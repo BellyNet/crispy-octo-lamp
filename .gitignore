@@ -1,0 +1,23 @@
+# .gitignore
+__pycache__/
+*.pyc
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+*.jpg
+*.png
+*.gif
+*.jpeg
+*.webp
+*.webm
+*.mp4
+*.zip
+*.tar
+venv/
+.env
+dataset/
+models/
+node_modules
+tmp/
+cache/

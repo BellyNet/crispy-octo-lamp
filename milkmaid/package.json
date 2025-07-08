@@ -1,0 +1,20 @@
+{
+  "name": "lora-training",
+  "version": "1.0.0",
+  "main": "milkmaid.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "milkmaid": "node milkmaid.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "canvas": "^3.1.2",
+    "gif-frames": "^1.0.1",
+    "image-hash": "^5.3.2",
+    "minimist": "^1.2.8",
+    "puppeteer": "^21.11.0"
+  }
+}
