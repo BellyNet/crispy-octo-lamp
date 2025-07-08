@@ -16,16 +16,20 @@
     "gif-frames": "^1.0.1",
     "image-hash": "^5.3.2",
     "minimist": "^1.2.8",
-    "puppeteer": "^21.11.0"
+    "p-limit": "^3.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",
+    "@puppeteer/browsers": "^2.10.5",
     "eslint": "^9.30.1",
     "eslint-config-prettier": "^10.1.5",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.1",
     "globals": "^16.3.0",
-    "prettier": "^3.6.2"
+    "install": "^0.13.0",
+    "npm": "^11.4.2",
+    "prettier": "^3.6.2",
+    "puppeteer": "^24.12.0"
   },
   "description": ""
 }

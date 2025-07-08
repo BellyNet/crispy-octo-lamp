@@ -3,7 +3,7 @@ import prettierConfig from 'eslint-config-prettier'
 
 export default [
   {
-    files: ['**/*.js'],
+    files: ['**/*.{js,ts,jsx,tsx}'], // expand if needed
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -12,9 +12,9 @@ export default [
       prettier: prettierPlugin,
     },
     rules: {
-      ...prettierConfig.rules, // ✅ spreads Prettier config directly
-      'prettier/prettier': 'error', // ✅ enables plugin
+      'prettier/prettier': 'error',
       'no-console': 'off',
     },
   },
+  prettierConfig, // disables conflicting ESLint rules
 ]
