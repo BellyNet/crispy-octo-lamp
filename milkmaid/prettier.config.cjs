@@ -1,4 +1,3 @@
-// prettier.config.cjs
 module.exports = {
   semi: false,
   singleQuote: true,

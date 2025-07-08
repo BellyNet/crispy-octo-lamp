@@ -1,5 +1,5 @@
-// eslint.config.mjs
-import prettier from 'eslint-config-prettier'
+import prettierPlugin from 'eslint-plugin-prettier'
+import prettierConfig from 'eslint-config-prettier'
 
 export default [
   {
@@ -9,12 +9,12 @@ export default [
       sourceType: 'module',
     },
     plugins: {
-      prettier: require('eslint-plugin-prettier'),
+      prettier: prettierPlugin,
     },
     rules: {
-      'prettier/prettier': 'error',
-      'no-console': 'warn',
+      ...prettierConfig.rules, // ✅ spreads Prettier config directly
+      'prettier/prettier': 'error', // ✅ enables plugin
+      'no-console': 'off',
     },
-    extends: [prettier],
   },
 ]
