@@ -1,3 +1,5 @@
+// milkmaid.js - Extended gif logic to detect single-frame gifs
+
 const { executablePath } = require('puppeteer')
 const puppeteer = require('puppeteer')
 const fs = require('fs')
@@ -11,39 +13,27 @@ const limit = pLimit(4)
 const lazyLimit = pLimit(2)
 
 let knownHashes = new Set()
-const fatLabels = [
-  'fat',
-  'plush',
-  'softbelly',
-  'overfed',
-  'stuffed',
-  'heavy',
-  'overhang',
-  'round',
-  'fullfigure',
-  'bloated',
-]
-
+let knownFilenames = new Set()
 const gifsToConvert = []
 const lazyVideoQueue = []
 let totalCount = 0,
   duplicateCount = 0,
   errorCount = 0,
   successCount = 0
-let imageCounter = 1
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const randomDelay = () => sleep(Math.floor(Math.random() * 1200) + 300)
 
 function createModelFolders(modelName) {
   const base = path.join(__dirname, 'dataset', modelName)
-  const folders = ['images', 'webm', 'tags', 'captions']
+  const folders = ['images', 'webm', 'tags', 'captions', 'dupes']
   for (const folder of folders)
     fs.mkdirSync(path.join(base, folder), { recursive: true })
   return {
     base,
     images: path.join(base, 'images'),
     webm: path.join(base, 'webm'),
+    dupes: path.join(base, 'dupes'),
   }
 }
 
@@ -65,9 +55,7 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
           if (onProgress && totalBytes > 0) {
             const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
             const speed = (
-              downloadedBytes /
-              1024 /
-              ((Date.now() - start) / 1000)
+              downloadedBytes / 1024 / ((Date.now() - start) / 1000)
             ).toFixed(1)
             onProgress(percent, speed)
           }
@@ -82,6 +70,18 @@ function convertGifToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
     exec(cmd, (err) => (err ? reject(err) : resolve()))
+  })
+}
+
+function getGifFrameCount(buffer) {
+  return new Promise((resolve) => {
+    const tmp = path.join(__dirname, 'tmp', `__framecheck_${Date.now()}.gif`)
+    fs.writeFileSync(tmp, buffer)
+    exec(`ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "${tmp}"`, (err, stdout) => {
+      fs.unlinkSync(tmp)
+      const frameCount = parseInt(stdout.trim(), 10)
+      resolve(isNaN(frameCount) ? 1 : frameCount)
+    })
   })
 }
 
@@ -101,19 +101,13 @@ function convertGifToMp4(inputPath, outputPath) {
   await page.setViewport({ width: 1280, height: 800 })
   await page.goto(startUrl, { waitUntil: 'domcontentloaded' })
 
-  const modelName = await page
-    .evaluate(() => {
-      const h2 = document.querySelector('.titrePage h2')
-      const anchors = h2?.querySelectorAll('a')
-      return anchors?.[anchors.length - 1]?.textContent?.trim() || 'unknown_cow'
-    })
-    .then((n) => n.replace(/\W+/g, '_').toLowerCase())
+  const modelName = await page.evaluate(() => {
+    const h2 = document.querySelector('.titrePage h2')
+    const anchors = h2?.querySelectorAll('a')
+    return anchors?.[anchors.length - 1]?.textContent?.trim() || 'unknown_cow'
+  }).then((n) => n.replace(/\W+/g, '_').toLowerCase())
 
-  const {
-    base,
-    images: imageFolder,
-    webm: webmFolder,
-  } = createModelFolders(modelName)
+  const { base, images: imageFolder, webm: webmFolder, dupes: dupeFolder } = createModelFolders(modelName)
 
   const hashFile = path.join(base, 'hashes.json')
   if (fs.existsSync(hashFile)) {
@@ -124,9 +118,14 @@ function convertGifToMp4(inputPath, outputPath) {
     }
   }
 
-  const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
-    ...new Set(links.map((l) => l.href)),
-  ])
+  const folders = [imageFolder, webmFolder, dupeFolder]
+  folders.forEach((f) => {
+    if (fs.existsSync(f)) {
+      fs.readdirSync(f).forEach((file) => knownFilenames.add(file))
+    }
+  })
+
+  const urls = await page.$$eval('a[href^="picture?/"]', (links) => [...new Set(links.map((l) => l.href))])
   console.log(`🔍 Found ${urls.length} full-res page links`)
 
   await Promise.all(
@@ -150,44 +149,53 @@ function convertGifToMp4(inputPath, outputPath) {
           await workerPage.close()
           if (!mediaUrl) return console.log(`💤 No media on ${mediaPageUrl}`)
 
-          const ext = path
-            .extname(new URL(mediaUrl).pathname)
-            .split('?')[0]
-            .toLowerCase()
-          const label = fatLabels[Math.floor(Math.random() * fatLabels.length)]
-          const padded = String(imageCounter++).padStart(3, '0')
-          const filename = `${modelName}_${label}-${padded}${ext}`
-          const tmpPath = path.join(__dirname, 'tmp', filename)
-          const finalPath = path.join(
-            ext === '.gif' || ext === '.mp4' ? webmFolder : imageFolder,
-            filename
-          )
+          const parsed = new URL(mediaUrl)
+          const filename = decodeURIComponent(path.basename(parsed.pathname).split('?')[0])
+          const ext = path.extname(filename).toLowerCase()
 
-          fs.mkdirSync(path.dirname(tmpPath), { recursive: true })
+          if (knownFilenames.has(filename)) {
+            duplicateCount++
+            return console.log(`🔁 Skipping existing filename: ${filename}`)
+          }
+
+          const tmpPath = path.join(__dirname, 'tmp', filename)
+          const buffer = await downloadBufferWithProgress(mediaUrl)
+          const hash = createHash('md5').update(buffer).digest('hex')
+          if (knownHashes.has(hash)) {
+            fs.writeFileSync(path.join(dupeFolder, filename), buffer)
+            duplicateCount++
+            return console.log(`♻️ Visual dupe saved to dupes/: ${filename}`)
+          }
 
           if (ext === '.gif') {
-            gifsToConvert.push({
-              url: mediaUrl,
-              tmpPath,
-              mp4Path: finalPath.replace(/\.gif$/, '.mp4'),
-            })
-            console.log(`🕓 Queued gif: ${filename}`)
-          } else if (ext === '.mp4') {
-            lazyVideoQueue.push({ url: mediaUrl, path: finalPath, filename })
-            console.log(`🕓 Queued lazy video: ${filename}`)
-          } else {
-            const buffer = await downloadBufferWithProgress(mediaUrl)
-            const hash = createHash('md5').update(buffer).digest('hex')
-            if (knownHashes.has(hash)) {
-              duplicateCount++
-              return console.log(`🔁 Skipping duplicate: ${filename}`)
+            const frameCount = await getGifFrameCount(buffer)
+            if (frameCount > 1) {
+              const mp4Path = path.join(webmFolder, filename.replace(/\.gif$/, '.mp4'))
+              fs.writeFileSync(tmpPath, buffer)
+              gifsToConvert.push({ url: mediaUrl, tmpPath, mp4Path, filename })
+              return console.log(`🕓 Queued animated gif: ${filename}`)
+            } else {
+              const stillPath = path.join(imageFolder, filename)
+              fs.writeFileSync(stillPath, buffer)
+              knownHashes.add(hash)
+              knownFilenames.add(filename)
+              successCount++
+              return console.log(`🖼️ Saved still gif: ${filename}`)
             }
-            fs.writeFileSync(tmpPath, buffer)
-            fs.renameSync(tmpPath, finalPath)
-            knownHashes.add(hash)
-            successCount++
-            console.log(`✅ Saved: ${finalPath}`)
           }
+
+          if (ext === '.mp4') {
+            const finalPath = path.join(webmFolder, filename)
+            lazyVideoQueue.push({ url: mediaUrl, path: finalPath, filename })
+            return console.log(`🕓 Queued lazy video: ${filename}`)
+          }
+
+          const finalPath = path.join(imageFolder, filename)
+          fs.writeFileSync(finalPath, buffer)
+          knownHashes.add(hash)
+          knownFilenames.add(filename)
+          successCount++
+          console.log(`✅ Saved: ${finalPath}`)
         } catch (err) {
           errorCount++
           console.error(`❌ Error processing ${mediaPageUrl}: ${err.message}`)
@@ -197,76 +205,52 @@ function convertGifToMp4(inputPath, outputPath) {
     )
   )
 
-  console.log(`🚜 Starting gif-to-mp4 conversions: ${gifsToConvert.length}`)
-  for (const { url, tmpPath, mp4Path } of gifsToConvert) {
+  console.log(`🚜 Converting gifs: ${gifsToConvert.length}`)
+  for (const { tmpPath, mp4Path, filename } of gifsToConvert) {
     try {
-      const buffer = await downloadBufferWithProgress(url)
-      const hash = createHash('md5').update(buffer).digest('hex')
-      if (knownHashes.has(hash)) {
-        duplicateCount++
-        console.log(`🔁 Skipping duplicate gif: ${mp4Path}`)
-        continue
-      }
-      fs.writeFileSync(tmpPath, buffer)
       await convertGifToMp4(tmpPath, mp4Path)
       fs.unlinkSync(tmpPath)
-      knownHashes.add(hash)
+      knownHashes.add(createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex'))
+      knownFilenames.add(path.basename(mp4Path))
+      successCount++
       console.log(`🎞️ Converted: ${mp4Path}`)
     } catch (err) {
-      console.error(`❌ Conversion failed for ${tmpPath}: ${err.message}`)
+      console.error(`❌ Conversion failed for ${filename}: ${err.message}`)
     }
   }
 
-  console.log(`🐢 Processing lazy video queue: ${lazyVideoQueue.length}`)
+  console.log(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
   await Promise.all(
     lazyVideoQueue.map(({ url, path: finalPath, filename }, i) =>
       lazyLimit(async () => {
-        console.log(
-          `⏳ (${i + 1}/${lazyVideoQueue.length}) Downloading: ${filename}`
-        )
+        console.log(`⏳ (${i + 1}/${lazyVideoQueue.length}) Downloading: ${filename}`)
         try {
-          const buffer = await downloadBufferWithProgress(
-            url,
-            (percent, speed) => {
-              process.stdout.write(`  ↪ ${percent}% @ ${speed} KB/s       \r`)
-            }
-          )
+          const buffer = await downloadBufferWithProgress(url, (percent, speed) => {
+            process.stdout.write(`  ↪ ${percent}% @ ${speed} KB/s       \r`)
+          })
           const hash = createHash('md5').update(buffer).digest('hex')
           if (knownHashes.has(hash)) {
+            fs.writeFileSync(path.join(dupeFolder, filename), buffer)
             duplicateCount++
             process.stdout.write(' '.repeat(40) + '\r')
-            console.log(`🔁 Skipping duplicate: ${filename}`)
-            return
+            return console.log(`♻️ Lazy dupe saved: ${filename}`)
           }
           fs.writeFileSync(finalPath, buffer)
           knownHashes.add(hash)
+          knownFilenames.add(filename)
           process.stdout.write(' '.repeat(40) + '\r')
-          console.log(`✅ Saved: ${filename}`)
+          console.log(`✅ Saved lazy video: ${filename}`)
         } catch (err) {
-          console.warn(
-            `❌ Lazy download failed for ${filename}: ${err.message}`
-          )
+          console.warn(`❌ Lazy video failed: ${filename} - ${err.message}`)
         }
         await sleep(3000)
       })
     )
   )
 
-  const logPath = path.join(base, 'log.txt')
-  const logContent = `
-Model: ${modelName}
--------------------------------
-Total scanned:        ${totalCount}
-Duplicates skipped:   ${duplicateCount}
-Downloaded:           ${successCount}
-Errors:               ${errorCount}
-GIFs queued:          ${gifsToConvert.length}
-Lazy videos queued:   ${lazyVideoQueue.length}
-`.trim()
-  fs.writeFileSync(logPath, logContent)
   fs.writeFileSync(hashFile, JSON.stringify([...knownHashes]))
+  const logPath = path.join(base, 'log.txt')
+  fs.writeFileSync(logPath, `Model: ${modelName}\nTotal: ${totalCount}\nSaved: ${successCount}\nDupes: ${duplicateCount}\nErrors: ${errorCount}`)
   await browser.close()
-  console.log(
-    `🎉 Gallery complete: ${imageCounter - 1} images milked from ${modelName}`
-  )
+  console.log(`🎉 Gallery complete: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`)
 })()
