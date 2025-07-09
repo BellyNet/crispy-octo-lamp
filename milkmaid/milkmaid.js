@@ -9,19 +9,16 @@ const http = require('http')
 const pLimit = require('p-limit')
 const limit = pLimit(8)
 const lazyLimit = pLimit(4)
+const readline = require('readline')
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
-
-function printProgress(completed, total) {
-  const percent = Math.floor((completed / total) * 100)
-  const barLength = 20
-  const filled = Math.floor((percent / 100) * barLength)
-  const bar = '🥛'.repeat(filled) + '·'.repeat(barLength - filled)
-  process.stdout.write(
-    `\r💦 Milking: [${bar}] ${completed}/${total} drops squeezed (${percent}%)`
-  )
-}
+const {
+  logProgress,
+  logLazyDownload,
+  logGifConversion,
+  getCompletionLine,
+} = require('../stuffinglogger')
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const randomDelay = () => sleep(Math.floor(Math.random() * 1200) + 300)
@@ -101,7 +98,7 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
 function convertGifToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
-    console.log(`🔥 Converting with: ${cmd}`)
+    console.log(`🔥 Converting`)
     exec(cmd, (err) => (err ? reject(err) : resolve()))
   })
 }
@@ -136,9 +133,24 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
       const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
         ...new Set(links.map((l) => l.href)),
       ])
+
+      let completed = 0
+      const total = urls.length
+
       console.log(
         `📸 ${modelName} - ${url.includes('&acs=') ? '[ACS]' : '[PLAIN]'} - ${urls.length} media links`
       )
+
+      console.log('\n') // 👈 Reserve a line for the bar
+      logProgress(0, urls.length) // 👈 Draw first progress bar
+
+      function logAndProgress(message) {
+        readline.moveCursor(process.stdout, 0, -1) // 👈 go up one line
+        readline.clearLine(process.stdout, 0) // 👈 clear that line
+        process.stdout.write(`${message}\n`) // 👈 write your log
+        completed++
+        logProgress(completed, total)
+      }
 
       await Promise.all(
         urls.map(
@@ -148,6 +160,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
               const workerPage = await browser.newPage()
               await workerPage.setUserAgent('Mozilla/5.0 ... Safari/537.36')
               await workerPage.setRequestInterception(true)
+
               workerPage.on('request', (req) => {
                 const type = req.resourceType()
                 if (['media', 'other'].includes(type)) {
@@ -179,7 +192,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                   uploadedDate &&
                   uploadedDate <= lastChecked
                 ) {
-                  return console.log(
+                  return logAndProgress(
                     `⏩ Skipping old media from ${uploadedDate.toISOString().split('T')[0]}`
                   )
                 }
@@ -199,8 +212,78 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
                 if (!mediaUrl) return
 
-                // continue with rest of logic...
-                // no more `await workerPage.close()` here!
+                const parsed = new URL(mediaUrl)
+                const filename = decodeURIComponent(
+                  path.basename(parsed.pathname).split('?')[0]
+                )
+                const ext = path.extname(filename).toLowerCase()
+                const tmpPath = path.join(tmpDir, filename)
+                const buffer = await downloadBufferWithProgress(mediaUrl)
+                const hash = createHash('md5').update(buffer).digest('hex')
+
+                if (knownHashes.has(hash)) {
+                  fs.writeFileSync(path.join(dupes, filename), buffer)
+                  duplicateCount++
+                  return logAndProgress(`♻️ Visual dupe: ${filename}`)
+                }
+
+                if (ext === '.gif') {
+                  const frameCount = await getGifFrameCount(buffer)
+                  if (frameCount > 1) {
+                    const mp4Name = filename.replace(/\.gif$/, '.mp4')
+                    if (knownFilenames.has(mp4Name)) {
+                      duplicateCount++
+                      return logAndProgress(
+                        `♻️ Already converted gif > mp4: ${mp4Name}`
+                      )
+                    }
+                    const mp4Path = path.join(webm, mp4Name)
+                    fs.writeFileSync(tmpPath, buffer)
+                    gifsToConvert.push({ tmpPath, mp4Path, filename })
+                    // return console.log(`🕓 Queued animated gif: ${filename}`)
+                    return logAndProgress(logGifConversion())
+                  } else {
+                    const stillPath = path.join(images, filename)
+                    fs.writeFileSync(stillPath, buffer)
+                    knownHashes.add(hash)
+                    knownFilenames.add(filename)
+                    successCount++
+                    return logAndProgress(`🖼️ Saved still gif: ${filename}`)
+                  }
+                }
+
+                if (ext === '.mp4') {
+                  const finalPath = path.join(webm, filename)
+
+                  if (
+                    knownFilenames.has(filename) ||
+                    fs.existsSync(finalPath)
+                  ) {
+                    duplicateCount++
+                    return logAndProgress(
+                      `⛔ Skipping mp4 – already handled: ${filename}`
+                    )
+                  }
+
+                  lazyVideoQueue.push({
+                    url: mediaUrl,
+                    path: finalPath,
+                    filename,
+                  })
+                  return logAndProgress(logLazyDownload())
+                }
+
+                if (knownFilenames.has(filename)) {
+                  duplicateCount++
+                  return logAndProgress(`🔁 Existing filename: ${filename}`)
+                }
+
+                const finalPath = path.join(images, filename)
+                fs.writeFileSync(finalPath, buffer)
+                knownHashes.add(hash)
+                knownFilenames.add(filename)
+                successCount++
+                return logAndProgress(`✅ Saved: ${filename}`)
               } catch (err) {
                 errorCount++
                 console.error(
@@ -208,8 +291,6 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                 )
               } finally {
                 if (!workerPage.isClosed()) await workerPage.close()
-                completed++
-                printProgress(completed, total)
               }
 
               await randomDelay()
@@ -230,6 +311,10 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
       }
     }
   } finally {
+    readline.clearLine(process.stdout, 0)
+    readline.cursorTo(process.stdout, 0)
+    console.log(getCompletionLine())
+
     await page.close()
   }
 
