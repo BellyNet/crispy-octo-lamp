@@ -13,6 +13,16 @@ const lazyLimit = pLimit(4)
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
 
+function printProgress(completed, total) {
+  const percent = Math.floor((completed / total) * 100)
+  const barLength = 20
+  const filled = Math.floor((percent / 100) * barLength)
+  const bar = '🥛'.repeat(filled) + '·'.repeat(barLength - filled)
+  process.stdout.write(
+    `\r💦 Milking: [${bar}] ${completed}/${total} drops squeezed (${percent}%)`
+  )
+}
+
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const randomDelay = () => sleep(Math.floor(Math.random() * 1200) + 300)
 
@@ -118,131 +128,110 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   const page = await browser.newPage()
   await page.setUserAgent('Mozilla/5.0 ... Safari/537.36')
   await page.setViewport({ width: 1280, height: 800 })
-  await page.goto(url, { waitUntil: 'domcontentloaded' })
 
-  const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
-    ...new Set(links.map((l) => l.href)),
-  ])
-  console.log(
-    `📸 ${modelName} - ${url.includes('&acs=') ? '[ACS]' : '[PLAIN]'} - ${urls.length} media links`
-  )
+  try {
+    while (url) {
+      await page.goto(url, { waitUntil: 'domcontentloaded' })
 
-  await Promise.all(
-    urls.map((mediaPageUrl) =>
-      limit(async () => {
-        totalCount++
-        const workerPage = await browser.newPage()
-        await workerPage.setUserAgent('Mozilla/5.0 ... Safari/537.36')
-        await workerPage.setViewport({ width: 1280, height: 800 })
+      const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
+        ...new Set(links.map((l) => l.href)),
+      ])
+      console.log(
+        `📸 ${modelName} - ${url.includes('&acs=') ? '[ACS]' : '[PLAIN]'} - ${urls.length} media links`
+      )
 
-        try {
-          await workerPage.goto(mediaPageUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: 20000,
-          })
+      await Promise.all(
+        urls.map(
+          async (mediaPageUrl) =>
+            await limit(async () => {
+              totalCount++
+              const workerPage = await browser.newPage()
+              await workerPage.setUserAgent('Mozilla/5.0 ... Safari/537.36')
+              await workerPage.setRequestInterception(true)
+              workerPage.on('request', (req) => {
+                const type = req.resourceType()
+                if (['media', 'other'].includes(type)) {
+                  req.abort()
+                } else {
+                  req.continue()
+                }
+              })
 
-          const uploadedDate = await workerPage.evaluate(() => {
-            const meta = document.querySelector('.imageInfo small')
-            const text = meta?.textContent || ''
-            const match = text.match(/\d{2}\/\d{2}\/\d{4}/)
-            if (!match) return null
-            const [day, month, year] = match[0].split('/')
-            return new Date(`${year}-${month}-${day}`)
-          })
+              await workerPage.setViewport({ width: 1280, height: 800 })
 
-          if (lastChecked && uploadedDate && uploadedDate <= lastChecked) {
-            await workerPage.close()
-            return console.log(
-              `⏩ Skipping old media from ${uploadedDate.toISOString().split('T')[0]}`
-            )
-          }
+              try {
+                await workerPage.goto(mediaPageUrl, {
+                  waitUntil: 'domcontentloaded',
+                  timeout: 20000,
+                })
 
-          if (
-            !newestDateSeen ||
-            (uploadedDate && uploadedDate > newestDateSeen)
-          ) {
-            newestDateSeen = uploadedDate
-          }
+                const uploadedDate = await workerPage.evaluate(() => {
+                  const meta = document.querySelector('.imageInfo small')
+                  const text = meta?.textContent || ''
+                  const match = text.match(/\d{2}\/\d{2}\/\d{4}/)
+                  if (!match) return null
+                  const [day, month, year] = match[0].split('/')
+                  return new Date(`${year}-${month}-${day}`)
+                })
 
-          const mediaUrl = await workerPage.evaluate(() => {
-            const video = document.querySelector('video.vjs-tech[src]')
-            const img = document.querySelector('#theMainImage')
-            return video?.src || img?.src || null
-          })
-          await workerPage.close()
-          if (!mediaUrl) return
+                if (
+                  lastChecked &&
+                  uploadedDate &&
+                  uploadedDate <= lastChecked
+                ) {
+                  return console.log(
+                    `⏩ Skipping old media from ${uploadedDate.toISOString().split('T')[0]}`
+                  )
+                }
 
-          const parsed = new URL(mediaUrl)
-          const filename = decodeURIComponent(
-            path.basename(parsed.pathname).split('?')[0]
-          )
-          const ext = path.extname(filename).toLowerCase()
-          const tmpPath = path.join(tmpDir, filename)
-          const buffer = await downloadBufferWithProgress(mediaUrl)
-          const hash = createHash('md5').update(buffer).digest('hex')
+                if (
+                  !newestDateSeen ||
+                  (uploadedDate && uploadedDate > newestDateSeen)
+                ) {
+                  newestDateSeen = uploadedDate
+                }
 
-          if (knownHashes.has(hash)) {
-            fs.writeFileSync(path.join(dupes, filename), buffer)
-            duplicateCount++
-            return console.log(`♻️ Visual dupe: ${filename}`)
-          }
+                const mediaUrl = await workerPage.evaluate(() => {
+                  const video = document.querySelector('video.vjs-tech[src]')
+                  const img = document.querySelector('#theMainImage')
+                  return video?.src || img?.src || null
+                })
 
-          if (ext === '.gif') {
-            const frameCount = await getGifFrameCount(buffer)
-            if (frameCount > 1) {
-              const mp4Name = filename.replace(/\.gif$/, '.mp4')
-              if (knownFilenames.has(mp4Name)) {
-                duplicateCount++
-                return console.log(`♻️ Already converted gif > mp4: ${mp4Name}`)
+                if (!mediaUrl) return
+
+                // continue with rest of logic...
+                // no more `await workerPage.close()` here!
+              } catch (err) {
+                errorCount++
+                console.error(
+                  `❌ Error processing ${mediaPageUrl}: ${err.message}`
+                )
+              } finally {
+                if (!workerPage.isClosed()) await workerPage.close()
+                completed++
+                printProgress(completed, total)
               }
-              const mp4Path = path.join(webm, mp4Name)
-              fs.writeFileSync(tmpPath, buffer)
-              gifsToConvert.push({ tmpPath, mp4Path, filename })
-              return console.log(`🕓 Queued animated gif: ${filename}`)
-            } else {
-              const stillPath = path.join(images, filename)
-              fs.writeFileSync(stillPath, buffer)
-              knownHashes.add(hash)
-              knownFilenames.add(filename)
-              successCount++
-              return console.log(`🖼️ Saved still gif: ${filename}`)
-            }
-          }
 
-          if (ext === '.mp4') {
-            const finalPath = path.join(webm, filename)
+              await randomDelay()
+            })
+        )
+      )
 
-            if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
-              duplicateCount++
-              return console.log(
-                `⛔ Skipping mp4 – already handled: ${filename}`
-              )
-            }
-
-            lazyVideoQueue.push({ url: mediaUrl, path: finalPath, filename })
-            return console.log(`🕓 Queued lazy video: ${filename}`)
-          }
-
-          if (knownFilenames.has(filename)) {
-            duplicateCount++
-            return console.log(`🔁 Existing filename: ${filename}`)
-          }
-
-          const finalPath = path.join(images, filename)
-          fs.writeFileSync(finalPath, buffer)
-          knownHashes.add(hash)
-          knownFilenames.add(filename)
-          successCount++
-          console.log(`✅ Saved: ${filename}`)
-        } catch (err) {
-          errorCount++
-          console.error(`❌ Error processing ${mediaPageUrl}: ${err.message}`)
-        }
-
-        await randomDelay()
-      })
-    )
-  )
+      const nextHref = await page
+        .$eval('a[rel="next"]', (el) => el?.href)
+        .catch(() => null)
+      if (nextHref) {
+        const baseUrl = new URL(url)
+        url = new URL(nextHref, baseUrl).href
+        console.log(`➡️ Next page found: ${url}`)
+      } else {
+        console.log(`🏁 No more pages.`)
+        break
+      }
+    }
+  } finally {
+    await page.close()
+  }
 
   return newestDateSeen
 }

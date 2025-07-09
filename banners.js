@@ -4,7 +4,7 @@ import chalk from 'chalk'
 export function bannerMilkmaid() {
   console.log(`\n${chalk.bgHex('#f2dede').hex('#a94442')(' MILKMAID ')} ${chalk.white('🍶 Squeezing out creamy galleries...')}
 ${chalk.gray('─────────────────────────────────────────────')}
-${chalk.hex('#f78da7')('  Ava leans back, belly full and dripping with data.')}
+${chalk.hex('#f78da7')('  She leans back, belly full and dripping with data.')}
 ${chalk.hex('#f78da7')('  Every squeeze pulls another soft pic from the source.')}
 ${chalk.gray('─────────────────────────────────────────────')}\n`)
 }
