@@ -10,6 +10,7 @@ const pLimit = require('p-limit')
 const limit = pLimit(8)
 const lazyLimit = pLimit(4)
 const readline = require('readline')
+const ansiEscapes = require('ansi-escapes')
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
@@ -141,15 +142,19 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
         `📸 ${modelName} - ${url.includes('&acs=') ? '[ACS]' : '[PLAIN]'} - ${urls.length} media links`
       )
 
-      console.log('\n') // 👈 Reserve a line for the bar
-      logProgress(0, urls.length) // 👈 Draw first progress bar
+      process.stdout.write('\n') // Reserve one lines
+      logProgress(0, total)
 
       function logAndProgress(message) {
-        readline.moveCursor(process.stdout, 0, -1) // 👈 go up one line
-        readline.clearLine(process.stdout, 0) // 👈 clear that line
-        process.stdout.write(`${message}\n`) // 👈 write your log
-        completed++
-        logProgress(completed, total)
+        // Move to piggy bar and clear it
+        process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
+        readline.clearLine(process.stdout, 0)
+
+        // Now print the message — THIS pushes everything up by 1
+        console.log(message)
+
+        // Redraw the piggy bar at the new bottom
+        logProgress(completed++, total)
       }
 
       await Promise.all(
@@ -241,7 +246,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                     fs.writeFileSync(tmpPath, buffer)
                     gifsToConvert.push({ tmpPath, mp4Path, filename })
                     // return console.log(`🕓 Queued animated gif: ${filename}`)
-                    return logAndProgress(logGifConversion())
+                    return logAndProgress('gif converttttt')
                   } else {
                     const stillPath = path.join(images, filename)
                     fs.writeFileSync(stillPath, buffer)
@@ -270,7 +275,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                     path: finalPath,
                     filename,
                   })
-                  return logAndProgress(logLazyDownload())
+                  return logAndProgress('lazyyyyyy')
                 }
 
                 if (knownFilenames.has(filename)) {

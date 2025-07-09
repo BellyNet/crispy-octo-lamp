@@ -1,6 +1,11 @@
+const chalk = require('chalk').default
+const stripAnsi = require('strip-ansi').default
 const readline = require('readline')
+const ansiEscapes = require('ansi-escapes')
 
-const foodEmojis = ['🍩', '🍰', '🍕', '🍔', '🍝', '🥛', '🧈']
+const foodEmojis = ['🍩', '🍰', '🍕', '🍔', '🍝', '🥛', '🧈', '🥤']
+let persistentEmoji = foodEmojis[Math.floor(Math.random() * foodEmojis.length)]
+
 const phrases = [
   'just getting started...',
   'filling out nicely...',
@@ -29,16 +34,30 @@ function getMidPhrase(current, total) {
 }
 
 function logProgress(current, total) {
-  const barLength = 10
+  const terminalWidth = process.stdout.columns || 80
+
+  // Progress count and piggy icon
+  const progressStats = chalk.cyan(`${current}/${total}`)
+  const pig = chalk.magentaBright('🐷')
+  const phrase = chalk.gray(getMidPhrase(current, total))
+
+  // Text that precedes the bar
+  const leftText = `${progressStats} ${pig} ${phrase} `
+  const visibleLeft = stripAnsi(leftText).length
+
+  // Bar space = terminal width minus visible text + fixed 3 for space + brackets
+  const barLength = Math.max(terminalWidth - visibleLeft - 3, 10)
   const filledLength = Math.floor((current / total) * barLength)
-  const bar = foodEmojis.slice(0, filledLength).join('').padEnd(barLength, '—')
-  const phrase = getMidPhrase(current, total)
 
-  const statusLine = `🐷 [${bar}] ${current}/${total} – ${phrase}`
+  const emojiWidth = 2 // because 🍩 or 🍼 are double-width
+  const adjustedFilled = Math.floor(filledLength / emojiWidth)
 
-  readline.cursorTo(process.stdout, 0)
+  const bar = `[${persistentEmoji.repeat(adjustedFilled)}${'—'.repeat(barLength - adjustedFilled * emojiWidth)}]`
+
+  // Print to last row, clear, and overwrite
+  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
   readline.clearLine(process.stdout, 0)
-  process.stdout.write(statusLine.padEnd(process.stdout.columns || 80))
+  process.stdout.write(`${leftText}${bar}`)
 }
 
 const gifLines = [
