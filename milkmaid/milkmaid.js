@@ -51,6 +51,14 @@ if (fs.existsSync(lastCheckedPath)) {
   }
 }
 
+const incompleteDir = path.join(rootDir, 'incomplete')
+const incompleteGifDir = path.join(incompleteDir, 'gifs')
+const incompleteVideoDir = path.join(incompleteDir, 'videos')
+if (!fs.existsSync(incompleteGifDir))
+  fs.mkdirSync(incompleteGifDir, { recursive: true })
+if (!fs.existsSync(incompleteVideoDir))
+  fs.mkdirSync(incompleteVideoDir, { recursive: true })
+
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
 
@@ -242,11 +250,14 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                         `♻️ Already converted gif > mp4: ${mp4Name}`
                       )
                     }
-                    const mp4Path = path.join(webm, mp4Name)
+                    const tmpPath = path.join(incompleteGifDir, filename)
                     fs.writeFileSync(tmpPath, buffer)
-                    gifsToConvert.push({ tmpPath, mp4Path, filename })
-                    // return console.log(`🕓 Queued animated gif: ${filename}`)
-                    return logAndProgress('gif converttttt')
+                    gifsToConvert.push({
+                      tmpPath,
+                      mp4Path: path.join(webm, mp4Name),
+                      filename,
+                    })
+                    return logAndProgress(logGifConversion(completed))
                   } else {
                     const stillPath = path.join(images, filename)
                     fs.writeFileSync(stillPath, buffer)
@@ -259,7 +270,6 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
                 if (ext === '.mp4') {
                   const finalPath = path.join(webm, filename)
-
                   if (
                     knownFilenames.has(filename) ||
                     fs.existsSync(finalPath)
@@ -269,13 +279,15 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                       `⛔ Skipping mp4 – already handled: ${filename}`
                     )
                   }
-
+                  const tmpPath = path.join(incompleteVideoDir, filename)
+                  fs.writeFileSync(tmpPath, buffer)
                   lazyVideoQueue.push({
                     url: mediaUrl,
                     path: finalPath,
+                    tmpPath,
                     filename,
                   })
-                  return logAndProgress('lazyyyyyy')
+                  return logAndProgress(logLazyDownload(completed))
                 }
 
                 if (knownFilenames.has(filename)) {
@@ -403,6 +415,15 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     fs.writeFileSync(lastCheckedPath, JSON.stringify(lastCheckedMap, null, 2))
   }
 
+  const leftoverGifs = fs
+    .readdirSync(incompleteGifDir)
+    .filter((f) => f.endsWith('.gif'))
+  for (const gif of leftoverGifs) {
+    const tmpPath = path.join(incompleteGifDir, gif)
+    const mp4Path = path.join(folders.webm, gif.replace(/\.gif$/, '.mp4'))
+    gifsToConvert.push({ tmpPath, mp4Path, filename: gif })
+  }
+
   console.log(`🚜 Converting gifs: ${gifsToConvert.length}`)
   const filteredGifs = gifsToConvert.filter(({ mp4Path }) => {
     const mp4Name = path.basename(mp4Path)
@@ -440,23 +461,29 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
   console.log(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
   await Promise.all(
-    lazyVideoQueue.map(({ url, path: finalPath, filename }, i) =>
+    lazyVideoQueue.map(({ url, path: finalPath, tmpPath, filename }, i) =>
       lazyLimit(async () => {
         console.log(
           `⏳ (${i + 1}/${lazyVideoQueue.length}) Downloading: ${filename}`
         )
         try {
-          const buffer = await downloadBufferWithProgress(url)
+          const buffer =
+            tmpPath && fs.existsSync(tmpPath)
+              ? fs.readFileSync(tmpPath)
+              : await downloadBufferWithProgress(url)
+
           const hash = createHash('md5').update(buffer).digest('hex')
           if (knownHashes.has(hash)) {
             fs.writeFileSync(path.join(folders.dupes, filename), buffer)
             duplicateCount++
             return console.log(`♻️ Lazy dupe: ${filename}`)
           }
+
           fs.writeFileSync(finalPath, buffer)
           knownHashes.add(hash)
           knownFilenames.add(filename)
           console.log(`✅ Saved lazy video: ${filename}`)
+          if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
         } catch (err) {
           console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
         }
