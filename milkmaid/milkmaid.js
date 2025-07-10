@@ -11,6 +11,7 @@ const limit = pLimit(8)
 const lazyLimit = pLimit(4)
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
+const chalk = require('chalk').default
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
@@ -39,7 +40,7 @@ let totalCount = 0,
 const rootDir = path.join(__dirname, '..')
 const datasetDir = path.join(rootDir, 'dataset')
 const tmpDir = path.join(rootDir, 'tmp')
-const lastCheckedPath = path.join(rootDir, 'lastChecked.json')
+const lastCheckedPath = path.join(rootDir, 'dataset/lastChecked.json')
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 let lastCheckedMap = {}
@@ -62,14 +63,13 @@ if (!fs.existsSync(incompleteVideoDir))
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
 
-  const folders = ['images', 'webm', 'tags', 'captions', 'dupes']
+  const folders = ['images', 'webm', 'tags', 'captions']
   for (const folder of folders)
     fs.mkdirSync(path.join(base, folder), { recursive: true })
   return {
     base,
     images: path.join(base, 'images'),
     webm: path.join(base, 'webm'),
-    dupes: path.join(base, 'dupes'),
   }
 }
 
@@ -128,7 +128,7 @@ function getGifFrameCount(buffer) {
 }
 
 async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
-  const { base, images, webm, dupes } = folders
+  const { base, images, webm } = folders
   let newestDateSeen = lastChecked
 
   const page = await browser.newPage()
@@ -153,22 +153,26 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
       process.stdout.write('\n') // Reserve one lines
       logProgress(0, total)
 
-      function logAndProgress(message) {
-        // Move to piggy bar and clear it
-        process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
-        readline.clearLine(process.stdout, 0)
-
-        // Now print the message — THIS pushes everything up by 1
-        console.log(message)
-
-        // Redraw the piggy bar at the new bottom
-        logProgress(completed++, total)
-      }
-
       await Promise.all(
         urls.map(
           async (mediaPageUrl) =>
             await limit(async () => {
+              let taskCompleted = false
+
+              function logAndProgress(message) {
+                if (!taskCompleted) {
+                  completed++
+                  taskCompleted = true
+                }
+
+                process.stdout.write(
+                  ansiEscapes.cursorTo(0, process.stdout.rows - 1)
+                )
+                readline.clearLine(process.stdout, 0)
+                console.log(message)
+                logProgress(completed, total)
+              }
+
               totalCount++
               const workerPage = await browser.newPage()
               await workerPage.setUserAgent('Mozilla/5.0 ... Safari/537.36')
@@ -191,14 +195,18 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                   timeout: 20000,
                 })
 
-                const uploadedDate = await workerPage.evaluate(() => {
-                  const meta = document.querySelector('.imageInfo small')
-                  const text = meta?.textContent || ''
-                  const match = text.match(/\d{2}\/\d{2}\/\d{4}/)
+                const uploadedDateIso = await workerPage.evaluate(() => {
+                  const anchor = document.querySelector('#datepost dd a')
+                  if (!anchor) return null
+                  const text = anchor.textContent?.trim()
+                  const match = text.match(/\d{1,2} \w+ \d{4}/)
                   if (!match) return null
-                  const [day, month, year] = match[0].split('/')
-                  return new Date(`${year}-${month}-${day}`)
+                  const date = new Date(match[0])
+                  return isNaN(date.getTime()) ? null : date.toISOString()
                 })
+                const uploadedDate = uploadedDateIso
+                  ? new Date(uploadedDateIso)
+                  : null
 
                 if (
                   lastChecked &&
@@ -226,21 +234,27 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                 if (!mediaUrl) return
 
                 const parsed = new URL(mediaUrl)
-                const filename = decodeURIComponent(
+                let filename = decodeURIComponent(
                   path.basename(parsed.pathname).split('?')[0]
                 )
-                const ext = path.extname(filename).toLowerCase()
-                const tmpPath = path.join(tmpDir, filename)
-                const buffer = await downloadBufferWithProgress(mediaUrl)
-                const hash = createHash('md5').update(buffer).digest('hex')
+
+                let ext = path.extname(filename).toLowerCase()
+                if (ext === '.m4v') {
+                  ext = '.mp4'
+                  filename = filename.replace(/\.m4v$/i, '.mp4')
+                }
+
+                let buffer = null
+                let hash = null
 
                 if (knownHashes.has(hash)) {
-                  fs.writeFileSync(path.join(dupes, filename), buffer)
                   duplicateCount++
                   return logAndProgress(`♻️ Visual dupe: ${filename}`)
                 }
 
                 if (ext === '.gif') {
+                  buffer = await downloadBufferWithProgress(mediaUrl)
+                  hash = createHash('md5').update(buffer).digest('hex')
                   const frameCount = await getGifFrameCount(buffer)
                   if (frameCount > 1) {
                     const mp4Name = filename.replace(/\.gif$/, '.mp4')
@@ -252,6 +266,10 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                     }
                     const tmpPath = path.join(incompleteGifDir, filename)
                     fs.writeFileSync(tmpPath, buffer)
+                    if (uploadedDate) {
+                      const ts = uploadedDate.getTime() / 1000
+                      fs.utimesSync(tmpPath, ts, ts)
+                    }
                     gifsToConvert.push({
                       tmpPath,
                       mp4Path: path.join(webm, mp4Name),
@@ -261,6 +279,10 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                   } else {
                     const stillPath = path.join(images, filename)
                     fs.writeFileSync(stillPath, buffer)
+                    if (uploadedDate) {
+                      const ts = uploadedDate.getTime() / 1000
+                      fs.utimesSync(stillPath, ts, ts)
+                    }
                     knownHashes.add(hash)
                     knownFilenames.add(filename)
                     successCount++
@@ -280,14 +302,14 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                     )
                   }
                   const tmpPath = path.join(incompleteVideoDir, filename)
-                  fs.writeFileSync(tmpPath, buffer)
                   lazyVideoQueue.push({
                     url: mediaUrl,
                     path: finalPath,
                     tmpPath,
                     filename,
+                    uploadedDate,
                   })
-                  return logAndProgress(logLazyDownload(completed))
+                  return logAndProgress(`🐌 Queued lazy video: ${filename}`)
                 }
 
                 if (knownFilenames.has(filename)) {
@@ -295,8 +317,15 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                   return logAndProgress(`🔁 Existing filename: ${filename}`)
                 }
 
+                buffer = await downloadBufferWithProgress(mediaUrl)
+                hash = createHash('md5').update(buffer).digest('hex')
+
                 const finalPath = path.join(images, filename)
                 fs.writeFileSync(finalPath, buffer)
+                if (uploadedDate) {
+                  const ts = uploadedDate.getTime() / 1000
+                  fs.utimesSync(finalPath, ts, ts)
+                }
                 knownHashes.add(hash)
                 knownFilenames.add(filename)
                 successCount++
@@ -376,7 +405,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     }
   }
 
-  for (const folder of [folders.images, folders.webm, folders.dupes]) {
+  for (const folder of [folders.images, folders.webm]) {
     if (fs.existsSync(folder)) {
       fs.readdirSync(folder).forEach((f) => knownFilenames.add(f))
     }
@@ -461,34 +490,45 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
   console.log(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
   await Promise.all(
-    lazyVideoQueue.map(({ url, path: finalPath, tmpPath, filename }, i) =>
-      lazyLimit(async () => {
-        console.log(
-          `⏳ (${i + 1}/${lazyVideoQueue.length}) Downloading: ${filename}`
-        )
-        try {
-          const buffer =
-            tmpPath && fs.existsSync(tmpPath)
-              ? fs.readFileSync(tmpPath)
-              : await downloadBufferWithProgress(url)
+    lazyVideoQueue.map(
+      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
+        lazyLimit(async () => {
+          let lastProgressLine = ''
+          console.log(logLazyDownload(i))
+          lastProgressLine = `⏳ (${i + 1}/${lazyVideoQueue.length})`
+          console.log(lastProgressLine)
+          try {
+            const buffer =
+              tmpPath && fs.existsSync(tmpPath)
+                ? fs.readFileSync(tmpPath)
+                : await downloadBufferWithProgress(url, (percent, speed) => {
+                    readline.clearLine(process.stdout, 0)
+                    readline.cursorTo(process.stdout, 0)
+                    process.stdout.write(
+                      `${lastProgressLine} ${chalk.gray(`(${percent}% @ ${speed} KB/s)`)}`
+                    )
+                  })
 
-          const hash = createHash('md5').update(buffer).digest('hex')
-          if (knownHashes.has(hash)) {
-            fs.writeFileSync(path.join(folders.dupes, filename), buffer)
-            duplicateCount++
-            return console.log(`♻️ Lazy dupe: ${filename}`)
+            const hash = createHash('md5').update(buffer).digest('hex')
+            if (knownHashes.has(hash)) {
+              duplicateCount++
+              return console.log(`♻️ Lazy dupe: ${filename}`)
+            }
+
+            fs.writeFileSync(finalPath, buffer)
+            if (uploadedDate) {
+              const ts = uploadedDate.getTime() / 1000
+              fs.utimesSync(finalPath, ts, ts)
+            }
+            knownHashes.add(hash)
+            knownFilenames.add(filename)
+            console.log(`✅ Saved lazy video: ${filename}`)
+            if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+          } catch (err) {
+            console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
           }
-
-          fs.writeFileSync(finalPath, buffer)
-          knownHashes.add(hash)
-          knownFilenames.add(filename)
-          console.log(`✅ Saved lazy video: ${filename}`)
-          if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-        } catch (err) {
-          console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
-        }
-        await sleep(3000)
-      })
+          await sleep(3000)
+        })
     )
   )
 
