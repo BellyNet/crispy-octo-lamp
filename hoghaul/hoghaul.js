@@ -51,7 +51,7 @@ function createModelFolders(modelName) {
   }
 }
 
-function downloadBufferWithProgress(url) {
+function downloadBufferWithProgress(url, onProgress) {
   const proto = url.startsWith('https') ? require('https') : require('http')
   return new Promise((resolve, reject) => {
     proto
@@ -59,7 +59,23 @@ function downloadBufferWithProgress(url) {
         if (res.statusCode !== 200)
           return reject(new Error(`HTTP ${res.statusCode}`))
         const chunks = []
-        res.on('data', (chunk) => chunks.push(chunk))
+        let downloadedBytes = 0
+        const totalBytes = parseInt(res.headers['content-length'] || '0', 10)
+        const start = Date.now()
+
+        res.on('data', (chunk) => {
+          downloadedBytes += chunk.length
+          chunks.push(chunk)
+          if (onProgress && totalBytes > 0) {
+            const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
+            const speed = (
+              downloadedBytes /
+              1024 /
+              ((Date.now() - start) / 1000)
+            ).toFixed(1)
+            onProgress(percent, speed, chunk)
+          }
+        })
         res.on('end', () => resolve(Buffer.concat(chunks)))
       })
       .on('error', reject)
@@ -112,6 +128,21 @@ if (fs.existsSync(lastCheckedPath)) {
   } catch (e) {
     console.warn('⚠️ Failed to load lastChecked cache:', e.message)
   }
+}
+
+let totalLazyBytes = 0
+let lazyBytesDownloaded = 0
+let lastDraw = 0
+
+function logLazyProgress() {
+  const percent = totalLazyBytes
+    ? ((lazyBytesDownloaded / totalLazyBytes) * 100).toFixed(1)
+    : '??'
+  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
+  readline.clearLine(process.stdout, 0)
+  process.stdout.write(
+    `🐷 Lazy stuffing: ${percent}% (${(lazyBytesDownloaded / 1024 / 1024).toFixed(2)} MB)\n`
+  )
 }
 
 async function scrapeCoomerUser(userUrl) {
@@ -386,15 +417,49 @@ async function scrapeCoomerUser(userUrl) {
     }
   }
 
+  // Pre-fetch expected file sizes (best-effort)
+  await Promise.all(
+    lazyVideoQueue.map(async ({ url }) => {
+      return new Promise((resolve) => {
+        const proto = url.startsWith('https')
+          ? require('https')
+          : require('http')
+        proto
+          .get(url, { method: 'HEAD' }, (res) => {
+            const size = parseInt(res.headers['content-length']) || 0
+            totalLazyBytes += size
+            res.destroy()
+            resolve()
+          })
+          .on('error', resolve)
+      })
+    })
+  )
+
   await Promise.all(
     lazyVideoQueue.map(({ url, path: finalPath, tmpPath, filename }, i) =>
       lazyLimit(async () => {
+        if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+          return console.log(`♻️ Lazy dupe (pre-download): ${filename}`)
+        }
+
         console.log(logLazyDownload(i))
+        console.log(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
         try {
           const buffer =
             tmpPath && fs.existsSync(tmpPath)
               ? fs.readFileSync(tmpPath)
-              : await downloadBufferWithProgress(url)
+              : await downloadBufferWithProgress(
+                  url,
+                  (percent, speed, chunk) => {
+                    lazyBytesDownloaded += chunk.length
+                    const now = Date.now()
+                    if (now - lastDraw > 250) {
+                      logLazyProgress()
+                      lastDraw = now
+                    }
+                  }
+                )
           const hash = createHash('md5').update(buffer).digest('hex')
           if (knownHashes.has(hash))
             return console.log(`♻️ Lazy dupe: ${filename}`)
