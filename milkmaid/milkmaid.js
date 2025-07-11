@@ -63,13 +63,14 @@ if (!fs.existsSync(incompleteVideoDir))
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
 
-  const folders = ['images', 'webm', 'tags', 'captions']
+  const folders = ['images', 'webm', 'gif', 'tags', 'captions']
   for (const folder of folders)
     fs.mkdirSync(path.join(base, folder), { recursive: true })
   return {
     base,
     images: path.join(base, 'images'),
     webm: path.join(base, 'webm'),
+    gif: path.join(base, 'gif'),
   }
 }
 
@@ -266,9 +267,12 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                     }
                     const tmpPath = path.join(incompleteGifDir, filename)
                     fs.writeFileSync(tmpPath, buffer)
+                    const gifSavePath = path.join(folders.gif, filename)
+                    fs.writeFileSync(gifSavePath, buffer)
                     if (uploadedDate) {
                       const ts = uploadedDate.getTime() / 1000
                       fs.utimesSync(tmpPath, ts, ts)
+                      fs.utimesSync(gifSavePath, ts, ts)
                     }
                     gifsToConvert.push({
                       tmpPath,
