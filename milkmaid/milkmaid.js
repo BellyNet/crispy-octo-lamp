@@ -22,6 +22,10 @@ const {
   getCompletionLine,
 } = require('../stuffinglogger')
 
+function sanitize(name) {
+  return name.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase()
+}
+
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const randomDelay = () => sleep(Math.floor(Math.random() * 1200) + 300)
 
@@ -390,7 +394,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   await tempPage.setViewport({ width: 1280, height: 800 })
   await tempPage.goto(inputUrl, { waitUntil: 'domcontentloaded' })
 
-  const modelName = await tempPage
+  const tmpModelName = await tempPage
     .evaluate(() => {
       const h2 = document.querySelector('.titrePage h2')
       const anchors = h2?.querySelectorAll('a')
@@ -398,25 +402,31 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     })
     .then((n) => n.replace(/\W+/g, '_').toLowerCase())
 
+  const rawName = sanitize(tmpModelName)
+  const aliasMap = JSON.parse(fs.readFileSync('model_aliases.json'))
+  const modelName = aliasMap[rawName] || rawName
+  if (!aliasMap[rawName]) {
+    aliasMap[rawName] = rawName
+    fs.writeFileSync('model_aliases.json', JSON.stringify(aliasMap, null, 2))
+  }
+
   const folders = createModelFolders(modelName)
 
-  const hashFile = path.join(folders.base, 'hashes.json')
-  if (fs.existsSync(hashFile)) {
+  const modelHashPath = path.join(folders.base, 'hashes.json')
+  if (fs.existsSync(modelHashPath)) {
     try {
-      JSON.parse(fs.readFileSync(hashFile)).forEach((h) => knownHashes.add(h))
+      JSON.parse(fs.readFileSync(modelHashPath)).forEach((h) =>
+        knownHashes.add(h)
+      )
     } catch (e) {
-      console.warn('⚠️ Failed to load hash cache:', e.message)
+      console.warn(
+        `⚠️ Failed to load hash cache for ${modelName}: ${e.message}`
+      )
     }
   }
 
-  for (const folder of [folders.images, folders.webm]) {
-    if (fs.existsSync(folder)) {
-      fs.readdirSync(folder).forEach((f) => knownFilenames.add(f))
-    }
-  }
-
-  const lastChecked = lastCheckedMap[modelName]
-    ? new Date(lastCheckedMap[modelName])
+  const lastChecked = lastCheckedMap[rawName]
+    ? new Date(lastCheckedMap[rawName])
     : null
 
   const acsUrl = `https://stufferdb.com/index?/category/${categoryId}&acs=${modelName}`
@@ -444,7 +454,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
   const newest = [newest1, newest2].filter(Boolean).sort().pop()
   if (newest) {
-    lastCheckedMap[modelName] = newest.toISOString()
+    lastCheckedMap[rawName] = newest.toISOString()
     fs.writeFileSync(lastCheckedPath, JSON.stringify(lastCheckedMap, null, 2))
   }
 
@@ -493,24 +503,62 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   }
 
   console.log(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
+  let lastDraw = 0
+  let totalLazyBytes = 0
+  let lazyBytesDownloaded = 0
+
+  // Pre-fetch expected file sizes (best-effort)
+  await Promise.all(
+    lazyVideoQueue.map(async ({ url }) => {
+      return new Promise((resolve) => {
+        const proto = url.startsWith('https') ? https : http
+        proto
+          .get(url, { method: 'HEAD' }, (res) => {
+            const size = parseInt(res.headers['content-length']) || 0
+            totalLazyBytes += size
+            res.destroy()
+            resolve()
+          })
+          .on('error', resolve)
+      })
+    })
+  )
+
+  function logLazyProgress() {
+    const percent = totalLazyBytes
+      ? ((lazyBytesDownloaded / totalLazyBytes) * 100).toFixed(1)
+      : '??'
+    process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
+    readline.clearLine(process.stdout, 0)
+    process.stdout.write(
+      `🐷 Lazy stuffing: ${percent}% (${(lazyBytesDownloaded / 1024 / 1024).toFixed(2)} MB)\n`
+    )
+  }
+
   await Promise.all(
     lazyVideoQueue.map(
       ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
         lazyLimit(async () => {
+          if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+            duplicateCount++
+            return console.log(`♻️ Lazy dupe (pre-download): ${filename}`)
+          }
+
           let lastProgressLine = ''
           console.log(logLazyDownload(i))
-          lastProgressLine = `⏳ (${i + 1}/${lazyVideoQueue.length})`
-          console.log(lastProgressLine)
+          console.log(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
+
           try {
             const buffer =
               tmpPath && fs.existsSync(tmpPath)
                 ? fs.readFileSync(tmpPath)
                 : await downloadBufferWithProgress(url, (percent, speed) => {
-                    readline.clearLine(process.stdout, 0)
-                    readline.cursorTo(process.stdout, 0)
-                    process.stdout.write(
-                      `${lastProgressLine} ${chalk.gray(`(${percent}% @ ${speed} KB/s)`)}`
-                    )
+                    lazyBytesDownloaded += chunk.length
+                    const now = Date.now()
+                    if (now - lastDraw > 250) {
+                      logLazyProgress()
+                      lastDraw = now
+                    }
                   })
 
             const hash = createHash('md5').update(buffer).digest('hex')
@@ -536,7 +584,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     )
   )
 
-  fs.writeFileSync(hashFile, JSON.stringify([...knownHashes]))
+  // const modelHashPathUpdate = path.join(folders.base, 'hashes.json')
+  fs.writeFileSync(modelHashPath, JSON.stringify([...knownHashes]))
   const logPath = path.join(folders.base, 'log.txt')
   fs.writeFileSync(
     logPath,

@@ -1,11 +1,14 @@
-// hoghaul.js - Coomer scraper matching Milkmaid's behavior
+// hoghaul.js — Coomer scraper (Milkmaid-matching)
 
-const puppeteer = require('puppeteer')
+const puppeteer = require('puppeteer-extra')
+const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+puppeteer.use(StealthPlugin())
 const path = require('path')
 const fs = require('fs')
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const { createHash } = require('crypto')
+const { exec } = require('child_process')
 const {
   logProgress,
   logLazyDownload,
@@ -14,8 +17,8 @@ const {
 } = require('../stuffinglogger')
 const pLimit = require('p-limit')
 
-const limit = pLimit(6)
-const lazyLimit = pLimit(4)
+const limit = pLimit(2)
+const lazyLimit = pLimit(2)
 
 const rootDir = path.join(__dirname, '..')
 const datasetDir = path.join(rootDir, 'dataset')
@@ -24,7 +27,6 @@ const incompleteDir = path.join(__dirname, 'incomplete')
 const incompleteGifDir = path.join(incompleteDir, 'gifs')
 const incompleteVideoDir = path.join(incompleteDir, 'videos')
 const lastCheckedPath = path.join(datasetDir, 'lastChecked.json')
-const hashFile = path.join(datasetDir, 'hashes.json')
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 if (!fs.existsSync(incompleteGifDir))
@@ -38,41 +40,26 @@ function sanitize(name) {
 
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
-  const folders = ['images', 'webm']
+  const folders = ['images', 'webm', 'gif']
   for (const folder of folders)
     fs.mkdirSync(path.join(base, folder), { recursive: true })
   return {
     base,
     images: path.join(base, 'images'),
     webm: path.join(base, 'webm'),
+    gif: path.join(base, 'gif'),
   }
 }
 
-function downloadBufferWithProgress(url, onProgress) {
+function downloadBufferWithProgress(url) {
   const proto = url.startsWith('https') ? require('https') : require('http')
   return new Promise((resolve, reject) => {
     proto
       .get(url, (res) => {
         if (res.statusCode !== 200)
           return reject(new Error(`HTTP ${res.statusCode}`))
-        const totalBytes = parseInt(res.headers['content-length'] || '0', 10)
-        let downloadedBytes = 0,
-          chunks = [],
-          start = Date.now()
-
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length
-          chunks.push(chunk)
-          if (onProgress && totalBytes > 0) {
-            const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
-            const speed = (
-              downloadedBytes /
-              1024 /
-              ((Date.now() - start) / 1000)
-            ).toFixed(1)
-            onProgress(percent, speed)
-          }
-        })
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
         res.on('end', () => resolve(Buffer.concat(chunks)))
       })
       .on('error', reject)
@@ -82,15 +69,15 @@ function downloadBufferWithProgress(url, onProgress) {
 function convertGifToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
-    require('child_process').exec(cmd, (err) => (err ? reject(err) : resolve()))
+    exec(cmd, (err) => (err ? reject(err) : resolve()))
   })
 }
 
 function getGifFrameCount(buffer) {
+  const tmp = path.join(tmpDir, `__framecheck_${Date.now()}.gif`)
+  fs.writeFileSync(tmp, buffer)
   return new Promise((resolve) => {
-    const tmp = path.join(tmpDir, `__framecheck_${Date.now()}.gif`)
-    fs.writeFileSync(tmp, buffer)
-    require('child_process').exec(
+    exec(
       `ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "${tmp}"`,
       (err, stdout) => {
         fs.unlinkSync(tmp)
@@ -101,18 +88,15 @@ function getGifFrameCount(buffer) {
   })
 }
 
+function normalizeUrl(url) {
+  if (!url) return null
+  return url.startsWith('http') ? url : `https:${url}`
+}
+
 const knownHashes = new Set()
 const knownFilenames = new Set()
 const gifsToConvert = []
 const lazyVideoQueue = []
-
-if (fs.existsSync(hashFile)) {
-  try {
-    JSON.parse(fs.readFileSync(hashFile)).forEach((h) => knownHashes.add(h))
-  } catch (e) {
-    console.warn('⚠️ Failed to load hash cache:', e.message)
-  }
-}
 
 fs.readdirSync(datasetDir).forEach((folder) => {
   const folderPath = path.join(datasetDir, folder)
@@ -130,21 +114,53 @@ if (fs.existsSync(lastCheckedPath)) {
   }
 }
 
-// scrape logic begins here
-
 async function scrapeCoomerUser(userUrl) {
-  const browser = await puppeteer.launch({ headless: 'new' })
-  const page = await browser.newPage()
-  await page.goto(userUrl, { waitUntil: 'domcontentloaded' })
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    defaultViewport: null,
+  })
 
-  const username = await page.$eval('div.site-section-user header h1', (el) =>
-    el.textContent.trim()
+  const page = await browser.newPage()
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+  )
+  await page.setViewport({ width: 1280, height: 800 })
+  const randomDelay = () => Math.random() * 2000 + 1000
+  await new Promise((res) => setTimeout(res, randomDelay()))
+
+  await page.goto(userUrl, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('a.user-header__profile span:last-of-type', {
+    timeout: 0,
+  })
+
+  const username = await page.$eval(
+    'a.user-header__profile span:last-of-type',
+    (el) => el.textContent.trim()
   )
 
-  const modelName = sanitize(username)
+  const rawName = sanitize(username)
+  const aliasMap = JSON.parse(fs.readFileSync('model_aliases.json'))
+  const modelName = aliasMap[rawName] || rawName
+  if (!aliasMap[rawName]) {
+    aliasMap[rawName] = rawName
+    fs.writeFileSync('model_aliases.json', JSON.stringify(aliasMap, null, 2))
+  }
   const folders = createModelFolders(modelName)
-  const lastChecked = lastCheckedMap[userUrl]
-    ? new Date(lastCheckedMap[userUrl])
+  const modelHashPath = path.join(folders.base, 'hashes.json')
+  if (fs.existsSync(modelHashPath)) {
+    try {
+      JSON.parse(fs.readFileSync(modelHashPath)).forEach((h) =>
+        knownHashes.add(h)
+      )
+    } catch (e) {
+      console.warn(
+        `⚠️ Failed to load hash cache for ${modelName}: ${e.message}`
+      )
+    }
+  }
+
+  const lastChecked = lastCheckedMap[rawName]
+    ? new Date(lastCheckedMap[rawName])
     : null
   let newestDateSeen = lastChecked
 
@@ -152,29 +168,65 @@ async function scrapeCoomerUser(userUrl) {
   let pageNum = 0
 
   while (true) {
-    await page.goto(`${userUrl}?o=${pageNum * 50}`, {
-      waitUntil: 'domcontentloaded',
+    await new Promise((res) => setTimeout(res, 1500)) // 1.5s pause
+
+    const url = `${userUrl}?o=${pageNum * 50}`
+    await page.goto(url, { waitUntil: 'networkidle2' })
+    await page.waitForSelector('article.post-card a.fancy-link', {
+      timeout: 10000,
     })
+
     const links = await page.$$eval('article.post-card a.fancy-link', (els) =>
       els.map((el) => el.href)
     )
+
     if (!links.length) break
-    links.forEach((link) => postLinks.add(link))
-    const hasNext = await page.$('a[rel="next"]')
-    if (!hasNext) break
+
+    // Process this page’s links immediately
+    await Promise.all(
+      links.map((link) =>
+        limit(() =>
+          processPost(
+            link,
+            browser,
+            folders,
+            knownHashes,
+            knownFilenames,
+            gifsToConvert,
+            lazyVideoQueue,
+            (updatedDate) => {
+              // update newestDateSeen if needed
+              if (
+                !newestDateSeen ||
+                (updatedDate && updatedDate > newestDateSeen)
+              ) {
+                newestDateSeen = updatedDate
+              }
+            }
+          )
+        )
+      )
+    )
+
+    // Check for disabled “next” button
+    const nextDisabled = await page.$(
+      'a.pagination-button-disabled.pagination-button-after-current'
+    )
+    if (nextDisabled) break
+
     pageNum++
   }
 
   const urls = Array.from(postLinks)
   let completed = 0
-  process.stdout.write('test')
+  process.stdout.write('\n')
   logProgress(0, urls.length)
 
   await Promise.all(
     urls.map((link) =>
       limit(async () => {
         let taskCompleted = false
-        function logAndProgress(msg) {
+        const logAndProgress = (msg) => {
           if (!taskCompleted) {
             completed++
             taskCompleted = true
@@ -189,17 +241,17 @@ async function scrapeCoomerUser(userUrl) {
         try {
           await page.goto(link, { waitUntil: 'domcontentloaded' })
 
-          const timeText = await page.$eval(
-            'header.post__card-header time',
-            (el) => el.getAttribute('datetime')
-          )
+          let timeText = null
+          try {
+            await page.waitForSelector('time.timestamp', { timeout: 3000 })
+            timeText = await page.$eval('time.timestamp', (el) =>
+              el.getAttribute('datetime')
+            )
+          } catch (err) {
+            console.warn(`⏳ No timestamp on ${link}`)
+          }
           const uploadedDate = timeText ? new Date(timeText) : null
 
-          if (lastChecked && uploadedDate && uploadedDate <= lastChecked) {
-            return logAndProgress(
-              `⏩ Skipping old post from ${uploadedDate.toISOString().split('T')[0]}`
-            )
-          }
           if (
             !newestDateSeen ||
             (uploadedDate && uploadedDate > newestDateSeen)
@@ -207,19 +259,38 @@ async function scrapeCoomerUser(userUrl) {
             newestDateSeen = uploadedDate
           }
 
-          const mediaUrls = await page.$$eval(
-            'div.post__files img, div.post__files video source',
-            (els) => els.map((el) => el.src || el.getAttribute('src'))
-          )
+          const mediaUrls = (
+            await page.$$eval(
+              'video[src], video source[src], img[src], a.post__attachment-link[href]',
+              (els) =>
+                els.map(
+                  (el) =>
+                    el.src ||
+                    el.href ||
+                    el.getAttribute('src') ||
+                    el.getAttribute('href')
+                )
+            )
+          ).filter((url) => !url.endsWith('.svg'))
 
           for (const mediaUrl of mediaUrls) {
-            const url = mediaUrl.startsWith('http')
-              ? mediaUrl
-              : `https:${mediaUrl}`
-            const filename = decodeURIComponent(
-              path.basename(new URL(url).pathname).split('?')[0]
-            )
+            const url = normalizeUrl(mediaUrl)
+            if (!url)
+              return logAndProgress`⚠️ Failed to extract filename from URL: ${url}`
+
+            let filename
+            try {
+              filename = decodeURIComponent(
+                path.basename(new URL(url).pathname).split('?')[0]
+              )
+            } catch (e) {
+              return logAndProgress(
+                `⚠️ Failed to extract filename from URL: ${url}`
+              )
+            }
+
             const ext = path.extname(filename).toLowerCase()
+
             const timestamp = uploadedDate
               ? uploadedDate.getTime() / 1000
               : null
@@ -242,6 +313,9 @@ async function scrapeCoomerUser(userUrl) {
                 const tmpPath = path.join(incompleteGifDir, filename)
                 fs.writeFileSync(tmpPath, buffer)
                 if (timestamp) fs.utimesSync(tmpPath, timestamp, timestamp)
+                const gifSavePath = path.join(folders.gif, filename)
+                fs.writeFileSync(gifSavePath, buffer)
+                if (timestamp) fs.utimesSync(gifSavePath, timestamp, timestamp)
                 gifsToConvert.push({
                   tmpPath,
                   mp4Path: path.join(
@@ -288,6 +362,7 @@ async function scrapeCoomerUser(userUrl) {
     )
   )
 
+  // convert gifs
   for (const gif of fs
     .readdirSync(incompleteGifDir)
     .filter((f) => f.endsWith('.gif'))) {
@@ -335,15 +410,154 @@ async function scrapeCoomerUser(userUrl) {
     )
   )
 
-  fs.writeFileSync(hashFile, JSON.stringify([...knownHashes]))
-  lastCheckedMap[userUrl] = newestDateSeen?.toISOString()
+  lastCheckedMap[rawName] = newestDateSeen?.toISOString()
   fs.writeFileSync(lastCheckedPath, JSON.stringify(lastCheckedMap, null, 2))
 
-  console.log(getCompletionLine())
+  const logPath = path.join(folders.base, 'log.txt')
+  fs.writeFileSync(
+    logPath,
+    `Model: ${modelName}\nTotal: ${urls.length}\nSaved: ${knownFilenames.size}\nDupes: ${urls.length - knownFilenames.size}\nErrors: 0`
+  )
+  fs.writeFileSync(
+    path.join(folders.base, 'hashes.json'),
+    JSON.stringify([...knownHashes], null, 2)
+  )
+
+  console.log('\n' + getCompletionLine())
+  console.log('🧼 Scrape complete. Leaving browser open for inspection.')
   await browser.close()
 }
 
-// Run it
+async function processPost(
+  link,
+  browser,
+  folders,
+  knownHashes,
+  knownFilenames,
+  gifsToConvert,
+  lazyVideoQueue,
+  updateNewestDate
+) {
+  const page = await browser.newPage()
+  let taskCompleted = false
+  const logAndProgress = (msg) => {
+    if (!taskCompleted) {
+      taskCompleted = true
+    }
+    console.log(msg)
+  }
+
+  try {
+    await page.goto(link, { waitUntil: 'domcontentloaded' })
+
+    let timeText = null
+    try {
+      await page.waitForSelector('time.timestamp', { timeout: 3000 })
+      timeText = await page.$eval('time.timestamp', (el) =>
+        el.getAttribute('datetime')
+      )
+    } catch (err) {
+      console.warn(`⏳ No timestamp on ${link}`)
+    }
+    const uploadedDate = timeText ? new Date(timeText) : null
+    updateNewestDate(uploadedDate)
+
+    const mediaUrls = (
+      await page.$$eval(
+        'video[src], video source[src], img[src], a.post__attachment-link[href]',
+        (els) =>
+          els.map(
+            (el) =>
+              el.src ||
+              el.href ||
+              el.getAttribute('src') ||
+              el.getAttribute('href')
+          )
+      )
+    ).filter((url) => !url.endsWith('.svg'))
+
+    for (const mediaUrl of mediaUrls) {
+      const url = normalizeUrl(mediaUrl)
+      if (!url)
+        return logAndProgress(`⚠️ Failed to extract filename from URL: ${url}`)
+
+      let filename
+      try {
+        filename = decodeURIComponent(
+          path.basename(new URL(url).pathname).split('?')[0]
+        )
+      } catch (e) {
+        return logAndProgress(`⚠️ Failed to extract filename from URL: ${url}`)
+      }
+
+      const ext = path.extname(filename).toLowerCase()
+      const timestamp = uploadedDate ? uploadedDate.getTime() / 1000 : null
+
+      if (knownFilenames.has(filename)) {
+        logAndProgress(`🔁 Existing filename: ${filename}`)
+        continue
+      }
+
+      const buffer = await downloadBufferWithProgress(url)
+      const hash = createHash('md5').update(buffer).digest('hex')
+      if (knownHashes.has(hash)) {
+        logAndProgress(`♻️ Visual dupe: ${filename}`)
+        continue
+      }
+
+      if (ext === '.gif') {
+        const frameCount = await getGifFrameCount(buffer)
+        if (frameCount > 1) {
+          const tmpPath = path.join(incompleteGifDir, filename)
+          fs.writeFileSync(tmpPath, buffer)
+          if (timestamp) fs.utimesSync(tmpPath, timestamp, timestamp)
+          const gifSavePath = path.join(folders.gif, filename)
+          fs.writeFileSync(gifSavePath, buffer)
+          if (timestamp) fs.utimesSync(gifSavePath, timestamp, timestamp)
+          gifsToConvert.push({
+            tmpPath,
+            mp4Path: path.join(
+              folders.webm,
+              filename.replace(/\.gif$/, '.mp4')
+            ),
+            filename,
+          })
+          logAndProgress(`📥 Queued gif for conversion: ${filename}`)
+        } else {
+          const outPath = path.join(folders.images, filename)
+          fs.writeFileSync(outPath, buffer)
+          if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
+          logAndProgress(`🖼️ Saved still gif: ${filename}`)
+          knownHashes.add(hash)
+          knownFilenames.add(filename)
+        }
+      } else if (['.mp4', '.m4v'].includes(ext)) {
+        const tmpPath = path.join(incompleteVideoDir, filename)
+        fs.writeFileSync(tmpPath, buffer)
+        if (timestamp) fs.utimesSync(tmpPath, timestamp, timestamp)
+        lazyVideoQueue.push({
+          url,
+          path: path.join(folders.webm, filename),
+          tmpPath,
+          filename,
+        })
+        logAndProgress(`🐌 Queued lazy video: ${filename}`)
+      } else {
+        const outPath = path.join(folders.images, filename)
+        fs.writeFileSync(outPath, buffer)
+        if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
+        logAndProgress(`✅ Saved: ${filename}`)
+        knownHashes.add(hash)
+        knownFilenames.add(filename)
+      }
+    }
+  } catch (err) {
+    console.error(`❌ Error on ${link}: ${err.message}`)
+  } finally {
+    if (!page.isClosed()) await page.close()
+  }
+}
+
 const target = process.argv[2]
 if (!target || !target.includes('coomer.su')) {
   console.error(
