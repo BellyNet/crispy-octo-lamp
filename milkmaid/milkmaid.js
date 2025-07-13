@@ -42,9 +42,13 @@ let totalCount = 0,
   successCount = 0
 
 const rootDir = path.join(__dirname, '..')
-const datasetDir = path.join(rootDir, 'dataset')
+const datasetDir = path.join(
+  process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
+  '.slopvault',
+  'dataset'
+)
 const tmpDir = path.join(rootDir, 'tmp')
-const lastCheckedPath = path.join(rootDir, 'dataset/lastChecked.json')
+const lastCheckedPath = path.join(datasetDir, 'lastChecked.json')
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 let lastCheckedMap = {}
@@ -132,6 +136,51 @@ function getGifFrameCount(buffer) {
   })
 }
 
+async function fetchStufferDBTotalCount(browser, url) {
+  const tempPage = await browser.newPage()
+  try {
+    await tempPage.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115 Safari/537.36'
+    )
+    await tempPage.setViewport({ width: 1280, height: 800 })
+    await tempPage.goto(url, { waitUntil: 'networkidle2', timeout: 20000 })
+
+    // Log raw text from the span
+    const rawText = await tempPage.$eval(
+      'span.badge.nb_items',
+      (el) => el.textContent
+    )
+    console.log(`🕵️ Raw badge text from ${url}:`, rawText)
+
+    const match = rawText.match(/(\d+)/)
+    const count = match ? parseInt(match[1]) : 0
+    console.log(`🔢 Parsed count: ${count}`)
+    return count
+  } catch (err) {
+    const title = await tempPage.title()
+    console.warn(`⚠️ Could not fetch count for ${url}: ${err.message}`)
+    console.warn(`🧙 Page title: ${title}`)
+    return 0
+  } finally {
+    if (!tempPage.isClosed()) await tempPage.close()
+  }
+}
+
+let completedTotal = 0
+let taskCompleted = false
+
+function logAndProgress(message) {
+  if (!taskCompleted) {
+    taskCompleted = true
+    completedTotal++
+  }
+
+  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
+  readline.clearLine(process.stdout, 0)
+  console.log(message)
+  logProgress(completedTotal, global.totalSearchTotal || total)
+}
+
 async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   const { base, images, webm } = folders
   let newestDateSeen = lastChecked
@@ -139,6 +188,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   const page = await browser.newPage()
   await page.setUserAgent('Mozilla/5.0 ... Safari/537.36')
   await page.setViewport({ width: 1280, height: 800 })
+  process.stdout.write('\n') // Reserve one lines
+  logProgress(0, global.totalSearchTotal || total)
 
   try {
     while (url) {
@@ -148,35 +199,16 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
         ...new Set(links.map((l) => l.href)),
       ])
 
-      let completed = 0
       const total = urls.length
 
-      console.log(
-        `📸 ${modelName} - ${url.includes('&acs=') ? '[ACS]' : '[PLAIN]'} - ${urls.length} media links`
-      )
-
-      process.stdout.write('\n') // Reserve one lines
-      logProgress(0, total)
+      const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
+      logAndProgress(`📸 ${modelName} - [${mode}] - ${urls.length} media links`)
 
       await Promise.all(
         urls.map(
           async (mediaPageUrl) =>
             await limit(async () => {
-              let taskCompleted = false
-
-              function logAndProgress(message) {
-                if (!taskCompleted) {
-                  completed++
-                  taskCompleted = true
-                }
-
-                process.stdout.write(
-                  ansiEscapes.cursorTo(0, process.stdout.rows - 1)
-                )
-                readline.clearLine(process.stdout, 0)
-                console.log(message)
-                logProgress(completed, total)
-              }
+              taskCompleted = false
 
               totalCount++
               const workerPage = await browser.newPage()
@@ -283,7 +315,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                       mp4Path: path.join(webm, mp4Name),
                       filename,
                     })
-                    return logAndProgress(logGifConversion(completed))
+                    return logAndProgress(logGifConversion(completedTotal))
                   } else {
                     const stillPath = path.join(images, filename)
                     fs.writeFileSync(stillPath, buffer)
@@ -358,9 +390,9 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
       if (nextHref) {
         const baseUrl = new URL(url)
         url = new URL(nextHref, baseUrl).href
-        console.log(`➡️ Next page found: ${url}`)
+        // console.log(`➡️ Next page found: ${url}`)
       } else {
-        console.log(`🏁 No more pages.`)
+        // console.log(`🏁 No more pages.`)
         break
       }
     }
@@ -376,9 +408,11 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 }
 
 ;(async () => {
-  const inputUrl = process.argv[2]
+  let inputUrl = process.argv[2]
   if (!inputUrl || !inputUrl.includes('/category/'))
     return console.error('⚠️  Usage: node milkmaid.js <gallery-url>')
+
+  inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
 
   const categoryId = inputUrl.match(/category\/?(\d+)/)?.[1]
   if (!categoryId) return console.error('❌ Invalid category URL')
@@ -403,7 +437,15 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     .then((n) => n.replace(/\W+/g, '_').toLowerCase())
 
   const rawName = sanitize(tmpModelName)
-  const aliasMap = JSON.parse(fs.readFileSync('model_aliases.json'))
+  const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
+  let aliasMap = {}
+
+  if (fs.existsSync(aliasMapPath)) {
+    aliasMap = JSON.parse(fs.readFileSync(aliasMapPath, 'utf-8'))
+  } else {
+    fs.writeFileSync(aliasMapPath, JSON.stringify({}, null, 2))
+  }
+
   const modelName = aliasMap[rawName] || rawName
   if (!aliasMap[rawName]) {
     aliasMap[rawName] = rawName
@@ -429,8 +471,17 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     ? new Date(lastCheckedMap[rawName])
     : null
 
-  const acsUrl = `https://stufferdb.com/index?/category/${categoryId}&acs=${modelName}`
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
+  const acsUrl = `${plainUrl}&acs=${modelName}`
+
+  console.log('🔍 Prefetching total counts...')
+  const [acsCount, plainCount] = await Promise.all([
+    fetchStufferDBTotalCount(browser, acsUrl),
+    fetchStufferDBTotalCount(browser, plainUrl),
+  ])
+
+  global.totalSearchTotal = acsCount + plainCount
+  console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
 
   console.log(`💦 Starting scrape for ${modelName}`)
 
@@ -441,9 +492,9 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     folders,
     lastChecked
   )
+  console.log('✅ ACS scrape finished')
 
-  console.log(`🔄 ACS scrape done. Now checking plain category URL...`)
-
+  console.log('🔁 Now starting PLAIN scrape')
   let newest2 = await scrapeGallery(
     browser,
     plainUrl,
@@ -451,6 +502,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     folders,
     lastChecked
   )
+
+  console.log('🧮 Both scrapes complete')
 
   const newest = [newest1, newest2].filter(Boolean).sort().pop()
   if (newest) {

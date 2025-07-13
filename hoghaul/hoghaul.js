@@ -20,8 +20,15 @@ const pLimit = require('p-limit')
 const limit = pLimit(2)
 const lazyLimit = pLimit(2)
 
+const { bannerHoghaul } = require('../banners.js') // adjust path if needed
+bannerHoghaul()
+
 const rootDir = path.join(__dirname, '..')
-const datasetDir = path.join(rootDir, 'dataset')
+const datasetDir = path.join(
+  process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
+  '.slopvault',
+  'dataset'
+)
 const tmpDir = path.join(__dirname, 'tmp')
 const incompleteDir = path.join(__dirname, 'incomplete')
 const incompleteGifDir = path.join(incompleteDir, 'gifs')
@@ -145,7 +152,7 @@ function logLazyProgress() {
   )
 }
 
-async function scrapeCoomerUser(userUrl) {
+async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   const browser = await puppeteer.launch({
     headless: 'new',
     defaultViewport: null,
@@ -170,7 +177,15 @@ async function scrapeCoomerUser(userUrl) {
   )
 
   const rawName = sanitize(username)
-  const aliasMap = JSON.parse(fs.readFileSync('model_aliases.json'))
+  const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
+  let aliasMap = {}
+
+  if (fs.existsSync(aliasMapPath)) {
+    aliasMap = JSON.parse(fs.readFileSync(aliasMapPath, 'utf-8'))
+  } else {
+    fs.writeFileSync(aliasMapPath, JSON.stringify({}, null, 2))
+  }
+
   const modelName = aliasMap[rawName] || rawName
   if (!aliasMap[rawName]) {
     aliasMap[rawName] = rawName
@@ -196,9 +211,14 @@ async function scrapeCoomerUser(userUrl) {
   let newestDateSeen = lastChecked
 
   const postLinks = new Set()
-  let pageNum = 0
+  let pageNum = startPage
 
   while (true) {
+    if (endPage !== null && pageNum > endPage) {
+      console.log(`🧮 Reached end of page range (${startPage}-${endPage})`)
+      break
+    }
+
     await new Promise((res) => setTimeout(res, 1500)) // 1.5s pause
 
     const url = `${userUrl}?o=${pageNum * 50}`
@@ -290,22 +310,41 @@ async function scrapeCoomerUser(userUrl) {
             newestDateSeen = uploadedDate
           }
 
-          const mediaUrls = (
-            await page.$$eval(
-              'video[src], video source[src], img[src], a.post__attachment-link[href]',
-              (els) =>
-                els.map(
+          const mediaUrls = await page.$$eval(
+            'a.fileThumb.image-link, video source, a.post__attachment-link[href]',
+            (elements) =>
+              elements
+                .map(
                   (el) =>
-                    el.src ||
                     el.href ||
+                    el.src ||
                     el.getAttribute('src') ||
                     el.getAttribute('href')
                 )
-            )
-          ).filter((url) => !url.endsWith('.svg'))
+                .filter((url) => {
+                  if (!url) return false
+                  const normalized = url.startsWith('http')
+                    ? url
+                    : `https:${url}`
+                  return (
+                    normalized.includes('/data/') || // full-res images
+                    normalized.endsWith('.mp4') || // video sources
+                    normalized.endsWith('.m4v') ||
+                    (!normalized.includes('/thumbnail/') &&
+                      !normalized.includes('/icons/') &&
+                      !normalized.includes('/static/') &&
+                      !normalized.includes('/user/') &&
+                      !normalized.endsWith('.svg'))
+                  )
+                })
+          )
 
           for (const mediaUrl of mediaUrls) {
-            const url = normalizeUrl(mediaUrl)
+            let url = normalizeUrl(mediaUrl)
+            if (url.includes('?f=')) {
+              url = url.split('?')[0]
+            }
+
             if (!url)
               return logAndProgress`⚠️ Failed to extract filename from URL: ${url}`
 
@@ -314,6 +353,10 @@ async function scrapeCoomerUser(userUrl) {
               filename = decodeURIComponent(
                 path.basename(new URL(url).pathname).split('?')[0]
               )
+              if (/avatar|profile/i.test(filename)) {
+                logAndProgress(`🚫 Skipping avatar image: ${filename}`)
+                continue
+              }
             } catch (e) {
               return logAndProgress(
                 `⚠️ Failed to extract filename from URL: ${url}`
@@ -527,19 +570,29 @@ async function processPost(
     const uploadedDate = timeText ? new Date(timeText) : null
     updateNewestDate(uploadedDate)
 
-    const mediaUrls = (
-      await page.$$eval(
-        'video[src], video source[src], img[src], a.post__attachment-link[href]',
-        (els) =>
-          els.map(
-            (el) =>
-              el.src ||
-              el.href ||
-              el.getAttribute('src') ||
-              el.getAttribute('href')
-          )
-      )
-    ).filter((url) => !url.endsWith('.svg'))
+    const mediaUrls = await page.evaluate(() => {
+      const urls = []
+
+      // Full-size image or file
+      const anchors = document.querySelectorAll('a.fileThumb.image-link')
+      anchors.forEach((a) => {
+        if (a?.href?.startsWith('http')) urls.push(a.href)
+      })
+
+      // Embedded video (direct .mp4)
+      const sources = document.querySelectorAll('video source[src]')
+      sources.forEach((s) => {
+        if (s?.src?.startsWith('http')) urls.push(s.src)
+      })
+
+      // Direct attachments
+      const links = document.querySelectorAll('a.post__attachment-link[href]')
+      links.forEach((l) => {
+        if (l?.href?.startsWith('http')) urls.push(l.href)
+      })
+
+      return urls
+    })
 
     for (const mediaUrl of mediaUrls) {
       const url = normalizeUrl(mediaUrl)
@@ -551,6 +604,11 @@ async function processPost(
         filename = decodeURIComponent(
           path.basename(new URL(url).pathname).split('?')[0]
         )
+
+        if (/avatar|profile/i.test(filename)) {
+          logAndProgress(`🚫 Skipping avatar image: ${filename}`)
+          continue
+        }
       } catch (e) {
         return logAndProgress(`⚠️ Failed to extract filename from URL: ${url}`)
       }
@@ -623,11 +681,28 @@ async function processPost(
   }
 }
 
-const target = process.argv[2]
-if (!target || !target.includes('coomer.su')) {
-  console.error(
-    'Usage: node hoghaul.js https://coomer.su/onlyfans/user/<username>'
-  )
+const args = process.argv.slice(2)
+const target = args.find((arg) => arg.includes('coomer.su'))
+
+let startPage = 0
+let endPage = null
+
+const pageArg = args.find((arg) => arg.startsWith('--pages='))
+if (pageArg) {
+  const [, value] = pageArg.split('=')
+  if (value.includes('-')) {
+    const [start, end] = value.split('-').map((n) => parseInt(n, 10))
+    startPage = isNaN(start) ? 0 : start
+    endPage = isNaN(end) ? null : end
+  } else {
+    const num = parseInt(value, 10)
+    endPage = isNaN(num) ? null : num
+  }
+}
+
+if (!target) {
+  console.error('Usage: node hoghaul.js <coomer-url> [--pages=N or N-M]')
   process.exit(1)
 }
-scrapeCoomerUser(target)
+
+scrapeCoomerUser(target, startPage, endPage)
