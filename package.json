@@ -17,8 +17,7 @@
     "lint:fix": "eslint . --ext .js --fix",
     "format": "prettier . --write",
     "hoghaul": "node hoghaul/hoghaul.js",
-    "milkmaid": "node milkmaid/milkmaid.js",
-    "sloplabel": "python sloplabel/sloplabel.py"
+    "milkmaid": "node milkmaid/milkmaid.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",

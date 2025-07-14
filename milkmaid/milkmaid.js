@@ -104,7 +104,7 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
               1024 /
               ((Date.now() - start) / 1000)
             ).toFixed(1)
-            onProgress(percent, speed)
+            onProgress(percent, speed, chunk)
           }
         })
         res.on('end', () => resolve(Buffer.concat(chunks)))
@@ -605,14 +605,17 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
             const buffer =
               tmpPath && fs.existsSync(tmpPath)
                 ? fs.readFileSync(tmpPath)
-                : await downloadBufferWithProgress(url, (percent, speed) => {
-                    lazyBytesDownloaded += chunk.length
-                    const now = Date.now()
-                    if (now - lastDraw > 250) {
-                      logLazyProgress()
-                      lastDraw = now
+                : await downloadBufferWithProgress(
+                    url,
+                    (percent, speed, chunk) => {
+                      lazyBytesDownloaded += chunk.length
+                      const now = Date.now()
+                      if (now - lastDraw > 250) {
+                        logLazyProgress()
+                        lastDraw = now
+                      }
                     }
-                  })
+                  )
 
             const hash = createHash('md5').update(buffer).digest('hex')
             if (knownHashes.has(hash)) {
