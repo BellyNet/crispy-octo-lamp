@@ -17,11 +17,13 @@ const {
 } = require('../stuffinglogger')
 const pLimit = require('p-limit')
 
-const limit = pLimit(2)
+const limit = pLimit(4)
 const lazyLimit = pLimit(2)
 
 const { bannerHoghaul } = require('../banners.js') // adjust path if needed
 bannerHoghaul()
+
+const { createScraperPage } = require('../scrapyard/pageHelpers')
 
 const rootDir = path.join(__dirname, '..')
 const datasetDir = path.join(
@@ -158,23 +160,17 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     defaultViewport: null,
   })
 
-  const page = await browser.newPage()
-  await page.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-  )
-  await page.setViewport({ width: 1280, height: 800 })
-  const randomDelay = () => Math.random() * 2000 + 1000
-  await new Promise((res) => setTimeout(res, randomDelay()))
-
-  await page.goto(userUrl, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('a.user-header__profile span:last-of-type', {
-    timeout: 0,
+  const page = await createScraperPage(browser, {
+    site: 'coomer',
+    interceptMedia: true, // for post list/gallery pages
   })
 
-  const username = await page.$eval(
-    'a.user-header__profile span:last-of-type',
-    (el) => el.textContent.trim()
-  )
+  const urlParts = new URL(userUrl).pathname.split('/')
+  const username = urlParts[urlParts.indexOf('user') + 1]
+
+  if (!username) {
+    throw new Error('❌ Failed to extract username from Coomer URL.')
+  }
 
   const rawName = sanitize(username)
   const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -288,7 +284,10 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
           logProgress(completed, urls.length)
         }
 
-        const page = await browser.newPage()
+        const page = await createScraperPage(browser, {
+          site: 'coomer',
+        })
+
         try {
           await page.goto(link, { waitUntil: 'domcontentloaded' })
 
@@ -310,34 +309,11 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
             newestDateSeen = uploadedDate
           }
 
-          const mediaUrls = await page.$$eval(
-            'a.fileThumb.image-link, video source, a.post__attachment-link[href]',
-            (elements) =>
-              elements
-                .map(
-                  (el) =>
-                    el.href ||
-                    el.src ||
-                    el.getAttribute('src') ||
-                    el.getAttribute('href')
-                )
-                .filter((url) => {
-                  if (!url) return false
-                  const normalized = url.startsWith('http')
-                    ? url
-                    : `https:${url}`
-                  return (
-                    normalized.includes('/data/') || // full-res images
-                    normalized.endsWith('.mp4') || // video sources
-                    normalized.endsWith('.m4v') ||
-                    (!normalized.includes('/thumbnail/') &&
-                      !normalized.includes('/icons/') &&
-                      !normalized.includes('/static/') &&
-                      !normalized.includes('/user/') &&
-                      !normalized.endsWith('.svg'))
-                  )
-                })
-          )
+          const mediaUrls = await page.evaluate(() => {
+            return window.extractMediaUrls
+              ? extractMediaUrls('coomer', document)
+              : []
+          })
 
           for (const mediaUrl of mediaUrls) {
             let url = normalizeUrl(mediaUrl)
@@ -546,7 +522,10 @@ async function processPost(
   lazyVideoQueue,
   updateNewestDate
 ) {
-  const page = await browser.newPage()
+  const page = await createScraperPage(browser, {
+    site: 'coomer',
+  })
+
   let taskCompleted = false
   const logAndProgress = (msg) => {
     if (!taskCompleted) {

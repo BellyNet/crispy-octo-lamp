@@ -15,6 +15,17 @@ const chalk = require('chalk').default
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
+
+// Helpers
+const { createScraperPage } = require('../scrapyard/pageHelpers')
+const {
+  loadVisualHashCache,
+  saveVisualHashCache,
+  getVisualHashFromBuffer,
+  isVisualDupe,
+  addVisualHash,
+} = require('../scrapyard/visualHasher')
+
 const {
   logProgress,
   logLazyDownload,
@@ -137,12 +148,11 @@ function getGifFrameCount(buffer) {
 }
 
 async function fetchStufferDBTotalCount(browser, url) {
-  const tempPage = await browser.newPage()
+  const tempPage = await createScraperPage(browser, {
+    site: 'stufferdb',
+    interceptMedia: true,
+  })
   try {
-    await tempPage.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115 Safari/537.36'
-    )
-    await tempPage.setViewport({ width: 1280, height: 800 })
     await tempPage.goto(url, { waitUntil: 'networkidle2', timeout: 20000 })
 
     // Log raw text from the span
@@ -185,9 +195,11 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   const { base, images, webm } = folders
   let newestDateSeen = lastChecked
 
-  const page = await browser.newPage()
-  await page.setUserAgent('Mozilla/5.0 ... Safari/537.36')
-  await page.setViewport({ width: 1280, height: 800 })
+  const page = await createScraperPage(browser, {
+    site: 'stufferdb',
+    interceptMedia: false,
+  })
+
   process.stdout.write('\n') // Reserve one lines
   logProgress(0, global.totalSearchTotal || total)
 
@@ -211,20 +223,10 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
               taskCompleted = false
 
               totalCount++
-              const workerPage = await browser.newPage()
-              await workerPage.setUserAgent('Mozilla/5.0 ... Safari/537.36')
-              await workerPage.setRequestInterception(true)
-
-              workerPage.on('request', (req) => {
-                const type = req.resourceType()
-                if (['media', 'other'].includes(type)) {
-                  req.abort()
-                } else {
-                  req.continue()
-                }
+              const workerPage = await createScraperPage(browser, {
+                site: 'stufferdb',
+                interceptMedia: false,
               })
-
-              await workerPage.setViewport({ width: 1280, height: 800 })
 
               try {
                 await workerPage.goto(mediaPageUrl, {
@@ -283,10 +285,23 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
                 let buffer = null
                 let hash = null
+                let visualHash = null
 
+                // Step 1: Fetch file buffer
+                buffer = await downloadBufferWithProgress(mediaUrl)
+
+                // Step 2: Bitwise (fast) hash
+                hash = createHash('md5').update(buffer).digest('hex')
                 if (knownHashes.has(hash)) {
                   duplicateCount++
-                  return logAndProgress(`♻️ Visual dupe: ${filename}`)
+                  return logAndProgress(`♻️ Bitwise dupe: ${filename}`)
+                }
+
+                // Step 3: Visual (slow) hash
+                visualHash = await getVisualHashFromBuffer(buffer)
+                if (visualHash && isVisualDupe(visualHash)) {
+                  duplicateCount++
+                  return logAndProgress(`👁️ Visual dupe (global): ${filename}`)
                 }
 
                 if (ext === '.gif') {
@@ -325,6 +340,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                     }
                     knownHashes.add(hash)
                     knownFilenames.add(filename)
+                    if (visualHash) addVisualHash(visualHash)
+
                     successCount++
                     return logAndProgress(`🖼️ Saved still gif: ${filename}`)
                   }
@@ -366,7 +383,10 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                   const ts = uploadedDate.getTime() / 1000
                   fs.utimesSync(finalPath, ts, ts)
                 }
+
+                // Add both hashes to global sets
                 knownHashes.add(hash)
+                if (visualHash) addVisualHash(visualHash)
                 knownFilenames.add(filename)
                 successCount++
                 return logAndProgress(`✅ Saved: ${filename}`)
@@ -423,10 +443,13 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     args: ['--no-sandbox'],
   })
 
-  const tempPage = await browser.newPage()
-  await tempPage.setUserAgent('Mozilla/5.0 ... Safari/537.36')
-  await tempPage.setViewport({ width: 1280, height: 800 })
+  const tempPage = await createScraperPage(browser, {
+    site: 'stufferdb',
+    interceptMedia: true,
+  })
   await tempPage.goto(inputUrl, { waitUntil: 'domcontentloaded' })
+
+  loadVisualHashCache()
 
   const tmpModelName = await tempPage
     .evaluate(() => {
@@ -545,6 +568,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
         createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
       )
       knownFilenames.add(path.basename(mp4Path))
+
       successCount++
       console.log(`🎞️ Converted: ${mp4Path}`)
 
@@ -605,14 +629,17 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
             const buffer =
               tmpPath && fs.existsSync(tmpPath)
                 ? fs.readFileSync(tmpPath)
-                : await downloadBufferWithProgress(url, (percent, speed) => {
-                    lazyBytesDownloaded += chunk.length
-                    const now = Date.now()
-                    if (now - lastDraw > 250) {
-                      logLazyProgress()
-                      lastDraw = now
+                : await downloadBufferWithProgress(
+                    url,
+                    (percent, speed, chunk) => {
+                      lazyBytesDownloaded += chunk.length
+                      const now = Date.now()
+                      if (now - lastDraw > 250) {
+                        logLazyProgress()
+                        lastDraw = now
+                      }
                     }
-                  })
+                  )
 
             const hash = createHash('md5').update(buffer).digest('hex')
             if (knownHashes.has(hash)) {
@@ -645,6 +672,9 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     `Model: ${modelName}\nTotal: ${totalCount}\nSaved: ${successCount}\nDupes: ${duplicateCount}\nErrors: ${errorCount}`
   )
   await browser.close()
+
+  saveVisualHashCache()
+  fs.writeFileSync(modelHashPath, JSON.stringify([...knownHashes]))
 
   console.log(
     `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
