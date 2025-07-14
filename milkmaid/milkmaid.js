@@ -115,7 +115,7 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
               1024 /
               ((Date.now() - start) / 1000)
             ).toFixed(1)
-            onProgress(percent, speed)
+            onProgress(percent, speed, chunk)
           }
         })
         res.on('end', () => resolve(Buffer.concat(chunks)))

@@ -43,6 +43,8 @@ if (!fs.existsSync(incompleteGifDir))
 if (!fs.existsSync(incompleteVideoDir))
   fs.mkdirSync(incompleteVideoDir, { recursive: true })
 
+let globalPostIndex = 0
+
 function sanitize(name) {
   return name.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase()
 }
@@ -217,6 +219,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
     await new Promise((res) => setTimeout(res, 1500)) // 1.5s pause
 
+    pageNumDisplay = pageNum - startPage + 1
+    console.log(`📦 Page ${pageNumDisplay}/${endPage - startPage + 1}`)
+
     const url = `${userUrl}?o=${pageNum * 50}`
     await page.goto(url, { waitUntil: 'networkidle2' })
     await page.waitForSelector('article.post-card a.fancy-link', {
@@ -230,10 +235,16 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     if (!links.length) break
 
     // Process this page’s links immediately
+    let postIndex = 0
     await Promise.all(
       links.map((link) =>
-        limit(() =>
-          processPost(
+        limit(() => {
+          postIndex++
+          console.log(
+            `📸 Page ${pageNumDisplay} — (${++pagePostIndex}/${links.length}) — Global ${++globalPostIndex}/${totalExpectedPosts}`
+          )
+
+          return processPost(
             link,
             browser,
             folders,
@@ -251,7 +262,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
               }
             }
           )
-        )
+        })
       )
     )
 
