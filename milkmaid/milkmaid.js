@@ -216,197 +216,199 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
       const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
       logAndProgress(`📸 ${modelName} - [${mode}] - ${urls.length} media links`)
 
-      await Promise.all(
-        urls.map(
-          async (mediaPageUrl) =>
-            await limit(async () => {
-              taskCompleted = false
-
-              totalCount++
-              const workerPage = await createScraperPage(browser, {
-                site: 'stufferdb',
-                interceptMedia: false,
-              })
-
-              try {
-                await workerPage.goto(mediaPageUrl, {
-                  waitUntil: 'domcontentloaded',
-                  timeout: 20000,
-                })
-
-                const uploadedDateIso = await workerPage.evaluate(() => {
-                  const anchor = document.querySelector('#datepost dd a')
-                  if (!anchor) return null
-                  const text = anchor.textContent?.trim()
-                  const match = text.match(/\d{1,2} \w+ \d{4}/)
-                  if (!match) return null
-                  const date = new Date(match[0])
-                  return isNaN(date.getTime()) ? null : date.toISOString()
-                })
-                const uploadedDate = uploadedDateIso
-                  ? new Date(uploadedDateIso)
-                  : null
-
-                if (
-                  lastChecked &&
-                  uploadedDate &&
-                  uploadedDate <= lastChecked
-                ) {
-                  return logAndProgress(
-                    `⏩ Skipping old media from ${uploadedDate.toISOString().split('T')[0]}`
-                  )
-                }
-
-                if (
-                  !newestDateSeen ||
-                  (uploadedDate && uploadedDate > newestDateSeen)
-                ) {
-                  newestDateSeen = uploadedDate
-                }
-
-                const mediaUrl = await workerPage.evaluate(() => {
-                  const video = document.querySelector('video.vjs-tech[src]')
-                  const img = document.querySelector('#theMainImage')
-                  return video?.src || img?.src || null
-                })
-
-                if (!mediaUrl) return
-
-                const parsed = new URL(mediaUrl)
-                let filename = decodeURIComponent(
-                  path.basename(parsed.pathname).split('?')[0]
-                )
-
-                let ext = path.extname(filename).toLowerCase()
-                if (ext === '.m4v') {
-                  ext = '.mp4'
-                  filename = filename.replace(/\.m4v$/i, '.mp4')
-                }
-
-                let buffer = null
-                let hash = null
-                let visualHash = null
-
-                // Step 1: Fetch file buffer
-                buffer = await downloadBufferWithProgress(mediaUrl)
-
-                // Step 2: Bitwise (fast) hash
-                hash = createHash('md5').update(buffer).digest('hex')
-                if (knownHashes.has(hash)) {
-                  duplicateCount++
-                  return logAndProgress(`♻️ Bitwise dupe: ${filename}`)
-                }
-
-                // Step 3: Visual (slow) hash
-                if (!['.mp4', '.webm', '.gif'].includes(ext)) {
-                  const visualHash = await getVisualHashFromBuffer(buffer)
-                  if (visualHash && isVisualDupe(visualHash)) {
-                    duplicateCount++
-                    return logAndProgress(
-                      `👁️ Visual dupe (global): ${filename}`
-                    )
-                  }
-                  if (visualHash) addVisualHash(visualHash)
-                }
-
-                if (ext === '.gif') {
-                  buffer = await downloadBufferWithProgress(mediaUrl)
-                  hash = createHash('md5').update(buffer).digest('hex')
-                  const frameCount = await getGifFrameCount(buffer)
-                  if (frameCount > 1) {
-                    const mp4Name = filename.replace(/\.gif$/, '.mp4')
-                    if (knownFilenames.has(mp4Name)) {
-                      duplicateCount++
-                      return logAndProgress(
-                        `♻️ Already converted gif > mp4: ${mp4Name}`
-                      )
-                    }
-                    const tmpPath = path.join(incompleteGifDir, filename)
-                    fs.writeFileSync(tmpPath, buffer)
-                    const gifSavePath = path.join(folders.gif, filename)
-                    fs.writeFileSync(gifSavePath, buffer)
-                    if (uploadedDate) {
-                      const ts = uploadedDate.getTime() / 1000
-                      fs.utimesSync(tmpPath, ts, ts)
-                      fs.utimesSync(gifSavePath, ts, ts)
-                    }
-                    gifsToConvert.push({
-                      tmpPath,
-                      mp4Path: path.join(webm, mp4Name),
-                      filename,
-                    })
-                    return logAndProgress(logGifConversion(completedTotal))
-                  } else {
-                    const stillPath = path.join(images, filename)
-                    fs.writeFileSync(stillPath, buffer)
-                    if (uploadedDate) {
-                      const ts = uploadedDate.getTime() / 1000
-                      fs.utimesSync(stillPath, ts, ts)
-                    }
-                    knownHashes.add(hash)
-                    knownFilenames.add(filename)
-                    if (visualHash) addVisualHash(visualHash)
-
-                    successCount++
-                    return logAndProgress(`🖼️ Saved still gif: ${filename}`)
-                  }
-                }
-
-                if (ext === '.mp4') {
-                  const finalPath = path.join(webm, filename)
-                  if (
-                    knownFilenames.has(filename) ||
-                    fs.existsSync(finalPath)
-                  ) {
-                    duplicateCount++
-                    return logAndProgress(
-                      `⛔ Skipping mp4 – already handled: ${filename}`
-                    )
-                  }
-                  const tmpPath = path.join(incompleteVideoDir, filename)
-                  lazyVideoQueue.push({
-                    url: mediaUrl,
-                    path: finalPath,
-                    tmpPath,
-                    filename,
-                    uploadedDate,
-                  })
-                  return logAndProgress(`🐌 Queued lazy video: ${filename}`)
-                }
-
-                if (knownFilenames.has(filename)) {
-                  duplicateCount++
-                  return logAndProgress(`🔁 Existing filename: ${filename}`)
-                }
-
-                buffer = await downloadBufferWithProgress(mediaUrl)
-                hash = createHash('md5').update(buffer).digest('hex')
-
-                const finalPath = path.join(images, filename)
-                fs.writeFileSync(finalPath, buffer)
-                if (uploadedDate) {
-                  const ts = uploadedDate.getTime() / 1000
-                  fs.utimesSync(finalPath, ts, ts)
-                }
-
-                // Add both hashes to global sets
-                knownHashes.add(hash)
-                if (visualHash) addVisualHash(visualHash)
-                knownFilenames.add(filename)
-                successCount++
-                return logAndProgress(`✅ Saved: ${filename}`)
-              } catch (err) {
-                errorCount++
-                console.error(
-                  `❌ Error processing ${mediaPageUrl}: ${err.message}`
-                )
-              } finally {
-                if (!workerPage.isClosed()) await workerPage.close()
-              }
-
-              await randomDelay()
-            })
+      const pages = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          createScraperPage(browser, {
+            site: 'stufferdb',
+            interceptMedia: false,
+          })
         )
+      )
+
+      let pageIndex = 0
+
+      const pageLocks = pages.map(() => pLimit(1)) // 🧠 One lock per tab
+
+      async function scrapeMediaOnPage(page, mediaPageUrl, i) {
+        taskCompleted = false
+        totalCount++
+
+        try {
+          await page.goto(mediaPageUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 20000,
+          })
+
+          const uploadedDateIso = await page.evaluate(() => {
+            const anchor = document.querySelector('#datepost dd a')
+            if (!anchor) return null
+            const text = anchor.textContent?.trim()
+            const match = text.match(/\d{1,2} \w+ \d{4}/)
+            if (!match) return null
+            const date = new Date(match[0])
+            return isNaN(date.getTime()) ? null : date.toISOString()
+          })
+
+          const uploadedDate = uploadedDateIso
+            ? new Date(uploadedDateIso)
+            : null
+
+          if (lastChecked && uploadedDate && uploadedDate <= lastChecked) {
+            return logAndProgress(
+              `⏩ Skipping old media from ${uploadedDate.toISOString().split('T')[0]}`
+            )
+          }
+
+          if (
+            !newestDateSeen ||
+            (uploadedDate && uploadedDate > newestDateSeen)
+          ) {
+            newestDateSeen = uploadedDate
+          }
+
+          const mediaUrl = await page.evaluate(() => {
+            const video = document.querySelector('video.vjs-tech[src]')
+            const img = document.querySelector('#theMainImage')
+            return video?.src || img?.src || null
+          })
+
+          if (!mediaUrl) return
+
+          const parsed = new URL(mediaUrl)
+          let filename = decodeURIComponent(
+            path.basename(parsed.pathname).split('?')[0]
+          )
+
+          let ext = path.extname(filename).toLowerCase()
+          if (ext === '.m4v') {
+            ext = '.mp4'
+            filename = filename.replace(/\.m4v$/i, '.mp4')
+          }
+
+          let buffer = null
+          let hash = null
+          let visualHash = null
+
+          // Step 1: Fetch file buffer
+          if (!['.mp4', '.webm', '.gif'].includes(ext)) {
+            buffer = await downloadBufferWithProgress(mediaUrl)
+
+            // Step 2: Bitwise (fast) hash
+            hash = createHash('md5').update(buffer).digest('hex')
+            if (knownHashes.has(hash)) {
+              duplicateCount++
+              return logAndProgress(`♻️ Bitwise dupe: ${filename}`)
+            }
+
+            // Step 3: Visual (slow) hash
+
+            visualHash = await getVisualHashFromBuffer(buffer)
+            if (visualHash && isVisualDupe(visualHash)) {
+              duplicateCount++
+              return logAndProgress(`👁️ Visual dupe (global): ${filename}`)
+            }
+            if (visualHash) addVisualHash(visualHash)
+          }
+
+          if (ext === '.gif') {
+            buffer = await downloadBufferWithProgress(mediaUrl)
+            hash = createHash('md5').update(buffer).digest('hex')
+            const frameCount = await getGifFrameCount(buffer)
+            if (frameCount > 1) {
+              const mp4Name = filename.replace(/\.gif$/, '.mp4')
+              if (knownFilenames.has(mp4Name)) {
+                duplicateCount++
+                return logAndProgress(
+                  `♻️ Already converted gif > mp4: ${mp4Name}`
+                )
+              }
+              const tmpPath = path.join(incompleteGifDir, filename)
+              fs.writeFileSync(tmpPath, buffer)
+              const gifSavePath = path.join(folders.gif, filename)
+              fs.writeFileSync(gifSavePath, buffer)
+              if (uploadedDate) {
+                const ts = uploadedDate.getTime() / 1000
+                fs.utimesSync(tmpPath, ts, ts)
+                fs.utimesSync(gifSavePath, ts, ts)
+              }
+              gifsToConvert.push({
+                tmpPath,
+                mp4Path: path.join(webm, mp4Name),
+                filename,
+              })
+              return logAndProgress(logGifConversion(completedTotal))
+            } else {
+              const stillPath = path.join(images, filename)
+              fs.writeFileSync(stillPath, buffer)
+              if (uploadedDate) {
+                const ts = uploadedDate.getTime() / 1000
+                fs.utimesSync(stillPath, ts, ts)
+              }
+              knownHashes.add(hash)
+              knownFilenames.add(filename)
+              if (visualHash) addVisualHash(visualHash)
+
+              successCount++
+              return logAndProgress(`🖼️ Saved still gif: ${filename}`)
+            }
+          }
+
+          if (ext === '.mp4') {
+            const finalPath = path.join(webm, filename)
+            if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+              duplicateCount++
+              return logAndProgress(
+                `⛔ Skipping mp4 – already handled: ${filename}`
+              )
+            }
+            const tmpPath = path.join(incompleteVideoDir, filename)
+            lazyVideoQueue.push({
+              url: mediaUrl,
+              path: finalPath,
+              tmpPath,
+              filename,
+              uploadedDate,
+            })
+            return logAndProgress(`🐌 Queued lazy video: ${filename}`)
+          }
+
+          if (knownFilenames.has(filename)) {
+            duplicateCount++
+            return logAndProgress(`🔁 Existing filename: ${filename}`)
+          }
+
+          buffer = await downloadBufferWithProgress(mediaUrl)
+          hash = createHash('md5').update(buffer).digest('hex')
+
+          const finalPath = path.join(images, filename)
+          fs.writeFileSync(finalPath, buffer)
+          if (uploadedDate) {
+            const ts = uploadedDate.getTime() / 1000
+            fs.utimesSync(finalPath, ts, ts)
+          }
+
+          knownHashes.add(hash)
+          if (visualHash) addVisualHash(visualHash)
+          knownFilenames.add(filename)
+          successCount++
+          return logAndProgress(`✅ Saved: ${filename}`)
+        } catch (err) {
+          errorCount++
+          console.error(`❌ Error processing ${mediaPageUrl}: ${err.message}`)
+        }
+
+        await randomDelay()
+      }
+
+      await Promise.all(
+        urls.map((mediaPageUrl, i) => {
+          const page = pages[i % pages.length]
+          const lock = pageLocks[i % pageLocks.length]
+
+          return limit(() =>
+            lock(() => scrapeMediaOnPage(page, mediaPageUrl, i))
+          )
+        })
       )
 
       const nextHref = await page
@@ -618,59 +620,72 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   }
 
   await Promise.all(
-    lazyVideoQueue.map(
-      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
-        lazyLimit(async () => {
-          if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
-            duplicateCount++
-            return console.log(`♻️ Lazy dupe (pre-download): ${filename}`)
-          }
+    lazyVideoQueue.map(({ url, path: finalPath, filename, uploadedDate }, i) =>
+      lazyLimit(async () => {
+        if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+          duplicateCount++
+          return console.log(`♻️ Lazy dupe (pre-download): ${filename}`)
+        }
 
-          let lastProgressLine = ''
-          let lastDraw = Date.now()
+        knownFilenames.add(filename) // ✅ Mark as claimed early
 
-          console.log(logLazyDownload(i))
-          console.log(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
+        console.log(`🚀 STARTING lazy task #${i}: ${filename}`)
+        console.log(logLazyDownload(i))
+        console.log(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
 
-          try {
-            const buffer =
-              tmpPath && fs.existsSync(tmpPath)
-                ? fs.readFileSync(tmpPath)
-                : await downloadBufferWithProgress(
-                    url,
-                    (percent, speed, chunk) => {
-                      lazyBytesDownloaded += chunk.length
-                      const now = Date.now()
-                      if (now - lastDraw > 250) {
-                        console.log(
-                          `⬇️ ${percent}% @ ${speed} KB/s (${chunk.length} bytes)`
+        const stream = fs.createWriteStream(finalPath)
+        let lastDraw = Date.now()
+
+        try {
+          await new Promise((resolve, reject) => {
+            const proto = url.startsWith('https') ? https : http
+            proto
+              .get(url, (res) => {
+                if (res.statusCode !== 200)
+                  return reject(new Error(`HTTP ${res.statusCode}`))
+
+                res.on('data', (chunk) => {
+                  stream.write(chunk)
+                  lazyBytesDownloaded += chunk.length
+
+                  const now = Date.now()
+                  if (now - lastDraw > 250) {
+                    const percent = totalLazyBytes
+                      ? ((lazyBytesDownloaded / totalLazyBytes) * 100).toFixed(
+                          1
                         )
+                      : '??'
+                    const mb = (lazyBytesDownloaded / 1024 / 1024).toFixed(1)
+                    // console.log(`⬇️ ${percent}% (${mb} MB)`)
+                    logLazyProgress()
+                    lastDraw = now
+                  }
+                })
 
-                        lastDraw = now
-                      }
-                    }
-                  )
+                res.on('end', () => {
+                  stream.end()
+                  resolve()
+                })
 
-            const hash = createHash('md5').update(buffer).digest('hex')
-            if (knownHashes.has(hash)) {
-              duplicateCount++
-              return console.log(`♻️ Lazy dupe: ${filename}`)
-            }
+                res.on('error', reject)
+              })
+              .on('error', reject)
+          })
 
-            fs.writeFileSync(finalPath, buffer)
-            if (uploadedDate) {
-              const ts = uploadedDate.getTime() / 1000
-              fs.utimesSync(finalPath, ts, ts)
-            }
-            knownHashes.add(hash)
-            knownFilenames.add(filename)
-            console.log(`✅ Saved lazy video: ${filename}`)
-            if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-          } catch (err) {
-            console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+          if (uploadedDate) {
+            const ts = uploadedDate.getTime() / 1000
+            fs.utimesSync(finalPath, ts, ts)
           }
-          await sleep(3000)
-        })
+
+          successCount++
+          console.log(`✅ Saved lazy video: ${filename}`)
+        } catch (err) {
+          errorCount++
+          console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+          if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
+          knownFilenames.delete(filename) // allow retry in future runs
+        }
+      })
     )
   )
 
