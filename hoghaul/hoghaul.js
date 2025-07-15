@@ -17,7 +17,7 @@ const {
 } = require('../stuffinglogger')
 const pLimit = require('p-limit')
 
-const limit = pLimit(4)
+const limit = pLimit(2)
 const lazyLimit = pLimit(2)
 
 const { bannerHoghaul } = require('../banners.js') // adjust path if needed
@@ -112,6 +112,24 @@ function convertGifToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
     exec(cmd, (err) => (err ? reject(err) : resolve()))
+  })
+}
+
+function convertShortMp4ToGif(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=15,scale=480:-1:flags=lanczos" "${outputPath}"`
+    exec(cmd, (err) => (err ? reject(err) : resolve()))
+  })
+}
+
+function getVideoDuration(filePath) {
+  return new Promise((resolve, reject) => {
+    const cmd = `ffprobe -v error -show_entries format=duration -of csv=p=0 "${filePath}"`
+    exec(cmd, (err, stdout) => {
+      if (err) return reject(err)
+      const duration = parseFloat(stdout.trim())
+      resolve(isNaN(duration) ? 9999 : duration)
+    })
   })
 }
 
@@ -218,7 +236,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     }
   }
 
-  const totalPages = (endPage ?? startPage) - startPage + 1
+  const totalPages = endPage - startPage + 1
   const totalExpectedPosts = totalPages * 50
   global.totalSearchTotal = totalExpectedPosts
 
@@ -363,6 +381,30 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
           if (knownHashes.has(hash))
             return logAndProgress(`♻️ Lazy dupe: ${filename}`)
           fs.writeFileSync(finalPath, buffer)
+
+          // after writing finalPath
+          if (fs.existsSync(finalPath)) {
+            try {
+              const { size } = fs.statSync(finalPath)
+              const isSmallFile = size < 5 * 1024 * 1024 // < 5MB
+
+              const duration = await getVideoDuration(finalPath)
+              if (duration <= 6 && isSmallFile) {
+                const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
+                const gifPath = path.join(folders.gif, gifName)
+
+                if (!fs.existsSync(gifPath)) {
+                  await convertShortMp4ToGif(finalPath, gifPath)
+                  console.log(`🎁 Converted to gif: ${gifName}`)
+                }
+              }
+            } catch (err) {
+              console.warn(
+                `⚠️ Couldn’t convert ${filename} to gif: ${err.message}`
+              )
+            }
+          }
+
           knownHashes.add(hash)
           knownFilenames.add(filename)
           logAndProgress(`✅ Saved lazy video: ${filename}`)
@@ -405,8 +447,6 @@ async function processPost(
   const page = await createScraperPage(browser, {
     site: 'coomer',
   })
-
-  logAndProgress(`📨 Processing: ${link}`)
 
   try {
     await page.goto(link, { waitUntil: 'domcontentloaded' })
@@ -540,18 +580,16 @@ const target = args.find((arg) => arg.includes('coomer.su'))
 let startPage = 0
 let endPage = null
 
-const pageArg = args.find((arg) => arg.startsWith('--pages='))
-if (pageArg) {
-  const [, value] = pageArg.split('=')
-  if (value.includes('-')) {
-    const [start, end] = value.split('-').map((n) => parseInt(n, 10))
+// NPM-compatible argument parsing
+const pageArgRaw = process.env.npm_config_pages
+if (pageArgRaw) {
+  if (pageArgRaw.includes('-')) {
+    const [start, end] = pageArgRaw.split('-').map((n) => parseInt(n, 10))
     startPage = isNaN(start) ? 0 : start
     endPage = isNaN(end) ? null : end
-    console.log(endPage)
   } else {
-    const num = parseInt(value, 10)
-    endPage = isNaN(num) ? null : num - 1 // ✅ fix: subtract 1\
-    console.log(endPage)
+    const num = parseInt(pageArgRaw, 10)
+    endPage = isNaN(num) ? null : num - 1
   }
 }
 
