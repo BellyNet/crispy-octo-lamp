@@ -298,10 +298,15 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                 }
 
                 // Step 3: Visual (slow) hash
-                visualHash = await getVisualHashFromBuffer(buffer)
-                if (visualHash && isVisualDupe(visualHash)) {
-                  duplicateCount++
-                  return logAndProgress(`👁️ Visual dupe (global): ${filename}`)
+                if (!['.mp4', '.webm', '.gif'].includes(ext)) {
+                  const visualHash = await getVisualHashFromBuffer(buffer)
+                  if (visualHash && isVisualDupe(visualHash)) {
+                    duplicateCount++
+                    return logAndProgress(
+                      `👁️ Visual dupe (global): ${filename}`
+                    )
+                  }
+                  if (visualHash) addVisualHash(visualHash)
                 }
 
                 if (ext === '.gif') {
@@ -622,6 +627,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
           }
 
           let lastProgressLine = ''
+          let lastDraw = Date.now()
+
           console.log(logLazyDownload(i))
           console.log(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
 
@@ -635,7 +642,10 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
                       lazyBytesDownloaded += chunk.length
                       const now = Date.now()
                       if (now - lastDraw > 250) {
-                        logLazyProgress()
+                        console.log(
+                          `⬇️ ${percent}% @ ${speed} KB/s (${chunk.length} bytes)`
+                        )
+
                         lastDraw = now
                       }
                     }
