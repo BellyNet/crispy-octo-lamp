@@ -52,7 +52,8 @@ function logProgress(current, total) {
   const emojiWidth = 2 // because 🍩 or 🍼 are double-width
   const adjustedFilled = Math.floor(filledLength / emojiWidth)
 
-  const bar = `[${persistentEmoji.repeat(adjustedFilled)}${'—'.repeat(barLength - adjustedFilled * emojiWidth)}]`
+  const dashCount = Math.max(barLength - adjustedFilled * emojiWidth, 0)
+  const bar = `[${persistentEmoji.repeat(adjustedFilled)}${'—'.repeat(dashCount)}]`
 
   // Print to last row, clear, and overwrite
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
