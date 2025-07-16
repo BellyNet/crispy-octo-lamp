@@ -193,6 +193,8 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   const browser = await puppeteer.launch({
     headless: 'new',
     defaultViewport: null,
+    args: ['--ignore-certificate-errors'],
+    ignoreHTTPSErrors: true, // ✅ ← This is key
   })
 
   const page = await createScraperPage(browser, {
@@ -318,16 +320,21 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     gifsToConvert.push({ tmpPath, mp4Path, filename: gif })
   }
 
-  for (const { tmpPath, mp4Path, filename } of gifsToConvert) {
+  for (const { tmpPath, mp4Path, filename, uploadedDate } of gifsToConvert) {
     try {
       if (fs.existsSync(mp4Path)) continue
       await convertGifToMp4(tmpPath, mp4Path)
+
+      if (uploadedDate) {
+        const ts = uploadedDate.getTime() / 1000
+        fs.utimesSync(mp4Path, ts, ts) // ✅ timestamp converted mp4
+      }
+
       knownHashes.add(
         createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
       )
       knownFilenames.add(path.basename(mp4Path))
       logAndProgress(`🎞️ Converted: ${filename}`)
-
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
     } catch (err) {
       console.error(`❌ Conversion failed for ${filename}`)
@@ -400,6 +407,10 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
                   if (!fs.existsSync(gifPath)) {
                     await convertShortMp4ToGif(finalPath, gifPath)
+                    if (uploadedDate) {
+                      const ts = uploadedDate.getTime() / 1000
+                      fs.utimesSync(gifPath, ts, ts) // ✅ set date on new .gif
+                    }
                     console.log(`🎁 Converted to gif: ${gifName}`)
                   }
                 }
@@ -528,29 +539,31 @@ async function processPost(
 
       if (ext === '.gif') {
         const frameCount = await getGifFrameCount(buffer)
+        const gifSavePath = path.join(folders.gif, filename)
+
         if (frameCount > 1) {
-          const tmpPath = path.join(incompleteGifDir, filename)
-          fs.writeFileSync(tmpPath, buffer)
-          if (timestamp) fs.utimesSync(tmpPath, timestamp, timestamp)
-          const gifSavePath = path.join(folders.gif, filename)
           fs.writeFileSync(gifSavePath, buffer)
           if (timestamp) fs.utimesSync(gifSavePath, timestamp, timestamp)
+
           gifsToConvert.push({
-            tmpPath,
+            tmpPath: gifSavePath, // ✅ now using the actual saved gif path
             mp4Path: path.join(
               folders.webm,
               filename.replace(/\.gif$/, '.mp4')
             ),
             filename,
+            uploadedDate, // ✅ pass it along
           })
+
           logAndProgress(`📥 Queued gif for conversion: ${filename}`)
         } else {
-          const outPath = path.join(folders.images, filename)
-          fs.writeFileSync(outPath, buffer)
-          if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
-          logAndProgress(`🖼️ Saved still gif: ${filename}`)
+          const stillPath = path.join(folders.images, filename)
+          fs.writeFileSync(stillPath, buffer)
+          if (timestamp) fs.utimesSync(stillPath, timestamp, timestamp)
+
           knownHashes.add(hash)
           knownFilenames.add(filename)
+          logAndProgress(`🖼️ Saved still gif: ${filename}`)
         }
       } else if (['.mp4', '.m4v'].includes(ext)) {
         const tmpPath = path.join(incompleteVideoDir, filename)

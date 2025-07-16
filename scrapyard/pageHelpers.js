@@ -1,22 +1,34 @@
-// /scrapyard/pageHelpers.js
 const path = require('path')
-
-const defaultUA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
 
 async function createScraperPage(browser, options = {}) {
   const {
     site = null,
     interceptMedia = false, // block media for non-download pages
     stealth = true, // default true
-    userAgent = defaultUA,
+    userAgent = null,
     injectHelpers = true,
-    waitForReady = true, // NEW: controls built-in wait
+    waitForReady = true, // ⏳ wait for <body> to load
   } = options
 
   const page = await browser.newPage()
   await page.setViewport({ width: 1280, height: 800 })
-  await page.setUserAgent(userAgent)
+
+  const realisticAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+  ]
+  const selectedUA =
+    userAgent ||
+    realisticAgents[Math.floor(Math.random() * realisticAgents.length)]
+  await page.setUserAgent(selectedUA)
+
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Upgrade-Insecure-Requests': '1',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+  })
 
   if (interceptMedia) {
     await page.setRequestInterception(true)
@@ -34,16 +46,14 @@ async function createScraperPage(browser, options = {}) {
     await page.addScriptTag({
       path: path.join(__dirname, 'mediaExtractors.js'),
     })
-    // could inject more helpers here later
   }
 
-  // ⏳ Optional safety wait for body/content to load (handles CF/DDOS screens)
   if (waitForReady) {
     try {
       await page.waitForSelector('body', { timeout: 15000 })
     } catch {
       console.warn(
-        '⚠️ Timed out waiting for <body> to appear (may be Cloudflare)'
+        '⚠️ Timed out waiting for <body> to appear (may be Cloudflare or anti-bot)'
       )
     }
   }

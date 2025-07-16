@@ -450,7 +450,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   const browser = await puppeteer.launch({
     headless: 'new',
     executablePath: executablePath(),
-    args: ['--no-sandbox'],
+    args: ['--no-sandbox', '--ignore-certificate-errors'],
+    ignoreHTTPSErrors: true, // ✅ add this too
   })
 
   const tempPage = await createScraperPage(browser, {
