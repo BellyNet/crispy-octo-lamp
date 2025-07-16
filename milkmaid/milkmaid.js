@@ -191,6 +191,8 @@ function logAndProgress(message) {
   logProgress(completedTotal, global.totalSearchTotal || total)
 }
 
+let grandCompleted = 0
+
 async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   const { base, images, webm } = folders
   let newestDateSeen = lastChecked
@@ -201,7 +203,8 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
   })
 
   process.stdout.write('\n') // Reserve one lines
-  logProgress(0, global.totalSearchTotal || total)
+  grandCompleted++
+  logProgress(grandCompleted, global.totalSearchTotal)
 
   try {
     while (url) {
@@ -522,9 +525,7 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     folders,
     lastChecked
   )
-  console.log('✅ ACS scrape finished')
 
-  console.log('🔁 Now starting PLAIN scrape')
   let newest2 = await scrapeGallery(
     browser,
     plainUrl,

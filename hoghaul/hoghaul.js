@@ -354,65 +354,70 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   )
 
   await Promise.all(
-    lazyVideoQueue.map(({ url, path: finalPath, tmpPath, filename }, i) =>
-      lazyLimit(async () => {
-        if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
-          return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
-        }
-
-        logAndProgress(logLazyDownload(i))
-        logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
-        try {
-          const buffer =
-            tmpPath && fs.existsSync(tmpPath)
-              ? fs.readFileSync(tmpPath)
-              : await downloadBufferWithProgress(
-                  url,
-                  (percent, speed, chunk) => {
-                    lazyBytesDownloaded += chunk.length
-                    const now = Date.now()
-                    if (now - lastDraw > 250) {
-                      logLazyProgress()
-                      lastDraw = now
-                    }
-                  }
-                )
-          const hash = createHash('md5').update(buffer).digest('hex')
-          if (knownHashes.has(hash))
-            return logAndProgress(`♻️ Lazy dupe: ${filename}`)
-          fs.writeFileSync(finalPath, buffer)
-
-          // after writing finalPath
-          if (fs.existsSync(finalPath)) {
-            try {
-              const { size } = fs.statSync(finalPath)
-              const isSmallFile = size < 5 * 1024 * 1024 // < 5MB
-
-              const duration = await getVideoDuration(finalPath)
-              if (duration <= 6 && isSmallFile) {
-                const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
-                const gifPath = path.join(folders.gif, gifName)
-
-                if (!fs.existsSync(gifPath)) {
-                  await convertShortMp4ToGif(finalPath, gifPath)
-                  console.log(`🎁 Converted to gif: ${gifName}`)
-                }
-              }
-            } catch (err) {
-              console.warn(
-                `⚠️ Couldn’t convert ${filename} to gif: ${err.message}`
-              )
-            }
+    lazyVideoQueue.map(
+      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
+        lazyLimit(async () => {
+          if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+            return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
           }
 
-          knownHashes.add(hash)
-          knownFilenames.add(filename)
-          logAndProgress(`✅ Saved lazy video: ${filename}`)
-          if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-        } catch (err) {
-          console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
-        }
-      })
+          logAndProgress(logLazyDownload(i))
+          logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
+          try {
+            const buffer =
+              tmpPath && fs.existsSync(tmpPath)
+                ? fs.readFileSync(tmpPath)
+                : await downloadBufferWithProgress(
+                    url,
+                    (percent, speed, chunk) => {
+                      lazyBytesDownloaded += chunk.length
+                      const now = Date.now()
+                      if (now - lastDraw > 250) {
+                        logLazyProgress()
+                        lastDraw = now
+                      }
+                    }
+                  )
+            const hash = createHash('md5').update(buffer).digest('hex')
+            if (knownHashes.has(hash))
+              return logAndProgress(`♻️ Lazy dupe: ${filename}`)
+            fs.writeFileSync(finalPath, buffer)
+            if (uploadedDate) {
+              const ts = uploadedDate.getTime() / 1000
+              fs.utimesSync(finalPath, ts, ts)
+            }
+
+            // after writing finalPath
+            if (fs.existsSync(finalPath)) {
+              try {
+                const { size } = fs.statSync(finalPath)
+                const isSmallFile = size < 5 * 1024 * 1024 // < 5MB
+
+                const duration = await getVideoDuration(finalPath)
+                if (duration <= 6 && isSmallFile) {
+                  const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
+                  const gifPath = path.join(folders.gif, gifName)
+
+                  if (!fs.existsSync(gifPath)) {
+                    await convertShortMp4ToGif(finalPath, gifPath)
+                    console.log(`🎁 Converted to gif: ${gifName}`)
+                  }
+                }
+              } catch (err) {
+                console.warn(
+                  `⚠️ Couldn’t convert ${filename} to gif: ${err.message}`
+                )
+              }
+            }
+
+            knownHashes.add(hash)
+            knownFilenames.add(filename)
+            logAndProgress(`✅ Saved lazy video: ${filename}`)
+            if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+          } catch (err) {
+            console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+          }
+        })
     )
   )
 
@@ -556,6 +561,7 @@ async function processPost(
           path: path.join(folders.webm, filename),
           tmpPath,
           filename,
+          uploadedDate,
         })
         logAndProgress(`🐌 Queued lazy video: ${filename}`)
       } else {
