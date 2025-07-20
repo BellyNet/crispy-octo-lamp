@@ -193,18 +193,13 @@ if (fs.existsSync(lastCheckedPath)) {
   }
 }
 
-let totalLazyBytes = 0
-let lazyBytesDownloaded = 0
-let lastDraw = 0
+let lazyCompleted = 0
 
 function logLazyProgress() {
-  const percent = totalLazyBytes
-    ? ((lazyBytesDownloaded / totalLazyBytes) * 100).toFixed(1)
-    : '??'
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
   readline.clearLine(process.stdout, 0)
   process.stdout.write(
-    `🐷 Lazy stuffing: ${percent}% (${(lazyBytesDownloaded / 1024 / 1024).toFixed(2)} MB)\n`
+    `🐷 Lazy stuffing: ${lazyCompleted} / ${lazyVideoQueue.length}\n`
   )
 }
 
@@ -365,25 +360,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     }
   }
 
-  // Pre-fetch expected file sizes (best-effort)
-  await Promise.all(
-    lazyVideoQueue.map(async ({ url }) => {
-      return new Promise((resolve) => {
-        const proto = url.startsWith('https')
-          ? require('https')
-          : require('http')
-        proto
-          .get(url, { method: 'HEAD' }, (res) => {
-            const size = parseInt(res.headers['content-length']) || 0
-            totalLazyBytes += size
-            res.destroy()
-            resolve()
-          })
-          .on('error', resolve)
-      })
-    })
-  )
-
   await Promise.all(
     lazyVideoQueue.map((entry, i) =>
       lazyLimit(async () => {
@@ -417,6 +393,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
           const hash = createHash('md5').update(buffer).digest('hex')
           if (knownHashes.has(hash))
             return logAndProgress(`♻️ Lazy dupe: ${filename}`)
+          lazyCompleted++
+          logLazyProgress()
+
           fs.writeFileSync(finalPath, buffer)
           if (uploadedDate) {
             const ts = uploadedDate.getTime() / 1000
@@ -440,6 +419,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
                     const ts = uploadedDate.getTime() / 1000
                     fs.utimesSync(gifPath, ts, ts) // ✅ set date on new .gif
                   }
+                  lazyCompleted++
+                  logLazyProgress()
+
                   console.log(`🎁 Converted to gif: ${gifName}`)
                 }
               }
@@ -454,6 +436,8 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
                 const hash = createHash('md5').update(buffer).digest('hex')
                 if (!knownHashes.has(hash)) knownHashes.add(hash)
                 knownFilenames.add(filename)
+                lazyCompleted++
+                logLazyProgress()
 
                 logAndProgress(`🖼️ Saved deferred image: ${filename}`)
                 return
@@ -467,6 +451,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
           knownHashes.add(hash)
           knownFilenames.add(filename)
+          lazyCompleted++
+          logLazyProgress()
+
           logAndProgress(`✅ Saved lazy video: ${filename}`)
         } catch (err) {
           console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
