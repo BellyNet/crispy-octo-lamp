@@ -59,17 +59,8 @@ const datasetDir = path.join(
   'dataset'
 )
 const tmpDir = path.join(rootDir, 'tmp')
-const lastCheckedPath = path.join(datasetDir, 'lastChecked.json')
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
-let lastCheckedMap = {}
-if (fs.existsSync(lastCheckedPath)) {
-  try {
-    lastCheckedMap = JSON.parse(fs.readFileSync(lastCheckedPath, 'utf-8'))
-  } catch (e) {
-    console.warn('⚠️ Failed to load lastChecked cache:', e.message)
-  }
-}
 
 const incompleteDir = path.join(rootDir, 'incomplete')
 const incompleteGifDir = path.join(incompleteDir, 'gifs')
@@ -193,9 +184,8 @@ function logAndProgress(message) {
 
 let grandCompleted = 0
 
-async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
+async function scrapeGallery(browser, url, modelName, folders) {
   const { base, images, webm } = folders
-  let newestDateSeen = lastChecked
 
   const page = await createScraperPage(browser, {
     site: 'stufferdb',
@@ -255,19 +245,6 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
           const uploadedDate = uploadedDateIso
             ? new Date(uploadedDateIso)
             : null
-
-          if (lastChecked && uploadedDate && uploadedDate <= lastChecked) {
-            return logAndProgress(
-              `⏩ Skipping old media from ${uploadedDate.toISOString().split('T')[0]}`
-            )
-          }
-
-          if (
-            !newestDateSeen ||
-            (uploadedDate && uploadedDate > newestDateSeen)
-          ) {
-            newestDateSeen = uploadedDate
-          }
 
           const mediaUrl = await page.evaluate(() => {
             const video = document.querySelector('video.vjs-tech[src]')
@@ -433,8 +410,6 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
     await page.close()
   }
-
-  return newestDateSeen
 }
 
 ;(async () => {
@@ -501,10 +476,6 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
     }
   }
 
-  const lastChecked = lastCheckedMap[rawName]
-    ? new Date(lastCheckedMap[rawName])
-    : null
-
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
   const acsUrl = `${plainUrl}&acs=${modelName}`
 
@@ -519,29 +490,11 @@ async function scrapeGallery(browser, url, modelName, folders, lastChecked) {
 
   console.log(`💦 Starting scrape for ${modelName}`)
 
-  let newest1 = await scrapeGallery(
-    browser,
-    acsUrl,
-    modelName,
-    folders,
-    lastChecked
-  )
+  let newest1 = await scrapeGallery(browser, acsUrl, modelName, folders)
 
-  let newest2 = await scrapeGallery(
-    browser,
-    plainUrl,
-    modelName,
-    folders,
-    lastChecked
-  )
+  let newest2 = await scrapeGallery(browser, plainUrl, modelName, folders)
 
   console.log('🧮 Both scrapes complete')
-
-  const newest = [newest1, newest2].filter(Boolean).sort().pop()
-  if (newest) {
-    lastCheckedMap[rawName] = newest.toISOString()
-    fs.writeFileSync(lastCheckedPath, JSON.stringify(lastCheckedMap, null, 2))
-  }
 
   const leftoverGifs = fs
     .readdirSync(incompleteGifDir)

@@ -54,7 +54,6 @@ const datasetDir = path.join(
 const tmpDir = path.join(__dirname, 'tmp')
 const incompleteDir = path.join(__dirname, 'incomplete')
 const incompleteGifDir = path.join(incompleteDir, 'gifs')
-const lastCheckedPath = path.join(datasetDir, 'lastChecked.json')
 
 let completedTotal = 0
 let taskCompleted = false
@@ -195,19 +194,9 @@ fs.readdirSync(datasetDir).forEach((folder) => {
   }
 })
 
-let lastCheckedMap = {}
-if (fs.existsSync(lastCheckedPath)) {
-  try {
-    lastCheckedMap = JSON.parse(fs.readFileSync(lastCheckedPath, 'utf-8'))
-  } catch (e) {
-    console.warn('⚠️ Failed to load lastChecked cache:', e.message)
-  }
-}
-
 let lazyCompleted = 0
 let lazyBytesDownloaded = 0
 let lastDraw = 0
-let totalLazyBytes = 0
 
 function logLazyProgress() {
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
@@ -257,11 +246,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   const totalPages = endPage - startPage + 1
   const totalExpectedPosts = totalPages * 50
   global.totalSearchTotal = totalExpectedPosts
-
-  const lastChecked = lastCheckedMap[rawName]
-    ? new Date(lastCheckedMap[rawName])
-    : null
-  let newestDateSeen = lastChecked
 
   const postLinks = new Set()
   let pageNum = startPage
@@ -473,9 +457,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
       })
     )
   )
-
-  lastCheckedMap[rawName] = newestDateSeen?.toISOString()
-  fs.writeFileSync(lastCheckedPath, JSON.stringify(lastCheckedMap, null, 2))
 
   const logPath = path.join(folders.base, 'log.txt')
   fs.writeFileSync(
