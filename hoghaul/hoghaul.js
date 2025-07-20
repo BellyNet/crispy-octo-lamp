@@ -24,6 +24,15 @@ const {
   addVisualHash,
 } = require('../scrapyard/visualHasher')
 
+const {
+  loadBitwiseHashCache,
+  saveBitwiseHashCache,
+  isBitwiseDupe,
+  addBitwiseHash,
+} = require('../scrapyard/bitwiseHasher')
+
+loadBitwiseHashCache()
+
 const pLimit = require('p-limit')
 
 const limit = pLimit(8)
@@ -196,6 +205,9 @@ if (fs.existsSync(lastCheckedPath)) {
 }
 
 let lazyCompleted = 0
+let lazyBytesDownloaded = 0
+let lastDraw = 0
+let totalLazyBytes = 0
 
 function logLazyProgress() {
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
@@ -241,18 +253,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     fs.writeFileSync('model_aliases.json', JSON.stringify(aliasMap, null, 2))
   }
   const folders = createModelFolders(modelName)
-  const modelHashPath = path.join(folders.base, 'hashes.json')
-  if (fs.existsSync(modelHashPath)) {
-    try {
-      JSON.parse(fs.readFileSync(modelHashPath)).forEach((h) =>
-        knownHashes.add(h)
-      )
-    } catch (e) {
-      console.warn(
-        `⚠️ Failed to load hash cache for ${modelName}: ${e.message}`
-      )
-    }
-  }
 
   const totalPages = endPage - startPage + 1
   const totalExpectedPosts = totalPages * 50
@@ -349,6 +349,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
       knownHashes.add(
         createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
       )
+      addBitwiseHash(hash)
+      saveBitwiseHashCache()
+
       knownFilenames.add(path.basename(mp4Path))
       logAndProgress(`🎞️ Converted: ${filename}`)
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
@@ -367,6 +370,8 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
           uploadedDate,
           isImage = false,
         } = entry
+
+        let hash = null
 
         if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
           return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
@@ -387,11 +392,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
             }
           )
 
-          const hash = createHash('md5').update(buffer).digest('hex')
-          if (knownHashes.has(hash))
+          hash = createHash('md5').update(buffer).digest('hex')
+          if (isBitwiseDupe(hash))
             return logAndProgress(`♻️ Lazy dupe: ${filename}`)
-          lazyCompleted++
-          logLazyProgress()
 
           fs.writeFileSync(finalPath, buffer)
           if (uploadedDate) {
@@ -431,8 +434,13 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
                 }
 
                 const hash = createHash('md5').update(buffer).digest('hex')
-                if (!knownHashes.has(hash)) knownHashes.add(hash)
+                if (!isBitwiseDupe(hash)) {
+                  addBitwiseHash(hash)
+                  saveBitwiseHashCache()
+                }
+
                 knownFilenames.add(filename)
+
                 lazyCompleted++
                 logLazyProgress()
 
@@ -446,14 +454,21 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
             }
           }
 
-          knownHashes.add(hash)
+          if (!isBitwiseDupe(hash)) {
+            addBitwiseHash(hash)
+            saveBitwiseHashCache()
+          }
+
           knownFilenames.add(filename)
+
           lazyCompleted++
           logLazyProgress()
 
           logAndProgress(`✅ Saved lazy video: ${filename}`)
         } catch (err) {
           logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
+          if (hash) knownHashes.delete(hash)
+          knownFilenames.delete(filename)
         }
       })
     )
@@ -468,11 +483,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     `Model: ${modelName}\nTotal: ${completedTotal}\nSaved: ${knownFilenames.size}\nDupes: N/A\nErrors: 0`
   )
 
-  fs.writeFileSync(
-    path.join(folders.base, 'hashes.json'),
-    JSON.stringify([...knownHashes], null, 2)
-  )
-
+  saveBitwiseHashCache()
   saveVisualHashCache()
 
   const durationMs = Date.now() - scrapeStart
@@ -572,6 +583,7 @@ async function processPost(
 
       // 🎥 Skip video download for lazy
       if (['.mp4', '.webm', '.m4v'].includes(ext)) {
+        logAndProgress(`🐌 Queued lazy video: ${filename}`)
         lazyVideoQueue.push({
           url,
           path: path.join(folders.webm, filename),
@@ -657,17 +669,20 @@ async function processPost(
       }
 
       const hash = createHash('md5').update(buffer).digest('hex')
-      if (knownHashes.has(hash)) continue
+      if (isBitwiseDupe(hash)) continue
 
       const visualHash = await getVisualHashFromBuffer(buffer)
       if (visualHash && isVisualDupe(visualHash)) continue
       if (visualHash) addVisualHash(visualHash)
-      const tHashEnd = Date.now()
 
       const outPath = path.join(folders.images, filename)
       fs.writeFileSync(outPath, buffer)
       if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
-      knownHashes.add(hash)
+      if (!isBitwiseDupe(hash)) {
+        addBitwiseHash(hash)
+        saveBitwiseHashCache()
+        logAndProgress(`✅ updated global hash `)
+      }
       knownFilenames.add(filename)
 
       logAndProgress(`✅ Saved ${filename}`)
