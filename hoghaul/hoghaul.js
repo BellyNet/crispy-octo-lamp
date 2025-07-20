@@ -15,9 +15,18 @@ const {
   logGifConversion,
   getCompletionLine,
 } = require('../stuffinglogger')
+
+const {
+  loadVisualHashCache,
+  saveVisualHashCache,
+  getVisualHashFromBuffer,
+  isVisualDupe,
+  addVisualHash,
+} = require('../scrapyard/visualHasher')
+
 const pLimit = require('p-limit')
 
-const limit = pLimit(2)
+const limit = pLimit(4)
 const lazyLimit = pLimit(2)
 
 const { bannerHoghaul } = require('../banners.js') // adjust path if needed
@@ -34,7 +43,6 @@ const datasetDir = path.join(
 const tmpDir = path.join(__dirname, 'tmp')
 const incompleteDir = path.join(__dirname, 'incomplete')
 const incompleteGifDir = path.join(incompleteDir, 'gifs')
-const incompleteVideoDir = path.join(incompleteDir, 'videos')
 const lastCheckedPath = path.join(datasetDir, 'lastChecked.json')
 
 let completedTotal = 0
@@ -55,8 +63,6 @@ function logAndProgress(message) {
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 if (!fs.existsSync(incompleteGifDir))
   fs.mkdirSync(incompleteGifDir, { recursive: true })
-if (!fs.existsSync(incompleteVideoDir))
-  fs.mkdirSync(incompleteVideoDir, { recursive: true })
 
 let globalPostIndex = 0
 
@@ -77,34 +83,47 @@ function createModelFolders(modelName) {
   }
 }
 
-function downloadBufferWithProgress(url, onProgress) {
+function downloadBufferWithProgress(url, onProgress, timeoutMs = 15000) {
   const proto = url.startsWith('https') ? require('https') : require('http')
-  return new Promise((resolve, reject) => {
-    proto
-      .get(url, (res) => {
-        if (res.statusCode !== 200)
-          return reject(new Error(`HTTP ${res.statusCode}`))
-        const chunks = []
-        let downloadedBytes = 0
-        const totalBytes = parseInt(res.headers['content-length'] || '0', 10)
-        const start = Date.now()
 
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length
-          chunks.push(chunk)
-          if (onProgress && totalBytes > 0) {
-            const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
-            const speed = (
-              downloadedBytes /
-              1024 /
-              ((Date.now() - start) / 1000)
-            ).toFixed(1)
-            onProgress(percent, speed, chunk)
-          }
-        })
-        res.on('end', () => resolve(Buffer.concat(chunks)))
+  return new Promise((resolve, reject) => {
+    const req = proto.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume()
+        return reject(new Error(`HTTP ${res.statusCode}`))
+      }
+
+      const chunks = []
+      let downloadedBytes = 0
+      const totalBytes = parseInt(res.headers['content-length'] || '0', 10)
+      const start = Date.now()
+
+      res.on('data', (chunk) => {
+        downloadedBytes += chunk.length
+        chunks.push(chunk)
+        if (onProgress && totalBytes > 0) {
+          const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
+          const speed = (
+            downloadedBytes /
+            1024 /
+            ((Date.now() - start) / 1000)
+          ).toFixed(1)
+          onProgress(percent, speed, chunk)
+        }
       })
-      .on('error', reject)
+
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks)
+        resolve(buffer)
+      })
+    })
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      reject(new Error('Download timed out'))
+    })
+
+    req.on('error', reject)
   })
 }
 
@@ -242,6 +261,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   const totalExpectedPosts = totalPages * 50
   global.totalSearchTotal = totalExpectedPosts
 
+  console.log(totalPages)
+  console.log(totalExpectedPosts)
+
   const lastChecked = lastCheckedMap[rawName]
     ? new Date(lastCheckedMap[rawName])
     : null
@@ -273,6 +295,8 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     const links = await page.$$eval('article.post-card a.fancy-link', (els) =>
       els.map((el) => el.href)
     )
+
+    console.log(links[0])
 
     if (!links.length) break
 
@@ -361,74 +385,93 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   )
 
   await Promise.all(
-    lazyVideoQueue.map(
-      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
-        lazyLimit(async () => {
-          if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
-            return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
-          }
+    lazyVideoQueue.map((entry, i) =>
+      lazyLimit(async () => {
+        const {
+          url,
+          path: finalPath,
+          filename,
+          uploadedDate,
+          isImage = false,
+        } = entry
 
-          logAndProgress(logLazyDownload(i))
-          logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
-          try {
-            const buffer =
-              tmpPath && fs.existsSync(tmpPath)
-                ? fs.readFileSync(tmpPath)
-                : await downloadBufferWithProgress(
-                    url,
-                    (percent, speed, chunk) => {
-                      lazyBytesDownloaded += chunk.length
-                      const now = Date.now()
-                      if (now - lastDraw > 250) {
-                        logLazyProgress()
-                        lastDraw = now
-                      }
-                    }
-                  )
-            const hash = createHash('md5').update(buffer).digest('hex')
-            if (knownHashes.has(hash))
-              return logAndProgress(`♻️ Lazy dupe: ${filename}`)
-            fs.writeFileSync(finalPath, buffer)
-            if (uploadedDate) {
-              const ts = uploadedDate.getTime() / 1000
-              fs.utimesSync(finalPath, ts, ts)
-            }
+        if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+          return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
+        }
 
-            // after writing finalPath
-            if (fs.existsSync(finalPath)) {
-              try {
-                const { size } = fs.statSync(finalPath)
-                const isSmallFile = size < 5 * 1024 * 1024 // < 5MB
-
-                const duration = await getVideoDuration(finalPath)
-                if (duration <= 6 && isSmallFile) {
-                  const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
-                  const gifPath = path.join(folders.gif, gifName)
-
-                  if (!fs.existsSync(gifPath)) {
-                    await convertShortMp4ToGif(finalPath, gifPath)
-                    if (uploadedDate) {
-                      const ts = uploadedDate.getTime() / 1000
-                      fs.utimesSync(gifPath, ts, ts) // ✅ set date on new .gif
-                    }
-                    console.log(`🎁 Converted to gif: ${gifName}`)
-                  }
-                }
-              } catch (err) {
-                console.warn(
-                  `⚠️ Couldn’t convert ${filename} to gif: ${err.message}`
-                )
+        logAndProgress(logLazyDownload(i))
+        logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
+        try {
+          const buffer = await downloadBufferWithProgress(
+            url,
+            (percent, speed, chunk) => {
+              lazyBytesDownloaded += chunk.length
+              const now = Date.now()
+              if (now - lastDraw > 250) {
+                logLazyProgress()
+                lastDraw = now
               }
             }
+          )
 
-            knownHashes.add(hash)
-            knownFilenames.add(filename)
-            logAndProgress(`✅ Saved lazy video: ${filename}`)
-            if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-          } catch (err) {
-            console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+          const hash = createHash('md5').update(buffer).digest('hex')
+          if (knownHashes.has(hash))
+            return logAndProgress(`♻️ Lazy dupe: ${filename}`)
+          fs.writeFileSync(finalPath, buffer)
+          if (uploadedDate) {
+            const ts = uploadedDate.getTime() / 1000
+            fs.utimesSync(finalPath, ts, ts)
           }
-        })
+
+          // after writing finalPath
+          if (fs.existsSync(finalPath)) {
+            try {
+              const { size } = fs.statSync(finalPath)
+              const isSmallFile = size < 5 * 1024 * 1024 // < 5MB
+
+              const duration = await getVideoDuration(finalPath)
+              if (duration <= 6 && isSmallFile) {
+                const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
+                const gifPath = path.join(folders.gif, gifName)
+
+                if (!fs.existsSync(gifPath)) {
+                  await convertShortMp4ToGif(finalPath, gifPath)
+                  if (uploadedDate) {
+                    const ts = uploadedDate.getTime() / 1000
+                    fs.utimesSync(gifPath, ts, ts) // ✅ set date on new .gif
+                  }
+                  console.log(`🎁 Converted to gif: ${gifName}`)
+                }
+              }
+
+              if (isImage) {
+                fs.writeFileSync(finalPath, buffer)
+                if (uploadedDate) {
+                  const ts = uploadedDate.getTime() / 1000
+                  fs.utimesSync(finalPath, ts, ts)
+                }
+
+                const hash = createHash('md5').update(buffer).digest('hex')
+                if (!knownHashes.has(hash)) knownHashes.add(hash)
+                knownFilenames.add(filename)
+
+                logAndProgress(`🖼️ Saved deferred image: ${filename}`)
+                return
+              }
+            } catch (err) {
+              console.warn(
+                `⚠️ Couldn’t convert ${filename} to gif: ${err.message}`
+              )
+            }
+          }
+
+          knownHashes.add(hash)
+          knownFilenames.add(filename)
+          logAndProgress(`✅ Saved lazy video: ${filename}`)
+        } catch (err) {
+          console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+        }
+      })
     )
   )
 
@@ -446,8 +489,20 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     JSON.stringify([...knownHashes], null, 2)
   )
 
+  saveVisualHashCache()
+
   console.log('\n' + getCompletionLine())
   await browser.close()
+}
+
+async function safeDownload(url) {
+  try {
+    return await downloadBufferWithProgress(url)
+  } catch (err) {
+    console.warn(`❌ Failed download, retrying: ${url} — ${err.message}`)
+    await new Promise((r) => setTimeout(r, 1000))
+    return await downloadBufferWithProgress(url)
+  }
 }
 
 async function processPost(
@@ -464,144 +519,212 @@ async function processPost(
     site: 'coomer',
   })
 
-  try {
-    await page.goto(link, { waitUntil: 'domcontentloaded' })
+  console.log(`\n🧭 Navigating to: ${link}`)
+  const tStart = Date.now()
 
-    let timeText = null
+  try {
+    const tNavStart = Date.now()
+    await page.goto(link, { waitUntil: 'networkidle2', timeout: 10000 })
+    const tNavEnd = Date.now()
+
+    let uploadedDate = null
     try {
       await page.waitForSelector('time.timestamp', { timeout: 10000 })
-      timeText = await page.$eval('time.timestamp', (el) =>
+      const timeText = await page.$eval('time.timestamp', (el) =>
         el.getAttribute('datetime')
       )
-    } catch (err) {
-      console.warn(`⏳ No timestamp on ${link}`)
+      uploadedDate = timeText ? new Date(timeText) : null
+    } catch {
+      console.warn(`⏳ No timestamp for: ${link}`)
     }
-    const uploadedDate = timeText ? new Date(timeText) : null
     updateNewestDate(uploadedDate)
 
+    const tMediaStart = Date.now()
     const mediaUrls = await page.evaluate(() => {
       const urls = []
-
-      // Full-size image or file
-      const anchors = document.querySelectorAll('a.fileThumb.image-link')
-      anchors.forEach((a) => {
-        if (a?.href?.startsWith('http')) urls.push(a.href)
-      })
-
-      // Embedded video (direct .mp4)
-      const sources = document.querySelectorAll('video source[src]')
-      sources.forEach((s) => {
-        if (s?.src?.startsWith('http')) urls.push(s.src)
-      })
-
-      // Direct attachments
-      const links = document.querySelectorAll('a.post__attachment-link[href]')
-      links.forEach((l) => {
-        if (l?.href?.startsWith('http')) urls.push(l.href)
-      })
-
+      document
+        .querySelectorAll(
+          'a.fileThumb.image-link, video source[src], a.post__attachment-link[href]'
+        )
+        .forEach((el) => {
+          const u =
+            el.href ||
+            el.src ||
+            el.getAttribute('src') ||
+            el.getAttribute('href')
+          if (u && u.startsWith('http')) urls.push(u)
+        })
       return urls
     })
+    const tMediaEnd = Date.now()
+
+    console.log(`🔗 Extracted media URLs (${mediaUrls.length}):`, mediaUrls)
 
     for (const mediaUrl of mediaUrls) {
-      const url = normalizeUrl(mediaUrl)
-      if (!url)
-        return logAndProgress(`⚠️ Failed to extract filename from URL: ${url}`)
+      const tLoopStart = Date.now()
+
+      let buffer = null
+      let url = normalizeUrl(mediaUrl)
+      if (!url || typeof url !== 'string') continue
+
+      // 🧼 Strip Coomer ?f= proxy image resizing
+      const parsed = new URL(url)
+      parsed.search = ''
+      url = parsed.toString()
+
+      if (url.includes('?f=')) {
+        console.warn(`⚠️ Still has ?f=: ${url}`)
+      }
 
       let filename
       try {
         filename = decodeURIComponent(
           path.basename(new URL(url).pathname).split('?')[0]
         )
-
-        if (/avatar|profile/i.test(filename)) {
-          logAndProgress(`🚫 Skipping avatar image: ${filename}`)
-          continue
-        }
-      } catch (e) {
-        return logAndProgress(`⚠️ Failed to extract filename from URL: ${url}`)
+        if (/avatar|profile/i.test(filename)) continue
+      } catch {
+        continue
       }
 
       const ext = path.extname(filename).toLowerCase()
       const timestamp = uploadedDate ? uploadedDate.getTime() / 1000 : null
 
-      if (knownFilenames.has(filename)) {
-        logAndProgress(`🔁 Existing filename: ${filename}`)
+      if (knownFilenames.has(filename)) continue
+
+      // 🎥 Skip video download for lazy
+      if (['.mp4', '.webm', '.m4v'].includes(ext)) {
+        lazyVideoQueue.push({
+          url,
+          path: path.join(folders.webm, filename),
+          filename,
+          uploadedDate,
+        })
         continue
       }
 
-      const buffer = await downloadBufferWithProgress(url)
-      const hash = createHash('md5').update(buffer).digest('hex')
-      if (knownHashes.has(hash)) {
-        logAndProgress(`♻️ Visual dupe: ${filename}`)
+      const tDownloadStart = Date.now()
+      try {
+        buffer = await safeDownload(url)
+      } catch (err) {
+        console.warn(`🚨 Full-res failed after retries: ${filename}`)
+
+        // fallback block starts here
+        const fallbackUrl = await page.evaluate((filenameGuess) => {
+          const imgs = Array.from(document.querySelectorAll('img'))
+          const match = imgs.find((img) => {
+            const src = img?.src || img?.getAttribute('src') || ''
+            return src.includes(filenameGuess.slice(0, 10))
+          })
+          return match?.src?.startsWith('http')
+            ? match.src
+            : match?.src
+              ? `https:${match.src}`
+              : null
+        }, filename)
+
+        if (fallbackUrl) {
+          try {
+            const fallbackBuffer = await downloadBufferWithProgress(fallbackUrl)
+            const fallbackPath = path.join(folders.images, filename)
+            fs.writeFileSync(fallbackPath, fallbackBuffer)
+            knownFilenames.add(filename)
+            console.warn(`🧷 Saved fallback image: ${filename}`)
+          } catch (e) {
+            console.warn(`❌ Fallback image failed: ${e.message}`)
+            fs.appendFileSync('skipped_images.txt', `${url}\n`)
+          }
+        } else {
+          console.warn(`❌ No fallback found in DOM for ${filename}`)
+          fs.appendFileSync('skipped_images.txt', `${url}\n`)
+        }
+
+        continue // ⛔ Skip the rest of this media loop
+      }
+
+      const tDownloadEnd = Date.now()
+
+      if (buffer.length > 5 * 1024 * 1024) {
+        console.warn(`🍖 Deferring large image to lazy queue: ${filename}`)
+        lazyVideoQueue.push({
+          url,
+          path: path.join(folders.images, filename),
+          filename,
+          uploadedDate,
+          isImage: true, // 👈 you'll need to check this later
+        })
         continue
       }
 
+      // 🌀 GIF handling
       if (ext === '.gif') {
         const frameCount = await getGifFrameCount(buffer)
-        const gifSavePath = path.join(folders.gif, filename)
-
+        const gifPath = path.join(folders.gif, filename)
         if (frameCount > 1) {
-          fs.writeFileSync(gifSavePath, buffer)
-          if (timestamp) fs.utimesSync(gifSavePath, timestamp, timestamp)
-
+          fs.writeFileSync(gifPath, buffer)
+          if (timestamp) fs.utimesSync(gifPath, timestamp, timestamp)
           gifsToConvert.push({
-            tmpPath: gifSavePath, // ✅ now using the actual saved gif path
+            tmpPath: gifPath,
             mp4Path: path.join(
               folders.webm,
               filename.replace(/\.gif$/, '.mp4')
             ),
             filename,
-            uploadedDate, // ✅ pass it along
+            uploadedDate,
           })
-
-          logAndProgress(`📥 Queued gif for conversion: ${filename}`)
         } else {
           const stillPath = path.join(folders.images, filename)
           fs.writeFileSync(stillPath, buffer)
           if (timestamp) fs.utimesSync(stillPath, timestamp, timestamp)
-
-          knownHashes.add(hash)
           knownFilenames.add(filename)
-          logAndProgress(`🖼️ Saved still gif: ${filename}`)
         }
-      } else if (['.mp4', '.m4v'].includes(ext)) {
-        const tmpPath = path.join(incompleteVideoDir, filename)
-        fs.writeFileSync(tmpPath, buffer)
-        if (timestamp) fs.utimesSync(tmpPath, timestamp, timestamp)
-        lazyVideoQueue.push({
-          url,
-          path: path.join(folders.webm, filename),
-          tmpPath,
-          filename,
-          uploadedDate,
-        })
-        logAndProgress(`🐌 Queued lazy video: ${filename}`)
-      } else {
-        const outPath = path.join(folders.images, filename)
-        fs.writeFileSync(outPath, buffer)
-        if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
-        logAndProgress(`✅ Saved: ${filename}`)
-        knownHashes.add(hash)
-        knownFilenames.add(filename)
+        continue
       }
+
+      const tHashStart = Date.now()
+      const hash = createHash('md5').update(buffer).digest('hex')
+      if (knownHashes.has(hash)) continue
+
+      const visualHash = await getVisualHashFromBuffer(buffer)
+      if (visualHash && isVisualDupe(visualHash)) continue
+      if (visualHash) addVisualHash(visualHash)
+      const tHashEnd = Date.now()
+
+      const outPath = path.join(folders.images, filename)
+      fs.writeFileSync(outPath, buffer)
+      if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
+      knownHashes.add(hash)
+      knownFilenames.add(filename)
+
+      const tLoopEnd = Date.now()
+
+      console.log(
+        `📸 ${filename} — total: ${tLoopEnd - tLoopStart}ms | download: ${tDownloadEnd - tDownloadStart}ms | dedupe: ${tHashEnd - tHashStart}ms`
+      )
     }
+
+    const tEnd = Date.now()
+    console.log(
+      `✅ Post scraped in ${tEnd - tStart}ms (navigate: ${tNavEnd - tNavStart}ms, extract: ${tMediaEnd - tMediaStart}ms, media: ${tEnd - tMediaEnd}ms)`
+    )
   } catch (err) {
-    console.error(`❌ Error on ${link}: ${err.message}`)
+    console.error(`❌ Error scraping post ${link}: ${err.message}`)
   } finally {
     if (!page.isClosed()) await page.close()
   }
 }
 
-const args = process.argv.slice(2)
-const target = args.find((arg) => arg.includes('coomer.su'))
+const argv = process.argv.slice(2)
+const target = argv.find((arg) => arg.includes('coomer.su'))
 
 let startPage = 0
 let endPage = null
 
-// NPM-compatible argument parsing
-const pageArgRaw = process.env.npm_config_pages
+// Support --pages=1 or --pages=1-3 from both env and argv
+let pageArgRaw =
+  process.env.npm_config_pages || argv.find((a) => a.startsWith('--pages='))
+
 if (pageArgRaw) {
+  pageArgRaw = pageArgRaw.replace('--pages=', '')
   if (pageArgRaw.includes('-')) {
     const [start, end] = pageArgRaw.split('-').map((n) => parseInt(n, 10))
     startPage = isNaN(start) ? 0 : start
@@ -616,5 +739,7 @@ if (!target) {
   console.error('Usage: node hoghaul.js <coomer-url> [--pages=N or N-M]')
   process.exit(1)
 }
+
+loadVisualHashCache()
 
 scrapeCoomerUser(target, startPage, endPage)

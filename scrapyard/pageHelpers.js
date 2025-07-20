@@ -34,7 +34,12 @@ async function createScraperPage(browser, options = {}) {
     await page.setRequestInterception(true)
     page.on('request', (req) => {
       const type = req.resourceType()
-      if (['media', 'other'].includes(type)) {
+      const url = req.url()
+
+      if (
+        ['media', 'other', 'font'].includes(type) ||
+        url.includes('google-analytics')
+      ) {
         req.abort()
       } else {
         req.continue()
