@@ -26,8 +26,10 @@ const {
 
 const pLimit = require('p-limit')
 
-const limit = pLimit(4)
-const lazyLimit = pLimit(2)
+const limit = pLimit(8)
+const lazyLimit = pLimit(4)
+
+const scrapeStart = Date.now()
 
 const { bannerHoghaul } = require('../banners.js') // adjust path if needed
 bannerHoghaul()
@@ -256,9 +258,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   const totalExpectedPosts = totalPages * 50
   global.totalSearchTotal = totalExpectedPosts
 
-  console.log(totalPages)
-  console.log(totalExpectedPosts)
-
   const lastChecked = lastCheckedMap[rawName]
     ? new Date(lastCheckedMap[rawName])
     : null
@@ -283,7 +282,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
       .catch(() => false)
 
     if (!hasPosts) {
-      console.log(`📭 No posts found on page ${pageNum}, stopping.`)
+      logAndProgress(`📭 No posts found on page ${pageNum}, stopping.`)
       break
     }
 
@@ -291,15 +290,13 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
       els.map((el) => el.href)
     )
 
-    console.log(links[0])
-
     if (!links.length) break
 
     if (pageNum === startPage) process.stdout.write('\n') // reserve space
     logProgress(globalPostIndex, totalExpectedPosts)
 
     // const pageNumDisplay = pageNum - startPage + 1
-    // console.log(`📦 Page ${pageNumDisplay}/${totalPages}`)
+    // logAndProgress(`📦 Page ${pageNumDisplay}/${totalPages}`)
 
     await Promise.all(
       links.map((link) =>
@@ -356,7 +353,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
       logAndProgress(`🎞️ Converted: ${filename}`)
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
     } catch (err) {
-      console.error(`❌ Conversion failed for ${filename}`)
+      logAndProgress(`❌ Conversion failed for ${filename}`)
     }
   }
 
@@ -422,7 +419,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
                   lazyCompleted++
                   logLazyProgress()
 
-                  console.log(`🎁 Converted to gif: ${gifName}`)
+                  logAndProgress(`🎁 Converted to gif: ${gifName}`)
                 }
               }
 
@@ -456,7 +453,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
           logAndProgress(`✅ Saved lazy video: ${filename}`)
         } catch (err) {
-          console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+          logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
         }
       })
     )
@@ -478,7 +475,12 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
   saveVisualHashCache()
 
+  const durationMs = Date.now() - scrapeStart
+  const mins = Math.floor(durationMs / 60000)
+  const secs = Math.floor((durationMs % 60000) / 1000)
+  console.log(`\n⏱️ Total scrape time: ${mins}m ${secs}s`)
   console.log('\n' + getCompletionLine())
+
   await browser.close()
 }
 
@@ -486,7 +488,7 @@ async function safeDownload(url) {
   try {
     return await downloadBufferWithProgress(url)
   } catch (err) {
-    console.warn(`❌ Failed download, retrying: ${url} — ${err.message}`)
+    logAndProgress(`❌ Failed download, retrying: ${url} — ${err.message}`)
     await new Promise((r) => setTimeout(r, 1000))
     return await downloadBufferWithProgress(url)
   }
@@ -506,13 +508,8 @@ async function processPost(
     site: 'coomer',
   })
 
-  console.log(`\n🧭 Navigating to: ${link}`)
-  const tStart = Date.now()
-
   try {
-    const tNavStart = Date.now()
     await page.goto(link, { waitUntil: 'networkidle2', timeout: 10000 })
-    const tNavEnd = Date.now()
 
     let uploadedDate = null
     try {
@@ -522,7 +519,7 @@ async function processPost(
       )
       uploadedDate = timeText ? new Date(timeText) : null
     } catch {
-      console.warn(`⏳ No timestamp for: ${link}`)
+      logAndProgress(`⏳ No timestamp for: ${link}`)
     }
     updateNewestDate(uploadedDate)
 
@@ -543,13 +540,8 @@ async function processPost(
         })
       return urls
     })
-    const tMediaEnd = Date.now()
-
-    console.log(`🔗 Extracted media URLs (${mediaUrls.length}):`, mediaUrls)
 
     for (const mediaUrl of mediaUrls) {
-      const tLoopStart = Date.now()
-
       let buffer = null
       let url = normalizeUrl(mediaUrl)
       if (!url || typeof url !== 'string') continue
@@ -560,7 +552,7 @@ async function processPost(
       url = parsed.toString()
 
       if (url.includes('?f=')) {
-        console.warn(`⚠️ Still has ?f=: ${url}`)
+        logAndProgress(`⚠️ Still has ?f=: ${url}`)
       }
 
       let filename
@@ -589,11 +581,10 @@ async function processPost(
         continue
       }
 
-      const tDownloadStart = Date.now()
       try {
         buffer = await safeDownload(url)
       } catch (err) {
-        console.warn(`🚨 Full-res failed after retries: ${filename}`)
+        logAndProgress(`🚨 Full-res failed after retries: ${filename}`)
 
         // fallback block starts here
         const fallbackUrl = await page.evaluate((filenameGuess) => {
@@ -615,23 +606,21 @@ async function processPost(
             const fallbackPath = path.join(folders.images, filename)
             fs.writeFileSync(fallbackPath, fallbackBuffer)
             knownFilenames.add(filename)
-            console.warn(`🧷 Saved fallback image: ${filename}`)
+            logAndProgress(`🧷 Saved fallback image: ${filename}`)
           } catch (e) {
-            console.warn(`❌ Fallback image failed: ${e.message}`)
+            logAndProgress(`❌ Fallback image failed: ${e.message}`)
             fs.appendFileSync('skipped_images.txt', `${url}\n`)
           }
         } else {
-          console.warn(`❌ No fallback found in DOM for ${filename}`)
+          logAndProgress(`❌ No fallback found in DOM for ${filename}`)
           fs.appendFileSync('skipped_images.txt', `${url}\n`)
         }
 
         continue // ⛔ Skip the rest of this media loop
       }
 
-      const tDownloadEnd = Date.now()
-
       if (buffer.length > 5 * 1024 * 1024) {
-        console.warn(`🍖 Deferring large image to lazy queue: ${filename}`)
+        logAndProgress(`🍖 Deferring large image to lazy queue: ${filename}`)
         lazyVideoQueue.push({
           url,
           path: path.join(folders.images, filename),
@@ -667,7 +656,6 @@ async function processPost(
         continue
       }
 
-      const tHashStart = Date.now()
       const hash = createHash('md5').update(buffer).digest('hex')
       if (knownHashes.has(hash)) continue
 
@@ -682,19 +670,10 @@ async function processPost(
       knownHashes.add(hash)
       knownFilenames.add(filename)
 
-      const tLoopEnd = Date.now()
-
-      console.log(
-        `📸 ${filename} — total: ${tLoopEnd - tLoopStart}ms | download: ${tDownloadEnd - tDownloadStart}ms | dedupe: ${tHashEnd - tHashStart}ms`
-      )
+      logAndProgress(`✅ Saved ${filename}`)
     }
-
-    const tEnd = Date.now()
-    console.log(
-      `✅ Post scraped in ${tEnd - tStart}ms (navigate: ${tNavEnd - tNavStart}ms, extract: ${tMediaEnd - tMediaStart}ms, media: ${tEnd - tMediaEnd}ms)`
-    )
   } catch (err) {
-    console.error(`❌ Error scraping post ${link}: ${err.message}`)
+    logAndProgress(`❌ Error scraping post ${link}: ${err.message}`)
   } finally {
     if (!page.isClosed()) await page.close()
   }
