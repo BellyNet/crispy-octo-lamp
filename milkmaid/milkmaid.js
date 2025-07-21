@@ -27,6 +27,13 @@ const {
 } = require('../scrapyard/visualHasher')
 
 const {
+  loadBitwiseHashCache,
+  saveBitwiseHashCache,
+  isBitwiseDupe,
+  addBitwiseHash,
+} = require('../scrapyard/bitwiseHasher')
+
+const {
   logProgress,
   logLazyDownload,
   logGifConversion,
@@ -40,7 +47,6 @@ function sanitize(name) {
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const randomDelay = () => sleep(Math.floor(Math.random() * 1200) + 300)
 
-const knownHashes = new Set()
 const knownFilenames = new Set()
 const skippedFilenames = new Set()
 const queuedVideos = new Set()
@@ -118,7 +124,7 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
 function convertGifToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
-    console.log(`🔥 Converting`)
+    logAndProgress(`🔥 Converting`)
     exec(cmd, (err) => (err ? reject(err) : resolve()))
   })
 }
@@ -159,8 +165,8 @@ async function fetchStufferDBTotalCount(browser, url) {
     return count
   } catch (err) {
     const title = await tempPage.title()
-    console.warn(`⚠️ Could not fetch count for ${url}: ${err.message}`)
-    console.warn(`🧙 Page title: ${title}`)
+    console.log(`⚠️ Could not fetch count for ${url}: ${err.message}`)
+    console.log(`🧙 Page title: ${title}`)
     return 0
   } finally {
     if (!tempPage.isClosed()) await tempPage.close()
@@ -179,7 +185,7 @@ function logAndProgress(message) {
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
   readline.clearLine(process.stdout, 0)
   console.log(message)
-  logProgress(completedTotal, global.totalSearchTotal || total)
+  logProgress(completedTotal, global.totalSearchTotal || 1)
 }
 
 let grandCompleted = 0
@@ -275,7 +281,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             // Step 2: Bitwise (fast) hash
             hash = createHash('md5').update(buffer).digest('hex')
-            if (knownHashes.has(hash)) {
+            if (isBitwiseDupe(hash)) {
               duplicateCount++
               return logAndProgress(`♻️ Bitwise dupe: ${filename}`)
             }
@@ -324,9 +330,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 const ts = uploadedDate.getTime() / 1000
                 fs.utimesSync(stillPath, ts, ts)
               }
-              knownHashes.add(hash)
               knownFilenames.add(filename)
               if (visualHash) addVisualHash(visualHash)
+              if (!isBitwiseDupe(hash)) {
+                addBitwiseHash(hash)
+                saveBitwiseHashCache()
+              }
 
               successCount++
               return logAndProgress(`🖼️ Saved still gif: ${filename}`)
@@ -367,14 +376,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
             fs.utimesSync(finalPath, ts, ts)
           }
 
-          knownHashes.add(hash)
+          if (!isBitwiseDupe(hash)) {
+            addBitwiseHash(hash)
+            saveBitwiseHashCache()
+          }
+
           if (visualHash) addVisualHash(visualHash)
           knownFilenames.add(filename)
           successCount++
           return logAndProgress(`✅ Saved: ${filename}`)
         } catch (err) {
           errorCount++
-          console.error(`❌ Error processing ${mediaPageUrl}: ${err.message}`)
+          logAndProgress(`❌ Error processing ${mediaPageUrl}: ${err.message}`)
         }
 
         await randomDelay()
@@ -397,16 +410,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
       if (nextHref) {
         const baseUrl = new URL(url)
         url = new URL(nextHref, baseUrl).href
-        // console.log(`➡️ Next page found: ${url}`)
       } else {
-        // console.log(`🏁 No more pages.`)
         break
       }
     }
   } finally {
     readline.clearLine(process.stdout, 0)
     readline.cursorTo(process.stdout, 0)
-    console.log(getCompletionLine())
+    logAndProgress(getCompletionLine())
 
     await page.close()
   }
@@ -415,12 +426,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
 ;(async () => {
   let inputUrl = process.argv[2]
   if (!inputUrl || !inputUrl.includes('/category/'))
-    return console.error('⚠️  Usage: node milkmaid.js <gallery-url>')
+    return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
 
   inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
 
   const categoryId = inputUrl.match(/category\/?(\d+)/)?.[1]
-  if (!categoryId) return console.error('❌ Invalid category URL')
+  if (!categoryId) return logAndProgress('❌ Invalid category URL')
 
   const browser = await puppeteer.launch({
     headless: 'new',
@@ -436,6 +447,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
   await tempPage.goto(inputUrl, { waitUntil: 'domcontentloaded' })
 
   loadVisualHashCache()
+  loadBitwiseHashCache()
 
   const tmpModelName = await tempPage
     .evaluate(() => {
@@ -463,38 +475,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   const folders = createModelFolders(modelName)
 
-  const modelHashPath = path.join(folders.base, 'hashes.json')
-  if (fs.existsSync(modelHashPath)) {
-    try {
-      JSON.parse(fs.readFileSync(modelHashPath)).forEach((h) =>
-        knownHashes.add(h)
-      )
-    } catch (e) {
-      console.warn(
-        `⚠️ Failed to load hash cache for ${modelName}: ${e.message}`
-      )
-    }
-  }
-
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
   const acsUrl = `${plainUrl}&acs=${modelName}`
 
-  console.log('🔍 Prefetching total counts...')
+  logAndProgress('🔍 Prefetching total counts...')
   const [acsCount, plainCount] = await Promise.all([
     fetchStufferDBTotalCount(browser, acsUrl),
     fetchStufferDBTotalCount(browser, plainUrl),
   ])
 
   global.totalSearchTotal = acsCount + plainCount
-  console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
+  logAndProgress(`📊 Combined media total: ${global.totalSearchTotal}`)
 
-  console.log(`💦 Starting scrape for ${modelName}`)
+  logAndProgress(`💦 Starting scrape for ${modelName}`)
 
   let newest1 = await scrapeGallery(browser, acsUrl, modelName, folders)
 
   let newest2 = await scrapeGallery(browser, plainUrl, modelName, folders)
 
-  console.log('🧮 Both scrapes complete')
+  logAndProgress('🧮 Both scrapes complete')
 
   const leftoverGifs = fs
     .readdirSync(incompleteGifDir)
@@ -505,43 +504,19 @@ async function scrapeGallery(browser, url, modelName, folders) {
     gifsToConvert.push({ tmpPath, mp4Path, filename: gif })
   }
 
-  console.log(`🚜 Converting gifs: ${gifsToConvert.length}`)
+  logAndProgress(`🚜 Converting gifs: ${gifsToConvert.length}`)
   const filteredGifs = gifsToConvert.filter(({ mp4Path }) => {
     const mp4Name = path.basename(mp4Path)
     const isKnown = knownFilenames.has(mp4Name) || skippedFilenames.has(mp4Name)
     if (isKnown) {
-      console.log(
+      logAndProgress(
         `🚫 Skipping gif conversion (already known or failed): ${mp4Name}`
       )
     }
     return !isKnown
   })
 
-  for (const { tmpPath, mp4Path, filename } of filteredGifs) {
-    try {
-      if (fs.existsSync(mp4Path)) {
-        console.log(`⚠️ MP4 already exists, skipping conversion: ${mp4Path}`)
-        continue
-      }
-
-      await convertGifToMp4(tmpPath, mp4Path)
-
-      knownHashes.add(
-        createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
-      )
-      knownFilenames.add(path.basename(mp4Path))
-
-      successCount++
-      console.log(`🎞️ Converted: ${mp4Path}`)
-
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-    } catch (err) {
-      console.error(`❌ Conversion failed for ${filename}`)
-      console.error(err)
-    }
-  }
-
-  console.log(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
+  logAndProgress(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
   let lastDraw = 0
   let totalLazyBytes = 0
   let lazyBytesDownloaded = 0
@@ -570,7 +545,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
     readline.clearLine(process.stdout, 0)
     process.stdout.write(
-      `🐷 Lazy stuffing: ${percent}% (${(lazyBytesDownloaded / 1024 / 1024).toFixed(2)} MB)\n`
+      `🐷 Lazy stuffing: ${percent}% (${(lazyBytesDownloaded / 1024 / 1024).toFixed(2)} MB)`
     )
   }
 
@@ -579,14 +554,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
       lazyLimit(async () => {
         if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
           duplicateCount++
-          return console.log(`♻️ Lazy dupe (pre-download): ${filename}`)
+          return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
         }
 
         knownFilenames.add(filename) // ✅ Mark as claimed early
 
-        console.log(`🚀 STARTING lazy task #${i}: ${filename}`)
-        console.log(logLazyDownload(i))
-        console.log(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
+        logAndProgress(`🚀 STARTING lazy task #${i}: ${filename}`)
+        logAndProgress(logLazyDownload(i))
+        logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
 
         const stream = fs.createWriteStream(finalPath)
         let lastDraw = Date.now()
@@ -611,7 +586,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
                         )
                       : '??'
                     const mb = (lazyBytesDownloaded / 1024 / 1024).toFixed(1)
-                    // console.log(`⬇️ ${percent}% (${mb} MB)`)
                     logLazyProgress()
                     lastDraw = now
                   }
@@ -633,10 +607,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           successCount++
-          console.log(`✅ Saved lazy video: ${filename}`)
+          logAndProgress(`✅ Saved lazy video: ${filename}`)
         } catch (err) {
           errorCount++
-          console.warn(`❌ Lazy failed: ${filename} - ${err.message}`)
+          logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
           if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
           knownFilenames.delete(filename) // allow retry in future runs
         }
@@ -644,8 +618,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
     )
   )
 
-  // const modelHashPathUpdate = path.join(folders.base, 'hashes.json')
-  fs.writeFileSync(modelHashPath, JSON.stringify([...knownHashes]))
   const logPath = path.join(folders.base, 'log.txt')
   fs.writeFileSync(
     logPath,
@@ -654,7 +626,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
   await browser.close()
 
   saveVisualHashCache()
-  fs.writeFileSync(modelHashPath, JSON.stringify([...knownHashes]))
 
   console.log(
     `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
