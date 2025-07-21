@@ -214,6 +214,8 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     ignoreHTTPSErrors: true, // ✅ ← This is key
   })
 
+  let newestDateSeen = null // ← 💥 this is what you're missing
+
   const page = await createScraperPage(browser, {
     site: 'coomer',
     interceptMedia: true, // for post list/gallery pages
