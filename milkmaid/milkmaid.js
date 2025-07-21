@@ -12,6 +12,7 @@ const lazyLimit = pLimit(4)
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const chalk = require('chalk').default
+const { syncToNAS } = require('./syncToNAS')
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
@@ -626,6 +627,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
   await browser.close()
 
   saveVisualHashCache()
+  syncToNAS()
 
   console.log(
     `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`

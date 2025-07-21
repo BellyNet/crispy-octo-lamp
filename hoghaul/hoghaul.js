@@ -9,6 +9,8 @@ const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const { createHash } = require('crypto')
 const { exec } = require('child_process')
+const { syncToNAS } = require('./syncToNAS')
+
 const {
   logProgress,
   logLazyDownload,
@@ -475,6 +477,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   console.log(`\n⏱️ Total scrape time: ${mins}m ${secs}s`)
   console.log('\n' + getCompletionLine())
 
+  syncToNAS()
   await browser.close()
 }
 
