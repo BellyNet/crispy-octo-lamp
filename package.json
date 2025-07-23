@@ -17,7 +17,8 @@
     "lint:fix": "eslint . --ext .js --fix",
     "format": "prettier . --write",
     "hoghaul": "node hoghaul/hoghaul.js",
-    "milkmaid": "node milkmaid/milkmaid.js"
+    "milkmaid": "node milkmaid/milkmaid.js",
+    "sync": "robocopy \"%APPDATA%\\.slopvault\\dataset\" \"Z:\\dataset\" /MIR /R:2 /W:5"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",

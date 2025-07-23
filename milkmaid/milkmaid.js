@@ -12,7 +12,6 @@ const lazyLimit = pLimit(4)
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const chalk = require('chalk').default
-const { syncToNAS } = require('./syncToNAS')
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
@@ -339,7 +338,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               }
 
               successCount++
-              return logAndProgress(`🖼️ Saved still gif: ${filename}`)
+              return logAndProgress(`🖼️ Saved still   gif: ${filename}`)
             }
           }
 
@@ -627,7 +626,17 @@ async function scrapeGallery(browser, url, modelName, folders) {
   await browser.close()
 
   saveVisualHashCache()
-  syncToNAS()
+
+  exec(
+    `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`,
+    (err) => {
+      if (err && err.code > 3) {
+        console.error('❌ NAS sync failed with code', err.code)
+      } else {
+        console.log('✅ NAS sync complete.')
+      }
+    }
+  )
 
   console.log(
     `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`

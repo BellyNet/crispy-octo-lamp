@@ -477,7 +477,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   console.log(`\n⏱️ Total scrape time: ${mins}m ${secs}s`)
   console.log('\n' + getCompletionLine())
 
-  syncToNAS()
+  syncToNAS(modelName)
   await browser.close()
 }
 
