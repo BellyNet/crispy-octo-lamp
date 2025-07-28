@@ -9,7 +9,6 @@ const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const { createHash } = require('crypto')
 const { exec } = require('child_process')
-const { syncToNAS } = require('./syncToNAS')
 
 const {
   logProgress,
@@ -283,8 +282,8 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     if (pageNum === startPage) process.stdout.write('\n') // reserve space
     logProgress(globalPostIndex, totalExpectedPosts)
 
-    // const pageNumDisplay = pageNum - startPage + 1
-    // logAndProgress(`📦 Page ${pageNumDisplay}/${totalPages}`)
+    const pageNumDisplay = pageNum - startPage + 1
+    logAndProgress(`📦 Page ${pageNumDisplay}/${totalPages}`)
 
     await Promise.all(
       links.map((link) =>
