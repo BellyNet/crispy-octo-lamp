@@ -78,15 +78,24 @@ if (!fs.existsSync(incompleteVideoDir))
 
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
+  const images = path.join(base, 'images')
 
-  const folders = ['images', 'webm', 'gif', 'tags', 'captions']
-  for (const folder of folders)
-    fs.mkdirSync(path.join(base, folder), { recursive: true })
+  // Always create images folder
+  fs.mkdirSync(images, { recursive: true })
+
   return {
     base,
-    images: path.join(base, 'images'),
-    webm: path.join(base, 'webm'),
-    gif: path.join(base, 'gif'),
+    images,
+    createGifFolder: () => {
+      const gifPath = path.join(base, 'gif')
+      if (!fs.existsSync(gifPath)) fs.mkdirSync(gifPath, { recursive: true })
+      return gifPath
+    },
+    createWebmFolder: () => {
+      const webmPath = path.join(base, 'webm')
+      if (!fs.existsSync(webmPath)) fs.mkdirSync(webmPath, { recursive: true })
+      return webmPath
+    },
   }
 }
 
@@ -299,37 +308,51 @@ async function scrapeGallery(browser, url, modelName, folders) {
           if (ext === '.gif') {
             buffer = await downloadBufferWithProgress(mediaUrl)
             hash = createHash('md5').update(buffer).digest('hex')
+
             const frameCount = await getGifFrameCount(buffer)
             if (frameCount > 1) {
+              // Animated GIF → Save and queue conversion
               const mp4Name = filename.replace(/\.gif$/, '.mp4')
+
               if (knownFilenames.has(mp4Name)) {
                 duplicateCount++
                 return logAndProgress(
                   `♻️ Already converted gif > mp4: ${mp4Name}`
                 )
               }
+
               const tmpPath = path.join(incompleteGifDir, filename)
               fs.writeFileSync(tmpPath, buffer)
-              const gifSavePath = path.join(folders.gif, filename)
+
+              // Create gif folder only now
+              const gifFolder = folders.createGifFolder()
+              const gifSavePath = path.join(gifFolder, filename)
               fs.writeFileSync(gifSavePath, buffer)
+
               if (uploadedDate) {
                 const ts = uploadedDate.getTime() / 1000
                 fs.utimesSync(tmpPath, ts, ts)
                 fs.utimesSync(gifSavePath, ts, ts)
               }
+
+              // Create webm folder only when queuing conversion
+              const webmFolder = folders.createWebmFolder()
               gifsToConvert.push({
                 tmpPath,
-                mp4Path: path.join(webm, mp4Name),
+                mp4Path: path.join(webmFolder, mp4Name),
                 filename,
               })
+
               return logAndProgress(logGifConversion(completedTotal))
             } else {
-              const stillPath = path.join(images, filename)
+              // Static GIF → treat as image
+              const stillPath = path.join(folders.images, filename)
               fs.writeFileSync(stillPath, buffer)
               if (uploadedDate) {
                 const ts = uploadedDate.getTime() / 1000
                 fs.utimesSync(stillPath, ts, ts)
               }
+
               knownFilenames.add(filename)
               if (visualHash) addVisualHash(visualHash)
               if (!isBitwiseDupe(hash)) {
@@ -338,19 +361,23 @@ async function scrapeGallery(browser, url, modelName, folders) {
               }
 
               successCount++
-              return logAndProgress(`🖼️ Saved still   gif: ${filename}`)
+              return logAndProgress(`🖼️ Saved still gif: ${filename}`)
             }
           }
 
           if (ext === '.mp4') {
-            const finalPath = path.join(webm, filename)
+            const webmFolder = folders.createWebmFolder() // Create only when needed
+            const finalPath = path.join(webmFolder, filename)
+
             if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
               duplicateCount++
               return logAndProgress(
                 `⛔ Skipping mp4 – already handled: ${filename}`
               )
             }
+
             const tmpPath = path.join(incompleteVideoDir, filename)
+
             lazyVideoQueue.push({
               url: mediaUrl,
               path: finalPath,
@@ -358,6 +385,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               filename,
               uploadedDate,
             })
+
             return logAndProgress(`🐌 Queued lazy video: ${filename}`)
           }
 
@@ -476,31 +504,28 @@ async function scrapeGallery(browser, url, modelName, folders) {
   const folders = createModelFolders(modelName)
 
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
-  const acsUrl = `${plainUrl}&acs=${modelName}`
 
   logAndProgress('🔍 Prefetching total counts...')
-  const [acsCount, plainCount] = await Promise.all([
-    fetchStufferDBTotalCount(browser, acsUrl),
+  const plainCount = await Promise.all([
     fetchStufferDBTotalCount(browser, plainUrl),
   ])
 
-  global.totalSearchTotal = acsCount + plainCount
+  global.totalSearchTotal = plainCount
   logAndProgress(`📊 Combined media total: ${global.totalSearchTotal}`)
 
   logAndProgress(`💦 Starting scrape for ${modelName}`)
 
-  let newest1 = await scrapeGallery(browser, acsUrl, modelName, folders)
+  await scrapeGallery(browser, plainUrl, modelName, folders)
 
-  let newest2 = await scrapeGallery(browser, plainUrl, modelName, folders)
-
-  logAndProgress('🧮 Both scrapes complete')
+  logAndProgress('🧮 Scrape complete')
 
   const leftoverGifs = fs
     .readdirSync(incompleteGifDir)
     .filter((f) => f.endsWith('.gif'))
   for (const gif of leftoverGifs) {
     const tmpPath = path.join(incompleteGifDir, gif)
-    const mp4Path = path.join(folders.webm, gif.replace(/\.gif$/, '.mp4'))
+    const webmFolder = folders.createWebmFolder()
+    const mp4Path = path.join(webmFolder, gif.replace(/\.gif$/, '.mp4'))
     gifsToConvert.push({ tmpPath, mp4Path, filename: gif })
   }
 
@@ -515,6 +540,37 @@ async function scrapeGallery(browser, url, modelName, folders) {
     }
     return !isKnown
   })
+
+  for (const { tmpPath, mp4Path, filename } of filteredGifs) {
+    try {
+      if (fs.existsSync(mp4Path)) {
+        logAndProgress(`♻️ Already exists: ${mp4Path}`)
+        continue
+      }
+
+      logAndProgress(`🔥 Converting GIF → MP4: ${filename}`)
+      await convertGifToMp4(tmpPath, mp4Path)
+
+      // Preserve timestamp if available
+      const uploadedDate = gifsToConvert.find(
+        (g) => g.filename === filename
+      )?.uploadedDate
+      if (uploadedDate) {
+        const ts = uploadedDate.getTime() / 1000
+        fs.utimesSync(mp4Path, ts, ts)
+      }
+
+      knownFilenames.add(path.basename(mp4Path))
+
+      // Clean up the original GIF from tmp folder
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+
+      logAndProgress(`✅ Converted GIF to MP4: ${filename}`)
+    } catch (err) {
+      logAndProgress(`❌ Conversion failed for ${filename}: ${err.message}`)
+      skippedFilenames.add(path.basename(mp4Path))
+    }
+  }
 
   logAndProgress(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
   let lastDraw = 0
@@ -608,6 +664,23 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
           successCount++
           logAndProgress(`✅ Saved lazy video: ${filename}`)
+
+          const duration = await getVideoDuration(finalPath)
+          const isSmallFile = fs.statSync(finalPath).size < 5 * 1024 * 1024 // <5MB
+          if (duration <= 6 && isSmallFile) {
+            const gifFolder = folders.createGifFolder()
+            const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
+            const gifPath = path.join(gifFolder, gifName)
+
+            if (!fs.existsSync(gifPath)) {
+              await convertShortMp4ToGif(finalPath, gifPath)
+              if (uploadedDate) {
+                const ts = uploadedDate.getTime() / 1000
+                fs.utimesSync(gifPath, ts, ts)
+              }
+              logAndProgress(`🎁 Converted short mp4 to gif: ${gifName}`)
+            }
+          }
         } catch (err) {
           errorCount++
           logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
@@ -618,11 +691,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
     )
   )
 
-  const logPath = path.join(folders.base, 'log.txt')
-  fs.writeFileSync(
-    logPath,
-    `Model: ${modelName}\nTotal: ${totalCount}\nSaved: ${successCount}\nDupes: ${duplicateCount}\nErrors: ${errorCount}`
-  )
   await browser.close()
 
   saveVisualHashCache()

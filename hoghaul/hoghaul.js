@@ -461,12 +461,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     )
   )
 
-  const logPath = path.join(folders.base, 'log.txt')
-  fs.writeFileSync(
-    logPath,
-    `Model: ${modelName}\nTotal: ${completedTotal}\nSaved: ${knownFilenames.size}\nDupes: N/A\nErrors: 0`
-  )
-
   saveBitwiseHashCache()
   saveVisualHashCache()
 
