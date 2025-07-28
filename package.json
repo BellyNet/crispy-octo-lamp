@@ -18,7 +18,9 @@
     "format": "prettier . --write",
     "hoghaul": "node hoghaul/hoghaul.js",
     "milkmaid": "node milkmaid/milkmaid.js",
-    "sync": "robocopy \"%APPDATA%\\.slopvault\\dataset\" \"Z:\\dataset\" /MIR /R:2 /W:5"
+    "sync:model": "node scrapyard/syncModel.js",
+    "sync:all": "powershell -Command \"robocopy \\\"$env:APPDATA\\.slopvault\\dataset\\\" \\\"Z:\\dataset\\\" /E /XC /XN /XO\"",
+    "pull:all": "powershell -Command \"robocopy \\\"Z:\\dataset\\\" \\\"$env:APPDATA\\.slopvault\\dataset\\\" /MIR\""
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
