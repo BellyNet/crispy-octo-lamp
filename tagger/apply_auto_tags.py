@@ -1,6 +1,6 @@
 import os
 
-IMAGES_DIR = r"C:\Dev\ThiccLab\LoRA-Training\Tagger\final"
+IMAGES_DIR = r"F:\Dev\LoRA-Training\tagger\final"
 
 # Static tag set for all images
 TAGS = [

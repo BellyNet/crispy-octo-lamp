@@ -1,7 +1,7 @@
 import os
 
 # === CONFIG ===
-IMAGES_DIR = r"C:\Dev\ThiccLab\LoRA-Training\Tagger\final"  # Change this to your folder with the 166 images
+IMAGES_DIR = r"F:\Dev\LoRA-Training\tagger\final"  # Change this to your folder with the 166 images
 
 # === CAPTIONS POOL (166 unique captions) ===
 CAPTIONS = [

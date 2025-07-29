@@ -182,6 +182,24 @@ async function fetchStufferDBTotalCount(browser, url) {
   }
 }
 
+function getVideoDuration(filePath) {
+  return new Promise((resolve, reject) => {
+    const cmd = `ffprobe -v error -show_entries format=duration -of csv=p=0 "${filePath}"`
+    exec(cmd, (err, stdout) => {
+      if (err) return reject(err)
+      const duration = parseFloat(stdout.trim())
+      resolve(isNaN(duration) ? 9999 : duration)
+    })
+  })
+}
+
+function convertShortMp4ToGif(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=15,scale=480:-1:flags=lanczos" "${outputPath}"`
+    exec(cmd, (err) => (err ? reject(err) : resolve()))
+  })
+}
+
 let completedTotal = 0
 let taskCompleted = false
 
@@ -314,7 +332,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               // Animated GIF → Save and queue conversion
               const mp4Name = filename.replace(/\.gif$/, '.mp4')
 
-              if (knownFilenames.has(mp4Name)) {
+              if (knownFilenames.has(mp4Name) || fs.existsSync(mp4Name)) {
                 duplicateCount++
                 return logAndProgress(
                   `♻️ Already converted gif > mp4: ${mp4Name}`
@@ -389,9 +407,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
             return logAndProgress(`🐌 Queued lazy video: ${filename}`)
           }
 
-          if (knownFilenames.has(filename)) {
+          if (
+            knownFilenames.has(filename) ||
+            fs.existsSync(path.join(images, filename))
+          ) {
             duplicateCount++
-            return logAndProgress(`🔁 Existing filename: ${filename}`)
+            return logAndProgress(`♻️ Skipped (exists): ${filename}`)
           }
 
           buffer = await downloadBufferWithProgress(mediaUrl)
@@ -505,15 +526,15 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
 
-  logAndProgress('🔍 Prefetching total counts...')
+  console.log('🔍 Prefetching total counts...')
   const plainCount = await Promise.all([
     fetchStufferDBTotalCount(browser, plainUrl),
   ])
 
   global.totalSearchTotal = plainCount
-  logAndProgress(`📊 Combined media total: ${global.totalSearchTotal}`)
+  console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
 
-  logAndProgress(`💦 Starting scrape for ${modelName}`)
+  console.log(`💦 Starting scrape for ${modelName}`)
 
   await scrapeGallery(browser, plainUrl, modelName, folders)
 
@@ -532,7 +553,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
   logAndProgress(`🚜 Converting gifs: ${gifsToConvert.length}`)
   const filteredGifs = gifsToConvert.filter(({ mp4Path }) => {
     const mp4Name = path.basename(mp4Path)
-    const isKnown = knownFilenames.has(mp4Name) || skippedFilenames.has(mp4Name)
+    const isKnown =
+      knownFilenames.has(mp4Name) ||
+      skippedFilenames.has(mp4Name) ||
+      fs.existsSync(mp4Name)
     if (isKnown) {
       logAndProgress(
         `🚫 Skipping gif conversion (already known or failed): ${mp4Name}`
