@@ -506,7 +506,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
     })
     .then((n) => n.replace(/\W+/g, '_').toLowerCase())
 
-  const rawName = sanitize(tmpModelName)
+  // Check if user passed --model=Name
+  // ✅ Use npm config or fallback to CLI flag
+  const forcedModel =
+    process.env.npm_config_model ||
+    process.argv
+      .find((arg) => arg.startsWith('--model='))
+      ?.replace('--model=', '')
+      .trim() ||
+    null
+
+  const rawName = sanitize(forcedModel || tmpModelName)
+
   const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
   let aliasMap = {}
 
@@ -527,11 +538,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
 
   console.log('🔍 Prefetching total counts...')
-  const plainCount = await Promise.all([
+  const [plainCount] = await Promise.all([
     fetchStufferDBTotalCount(browser, plainUrl),
   ])
-
   global.totalSearchTotal = plainCount
+
   console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
 
   console.log(`💦 Starting scrape for ${modelName}`)
@@ -673,9 +684,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
                 res.on('end', () => {
                   stream.end()
-                  resolve()
                 })
 
+                stream.on('finish', () => resolve())
                 res.on('error', reject)
               })
               .on('error', reject)
@@ -708,6 +719,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
         } catch (err) {
           errorCount++
           logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
+          const failed = lazyVideoQueue[i]
+          if (failed?.url) logAndProgress(`🔗 Source URL: ${failed.url}`)
+
           if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
           knownFilenames.delete(filename) // allow retry in future runs
         }

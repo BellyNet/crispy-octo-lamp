@@ -674,7 +674,7 @@ async function processPost(
 }
 
 const argv = process.argv.slice(2)
-const target = argv.find((arg) => arg.includes('coomer.su'))
+const target = argv.find((arg) => arg.includes('coomer.'))
 
 let startPage = 0
 let endPage = null
