@@ -41,7 +41,217 @@ const {
 } = require('../stuffinglogger')
 
 function sanitize(name) {
-  return name.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase()
+  return String(name || '')
+    .replace(/[^a-z0-9_\-]/gi, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+}
+
+function loadModelRegistry(registryPath) {
+  if (!fs.existsSync(registryPath)) {
+    const emptyRegistry = {}
+    fs.writeFileSync(registryPath, JSON.stringify(emptyRegistry, null, 2))
+    return emptyRegistry
+  }
+
+  try {
+    const raw = fs.readFileSync(registryPath, 'utf-8').trim()
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch (err) {
+    console.warn(
+      `⚠️ Could not parse model registry at ${registryPath}: ${err.message}`
+    )
+    return {}
+  }
+}
+
+function saveModelRegistry(registryPath, registry) {
+  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2))
+}
+
+function ensureModelEntryShape(entry, canonicalName) {
+  const aliasSet = new Set(
+    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
+  )
+
+  if (canonicalName) aliasSet.add(canonicalName)
+
+  return {
+    aliases: Array.from(aliasSet),
+    sources: {
+      stufferdb: Array.isArray(entry?.sources?.stufferdb)
+        ? entry.sources.stufferdb
+        : [],
+    },
+  }
+}
+
+function findCanonicalModelName(registry, rawName) {
+  const normalizedRaw = sanitize(rawName)
+  if (!normalizedRaw) return null
+
+  for (const [canonicalName, entry] of Object.entries(registry)) {
+    if (sanitize(canonicalName) === normalizedRaw) return canonicalName
+
+    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
+    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) {
+      return canonicalName
+    }
+  }
+
+  return null
+}
+
+function upsertStufferSource(entry, sourceUrl, rawName) {
+  const cleanedUrl = String(sourceUrl || '').replace(/&acs=[^&]+/gi, '')
+  const categoryId = cleanedUrl.match(/category\/?(\d+)/)?.[1] || null
+  const now = new Date().toISOString()
+
+  if (!entry.sources) entry.sources = {}
+  if (!Array.isArray(entry.sources.stufferdb)) entry.sources.stufferdb = []
+
+  const sourceIndex = entry.sources.stufferdb.findIndex(
+    (source) =>
+      source?.url === cleanedUrl ||
+      (categoryId && source?.categoryId === categoryId)
+  )
+
+  const nextSource = {
+    url: cleanedUrl,
+    categoryId,
+    discoveredAs: rawName,
+    lastCheckedAt: now,
+  }
+
+  if (sourceIndex >= 0) {
+    entry.sources.stufferdb[sourceIndex] = {
+      ...entry.sources.stufferdb[sourceIndex],
+      ...nextSource,
+    }
+  } else {
+    entry.sources.stufferdb.push(nextSource)
+  }
+}
+
+function resolveAndTrackModel(registryPath, rawName, sourceUrl) {
+  const registry = loadModelRegistry(registryPath)
+  const cleanedRawName = sanitize(rawName) || 'unknown_cow'
+  const existingCanonical = findCanonicalModelName(registry, cleanedRawName)
+  const canonicalName = existingCanonical || cleanedRawName
+
+  registry[canonicalName] = ensureModelEntryShape(
+    registry[canonicalName],
+    canonicalName
+  )
+
+  const aliases = registry[canonicalName].aliases
+  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
+    aliases.push(cleanedRawName)
+  }
+
+  registry[canonicalName].aliases = Array.from(
+    new Set(aliases.filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b))
+
+  upsertStufferSource(registry[canonicalName], sourceUrl, cleanedRawName)
+  saveModelRegistry(registryPath, registry)
+
+  return canonicalName
+}
+
+function extractModelNameFromBreadcrumb(anchors) {
+  const genericFolderNames = new Set([
+    'video',
+    'videos',
+    'clip',
+    'clips',
+    'gif',
+    'gifs',
+    'animation',
+    'animations',
+    'animated',
+    'movies',
+    'movie',
+    'media',
+    'extra',
+    'extras',
+    'misc',
+    'miscellaneous',
+  ])
+
+  const cleaned = (anchors || []).map((text) => sanitize(text)).filter(Boolean)
+
+  if (!cleaned.length) return 'unknown_cow'
+
+  const last = cleaned[cleaned.length - 1]
+  const prev = cleaned.length > 1 ? cleaned[cleaned.length - 2] : null
+
+  if (genericFolderNames.has(last) && prev) {
+    return prev
+  }
+
+  return last
+}
+
+async function getBreadcrumbInfo(page) {
+  return await page.evaluate(() => {
+    const h2 = document.querySelector('.titrePage h2')
+    const anchors = [...(h2?.querySelectorAll('a') || [])].map((a) => ({
+      text: a.textContent?.trim() || '',
+      href: a.href || '',
+    }))
+
+    return {
+      texts: anchors.map((a) => a.text).filter(Boolean),
+      hrefs: anchors.map((a) => a.href).filter(Boolean),
+    }
+  })
+}
+
+async function collectChildCategoryUrls(browser, parentUrl) {
+  const page = await createScraperPage(browser, {
+    site: 'stufferdb',
+    interceptMedia: true,
+  })
+
+  try {
+    await page.goto(parentUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 20000,
+    })
+
+    const candidateUrls = await page.evaluate(() => {
+      const links = [
+        ...document.querySelectorAll(
+          'ul.thumbnailCategories li.album a, li.gdthumb.album a'
+        ),
+      ]
+
+      return [
+        ...new Set(
+          links
+            .map((a) => a.href || '')
+            .filter((href) => href.includes('index?/category/'))
+            .map((href) => href.replace(/&acs=[^&]+/gi, ''))
+        ),
+      ]
+    })
+
+    const parentNormalized = parentUrl.replace(/&acs=[^&]+/gi, '')
+    return candidateUrls.filter((url) => url && url !== parentNormalized)
+  } finally {
+    if (!page.isClosed()) await page.close()
+  }
+}
+
+async function buildCategoryRunList(browser, inputUrl) {
+  const normalizedInput = inputUrl.replace(/&acs=[^&]+/gi, '')
+  const childUrls = await collectChildCategoryUrls(browser, normalizedInput)
+
+  return [...new Set([normalizedInput, ...childUrls])]
 }
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
@@ -324,7 +534,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
 
             // Step 3: Visual (slow) hash
-
             visualHash = await getVisualHashFromBuffer(buffer)
             if (visualHash && isVisualDupe(visualHash)) {
               duplicateCount++
@@ -508,45 +717,39 @@ async function scrapeGallery(browser, url, modelName, folders) {
   loadVisualHashCache()
   loadBitwiseHashCache()
 
-  const tmpModelName = await tempPage
-    .evaluate(() => {
-      const h2 = document.querySelector('.titrePage h2')
-      const anchors = h2?.querySelectorAll('a')
-      return anchors?.[anchors.length - 1]?.textContent?.trim() || 'unknown_cow'
-    })
-    .then((n) => n.replace(/\W+/g, '_').toLowerCase())
+  const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
+  const rawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
 
-  const rawName = sanitize(tmpModelName)
   const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
-  let aliasMap = {}
-
-  if (fs.existsSync(aliasMapPath)) {
-    aliasMap = JSON.parse(fs.readFileSync(aliasMapPath, 'utf-8'))
-  } else {
-    fs.writeFileSync(aliasMapPath, JSON.stringify({}, null, 2))
-  }
-
-  const modelName = aliasMap[rawName] || rawName
-  if (!aliasMap[rawName]) {
-    aliasMap[rawName] = rawName
-    fs.writeFileSync('model_aliases.json', JSON.stringify(aliasMap, null, 2))
-  }
+  const modelName = resolveAndTrackModel(aliasMapPath, rawName, inputUrl)
 
   const folders = createModelFolders(modelName)
 
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
+  const categoryRunList = await buildCategoryRunList(browser, plainUrl)
+
+  console.log(`🗂️ Category run list for ${modelName}:`)
+  for (const categoryUrl of categoryRunList) {
+    console.log(`   - ${categoryUrl}`)
+  }
 
   console.log('🔍 Prefetching total counts...')
-  const plainCount = await Promise.all([
-    fetchStufferDBTotalCount(browser, plainUrl),
-  ])
+  const categoryCounts = await Promise.all(
+    categoryRunList.map((categoryUrl) =>
+      fetchStufferDBTotalCount(browser, categoryUrl)
+    )
+  )
 
-  global.totalSearchTotal = plainCount
+  global.totalSearchTotal =
+    categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
+
   console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
-
   console.log(`💦 Starting scrape for ${modelName}`)
 
-  await scrapeGallery(browser, plainUrl, modelName, folders)
+  for (const categoryUrl of categoryRunList) {
+    console.log(`🍼 Scraping category: ${categoryUrl}`)
+    await scrapeGallery(browser, categoryUrl, modelName, folders)
+  }
 
   logAndProgress('🧮 Scrape complete')
 
