@@ -68,13 +68,17 @@ const tmpDir = path.join(rootDir, 'tmp')
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
-const incompleteDir = path.join(rootDir, 'incomplete')
-const incompleteGifDir = path.join(incompleteDir, 'gifs')
-const incompleteVideoDir = path.join(incompleteDir, 'videos')
-if (!fs.existsSync(incompleteGifDir))
-  fs.mkdirSync(incompleteGifDir, { recursive: true })
-if (!fs.existsSync(incompleteVideoDir))
-  fs.mkdirSync(incompleteVideoDir, { recursive: true })
+function getIncompleteDirs(modelName) {
+  // Per-model scratch space so unfinished work never "bleeds" into the next run
+  const base = path.join(rootDir, 'incomplete', modelName)
+  const gifs = path.join(base, 'gifs')
+  const videos = path.join(base, 'videos')
+
+  if (!fs.existsSync(gifs)) fs.mkdirSync(gifs, { recursive: true })
+  if (!fs.existsSync(videos)) fs.mkdirSync(videos, { recursive: true })
+
+  return { base, gifs, videos }
+}
 
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
@@ -83,9 +87,15 @@ function createModelFolders(modelName) {
   // Always create images folder
   fs.mkdirSync(images, { recursive: true })
 
+  // Per-model incomplete dirs (gifs/videos) live in the project root,
+  // while finished media lives in the dataset folder.
+  const incomplete = getIncompleteDirs(modelName)
+
   return {
     base,
     images,
+    incompleteGifDir: incomplete.gifs,
+    incompleteVideoDir: incomplete.videos,
     createGifFolder: () => {
       const gifPath = path.join(base, 'gif')
       if (!fs.existsSync(gifPath)) fs.mkdirSync(gifPath, { recursive: true })
@@ -339,7 +349,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 )
               }
 
-              const tmpPath = path.join(incompleteGifDir, filename)
+              const tmpPath = path.join(folders.incompleteGifDir, filename)
               fs.writeFileSync(tmpPath, buffer)
 
               // Create gif folder only now
@@ -394,7 +404,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               )
             }
 
-            const tmpPath = path.join(incompleteVideoDir, filename)
+            const tmpPath = path.join(folders.incompleteVideoDir, filename)
 
             lazyVideoQueue.push({
               url: mediaUrl,
@@ -506,18 +516,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     })
     .then((n) => n.replace(/\W+/g, '_').toLowerCase())
 
-  // Check if user passed --model=Name
-  // ✅ Use npm config or fallback to CLI flag
-  const forcedModel =
-    process.env.npm_config_model ||
-    process.argv
-      .find((arg) => arg.startsWith('--model='))
-      ?.replace('--model=', '')
-      .trim() ||
-    null
-
-  const rawName = sanitize(forcedModel || tmpModelName)
-
+  const rawName = sanitize(tmpModelName)
   const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
   let aliasMap = {}
 
@@ -538,11 +537,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
   const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
 
   console.log('🔍 Prefetching total counts...')
-  const [plainCount] = await Promise.all([
+  const plainCount = await Promise.all([
     fetchStufferDBTotalCount(browser, plainUrl),
   ])
-  global.totalSearchTotal = plainCount
 
+  global.totalSearchTotal = plainCount
   console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
 
   console.log(`💦 Starting scrape for ${modelName}`)
@@ -552,10 +551,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
   logAndProgress('🧮 Scrape complete')
 
   const leftoverGifs = fs
-    .readdirSync(incompleteGifDir)
+    .readdirSync(folders.incompleteGifDir)
     .filter((f) => f.endsWith('.gif'))
   for (const gif of leftoverGifs) {
-    const tmpPath = path.join(incompleteGifDir, gif)
+    const tmpPath = path.join(folders.incompleteGifDir, gif)
     const webmFolder = folders.createWebmFolder()
     const mp4Path = path.join(webmFolder, gif.replace(/\.gif$/, '.mp4'))
     gifsToConvert.push({ tmpPath, mp4Path, filename: gif })
@@ -684,9 +683,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
                 res.on('end', () => {
                   stream.end()
+                  resolve()
                 })
 
-                stream.on('finish', () => resolve())
                 res.on('error', reject)
               })
               .on('error', reject)
@@ -719,9 +718,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
         } catch (err) {
           errorCount++
           logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
-          const failed = lazyVideoQueue[i]
-          if (failed?.url) logAndProgress(`🔗 Source URL: ${failed.url}`)
-
           if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
           knownFilenames.delete(filename) // allow retry in future runs
         }
