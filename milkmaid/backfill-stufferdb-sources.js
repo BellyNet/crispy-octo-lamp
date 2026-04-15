@@ -317,6 +317,27 @@ async function findFirstDuckDuckGoResultUrl(query) {
   }
 }
 
+function getAliasSearchVariants(entry, canonicalName) {
+  const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
+
+  return Array.from(
+    new Set(
+      [canonicalName, ...aliases]
+        .map((name) => String(name || '').trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function hasSavedSourceForAlias(entry, alias) {
+  const normalizedAlias = sanitize(alias)
+  const sources = Array.isArray(entry?.sources?.stufferdb)
+    ? entry.sources.stufferdb
+    : []
+
+  return sources.some((src) => sanitize(src?.discoveredAs) === normalizedAlias)
+}
+
 async function buildCandidatesForModel(canonicalName, entry) {
   const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
   const searchTerms = Array.from(
@@ -335,7 +356,7 @@ async function buildCandidatesForModel(canonicalName, entry) {
     )
 
     for (const variant of searchVariants) {
-      const query = `site:stufferdb.com "${variant}"`
+      const query = `site:stufferdb.com/index "${variant}" category`
       try {
         const results = await searchDuckDuckGo(query)
 
@@ -356,36 +377,26 @@ async function buildCandidatesForModel(canonicalName, entry) {
   return Array.from(allCandidates.values())
 }
 
-async function findFirstCandidateForModel(canonicalName, entry) {
-  const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-  const searchTerms = Array.from(
-    new Set(
-      [canonicalName, ...aliases]
-        .map((name) => String(name || '').trim())
-        .filter(Boolean)
-    )
+async function findFirstCandidateForAlias(alias) {
+  const searchVariants = Array.from(
+    new Set([alias, alias.replace(/_/g, ' '), alias.replace(/-/g, ' ')])
   )
 
-  for (const term of searchTerms) {
-    const searchVariants = Array.from(
-      new Set([term, term.replace(/_/g, ' '), term.replace(/-/g, ' ')])
-    )
+  for (const variant of searchVariants) {
+    const query = `site:stufferdb.com/index "${variant}" category`
+    try {
+      const resultUrl = await findFirstDuckDuckGoResultUrl(query)
+      const normalized = normalizeCategoryUrl(resultUrl)
 
-    for (const variant of searchVariants) {
-      const query = `site:stufferdb.com "${variant}"`
-      try {
-        const resultUrl = await findFirstDuckDuckGoResultUrl(query)
-        const normalized = normalizeCategoryUrl(resultUrl)
-
-        if (normalized) {
-          return {
-            url: normalized,
-            matchedBy: variant,
-          }
+      if (normalized) {
+        return {
+          url: normalized,
+          matchedBy: variant,
+          alias,
         }
-      } catch (err) {
-        console.log(`   ⚠️ Search failed for "${variant}": ${err.message}`)
       }
+    } catch (err) {
+      console.log(`   ⚠️ Search failed for "${variant}": ${err.message}`)
     }
   }
 
@@ -459,126 +470,138 @@ async function run() {
       )
       console.log(`Aliases: ${entry.aliases.join(', ')}`)
 
-      let current = null
+      const aliasTerms = getAliasSearchVariants(entry, canonicalName)
 
-      try {
-        console.log(
-          '🔎 Searching DuckDuckGo and opening first StufferDB result...'
+      for (const alias of aliasTerms) {
+        const freshEntry = ensureModelEntryShape(
+          registry[canonicalName],
+          canonicalName
         )
-        current = await findFirstCandidateForModel(canonicalName, entry)
-      } catch (err) {
-        console.log(`⚠️ Could not find first candidate: ${err.message}`)
-      }
 
-      if (current) {
-        console.log(`🌐 Opening first candidate in Yandex...`)
-        console.log(`   ${current.url}`)
-        console.log(`   matched by: ${current.matchedBy}`)
-        openInYandex(current.url)
-      } else {
-        console.log('No candidate links found automatically.')
-        openInYandex(
-          `https://duckduckgo.com/?q=${encodeURIComponent(`site:stufferdb.com ${canonicalName}`)}`
-        )
-      }
-
-      while (true) {
-        console.log('\nCommands:')
-        console.log('  y = accept opened URL')
-        console.log('  o = reopen current URL in Yandex')
-        console.log('  c = paste correct StufferDB category URL manually')
-        console.log('  s = skip this model')
-        console.log('  q = save and quit\n')
-
-        if (current) {
-          console.log(`Current candidate: ${current.url}`)
-          console.log(`Matched by: ${current.matchedBy}`)
-        } else {
-          console.log('Current candidate: none')
-        }
-
-        const answer = (await ask(rl, '> ')).trim().toLowerCase()
-
-        if (!answer) continue
-
-        if (answer === 'y') {
-          if (!current) {
-            console.log('No current candidate to accept.')
-            continue
-          }
-
-          addStufferSource(
-            registry,
-            canonicalName,
-            current.url,
-            current.matchedBy
-          )
-          console.log(`✅ Saved source for ${canonicalName}: ${current.url}`)
-          break
-        }
-
-        if (answer === 'o') {
-          if (!current) {
-            console.log('No current candidate to open.')
-            continue
-          }
-
-          openInYandex(current.url)
+        if (hasSavedSourceForAlias(freshEntry, alias)) {
+          console.log(`⏭️ Alias already has a saved source: ${alias}`)
           continue
         }
 
-        if (answer === 'c') {
-          const customUrl = (
-            await ask(rl, 'Paste the correct StufferDB category URL: ')
-          ).trim()
+        console.log(`\n🔎 Searching alias: ${alias}`)
 
-          const normalized = normalizeCategoryUrl(customUrl)
-          if (!normalized) {
-            console.log(
-              'That does not look like a valid StufferDB category URL.'
-            )
-            continue
-          }
+        let current = null
 
-          current = {
-            url: normalized,
-            matchedBy: canonicalName,
-          }
+        try {
+          current = await findFirstCandidateForAlias(alias)
+        } catch (err) {
+          console.log(
+            `⚠️ Could not find first candidate for ${alias}: ${err.message}`
+          )
+        }
 
+        if (current) {
+          console.log(`🌐 Opening first candidate in Yandex...`)
+          console.log(`   ${current.url}`)
+          console.log(`   matched by: ${current.matchedBy}`)
+          console.log(`   alias: ${alias}`)
           openInYandex(current.url)
+        } else {
+          console.log(
+            `No candidate links found automatically for alias: ${alias}`
+          )
+          openInYandex(
+            `https://duckduckgo.com/?q=${encodeURIComponent(`site:stufferdb.com/index "${alias}" category`)}`
+          )
+        }
 
-          const confirm = (await ask(rl, 'Save this URL now? (y/n): '))
-            .trim()
-            .toLowerCase()
+        while (true) {
+          console.log('\nCommands:')
+          console.log('  y = accept opened URL')
+          console.log('  o = reopen current URL in Yandex')
+          console.log('  c = paste correct StufferDB category URL manually')
+          console.log('  s = skip this alias')
+          console.log('  q = save and quit\n')
 
-          if (confirm === 'y') {
-            addStufferSource(
-              registry,
-              canonicalName,
-              current.url,
-              canonicalName
-            )
+          if (current) {
+            console.log(`Current candidate: ${current.url}`)
+            console.log(`Matched by: ${current.matchedBy}`)
+            console.log(`Alias: ${alias}`)
+          } else {
+            console.log(`Current candidate: none`)
+            console.log(`Alias: ${alias}`)
+          }
+
+          const answer = (await ask(rl, '> ')).trim().toLowerCase()
+          if (!answer) continue
+
+          if (answer === 'y') {
+            if (!current) {
+              console.log('No current candidate to accept.')
+              continue
+            }
+
+            addStufferSource(registry, canonicalName, current.url, alias)
             console.log(
-              `✅ Saved manual source for ${canonicalName}: ${current.url}`
+              `✅ Saved source for ${canonicalName} via alias ${alias}: ${current.url}`
             )
             break
           }
 
-          continue
-        }
+          if (answer === 'o') {
+            if (!current) {
+              console.log('No current candidate to open.')
+              continue
+            }
 
-        if (answer === 's') {
-          console.log(`⏭️ Skipped ${canonicalName}`)
-          break
-        }
+            openInYandex(current.url)
+            continue
+          }
 
-        if (answer === 'q') {
-          console.log('💾 Quitting. Progress already saved as you went.')
-          rl.close()
-          return
-        }
+          if (answer === 'c') {
+            const customUrl = (
+              await ask(rl, 'Paste the correct StufferDB category URL: ')
+            ).trim()
 
-        console.log('Unknown command.')
+            const normalized = normalizeCategoryUrl(customUrl)
+            if (!normalized) {
+              console.log(
+                'That does not look like a valid StufferDB category URL.'
+              )
+              continue
+            }
+
+            current = {
+              url: normalized,
+              matchedBy: alias,
+              alias,
+            }
+
+            openInYandex(current.url)
+
+            const confirm = (await ask(rl, 'Save this URL now? (y/n): '))
+              .trim()
+              .toLowerCase()
+
+            if (confirm === 'y') {
+              addStufferSource(registry, canonicalName, current.url, alias)
+              console.log(
+                `✅ Saved manual source for ${canonicalName} via alias ${alias}: ${current.url}`
+              )
+              break
+            }
+
+            continue
+          }
+
+          if (answer === 's') {
+            console.log(`⏭️ Skipped alias ${alias}`)
+            break
+          }
+
+          if (answer === 'q') {
+            console.log('💾 Quitting. Progress already saved as you went.')
+            rl.close()
+            return
+          }
+
+          console.log('Unknown command.')
+        }
       }
     }
 
