@@ -378,22 +378,29 @@ async function fetchStufferDBTotalCount(browser, url) {
     site: 'stufferdb',
     interceptMedia: true,
   })
-  try {
-    await tempPage.goto(url, { waitUntil: 'networkidle2', timeout: 20000 })
 
-    // Log raw text from the span
+  try {
+    await tempPage.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    })
+
+    await tempPage.waitForSelector('span.badge.nb_items', {
+      timeout: 10000,
+    })
+
     const rawText = await tempPage.$eval(
       'span.badge.nb_items',
-      (el) => el.textContent
+      (el) => el.textContent || ''
     )
     console.log(`🕵️ Raw badge text from ${url}:`, rawText)
 
     const match = rawText.match(/(\d+)/)
-    const count = match ? parseInt(match[1]) : 0
+    const count = match ? parseInt(match[1], 10) : 0
     console.log(`🔢 Parsed count: ${count}`)
     return count
   } catch (err) {
-    const title = await tempPage.title()
+    const title = await tempPage.title().catch(() => 'unknown')
     console.log(`⚠️ Could not fetch count for ${url}: ${err.message}`)
     console.log(`🧙 Page title: ${title}`)
     return 0
@@ -421,11 +428,17 @@ function convertShortMp4ToGif(inputPath, outputPath) {
 }
 
 let completedTotal = 0
-let taskCompleted = false
 
-function logAndProgress(message) {
-  if (!taskCompleted) {
-    taskCompleted = true
+function resetProgressCounter(total = null) {
+  completedTotal = 0
+
+  if (typeof total === 'number' && !Number.isNaN(total)) {
+    global.totalSearchTotal = Math.max(total, 1)
+  }
+}
+
+function logAndProgress(message, increment = false) {
+  if (increment) {
     completedTotal++
   }
 
@@ -459,8 +472,19 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
       const total = urls.length
 
+      // If prefetch failed or undercounted badly, trust the actual page we just loaded.
+      if (
+        !global.totalSearchTotal ||
+        global.totalSearchTotal <= 1 ||
+        total > global.totalSearchTotal
+      ) {
+        global.totalSearchTotal = total
+      }
+
       const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
-      logAndProgress(`📸 ${modelName} - [${mode}] - ${urls.length} media links`)
+      logAndProgress(
+        `📸 ${modelName} - [${mode}] - ${urls.length} media links (tracking ${global.totalSearchTotal})`
+      )
 
       const pages = await Promise.all(
         Array.from({ length: 8 }, () =>
@@ -476,7 +500,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const pageLocks = pages.map(() => pLimit(1)) // 🧠 One lock per tab
 
       async function scrapeMediaOnPage(page, mediaPageUrl, i) {
-        taskCompleted = false
         totalCount++
 
         try {
@@ -530,14 +553,17 @@ async function scrapeGallery(browser, url, modelName, folders) {
             hash = createHash('md5').update(buffer).digest('hex')
             if (isBitwiseDupe(hash)) {
               duplicateCount++
-              return logAndProgress(`♻️ Bitwise dupe: ${filename}`)
+              return logAndProgress(`♻️ Bitwise dupe: ${filename}`, true)
             }
 
             // Step 3: Visual (slow) hash
             visualHash = await getVisualHashFromBuffer(buffer)
             if (visualHash && isVisualDupe(visualHash)) {
               duplicateCount++
-              return logAndProgress(`👁️ Visual dupe (global): ${filename}`)
+              return logAndProgress(
+                `👁️ Visual dupe (global): ${filename}`,
+                true
+              )
             }
             if (visualHash) addVisualHash(visualHash)
           }
@@ -554,7 +580,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
               if (knownFilenames.has(mp4Name) || fs.existsSync(mp4Name)) {
                 duplicateCount++
                 return logAndProgress(
-                  `♻️ Already converted gif > mp4: ${mp4Name}`
+                  `♻️ Already converted gif > mp4: ${mp4Name}`,
+                  true
                 )
               }
 
@@ -580,7 +607,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 filename,
               })
 
-              return logAndProgress(logGifConversion(completedTotal))
+              return logAndProgress(logGifConversion(completedTotal), true)
             } else {
               // Static GIF → treat as image
               const stillPath = path.join(folders.images, filename)
@@ -598,7 +625,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               }
 
               successCount++
-              return logAndProgress(`🖼️ Saved still gif: ${filename}`)
+              return logAndProgress(`🖼️ Saved still gif: ${filename}`, true)
             }
           }
 
@@ -609,7 +636,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
             if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
               duplicateCount++
               return logAndProgress(
-                `⛔ Skipping mp4 – already handled: ${filename}`
+                `⛔ Skipping mp4 – already handled: ${filename}`,
+                true
               )
             }
 
@@ -623,7 +651,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               uploadedDate,
             })
 
-            return logAndProgress(`🐌 Queued lazy video: ${filename}`)
+            return logAndProgress(`🐌 Queued lazy video: ${filename}`, true)
           }
 
           if (
@@ -631,7 +659,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             fs.existsSync(path.join(images, filename))
           ) {
             duplicateCount++
-            return logAndProgress(`♻️ Skipped (exists): ${filename}`)
+            return logAndProgress(`♻️ Skipped (exists): ${filename}`, true)
           }
 
           buffer = await downloadBufferWithProgress(mediaUrl)
@@ -652,10 +680,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
           if (visualHash) addVisualHash(visualHash)
           knownFilenames.add(filename)
           successCount++
-          return logAndProgress(`✅ Saved: ${filename}`)
+          return logAndProgress(`✅ Saved: ${filename}`, true)
         } catch (err) {
           errorCount++
-          logAndProgress(`❌ Error processing ${mediaPageUrl}: ${err.message}`)
+          logAndProgress(
+            `❌ Error processing ${mediaPageUrl}: ${err.message}`,
+            true
+          )
         }
 
         await randomDelay()
@@ -740,14 +771,23 @@ async function scrapeGallery(browser, url, modelName, folders) {
     )
   )
 
-  global.totalSearchTotal =
+  const combinedTotal =
     categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
 
-  console.log(`📊 Combined media total: ${global.totalSearchTotal}`)
+  console.log(`📊 Combined media total: ${combinedTotal}`)
   console.log(`💦 Starting scrape for ${modelName}`)
 
-  for (const categoryUrl of categoryRunList) {
+  for (let i = 0; i < categoryRunList.length; i++) {
+    const categoryUrl = categoryRunList[i]
+    const categoryTotal = categoryCounts[i] || 0
+
+    resetProgressCounter(categoryTotal)
+
     console.log(`🍼 Scraping category: ${categoryUrl}`)
+    console.log(
+      `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
+    )
+
     await scrapeGallery(browser, categoryUrl, modelName, folders)
   }
 
@@ -847,7 +887,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
       lazyLimit(async () => {
         if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
           duplicateCount++
-          return logAndProgress(`♻️ Lazy dupe (pre-download): ${filename}`)
+          return logAndProgress(
+            `♻️ Lazy dupe (pre-download): ${filename}`,
+            true
+          )
         }
 
         knownFilenames.add(filename) // ✅ Mark as claimed early

@@ -19,7 +19,8 @@
     "hoghaul": "node hoghaul/hoghaul.js",
     "milkmaid": "node milkmaid/milkmaid.js",
     "sync": "node scrapyard/sync.js",
-    "purge-hashes": "node scrapyard/purgeModelHashes.js"
+    "purge-hashes": "node scrapyard/purgeModelHashes.js",
+    "backfill:sources": "node milkmaid/backfill-stufferdb-sources.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
