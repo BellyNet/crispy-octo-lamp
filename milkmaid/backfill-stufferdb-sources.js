@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const https = require('https')
 const readline = require('readline')
-const { exec, execFile } = require('child_process')
+const { exec } = require('child_process')
 const puppeteer = require('puppeteer')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -48,14 +48,21 @@ function saveRegistry(registry) {
 }
 
 function ensureModelEntryShape(entry, canonicalName) {
-  const aliasSet = new Set(
-    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
-  )
+  const aliasList = Array.isArray(entry?.aliases)
+    ? entry.aliases.filter(Boolean)
+    : []
+  const ordered = []
 
-  if (canonicalName) aliasSet.add(canonicalName)
+  for (const alias of aliasList) {
+    if (!ordered.includes(alias)) ordered.push(alias)
+  }
+
+  if (canonicalName && !ordered.includes(canonicalName)) {
+    ordered.push(canonicalName)
+  }
 
   return {
-    aliases: Array.from(aliasSet).sort((a, b) => a.localeCompare(b)),
+    aliases: ordered,
     sources: {
       stufferdb: Array.isArray(entry?.sources?.stufferdb)
         ? entry.sources.stufferdb
@@ -71,6 +78,58 @@ function hasStufferSource(entry) {
   )
 }
 
+function getAliasSearchOrder(entry, canonicalName) {
+  const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
+  const ordered = []
+
+  for (const alias of aliases) {
+    const trimmed = String(alias || '').trim()
+    if (trimmed && !ordered.includes(trimmed)) {
+      ordered.push(trimmed)
+    }
+  }
+
+  if (canonicalName && !ordered.includes(canonicalName)) {
+    ordered.push(canonicalName)
+  }
+
+  return ordered
+}
+
+async function findFirstCandidateForAlias(alias) {
+  const searchVariants = Array.from(
+    new Set([alias, alias.replace(/_/g, ' '), alias.replace(/-/g, ' ')])
+  )
+
+  for (const variant of searchVariants) {
+    const queries = [
+      `site:stufferdb.com/index "${variant}" category`,
+      `site:stufferdb.com "${variant}" category`,
+      `site:stufferdb.com "${variant}"`,
+    ]
+
+    for (const query of queries) {
+      try {
+        const resultUrl = await findFirstDuckDuckGoResultUrl(query)
+        const normalized = normalizeCategoryUrl(resultUrl)
+
+        if (normalized) {
+          return {
+            url: normalized,
+            matchedBy: variant,
+            alias,
+            queryUsed: query,
+          }
+        }
+      } catch (err) {
+        console.log(`   ⚠️ Search failed for "${query}": ${err.message}`)
+      }
+    }
+  }
+
+  return null
+}
+
 function addStufferSource(registry, canonicalName, sourceUrl, discoveredAs) {
   const normalizedUrl = normalizeCategoryUrl(sourceUrl)
   if (!normalizedUrl) {
@@ -78,7 +137,6 @@ function addStufferSource(registry, canonicalName, sourceUrl, discoveredAs) {
   }
 
   const categoryId = normalizedUrl.match(/category\/(\d+)/i)?.[1] || null
-  const now = new Date().toISOString()
 
   registry[canonicalName] = ensureModelEntryShape(
     registry[canonicalName],
@@ -90,35 +148,30 @@ function addStufferSource(registry, canonicalName, sourceUrl, discoveredAs) {
     entry.sources.stufferdb = []
   }
 
-  const alreadyExists = entry.sources.stufferdb.some(
+  const existingIndex = entry.sources.stufferdb.findIndex(
     (src) =>
       src?.url === normalizedUrl ||
       (categoryId && src?.categoryId === categoryId)
   )
 
-  if (!alreadyExists) {
+  if (existingIndex === -1) {
     entry.sources.stufferdb.push({
       url: normalizedUrl,
       categoryId,
       discoveredAs: discoveredAs || canonicalName,
-      lastCheckedAt: now,
     })
   } else {
-    entry.sources.stufferdb = entry.sources.stufferdb.map((src) => {
-      if (
-        src?.url === normalizedUrl ||
-        (categoryId && src?.categoryId === categoryId)
-      ) {
-        return {
-          ...src,
-          url: normalizedUrl,
-          categoryId,
-          discoveredAs: discoveredAs || src.discoveredAs || canonicalName,
-          lastCheckedAt: now,
-        }
-      }
-      return src
-    })
+    const existing = entry.sources.stufferdb[existingIndex]
+
+    entry.sources.stufferdb[existingIndex] = {
+      ...existing,
+      url: normalizedUrl,
+      categoryId,
+      discoveredAs: discoveredAs || existing.discoveredAs || canonicalName,
+    }
+
+    // Intentionally do NOT update lastCheckedAt during backfill.
+    // That field should only change after a real scrape/update run.
   }
 
   saveRegistry(registry)
@@ -377,44 +430,26 @@ async function buildCandidatesForModel(canonicalName, entry) {
   return Array.from(allCandidates.values())
 }
 
-async function findFirstCandidateForAlias(alias) {
-  const searchVariants = Array.from(
-    new Set([alias, alias.replace(/_/g, ' '), alias.replace(/-/g, ' ')])
-  )
-
-  for (const variant of searchVariants) {
-    const query = `site:stufferdb.com/index "${variant}" category`
-    try {
-      const resultUrl = await findFirstDuckDuckGoResultUrl(query)
-      const normalized = normalizeCategoryUrl(resultUrl)
-
-      if (normalized) {
-        return {
-          url: normalized,
-          matchedBy: variant,
-          alias,
-        }
-      }
-    } catch (err) {
-      console.log(`   ⚠️ Search failed for "${variant}": ${err.message}`)
-    }
-  }
-
-  return null
-}
-
 function expandWindowsEnvVars(input) {
   return input.replace(/%([^%]+)%/g, (_, key) => process.env[key] || `%${key}%`)
 }
 
 const YANDEX_BROWSER_PATH =
   process.env.YANDEX_BROWSER_PATH ||
-  'C:\\Users\\jagsr\\AppData\\Local\\Yandex\\YandexBrowser\\Application\\browser.exe'
+  'C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe'
 
 function openInYandex(url) {
   const browserPath = expandWindowsEnvVars(YANDEX_BROWSER_PATH)
 
-  execFile(browserPath, [url], (err) => {
+  if (!fs.existsSync(browserPath)) {
+    console.log(`⚠️ Could not open Yandex Browser:`)
+    console.log(`   ${browserPath}`)
+    console.log(`   Error: file does not exist`)
+    console.log(`   URL: ${url}`)
+    return
+  }
+
+  exec(`cmd.exe /c start "" "${browserPath}" "${url}"`, (err) => {
     if (err) {
       console.log(`⚠️ Could not open Yandex Browser:`)
       console.log(`   ${browserPath}`)
@@ -506,7 +541,7 @@ async function run() {
             `No candidate links found automatically for alias: ${alias}`
           )
           openInYandex(
-            `https://duckduckgo.com/?q=${encodeURIComponent(`site:stufferdb.com/index "${alias}" category`)}`
+            `https://duckduckgo.com/?q=${encodeURIComponent(`site:stufferdb.com "${alias}" `)}`
           )
         }
 
@@ -518,13 +553,11 @@ async function run() {
           console.log('  s = skip this alias')
           console.log('  q = save and quit\n')
 
+          console.log(`Current alias: ${alias}`)
+
           if (current) {
-            console.log(`Current candidate: ${current.url}`)
+            console.log(`Matched URL: ${current.url}`)
             console.log(`Matched by: ${current.matchedBy}`)
-            console.log(`Alias: ${alias}`)
-          } else {
-            console.log(`Current candidate: none`)
-            console.log(`Alias: ${alias}`)
           }
 
           const answer = (await ask(rl, '> ')).trim().toLowerCase()
