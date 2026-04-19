@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const https = require('https')
 const readline = require('readline')
-const { exec } = require('child_process')
+const { exec, execFile } = require('child_process')
 const puppeteer = require('puppeteer')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -434,22 +434,29 @@ function expandWindowsEnvVars(input) {
   return input.replace(/%([^%]+)%/g, (_, key) => process.env[key] || `%${key}%`)
 }
 
-const YANDEX_BROWSER_PATH =
-  process.env.YANDEX_BROWSER_PATH ||
-  'C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe'
+const YANDEX_BROWSER_CANDIDATES = [
+  process.env.YANDEX_BROWSER_PATH,
+  'C:\\Users\\jagsr\\AppData\\Local\\Yandex\\YandexBrowser\\Application\\browser.exe',
+  'C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe',
+].filter(Boolean)
 
-function openInYandex(url) {
-  const browserPath = expandWindowsEnvVars(YANDEX_BROWSER_PATH)
-
-  if (!fs.existsSync(browserPath)) {
-    console.log(`⚠️ Could not open Yandex Browser:`)
-    console.log(`   ${browserPath}`)
-    console.log(`   Error: file does not exist`)
-    console.log(`   URL: ${url}`)
-    return
+function getYandexBrowserPath() {
+  for (const candidate of YANDEX_BROWSER_CANDIDATES) {
+    const expanded = expandWindowsEnvVars(candidate)
+    if (fs.existsSync(expanded)) {
+      return expanded
+    }
   }
 
-  exec(`cmd.exe /c start "" "${browserPath}" "${url}"`, (err) => {
+  // Fallback to first candidate even if it doesn't exist,
+  // so the error output still shows something useful.
+  return expandWindowsEnvVars(YANDEX_BROWSER_CANDIDATES[0])
+}
+
+function openInYandex(url) {
+  const browserPath = getYandexBrowserPath()
+
+  execFile(browserPath, [url], (err) => {
     if (err) {
       console.log(`⚠️ Could not open Yandex Browser:`)
       console.log(`   ${browserPath}`)
