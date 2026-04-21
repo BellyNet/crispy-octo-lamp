@@ -35,9 +35,16 @@ const {
 
 const {
   logProgress,
-  logLazyDownload,
+  logLazyProgress,
+  resetProgressBar,
   logGifConversion,
+  logLazyDownload,
   getCompletionLine,
+  getScrapeLine,
+  getStatusHeader,
+  getMilestoneLine,
+  getMilestoneBucket,
+  logScrollingMessage,
 } = require('../stuffinglogger')
 
 function sanitize(name) {
@@ -266,7 +273,10 @@ const lazyVideoQueue = []
 let totalCount = 0,
   duplicateCount = 0,
   errorCount = 0,
-  successCount = 0
+  successCount = 0,
+  lastDraw = 0,
+  totalLazyBytes = 0,
+  lazyBytesDownloaded = 0
 
 const rootDir = path.join(__dirname, '..')
 const datasetDir = path.join(
@@ -428,9 +438,15 @@ function convertShortMp4ToGif(inputPath, outputPath) {
 }
 
 let completedTotal = 0
+let progressMode = 'scrape'
+
+function setProgressMode(mode) {
+  progressMode = mode
+}
 
 function resetProgressCounter(total = null) {
   completedTotal = 0
+  progressMode = 'scrape'
 
   if (typeof total === 'number' && !Number.isNaN(total)) {
     global.totalSearchTotal = Math.max(total, 1)
@@ -442,10 +458,16 @@ function logAndProgress(message, increment = false) {
     completedTotal++
   }
 
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
-  readline.clearLine(process.stdout, 0)
-  console.log(message)
-  logProgress(completedTotal, global.totalSearchTotal || 1)
+  logScrollingMessage(message)
+
+  if (progressMode === 'lazy') {
+    const percent = totalLazyBytes
+      ? (lazyBytesDownloaded / totalLazyBytes) * 100
+      : 0
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes)
+  } else {
+    logProgress(completedTotal, global.totalSearchTotal || 1)
+  }
 }
 
 let grandCompleted = 0
@@ -783,8 +805,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     resetProgressCounter(categoryTotal)
 
-    console.log(`🍼 Scraping category: ${categoryUrl}`)
-    console.log(
+    logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
+    logScrollingMessage(
       `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
     )
 
@@ -850,9 +872,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
   }
 
   logAndProgress(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
-  let lastDraw = 0
-  let totalLazyBytes = 0
-  let lazyBytesDownloaded = 0
+  resetProgressBar(null, 'lazy')
+  lastDraw = 0
+  totalLazyBytes = 0
+  lazyBytesDownloaded = 0
+  setProgressMode('lazy')
 
   // Pre-fetch expected file sizes (best-effort)
   await Promise.all(
@@ -871,15 +895,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
     })
   )
 
-  function logLazyProgress() {
+  function drawLazyProgress() {
     const percent = totalLazyBytes
-      ? ((lazyBytesDownloaded / totalLazyBytes) * 100).toFixed(1)
-      : '??'
-    process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
-    readline.clearLine(process.stdout, 0)
-    process.stdout.write(
-      `🐷 Lazy stuffing: ${percent}% (${(lazyBytesDownloaded / 1024 / 1024).toFixed(2)} MB)`
-    )
+      ? (lazyBytesDownloaded / totalLazyBytes) * 100
+      : 0
+
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes)
   }
 
   await Promise.all(
@@ -922,7 +943,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                         )
                       : '??'
                     const mb = (lazyBytesDownloaded / 1024 / 1024).toFixed(1)
-                    logLazyProgress()
+                    drawLazyProgress()
                     lastDraw = now
                   }
                 })

@@ -1071,7 +1071,29 @@
           "url": "https://stufferdb.com/index?/category/1356",
           "categoryId": "1356",
           "discoveredAs": "kayla_paolini",
-          "lastCheckedAt": "2026-04-21T15:25:48.545Z"
+          "lastCheckedAt": "2026-04-21T17:44:18.025Z"
+        }
+      ]
+    }
+  },
+  "laurenlushh": {
+    "aliases": [
+      "laurenlush",
+      "laurenlushh"
+    ],
+    "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferai.com/index?/category/18691",
+          "categoryId": "18691",
+          "discoveredAs": "laurenlushh",
+          "lastCheckedAt": "2026-04-21T18:05:26.924Z"
+        },
+        {
+          "url": "https://stufferai.com/index?/category/8548",
+          "categoryId": "8548",
+          "discoveredAs": "laurenlush",
+          "lastCheckedAt": "2026-04-21T18:07:49.151Z"
         }
       ]
     }
