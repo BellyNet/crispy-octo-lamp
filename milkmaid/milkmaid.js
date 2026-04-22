@@ -437,6 +437,18 @@ function convertShortMp4ToGif(inputPath, outputPath) {
   })
 }
 
+function moveFileIntoPlace(sourcePath, destinationPath) {
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
+
+  try {
+    fs.renameSync(sourcePath, destinationPath)
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err
+    fs.copyFileSync(sourcePath, destinationPath)
+    fs.unlinkSync(sourcePath)
+  }
+}
+
 let completedTotal = 0
 let progressMode = 'scrape'
 
@@ -598,8 +610,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
             if (frameCount > 1) {
               // Animated GIF → Save and queue conversion
               const mp4Name = filename.replace(/\.gif$/, '.mp4')
+              const webmFolder = folders.createWebmFolder()
+              const mp4Path = path.join(webmFolder, mp4Name)
 
-              if (knownFilenames.has(mp4Name) || fs.existsSync(mp4Name)) {
+              if (knownFilenames.has(mp4Name) || fs.existsSync(mp4Path)) {
                 duplicateCount++
                 return logAndProgress(
                   `♻️ Already converted gif > mp4: ${mp4Name}`,
@@ -621,11 +635,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 fs.utimesSync(gifSavePath, ts, ts)
               }
 
-              // Create webm folder only when queuing conversion
-              const webmFolder = folders.createWebmFolder()
               gifsToConvert.push({
                 tmpPath,
-                mp4Path: path.join(webmFolder, mp4Name),
+                mp4Path,
                 filename,
               })
 
@@ -651,7 +663,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
           }
 
-          if (ext === '.mp4') {
+          if (['.mp4', '.webm'].includes(ext)) {
             const webmFolder = folders.createWebmFolder() // Create only when needed
             const finalPath = path.join(webmFolder, filename)
 
@@ -689,6 +701,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
           const finalPath = path.join(images, filename)
           fs.writeFileSync(finalPath, buffer)
+
           if (uploadedDate) {
             const ts = uploadedDate.getTime() / 1000
             fs.utimesSync(finalPath, ts, ts)
@@ -831,7 +844,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     const isKnown =
       knownFilenames.has(mp4Name) ||
       skippedFilenames.has(mp4Name) ||
-      fs.existsSync(mp4Name)
+      fs.existsSync(mp4Path)
     if (isKnown) {
       logAndProgress(
         `🚫 Skipping gif conversion (already known or failed): ${mp4Name}`
@@ -904,91 +917,96 @@ async function scrapeGallery(browser, url, modelName, folders) {
   }
 
   await Promise.all(
-    lazyVideoQueue.map(({ url, path: finalPath, filename, uploadedDate }, i) =>
-      lazyLimit(async () => {
-        if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
-          duplicateCount++
-          return logAndProgress(
-            `♻️ Lazy dupe (pre-download): ${filename}`,
-            true
-          )
-        }
+    lazyVideoQueue.map(
+      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
+        lazyLimit(async () => {
+          if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+            duplicateCount++
+            return logAndProgress(
+              `♻️ Lazy dupe (pre-download): ${filename}`,
+              true
+            )
+          }
 
-        knownFilenames.add(filename) // ✅ Mark as claimed early
+          knownFilenames.add(filename) // ✅ Mark as claimed early
 
-        logAndProgress(`🚀 STARTING lazy task #${i}: ${filename}`)
-        logAndProgress(logLazyDownload(i))
-        logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
+          logAndProgress(`🚀 STARTING lazy task #${i}: ${filename}`)
+          logAndProgress(logLazyDownload(i))
+          logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
 
-        const stream = fs.createWriteStream(finalPath)
-        let lastDraw = Date.now()
+          fs.mkdirSync(path.dirname(tmpPath), { recursive: true })
+          const stream = fs.createWriteStream(tmpPath)
+          let lastDraw = Date.now()
 
-        try {
-          await new Promise((resolve, reject) => {
-            const proto = url.startsWith('https') ? https : http
-            proto
-              .get(url, (res) => {
-                if (res.statusCode !== 200)
-                  return reject(new Error(`HTTP ${res.statusCode}`))
-
-                res.on('data', (chunk) => {
-                  stream.write(chunk)
-                  lazyBytesDownloaded += chunk.length
-
-                  const now = Date.now()
-                  if (now - lastDraw > 250) {
-                    const percent = totalLazyBytes
-                      ? ((lazyBytesDownloaded / totalLazyBytes) * 100).toFixed(
-                          1
-                        )
-                      : '??'
-                    const mb = (lazyBytesDownloaded / 1024 / 1024).toFixed(1)
-                    drawLazyProgress()
-                    lastDraw = now
+          try {
+            await new Promise((resolve, reject) => {
+              const proto = url.startsWith('https') ? https : http
+              stream.on('error', reject)
+              proto
+                .get(url, (res) => {
+                  if (res.statusCode !== 200) {
+                    res.resume()
+                    return reject(new Error(`HTTP ${res.statusCode}`))
                   }
+
+                  res.on('data', (chunk) => {
+                    stream.write(chunk)
+                    lazyBytesDownloaded += chunk.length
+
+                    const now = Date.now()
+                    if (now - lastDraw > 250) {
+                      drawLazyProgress()
+                      lastDraw = now
+                    }
+                  })
+
+                  res.on('end', () => {
+                    stream.end(resolve)
+                  })
+
+                  res.on('error', (err) => {
+                    stream.destroy(err)
+                    reject(err)
+                  })
                 })
+                .on('error', reject)
+            })
 
-                res.on('end', () => {
-                  stream.end()
-                  resolve()
-                })
+            const duration = await getVideoDuration(tmpPath)
 
-                res.on('error', reject)
-              })
-              .on('error', reject)
-          })
-
-          if (uploadedDate) {
-            const ts = uploadedDate.getTime() / 1000
-            fs.utimesSync(finalPath, ts, ts)
-          }
-
-          successCount++
-          logAndProgress(`✅ Saved lazy video: ${filename}`)
-
-          const duration = await getVideoDuration(finalPath)
-          const isSmallFile = fs.statSync(finalPath).size < 5 * 1024 * 1024 // <5MB
-          if (duration <= 6 && isSmallFile) {
-            const gifFolder = folders.createGifFolder()
-            const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
-            const gifPath = path.join(gifFolder, gifName)
-
-            if (!fs.existsSync(gifPath)) {
-              await convertShortMp4ToGif(finalPath, gifPath)
-              if (uploadedDate) {
-                const ts = uploadedDate.getTime() / 1000
-                fs.utimesSync(gifPath, ts, ts)
-              }
-              logAndProgress(`🎁 Converted short mp4 to gif: ${gifName}`)
+            if (uploadedDate) {
+              const ts = uploadedDate.getTime() / 1000
+              fs.utimesSync(tmpPath, ts, ts)
             }
+
+            moveFileIntoPlace(tmpPath, finalPath)
+
+            successCount++
+            logAndProgress(`✅ Saved lazy video: ${filename}`)
+
+            const isSmallFile = fs.statSync(finalPath).size < 5 * 1024 * 1024 // <5MB
+            if (duration <= 6 && isSmallFile) {
+              const gifFolder = folders.createGifFolder()
+              const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
+              const gifPath = path.join(gifFolder, gifName)
+
+              if (!fs.existsSync(gifPath)) {
+                await convertShortMp4ToGif(finalPath, gifPath)
+                if (uploadedDate) {
+                  const ts = uploadedDate.getTime() / 1000
+                  fs.utimesSync(gifPath, ts, ts)
+                }
+                logAndProgress(`🎁 Converted short mp4 to gif: ${gifName}`)
+              }
+            }
+          } catch (err) {
+            errorCount++
+            logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+            if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
+            knownFilenames.delete(filename) // allow retry in future runs
           }
-        } catch (err) {
-          errorCount++
-          logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
-          if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
-          knownFilenames.delete(filename) // allow retry in future runs
-        }
-      })
+        })
     )
   )
 
