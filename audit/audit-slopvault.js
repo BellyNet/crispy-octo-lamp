@@ -18,6 +18,8 @@ const argv = minimist(process.argv.slice(2), {
     'min-video-bytes': 64 * 1024,
     'min-image-bytes': 8 * 1024,
     'min-gif-bytes': 8 * 1024,
+    'tail-seconds': 5,
+    'tail-frames': 5,
   },
 })
 
@@ -60,6 +62,8 @@ const minImageBytes = normalizePositiveInteger(
   8 * 1024
 )
 const minGifBytes = normalizePositiveInteger(argv['min-gif-bytes'], 8 * 1024)
+const tailSeconds = normalizePositiveInteger(argv['tail-seconds'], 5)
+const tailFrames = normalizePositiveInteger(argv['tail-frames'], 5)
 const includeIncomplete = Boolean(argv['include-incomplete'])
 const dryRun = argv.apply ? false : true
 const startedAt = new Date()
@@ -116,6 +120,9 @@ async function main() {
   console.log(`Quarantine base: ${quarantineBase}`)
   console.log(
     `Minimum sizes: video=${minVideoBytes} image=${minImageBytes} gif=${minGifBytes}`
+  )
+  console.log(
+    `Video tail decode check: last ${tailSeconds}s / ${tailFrames} frames`
   )
 
   const auditTargets = []
@@ -212,6 +219,8 @@ Options:
   --min-video-bytes <n>         Report videos smaller than this size.
   --min-image-bytes <n>         Report images smaller than this size.
   --min-gif-bytes <n>           Report GIFs smaller than this size.
+  --tail-seconds <n>            Seek this far from end for video decode check.
+  --tail-frames <n>             Decode this many tail frames for video check.
   --include-incomplete          Include repo incomplete files. Default: true.
   -h, --help                    Show help.
 
@@ -292,6 +301,10 @@ async function inspectVideoFile(filePath, target) {
   const stat = fs.statSync(filePath)
   const reasons = []
   const probe = await probeVideo(filePath)
+  const tailDecode =
+    !probe.error && probe.hasVideoStream
+      ? await probeVideoTailDecode(filePath)
+      : { error: null }
   const basename = getNormalizedBasename(filePath)
 
   if (placeholderBasenames.has(basename)) {
@@ -318,12 +331,17 @@ async function inspectVideoFile(filePath, target) {
     reasons.push('invalid_duration_metadata')
   }
 
+  if (tailDecode.error) {
+    reasons.push('tail_decode_error')
+  }
+
   if (!reasons.length) return null
 
   const quarantineEligible =
     reasons.includes('known_placeholder_name') ||
     reasons.includes('ffprobe_error') ||
-    reasons.includes('missing_video_stream')
+    reasons.includes('missing_video_stream') ||
+    reasons.includes('tail_decode_error')
 
   return buildFinding({
     filePath,
@@ -338,6 +356,7 @@ async function inspectVideoFile(filePath, target) {
         : null,
       hasVideoStream: probe.hasVideoStream,
       ffprobeError: probe.error || null,
+      tailDecodeError: tailDecode.error || null,
     },
   })
 }
@@ -475,6 +494,40 @@ function probeVideo(filePath) {
             error: `Failed to parse ffprobe output: ${parseErr.message}`,
           })
         }
+      }
+    )
+  })
+}
+
+function probeVideoTailDecode(filePath) {
+  return new Promise((resolve) => {
+    execFile(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-xerror',
+        '-sseof',
+        `-${tailSeconds}`,
+        '-i',
+        filePath,
+        '-map',
+        '0:v:0',
+        '-frames:v',
+        String(tailFrames),
+        '-f',
+        'null',
+        '-',
+      ],
+      { timeout: 60_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          return resolve({
+            error: (stderr || stdout || err.message || '').trim(),
+          })
+        }
+
+        resolve({ error: null })
       }
     )
   })
