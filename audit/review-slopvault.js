@@ -15,6 +15,7 @@ const argv = minimist(process.argv.slice(2), {
     'hash',
     'hash-findings',
     'archive',
+    'fresh',
     'no-open',
     'skip-audit',
     'include-incomplete',
@@ -24,6 +25,7 @@ const argv = minimist(process.argv.slice(2), {
     hash: false,
     'hash-findings': false,
     archive: false,
+    fresh: false,
     'no-open': false,
     'skip-audit': false,
     'include-incomplete': true,
@@ -60,8 +62,17 @@ async function main() {
   ensureDir(manifestDir)
   ensureDir(dashboardDir)
 
-  if (!argv['skip-audit']) {
+  const latestAuditLog = findLatestAuditLog(logDir)
+  const shouldRunAudit = argv.fresh || (!argv['skip-audit'] && !latestAuditLog)
+
+  if (shouldRunAudit) {
     await runNodeScript('audit-slopvault.js', buildAuditArgs(false))
+  } else if (latestAuditLog) {
+    console.log(`Reusing audit log: ${latestAuditLog}`)
+  } else if (argv['skip-audit']) {
+    throw new Error(
+      'No latest audit log exists yet. Run review without --skip-audit or use --fresh.'
+    )
   }
 
   await regenerateManifest()
@@ -76,6 +87,7 @@ Options:
   --hash              Compute md5 hashes while generating the manifest.
   --hash-findings     Hash every flagged audit finding before review.
   --archive           Also keep timestamped audit logs.
+  --fresh             Force a new audit scan before opening the dashboard.
   --skip-audit        Reuse the latest audit log instead of running a new scan.
   --include-incomplete=false
                       Skip repo incomplete files during audit.
@@ -85,6 +97,7 @@ Options:
 Notes:
   The review app runs a localhost-only server so the dashboard can apply
   quarantine decisions without a separate terminal command.
+  By default it reuses audit-slopvault-latest.json when available.
 `)
 }
 
