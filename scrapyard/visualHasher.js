@@ -15,7 +15,7 @@ const datasetDir = path.join(
   '.slopvault',
   'dataset'
 )
-const visualHashPath = path.join(datasetDir, 'visualHashes.json')
+const visualHashPath = path.join(datasetDir, 'visualHashes.v2.json')
 const visualHashStore = createHashStore({
   storePath: visualHashPath,
   kind: 'visual',

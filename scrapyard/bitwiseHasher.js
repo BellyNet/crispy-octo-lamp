@@ -9,7 +9,7 @@ const datasetDir = path.join(
   'dataset'
 )
 
-const bitwiseHashPath = path.join(datasetDir, 'bitwiseHashes.json')
+const bitwiseHashPath = path.join(datasetDir, 'bitwiseHashes.v2.json')
 const bitwiseHashStore = createHashStore({
   storePath: bitwiseHashPath,
   kind: 'bitwise',
