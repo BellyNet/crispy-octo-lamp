@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const crypto = require('crypto')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
 const sharp = require('sharp')
@@ -232,7 +233,8 @@ Options:
 
 Notes:
   The script defaults to dry-run unless --apply is provided.
-  Apply mode only quarantines high-confidence problem files.
+  Apply mode quarantines high-confidence problem files by default.
+  With --decisions, apply mode quarantines dashboard-approved files.
   Quarantine paths mirror the Slopvault dataset/incomplete layout.
 `)
 }
@@ -466,6 +468,10 @@ function buildFinding({
     quarantinePath: path.join(target.quarantineRoot, relativePath),
     sizeBytes: stat.size,
     modifiedAt: stat.mtime.toISOString(),
+    contentHash: {
+      algorithm: 'md5',
+      value: hashFile(filePath),
+    },
     reasons,
     quarantineEligible,
     ...extra,
@@ -480,6 +486,12 @@ function normalizePath(value) {
   return String(value || '')
     .split(path.sep)
     .join('/')
+}
+
+function hashFile(filePath) {
+  const hash = crypto.createHash('md5')
+  hash.update(fs.readFileSync(filePath))
+  return hash.digest('hex')
 }
 
 function getNormalizedBasename(filePath) {

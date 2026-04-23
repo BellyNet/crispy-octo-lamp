@@ -20,6 +20,7 @@
     "milkmaid": "node milkmaid/milkmaid.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
     "manifest:slopvault": "node audit/manifest-slopvault.js",
+    "review:slopvault": "node audit/review-slopvault.js",
     "sync": "node scrapyard/sync.js",
     "purge-hashes": "node scrapyard/purgeModelHashes.js",
     "backfill:sources": "node milkmaid/backfill-stufferdb-sources.js"

@@ -607,6 +607,10 @@ function renderDashboard(manifest) {
       align-items: center;
       margin: 18px 0;
     }
+    .api-state {
+      color: var(--muted);
+      font-size: 13px;
+    }
     @media (max-width: 1100px) {
       main, header { padding-left: 18px; padding-right: 18px; }
       .controls, .layout { grid-template-columns: 1fr; }
@@ -632,9 +636,9 @@ function renderDashboard(manifest) {
     </section>
 
     <section class="notice">
-      This dashboard is the dry-run review step. Choose <strong>Quarantine</strong> or <strong>Keep</strong>, export the decisions JSON, then apply it with:
-      <code>npm run audit:slopvault -- --apply --decisions &lt;exported-json&gt;</code>.
-      The page itself does not move or delete files.
+      This dashboard is the dry-run review step. Choose <strong>Quarantine</strong> or <strong>Keep</strong>.
+      If opened with <code>npm run review:slopvault</code>, <strong>Apply Quarantine</strong> will move approved files from the browser.
+      If opened as a plain file, export the decisions JSON and apply it manually.
     </section>
 
     <section class="controls">
@@ -663,10 +667,12 @@ function renderDashboard(manifest) {
 
     <section class="footer-tools">
       <button class="primary" id="exportDecisions">Export Decisions JSON</button>
+      <button class="danger" id="applyDecisions" disabled>Apply Quarantine</button>
       <button id="markVisibleQuarantine">Mark Visible Quarantine</button>
       <button id="markVisibleKeep">Mark Visible Keep</button>
       <button id="clearVisible">Clear Visible</button>
       <span id="saveState"></span>
+      <span class="api-state" id="apiState"></span>
     </section>
 
     <section class="layout">
@@ -703,6 +709,7 @@ function renderDashboard(manifest) {
     const manifest = ${data};
     const findings = manifest.audit.findings || [];
     const storageKey = 'slopvault-audit-decisions:' + (manifest.audit.logPath || manifest.generatedAt);
+    const reviewToken = new URLSearchParams(window.location.search).get('token') || '';
     const decisions = loadDecisions();
     let selectedId = findings[0]?.id || null;
     let visibleFindings = [];
@@ -719,10 +726,12 @@ function renderDashboard(manifest) {
       decisionFilter: document.querySelector('#decisionFilter'),
       reasonFilter: document.querySelector('#reasonFilter'),
       exportDecisions: document.querySelector('#exportDecisions'),
+      applyDecisions: document.querySelector('#applyDecisions'),
       markVisibleQuarantine: document.querySelector('#markVisibleQuarantine'),
       markVisibleKeep: document.querySelector('#markVisibleKeep'),
       clearVisible: document.querySelector('#clearVisible'),
       saveState: document.querySelector('#saveState'),
+      apiState: document.querySelector('#apiState'),
       viewerTitle: document.querySelector('#viewerTitle'),
       viewerMeta: document.querySelector('#viewerMeta'),
       preview: document.querySelector('#preview'),
@@ -733,6 +742,7 @@ function renderDashboard(manifest) {
     };
 
     hydrateReasonFilter();
+    detectReviewServer();
     render();
 
     for (const input of [els.search, els.typeFilter, els.eligibilityFilter, els.decisionFilter, els.reasonFilter]) {
@@ -740,6 +750,7 @@ function renderDashboard(manifest) {
     }
 
     els.exportDecisions.addEventListener('click', exportDecisions);
+    els.applyDecisions.addEventListener('click', applyDecisions);
     els.markVisibleQuarantine.addEventListener('click', () => setVisibleDecisions('quarantine'));
     els.markVisibleKeep.addEventListener('click', () => setVisibleDecisions('keep'));
     els.clearVisible.addEventListener('click', () => clearVisibleDecisions());
@@ -894,9 +905,9 @@ function renderDashboard(manifest) {
       \`;
 
       if (finding.mediaType === 'video') {
-        els.preview.innerHTML = \`<video src="\${finding.sourceFileUri || ''}" controls preload="metadata"></video>\`;
+        els.preview.innerHTML = \`<video src="\${getMediaUrl(finding)}" controls preload="metadata"></video>\`;
       } else if (finding.mediaType === 'image' || finding.mediaType === 'gif') {
-        els.preview.innerHTML = \`<img src="\${finding.sourceFileUri || ''}" alt="">\`;
+        els.preview.innerHTML = \`<img src="\${getMediaUrl(finding)}" alt="">\`;
       } else {
         els.preview.textContent = 'No preview available';
       }
@@ -904,6 +915,7 @@ function renderDashboard(manifest) {
       els.details.innerHTML = \`
         <div><strong>Reasons:</strong> \${(finding.reasons || []).map(escapeHtml).join(', ')}</div>
         <div><strong>Size:</strong> \${formatBytes(finding.sizeBytes || 0)}</div>
+        <div><strong>Hash:</strong> \${escapeHtml(finding.contentHash?.value || 'not recorded')}</div>
         <div><strong>Source:</strong> <a href="\${finding.sourceFileUri || '#'}">\${escapeHtml(finding.sourcePath || '')}</a></div>
         <div><strong>Quarantine target:</strong> \${escapeHtml(finding.quarantinePath || '')}</div>
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
@@ -911,7 +923,32 @@ function renderDashboard(manifest) {
     }
 
     function exportDecisions() {
-      const exported = {
+      const exported = buildDecisionExport();
+      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'slopvault-audit-decisions-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function getMediaUrl(finding) {
+      if (
+        (window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+        finding.sourcePath
+      ) {
+        const tokenParam = reviewToken ? '&token=' + encodeURIComponent(reviewToken) : '';
+        return '/media?path=' + encodeURIComponent(finding.sourcePath) + tokenParam;
+      }
+
+      return finding.sourceFileUri || '';
+    }
+
+    function buildDecisionExport() {
+      return {
         generatedAt: new Date().toISOString(),
         auditLogPath: manifest.audit.logPath,
         manifestGeneratedAt: manifest.generatedAt,
@@ -924,18 +961,67 @@ function renderDashboard(manifest) {
             relativePath: finding?.relativePath || null,
             reasons: finding?.reasons || [],
             quarantineEligible: Boolean(finding?.quarantineEligible),
+            contentHash: finding?.contentHash || null,
           };
         }),
       };
-      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'slopvault-audit-decisions-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+    }
+
+    async function detectReviewServer() {
+      if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
+        els.applyDecisions.disabled = true;
+        els.apiState.textContent = 'Apply requires npm run review:slopvault';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/status', {
+          cache: 'no-store',
+          headers: { 'x-slopvault-token': reviewToken },
+        });
+        if (!response.ok) throw new Error('status unavailable');
+        els.applyDecisions.disabled = false;
+        els.apiState.textContent = 'Local review server connected';
+      } catch {
+        els.applyDecisions.disabled = true;
+        els.apiState.textContent = 'Apply server unavailable';
+      }
+    }
+
+    async function applyDecisions() {
+      const exported = buildDecisionExport();
+      const quarantineCount = exported.decisions.filter(item => item.action === 'quarantine').length;
+
+      if (!quarantineCount) {
+        els.apiState.textContent = 'No quarantine decisions to apply';
+        return;
+      }
+
+      if (!confirm('Move ' + quarantineCount + ' reviewed file(s) to quarantine now?')) return;
+
+      els.applyDecisions.disabled = true;
+      els.apiState.textContent = 'Applying quarantine... keep this tab open';
+
+      try {
+        const response = await fetch('/api/apply', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-slopvault-token': reviewToken,
+          },
+          body: JSON.stringify(exported),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error || 'Apply failed');
+        }
+
+        els.apiState.textContent = 'Applied. Reloading dashboard...';
+        window.setTimeout(() => window.location.reload(), 800);
+      } catch (err) {
+        els.applyDecisions.disabled = false;
+        els.apiState.textContent = 'Apply failed: ' + err.message;
+      }
     }
 
     function formatBytes(bytes) {
