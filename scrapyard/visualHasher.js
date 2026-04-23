@@ -1,6 +1,7 @@
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const { spawn } = require('child_process')
 const imghash = require('imghash')
 const sharp = require('sharp')
 const { createHash } = require('crypto')
@@ -34,6 +35,8 @@ function saveVisualHashCache() {
 async function getVisualHashFromBuffer(buffer) {
   const hash = createHash('md5').update(buffer).digest('hex')
   const tmpPath = path.join(tmpDir, `vh_${hash}.jpg`)
+  const ffmpegInputPath = path.join(tmpDir, `vh_${hash}_src.jpg`)
+  const ffmpegOutputPath = path.join(tmpDir, `vh_${hash}_ffmpeg.png`)
 
   try {
     await sharp(buffer).resize(512).jpeg({ quality: 95 }).toFile(tmpPath)
@@ -41,10 +44,55 @@ async function getVisualHashFromBuffer(buffer) {
     fs.unlinkSync(tmpPath)
     return visualHash
   } catch (err) {
-    console.warn(`Failed visual hash: ${err.message}`)
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-    return null
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      fs.writeFileSync(ffmpegInputPath, buffer)
+      await normalizeImageWithFfmpeg(ffmpegInputPath, ffmpegOutputPath)
+      const visualHash = await imghash.hash(ffmpegOutputPath, 16, 'hex')
+      fs.unlinkSync(ffmpegInputPath)
+      fs.unlinkSync(ffmpegOutputPath)
+      return visualHash
+    } catch (fallbackErr) {
+      console.warn(
+        `Failed visual hash: ${err.message}; ffmpeg fallback failed: ${fallbackErr.message}`
+      )
+      if (fs.existsSync(ffmpegInputPath)) fs.unlinkSync(ffmpegInputPath)
+      if (fs.existsSync(ffmpegOutputPath)) fs.unlinkSync(ffmpegOutputPath)
+      return null
+    }
   }
+}
+
+function normalizeImageWithFfmpeg(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'ffmpeg',
+      [
+        '-y',
+        '-loglevel',
+        'error',
+        '-i',
+        inputPath,
+        '-frames:v',
+        '1',
+        outputPath,
+      ],
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      }
+    )
+
+    let stderr = ''
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0 && fs.existsSync(outputPath)) return resolve()
+      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
+    })
+  })
 }
 
 function isVisualDupe(visualHash) {
