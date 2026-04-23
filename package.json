@@ -18,6 +18,7 @@
     "format": "prettier . --write",
     "hoghaul": "node hoghaul/hoghaul.js",
     "milkmaid": "node milkmaid/milkmaid.js",
+    "audit:slopvault": "node audit/audit-slopvault.js",
     "sync": "node scrapyard/sync.js",
     "purge-hashes": "node scrapyard/purgeModelHashes.js",
     "backfill:sources": "node milkmaid/backfill-stufferdb-sources.js"
