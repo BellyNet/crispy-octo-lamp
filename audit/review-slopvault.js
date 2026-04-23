@@ -10,10 +10,18 @@ const argv = minimist(process.argv.slice(2), {
   alias: {
     h: 'help',
   },
-  boolean: ['help', 'hash', 'no-open', 'skip-audit', 'include-incomplete'],
+  boolean: [
+    'help',
+    'hash',
+    'hash-findings',
+    'no-open',
+    'skip-audit',
+    'include-incomplete',
+  ],
   default: {
     port: 4777,
     hash: false,
+    'hash-findings': false,
     'no-open': false,
     'skip-audit': false,
     'include-incomplete': true,
@@ -64,6 +72,7 @@ function printHelp() {
 Options:
   --port <n>          Local dashboard port. Default: 4777.
   --hash              Compute md5 hashes while generating the manifest.
+  --hash-findings     Hash every flagged audit finding before review.
   --skip-audit        Reuse the latest audit log instead of running a new scan.
   --include-incomplete=false
                       Skip repo incomplete files during audit.
@@ -80,6 +89,7 @@ function buildAuditArgs(apply, decisionsPath = null) {
   const args = []
   if (apply) args.push('--apply')
   if (decisionsPath) args.push('--decisions', decisionsPath)
+  if (argv['hash-findings']) args.push('--hash-findings')
 
   for (const name of [
     'slopvault-root',

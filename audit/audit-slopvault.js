@@ -11,7 +11,7 @@ const argv = minimist(process.argv.slice(2), {
     d: 'dry-run',
     h: 'help',
   },
-  boolean: ['dry-run', 'apply', 'help', 'include-incomplete'],
+  boolean: ['dry-run', 'apply', 'help', 'include-incomplete', 'hash-findings'],
   default: {
     'dry-run': false,
     apply: false,
@@ -21,6 +21,7 @@ const argv = minimist(process.argv.slice(2), {
     'min-gif-bytes': 8 * 1024,
     'tail-seconds': 5,
     'tail-frames': 5,
+    'hash-findings': false,
   },
 })
 
@@ -69,6 +70,7 @@ const minGifBytes = normalizePositiveInteger(argv['min-gif-bytes'], 8 * 1024)
 const tailSeconds = normalizePositiveInteger(argv['tail-seconds'], 5)
 const tailFrames = normalizePositiveInteger(argv['tail-frames'], 5)
 const includeIncomplete = Boolean(argv['include-incomplete'])
+const hashFindings = Boolean(argv['hash-findings'])
 const dryRun = argv.apply ? false : true
 const decisions = decisionsPath ? loadDecisions(decisionsPath) : null
 const startedAt = new Date()
@@ -184,6 +186,8 @@ async function main() {
           (summary.flaggedByReason[reason] || 0) + 1
       }
 
+      const shouldMove = !dryRun && shouldQuarantineFinding(finding)
+
       if (finding.quarantineEligible) {
         summary.quarantineEligibleFiles += 1
       }
@@ -194,7 +198,11 @@ async function main() {
         }`
       )
 
-      if (!dryRun && shouldQuarantineFinding(finding)) {
+      if (hashFindings || shouldMove) {
+        await attachContentHash(finding)
+      }
+
+      if (shouldMove) {
         await quarantineFinding(finding)
         summary.movedFiles += 1
       }
@@ -228,6 +236,7 @@ Options:
   --min-gif-bytes <n>           Report GIFs smaller than this size.
   --tail-seconds <n>            Seek this far from end for video decode check.
   --tail-frames <n>             Decode this many tail frames for video check.
+  --hash-findings               Hash every flagged finding during this run.
   --include-incomplete          Include repo incomplete files. Default: true.
   -h, --help                    Show help.
 
@@ -468,13 +477,25 @@ function buildFinding({
     quarantinePath: path.join(target.quarantineRoot, relativePath),
     sizeBytes: stat.size,
     modifiedAt: stat.mtime.toISOString(),
-    contentHash: {
-      algorithm: 'md5',
-      value: hashFile(filePath),
-    },
     reasons,
     quarantineEligible,
     ...extra,
+  }
+}
+
+async function attachContentHash(finding) {
+  try {
+    finding.contentHash = {
+      algorithm: 'md5',
+      value: await hashFile(finding.sourcePath),
+    }
+  } catch (err) {
+    finding.contentHash = {
+      algorithm: 'md5',
+      value: null,
+      error: err.message,
+    }
+    summary.errors.push(`Failed to hash ${finding.sourcePath}: ${err.message}`)
   }
 }
 
@@ -489,9 +510,14 @@ function normalizePath(value) {
 }
 
 function hashFile(filePath) {
-  const hash = crypto.createHash('md5')
-  hash.update(fs.readFileSync(filePath))
-  return hash.digest('hex')
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('md5')
+    const stream = fs.createReadStream(filePath)
+
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 function getNormalizedBasename(filePath) {
