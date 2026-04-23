@@ -32,9 +32,7 @@ const datasetRoot = path.resolve(
   String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
 )
 const quarantineRoot = path.resolve(
-  String(
-    argv['quarantine-root'] || path.join(__dirname, 'quarantine', 'slopvault')
-  )
+  String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
 )
 const outputDir = path.resolve(
   String(argv['output-dir'] || path.join(__dirname, 'manifests'))
@@ -491,20 +489,38 @@ function renderDashboard(manifest) {
       padding: 16px 18px;
       box-shadow: 0 14px 40px var(--shadow);
     }
-    .notice code { background: rgba(53, 208, 255, .12); border-radius: 8px; padding: 2px 6px; color: var(--accent); }
+    .notice code {
+      background: rgba(53, 208, 255, .12);
+      border-radius: 8px;
+      padding: 2px 6px;
+      color: var(--accent);
+    }
     .controls {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) 140px 170px 160px 150px;
+      grid-template-columns: minmax(220px, 1.1fr) 160px 170px 190px 170px;
       gap: 10px;
       margin-bottom: 18px;
     }
     input, select, button {
       border: 1px solid var(--line);
-      border-radius: 999px;
+      border-radius: 14px;
       background: var(--card);
       color: var(--ink);
       padding: 11px 14px;
       font: inherit;
+    }
+    input::placeholder { color: #7990b4; }
+    select {
+      appearance: none;
+      padding-right: 34px;
+      background-image:
+        linear-gradient(45deg, transparent 50%, #9fc3ff 50%),
+        linear-gradient(135deg, #9fc3ff 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) calc(50% - 3px),
+        calc(100% - 12px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
     }
     button { cursor: pointer; }
     button.primary {
@@ -523,9 +539,25 @@ function renderDashboard(manifest) {
       color: #d8ffe8;
       border-color: var(--good);
     }
+    button.ghost {
+      background: rgba(159, 195, 255, .08);
+    }
+    button:disabled,
+    select:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 18px 0;
+    }
+    .toolbar .spacer { flex: 1 1 auto; }
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr);
+      grid-template-columns: minmax(0, 1.3fr) minmax(360px, .7fr);
       gap: 18px;
       align-items: start;
     }
@@ -536,7 +568,7 @@ function renderDashboard(manifest) {
       overflow: hidden;
       box-shadow: 0 18px 50px var(--shadow);
     }
-    .table-wrap { max-height: 68vh; overflow: auto; }
+    .table-wrap { max-height: 72vh; overflow: auto; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -560,6 +592,13 @@ function renderDashboard(manifest) {
     tr { cursor: pointer; }
     tr:hover, tr.selected { background: rgba(53, 208, 255, .08); }
     .path { overflow-wrap: anywhere; }
+    .path code {
+      font-size: 12px;
+      color: #bcd2f7;
+      background: rgba(159, 195, 255, .08);
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
     .badge {
       display: inline-block;
       border-radius: 999px;
@@ -573,7 +612,16 @@ function renderDashboard(manifest) {
     .badge.ok { background: rgba(69, 212, 131, .16); color: #bafbd5; }
     .badge.warn { background: rgba(255, 191, 77, .16); color: #ffe0a3; }
     .badge.bad { background: rgba(255, 91, 110, .18); color: #ffd0d7; }
+    .decision-cell { min-width: 165px; }
+    .decision-cell select { width: 100%; min-width: 140px; }
+    .decision-status { margin-top: 6px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .row-check {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
     .viewer { padding: 18px; position: sticky; top: 16px; }
     .viewer h2 { margin: 0 0 8px; font-size: 22px; }
     .viewer p { color: var(--muted); overflow-wrap: anywhere; }
@@ -603,18 +651,21 @@ function renderDashboard(manifest) {
       font-size: 13px;
     }
     .meta-list div { overflow-wrap: anywhere; }
-    .footer-tools {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-      margin: 18px 0;
+    .meta-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
     }
+    .meta-link:hover { text-decoration: underline; }
     .api-state {
       color: var(--muted);
       font-size: 13px;
     }
-    @media (max-width: 1100px) {
+    .helper {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 1200px) {
       main, header { padding-left: 18px; padding-right: 18px; }
       .controls, .layout { grid-template-columns: 1fr; }
       .viewer { position: static; }
@@ -627,21 +678,19 @@ function renderDashboard(manifest) {
     <div class="subhead">
       Generated at ${escapeHtml(manifest.generatedAt)} from audit log
       ${manifest.audit.logPath ? `<code>${escapeHtml(manifest.audit.logPath)}</code>` : '<code>none found</code>'}.
-      Duplicate analysis is still in the manifest, but this page is intentionally focused on corrupt/quarantine candidates.
+      Default decisions are prefilled from the suggested action so you can review fast, make overrides only where needed, then apply the current decision set in one shot.
     </div>
   </header>
   <main>
     <section class="cards">
       <div class="card"><strong id="auditFindings"></strong><span>Audit Findings</span></div>
-      <div class="card"><strong id="quarantineCandidates"></strong><span>Quarantine Candidates</span></div>
-      <div class="card"><strong id="reviewedCount"></strong><span>Reviewed</span></div>
+      <div class="card"><strong id="quarantineCandidates"></strong><span>Suggested Quarantine</span></div>
+      <div class="card"><strong id="overrideCount"></strong><span>Overrides</span></div>
       <div class="card"><strong id="visibleCount"></strong><span>Visible</span></div>
     </section>
 
     <section class="notice">
-      This dashboard is the dry-run review step. Choose <strong>Quarantine</strong> or <strong>Keep</strong>.
-      If opened with <code>npm run review:slopvault</code>, <strong>Apply Quarantine</strong> will move approved files from the browser.
-      If opened as a plain file, export the decisions JSON and apply it manually.
+      Review starts with the suggested action already selected for every finding. Change only the rows you disagree with, use the bulk tools for visible or checked rows, then click <strong>Apply Quarantine</strong> to accept the current decision set.
     </section>
 
     <section class="controls">
@@ -654,26 +703,29 @@ function renderDashboard(manifest) {
       </select>
       <select id="eligibilityFilter">
         <option value="">All findings</option>
-        <option value="true">Quarantine candidates</option>
-        <option value="false">Report-only</option>
+        <option value="true">Suggested quarantine</option>
+        <option value="false">Suggested keep</option>
       </select>
       <select id="decisionFilter">
-        <option value="">All decisions</option>
-        <option value="quarantine">Quarantine</option>
-        <option value="keep">Keep</option>
-        <option value="unreviewed">Unreviewed</option>
+        <option value="">All current decisions</option>
+        <option value="quarantine">Current: quarantine</option>
+        <option value="keep">Current: keep</option>
+        <option value="overridden">Overrides only</option>
       </select>
       <select id="reasonFilter">
         <option value="">All reasons</option>
       </select>
     </section>
 
-    <section class="footer-tools">
-      <button class="primary" id="exportDecisions">Export Decisions JSON</button>
+    <section class="toolbar">
       <button class="danger" id="applyDecisions" disabled>Apply Quarantine</button>
-      <button id="markVisibleQuarantine">Mark Visible Quarantine</button>
-      <button id="markVisibleKeep">Mark Visible Keep</button>
-      <button id="clearVisible">Clear Visible</button>
+      <button class="ghost" id="exportDecisions">Export Decisions JSON</button>
+      <button class="ghost" id="useSuggestedVisible">Use Suggested Visible</button>
+      <button class="ghost" id="selectVisible">Select Visible</button>
+      <button class="ghost" id="clearSelected">Clear Selected</button>
+      <button class="danger" id="selectedQuarantine">Selected Quarantine</button>
+      <button class="good" id="selectedKeep">Selected Keep</button>
+      <span class="spacer"></span>
       <span id="saveState"></span>
       <span class="api-state" id="apiState"></span>
     </section>
@@ -683,6 +735,7 @@ function renderDashboard(manifest) {
         <table>
           <thead>
             <tr>
+              <th><input class="row-check" id="toggleVisible" type="checkbox" aria-label="Select visible rows"></th>
               <th>Decision</th>
               <th>Type</th>
               <th>Model</th>
@@ -696,13 +749,14 @@ function renderDashboard(manifest) {
       </div>
       <aside class="panel viewer">
         <h2 id="viewerTitle">Select a finding</h2>
-        <p id="viewerMeta">Pick a row to preview local media and review why it was flagged.</p>
+        <p id="viewerMeta">Use the main table decisions for fast review, or the viewer buttons if you want to inspect one item at a time.</p>
         <div class="preview" id="preview">No finding selected</div>
         <div class="actions">
           <button class="danger" id="viewerQuarantine">Quarantine</button>
           <button class="good" id="viewerKeep">Keep</button>
-          <button id="viewerReset">Reset</button>
+          <button class="ghost" id="viewerSuggested">Suggested</button>
         </div>
+        <div class="helper">Changing a decision here advances to the next visible finding.</div>
         <div class="meta-list" id="details"></div>
       </aside>
     </section>
@@ -711,16 +765,19 @@ function renderDashboard(manifest) {
   <script>
     const manifest = ${data};
     const findings = manifest.audit.findings || [];
+    const byId = new Map(findings.map(finding => [finding.id, finding]));
     const storageKey = 'slopvault-audit-decisions:' + (manifest.audit.logPath || manifest.generatedAt);
+    const selectionKey = storageKey + ':selection';
     const reviewToken = new URLSearchParams(window.location.search).get('token') || '';
     const decisions = loadDecisions();
+    const selectedRows = loadSelection();
     let selectedId = findings[0]?.id || null;
     let visibleFindings = [];
 
     const els = {
       auditFindings: document.querySelector('#auditFindings'),
       quarantineCandidates: document.querySelector('#quarantineCandidates'),
-      reviewedCount: document.querySelector('#reviewedCount'),
+      overrideCount: document.querySelector('#overrideCount'),
       visibleCount: document.querySelector('#visibleCount'),
       rows: document.querySelector('#rows'),
       search: document.querySelector('#search'),
@@ -728,11 +785,14 @@ function renderDashboard(manifest) {
       eligibilityFilter: document.querySelector('#eligibilityFilter'),
       decisionFilter: document.querySelector('#decisionFilter'),
       reasonFilter: document.querySelector('#reasonFilter'),
+      toggleVisible: document.querySelector('#toggleVisible'),
       exportDecisions: document.querySelector('#exportDecisions'),
       applyDecisions: document.querySelector('#applyDecisions'),
-      markVisibleQuarantine: document.querySelector('#markVisibleQuarantine'),
-      markVisibleKeep: document.querySelector('#markVisibleKeep'),
-      clearVisible: document.querySelector('#clearVisible'),
+      useSuggestedVisible: document.querySelector('#useSuggestedVisible'),
+      selectVisible: document.querySelector('#selectVisible'),
+      clearSelected: document.querySelector('#clearSelected'),
+      selectedQuarantine: document.querySelector('#selectedQuarantine'),
+      selectedKeep: document.querySelector('#selectedKeep'),
       saveState: document.querySelector('#saveState'),
       apiState: document.querySelector('#apiState'),
       viewerTitle: document.querySelector('#viewerTitle'),
@@ -740,7 +800,7 @@ function renderDashboard(manifest) {
       preview: document.querySelector('#preview'),
       viewerQuarantine: document.querySelector('#viewerQuarantine'),
       viewerKeep: document.querySelector('#viewerKeep'),
-      viewerReset: document.querySelector('#viewerReset'),
+      viewerSuggested: document.querySelector('#viewerSuggested'),
       details: document.querySelector('#details'),
     };
 
@@ -754,12 +814,15 @@ function renderDashboard(manifest) {
 
     els.exportDecisions.addEventListener('click', exportDecisions);
     els.applyDecisions.addEventListener('click', applyDecisions);
-    els.markVisibleQuarantine.addEventListener('click', () => setVisibleDecisions('quarantine'));
-    els.markVisibleKeep.addEventListener('click', () => setVisibleDecisions('keep'));
-    els.clearVisible.addEventListener('click', () => clearVisibleDecisions());
-    els.viewerQuarantine.addEventListener('click', () => setDecision(selectedId, 'quarantine'));
-    els.viewerKeep.addEventListener('click', () => setDecision(selectedId, 'keep'));
-    els.viewerReset.addEventListener('click', () => setDecision(selectedId, null));
+    els.useSuggestedVisible.addEventListener('click', () => setVisibleToSuggested());
+    els.selectVisible.addEventListener('click', () => setSelectionForVisible(true));
+    els.clearSelected.addEventListener('click', () => clearSelectedRows());
+    els.selectedQuarantine.addEventListener('click', () => setSelectedRowsDecision('quarantine'));
+    els.selectedKeep.addEventListener('click', () => setSelectedRowsDecision('keep'));
+    els.toggleVisible.addEventListener('change', () => setSelectionForVisible(els.toggleVisible.checked));
+    els.viewerQuarantine.addEventListener('click', () => setDecision(selectedId, 'quarantine', true));
+    els.viewerKeep.addEventListener('click', () => setDecision(selectedId, 'keep', true));
+    els.viewerSuggested.addEventListener('click', () => resetDecision(selectedId, true));
 
     function hydrateReasonFilter() {
       const reasons = [...new Set(findings.flatMap(finding => finding.reasons || []))].sort();
@@ -780,8 +843,18 @@ function renderDashboard(manifest) {
       }
     }
 
-    function saveDecisions() {
+    function loadSelection() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(selectionKey) || '[]');
+        return new Set(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        return new Set();
+      }
+    }
+
+    function saveUiState() {
       localStorage.setItem(storageKey, JSON.stringify(decisions));
+      localStorage.setItem(selectionKey, JSON.stringify(Array.from(selectedRows)));
       els.saveState.textContent = 'Saved locally';
       window.setTimeout(() => {
         els.saveState.textContent = '';
@@ -789,37 +862,81 @@ function renderDashboard(manifest) {
     }
 
     function getDecision(finding) {
-      return decisions[finding.id] || 'unreviewed';
+      return decisions[finding.id] || finding.defaultAction || 'keep';
     }
 
-    function setDecision(id, action) {
+    function hasOverride(finding) {
+      return Object.prototype.hasOwnProperty.call(decisions, finding.id);
+    }
+
+    function resetDecision(id, advance = false) {
+      if (!id) return;
+      delete decisions[id];
+      saveUiState();
+      if (advance) selectNextVisible(id);
+      render();
+    }
+
+    function setDecision(id, action, advance = false) {
       if (!id) return;
       const finding = findings.find(item => item.id === id);
       if (!finding) return;
 
-      if (action) {
-        decisions[id] = action;
-      } else {
+      if (!action || action === finding.defaultAction) {
         delete decisions[id];
+      } else {
+        decisions[id] = action;
       }
 
-      saveDecisions();
+      saveUiState();
+      if (advance) selectNextVisible(id);
       render();
     }
 
-    function setVisibleDecisions(action) {
-      for (const finding of visibleFindings) {
-        decisions[finding.id] = action;
+    function selectNextVisible(currentId) {
+      const index = visibleFindings.findIndex(item => item.id === currentId);
+      if (index >= 0 && index < visibleFindings.length - 1) {
+        selectedId = visibleFindings[index + 1].id;
       }
-      saveDecisions();
-      render();
     }
 
-    function clearVisibleDecisions() {
+    function setVisibleToSuggested() {
       for (const finding of visibleFindings) {
         delete decisions[finding.id];
       }
-      saveDecisions();
+      saveUiState();
+      render();
+    }
+
+    function setSelectionForVisible(isSelected) {
+      for (const finding of visibleFindings) {
+        if (isSelected) {
+          selectedRows.add(finding.id);
+        } else {
+          selectedRows.delete(finding.id);
+        }
+      }
+      saveUiState();
+      render();
+    }
+
+    function clearSelectedRows() {
+      selectedRows.clear();
+      saveUiState();
+      render();
+    }
+
+    function setSelectedRowsDecision(action) {
+      for (const id of selectedRows) {
+        const finding = byId.get(id);
+        if (!finding) continue;
+        if (!action || action === finding.defaultAction) {
+          delete decisions[id];
+        } else {
+          decisions[id] = action;
+        }
+      }
+      saveUiState();
       render();
     }
 
@@ -833,7 +950,8 @@ function renderDashboard(manifest) {
       return findings.filter(finding => {
         if (type && finding.mediaType !== type) return false;
         if (eligible && String(finding.quarantineEligible) !== eligible) return false;
-        if (decision && getDecision(finding) !== decision) return false;
+        if (decision === 'overridden' && !hasOverride(finding)) return false;
+        if (decision && decision !== 'overridden' && getDecision(finding) !== decision) return false;
         if (reason && !(finding.reasons || []).includes(reason)) return false;
         if (!q) return true;
         return [
@@ -857,8 +975,11 @@ function renderDashboard(manifest) {
 
       els.auditFindings.textContent = findings.length.toLocaleString();
       els.quarantineCandidates.textContent = findings.filter(finding => finding.quarantineEligible).length.toLocaleString();
-      els.reviewedCount.textContent = Object.keys(decisions).length.toLocaleString();
+      els.overrideCount.textContent = Object.keys(decisions).length.toLocaleString();
       els.visibleCount.textContent = visibleFindings.length.toLocaleString();
+      els.toggleVisible.checked =
+        visibleFindings.length > 0 &&
+        visibleFindings.every(finding => selectedRows.has(finding.id));
 
       renderRows();
       showFinding(findings.find(finding => finding.id === selectedId));
@@ -868,11 +989,22 @@ function renderDashboard(manifest) {
       const page = visibleFindings.slice(0, 1000);
       els.rows.innerHTML = page.map(finding => {
         const decision = getDecision(finding);
-        const decisionClass = decision === 'quarantine' ? 'bad' : decision === 'keep' ? 'ok' : 'warn';
+        const decisionClass = decision === 'quarantine' ? 'bad' : 'ok';
         const selected = finding.id === selectedId ? ' class="selected"' : '';
+        const checked = selectedRows.has(finding.id) ? ' checked' : '';
+        const marker = hasOverride(finding)
+          ? '<span class="badge">override</span>'
+          : '<span class="badge ok">suggested</span>';
         return \`
           <tr data-id="\${escapeAttr(finding.id)}"\${selected}>
-            <td><span class="badge \${decisionClass}">\${decision}</span></td>
+            <td><input class="row-check" data-check-id="\${escapeAttr(finding.id)}" type="checkbox"\${checked} aria-label="Select row"></td>
+            <td class="decision-cell">
+              <select data-decision-id="\${escapeAttr(finding.id)}">
+                <option value="quarantine"\${decision === 'quarantine' ? ' selected' : ''}>Quarantine</option>
+                <option value="keep"\${decision === 'keep' ? ' selected' : ''}>Keep</option>
+              </select>
+              <div class="decision-status"><span class="badge \${decisionClass}">\${decision}</span>\${marker}</div>
+            </td>
             <td>\${finding.mediaType || ''}</td>
             <td>\${finding.model || ''}</td>
             <td>\${(finding.reasons || []).map(reason => '<span class="badge warn">' + escapeHtml(reason) + '</span>').join('')}</td>
@@ -886,6 +1018,27 @@ function renderDashboard(manifest) {
         row.addEventListener('click', () => {
           selectedId = row.dataset.id;
           render();
+        });
+      }
+
+      for (const checkbox of els.rows.querySelectorAll('[data-check-id]')) {
+        checkbox.addEventListener('click', (event) => event.stopPropagation());
+        checkbox.addEventListener('change', (event) => {
+          const id = event.target.dataset.checkId;
+          if (event.target.checked) {
+            selectedRows.add(id);
+          } else {
+            selectedRows.delete(id);
+          }
+          saveUiState();
+          render();
+        });
+      }
+
+      for (const select of els.rows.querySelectorAll('[data-decision-id]')) {
+        select.addEventListener('click', (event) => event.stopPropagation());
+        select.addEventListener('change', (event) => {
+          setDecision(event.target.dataset.decisionId, event.target.value, true);
         });
       }
     }
@@ -903,8 +1056,9 @@ function renderDashboard(manifest) {
       els.viewerTitle.textContent = finding.relativePath || finding.sourcePath || finding.id;
       els.viewerMeta.innerHTML = \`
         <span class="badge \${finding.quarantineEligible ? 'bad' : 'warn'}">\${finding.quarantineEligible ? 'quarantine candidate' : 'report-only'}</span>
-        <span class="badge \${decision === 'quarantine' ? 'bad' : decision === 'keep' ? 'ok' : 'warn'}">decision: \${decision}</span>
+        <span class="badge \${decision === 'quarantine' ? 'bad' : 'ok'}">current: \${decision}</span>
         <span class="badge">suggested: \${finding.defaultAction || 'keep'}</span>
+        \${hasOverride(finding) ? '<span class="badge">override saved</span>' : ''}
       \`;
 
       if (finding.mediaType === 'video') {
@@ -919,8 +1073,9 @@ function renderDashboard(manifest) {
         <div><strong>Reasons:</strong> \${(finding.reasons || []).map(escapeHtml).join(', ')}</div>
         <div><strong>Size:</strong> \${formatBytes(finding.sizeBytes || 0)}</div>
         <div><strong>Hash:</strong> \${escapeHtml(finding.contentHash?.value || 'not recorded')}</div>
-        <div><strong>Source:</strong> <a href="\${finding.sourceFileUri || '#'}">\${escapeHtml(finding.sourcePath || '')}</a></div>
-        <div><strong>Quarantine target:</strong> \${escapeHtml(finding.quarantinePath || '')}</div>
+        <div><strong>Source:</strong> <a class="meta-link" href="\${getMediaUrl(finding)}" target="_blank" rel="noreferrer">Source</a></div>
+        <div><strong>Source Path:</strong> <code>\${escapeHtml(finding.sourcePath || '')}</code></div>
+        <div><strong>Quarantine target:</strong> <code>\${escapeHtml(finding.quarantinePath || '')}</code></div>
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
       \`;
     }
@@ -955,16 +1110,15 @@ function renderDashboard(manifest) {
         generatedAt: new Date().toISOString(),
         auditLogPath: manifest.audit.logPath,
         manifestGeneratedAt: manifest.generatedAt,
-        decisions: Object.entries(decisions).map(([id, action]) => {
-          const finding = findings.find(item => item.id === id);
+        decisions: findings.map((finding) => {
           return {
-            id,
-            action,
-            sourcePath: finding?.sourcePath || null,
-            relativePath: finding?.relativePath || null,
-            reasons: finding?.reasons || [],
-            quarantineEligible: Boolean(finding?.quarantineEligible),
-            contentHash: finding?.contentHash || null,
+            id: finding.id,
+            action: getDecision(finding),
+            sourcePath: finding.sourcePath || null,
+            relativePath: finding.relativePath || null,
+            reasons: finding.reasons || [],
+            quarantineEligible: Boolean(finding.quarantineEligible),
+            contentHash: finding.contentHash || null,
           };
         }),
       };

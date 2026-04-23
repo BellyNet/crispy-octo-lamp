@@ -55,9 +55,7 @@ const incompleteRoot = path.resolve(
   String(argv['incomplete-root'] || path.join(rootDir, 'incomplete'))
 )
 const quarantineBase = path.resolve(
-  String(
-    argv['quarantine-root'] || path.join(__dirname, 'quarantine', 'slopvault')
-  )
+  String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
 )
 const decisionsPath = argv.decisions
   ? path.resolve(String(argv.decisions))
