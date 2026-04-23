@@ -70,6 +70,9 @@ async function main() {
   const records = []
   const roots = buildScanRoots()
   const auditLog = loadAuditLog(auditLogPath)
+  const persistedDecisions = loadLatestDecisions(
+    path.join(outputDir, 'slopvault-dashboard-decisions-latest.json')
+  )
 
   for (const scanRoot of roots) {
     if (!fs.existsSync(scanRoot.root)) continue
@@ -80,7 +83,7 @@ async function main() {
     }
   }
 
-  const manifest = buildManifest(records, auditLog)
+  const manifest = buildManifest(records, auditLog, persistedDecisions)
   const manifestPath = path.join(
     outputDir,
     `slopvault-manifest-${runStamp}.json`
@@ -226,11 +229,15 @@ async function buildRecord(filePath, scanRoot) {
   }
 }
 
-function buildManifest(records, auditLog) {
+function buildManifest(records, auditLog, persistedDecisions) {
   const duplicates = buildDuplicateGroups(records)
   const byMediaType = countBy(records, (record) => record.mediaType)
   const byRoot = countBy(records, (record) => record.root)
-  const auditFindings = buildAuditFindings(auditLog, records)
+  const auditFindings = buildAuditFindings(
+    auditLog,
+    records,
+    persistedDecisions
+  )
 
   return {
     generatedAt: new Date().toISOString(),
@@ -263,7 +270,7 @@ function buildManifest(records, auditLog) {
   }
 }
 
-function buildAuditFindings(auditLog, records) {
+function buildAuditFindings(auditLog, records, persistedDecisions) {
   if (!auditLog?.findings?.length) return []
 
   const recordsByPath = new Map(
@@ -273,31 +280,35 @@ function buildAuditFindings(auditLog, records) {
     ])
   )
 
-  return auditLog.findings.map((finding) => {
-    const sourcePath = finding.sourcePath || ''
-    const matchedRecord = recordsByPath.get(normalizeAbsolutePath(sourcePath))
-    const id =
-      finding.id || createFindingId(finding.sourceType, finding.relativePath)
-    const quarantineEligible = Boolean(finding.quarantineEligible)
+  const findings = auditLog.findings
+    .map((finding) => {
+      const sourcePath = finding.sourcePath || ''
+      const matchedRecord = recordsByPath.get(normalizeAbsolutePath(sourcePath))
+      const id =
+        finding.id || createFindingId(finding.sourceType, finding.relativePath)
+      const quarantineEligible = Boolean(finding.quarantineEligible)
 
-    return {
-      ...finding,
-      id,
-      sourcePath,
-      sourceFileUri: sourcePath ? pathToFileUri(sourcePath) : null,
-      quarantinePath: finding.quarantinePath || null,
-      quarantineFileUri: finding.quarantinePath
-        ? pathToFileUri(finding.quarantinePath)
-        : null,
-      relativePath: normalizePath(finding.relativePath || ''),
-      reasons: Array.isArray(finding.reasons) ? finding.reasons : [],
-      quarantineEligible,
-      defaultAction: quarantineEligible ? 'quarantine' : 'keep',
-      matchedRecordId: matchedRecord?.id || null,
-      model: matchedRecord?.model || inferModelFromFinding(finding),
-      bucket: matchedRecord?.bucket || inferBucketFromFinding(finding),
-    }
-  })
+      return {
+        ...finding,
+        id,
+        sourcePath,
+        sourceFileUri: sourcePath ? pathToFileUri(sourcePath) : null,
+        quarantinePath: finding.quarantinePath || null,
+        quarantineFileUri: finding.quarantinePath
+          ? pathToFileUri(finding.quarantinePath)
+          : null,
+        relativePath: normalizePath(finding.relativePath || ''),
+        reasons: Array.isArray(finding.reasons) ? finding.reasons : [],
+        quarantineEligible,
+        defaultAction: quarantineEligible ? 'quarantine' : 'keep',
+        matchedRecordId: matchedRecord?.id || null,
+        model: matchedRecord?.model || inferModelFromFinding(finding),
+        bucket: matchedRecord?.bucket || inferBucketFromFinding(finding),
+      }
+    })
+    .filter((finding) => persistedDecisions.get(finding.id) !== 'keep')
+
+  return findings
 }
 
 function omitFindings(auditLog) {
@@ -382,6 +393,26 @@ function loadAuditLog(filePath) {
   parsed.logPath = filePath
   parsed.findings = Array.isArray(parsed.findings) ? parsed.findings : []
   return parsed
+}
+
+function loadLatestDecisions(filePath) {
+  if (!fs.existsSync(filePath)) return new Map()
+
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
+    const parsed = JSON.parse(raw)
+    const decisions = Array.isArray(parsed?.decisions) ? parsed.decisions : []
+    return new Map(
+      decisions
+        .filter((decision) => decision?.id && decision?.action)
+        .map((decision) => [String(decision.id), String(decision.action)])
+    )
+  } catch (err) {
+    console.warn(
+      `Could not load saved review decisions from ${filePath}: ${err.message}`
+    )
+    return new Map()
+  }
 }
 
 function createFindingId(sourceType, relativePath) {
@@ -640,12 +671,6 @@ function renderDashboard(manifest) {
       box-shadow: inset 0 0 0 1px currentColor;
     }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .row-check {
-      width: 16px;
-      height: 16px;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
     .viewer { padding: 18px; position: sticky; top: 16px; }
     .viewer h2 { margin: 0 0 8px; font-size: 22px; }
     .viewer p { color: var(--muted); overflow-wrap: anywhere; }
@@ -702,19 +727,19 @@ function renderDashboard(manifest) {
     <div class="subhead">
       Generated at ${escapeHtml(manifest.generatedAt)} from audit log
       ${manifest.audit.logPath ? `<code>${escapeHtml(manifest.audit.logPath)}</code>` : '<code>none found</code>'}.
-      Default decisions are prefilled from the suggested action so you can review fast, make overrides only where needed, then apply the current decision set in one shot.
+      Default decisions are prefilled on load so you can review fast, change only the rows you disagree with, and apply the current decision set in one shot.
     </div>
   </header>
   <main>
     <section class="cards">
       <div class="card"><strong id="auditFindings"></strong><span>Audit Findings</span></div>
-      <div class="card"><strong id="quarantineCandidates"></strong><span>Suggested Quarantine</span></div>
-      <div class="card"><strong id="overrideCount"></strong><span>Overrides</span></div>
+      <div class="card"><strong id="quarantineCandidates"></strong><span>Current Quarantine</span></div>
+      <div class="card"><strong id="keepCount"></strong><span>Current Keep</span></div>
       <div class="card"><strong id="visibleCount"></strong><span>Visible</span></div>
     </section>
 
     <section class="notice">
-      Review starts with the suggested action already selected for every finding. Change only the rows you disagree with, use the bulk tools for visible or checked rows, then click <strong>Apply Quarantine</strong> to accept the current decision set.
+      Every finding starts prefilled as either <strong>keep</strong> or <strong>quarantine</strong>. Change only the rows you disagree with, then click <strong>Apply Review Decisions</strong> to quarantine the current quarantine items and remember the current keep items so they stay out of future reviews.
     </section>
 
     <section class="controls">
@@ -734,7 +759,6 @@ function renderDashboard(manifest) {
         <option value="">All current decisions</option>
         <option value="quarantine">Current: quarantine</option>
         <option value="keep">Current: keep</option>
-        <option value="overridden">Overrides only</option>
       </select>
       <select id="reasonFilter">
         <option value="">All reasons</option>
@@ -742,13 +766,7 @@ function renderDashboard(manifest) {
     </section>
 
     <section class="toolbar">
-      <button class="danger" id="applyDecisions" disabled>Apply Quarantine</button>
-      <button class="ghost" id="exportDecisions">Export Decisions JSON</button>
-      <button class="ghost" id="useSuggestedVisible">Use Suggested Visible</button>
-      <button class="ghost" id="selectVisible">Select Visible</button>
-      <button class="ghost" id="clearSelected">Clear Selected</button>
-      <button class="danger" id="selectedQuarantine">Selected Quarantine</button>
-      <button class="good" id="selectedKeep">Selected Keep</button>
+      <button class="primary" id="applyDecisions" disabled>Apply Review Decisions</button>
       <span class="spacer"></span>
       <span id="saveState"></span>
       <span class="api-state" id="apiState"></span>
@@ -759,7 +777,6 @@ function renderDashboard(manifest) {
         <table>
           <thead>
             <tr>
-              <th><input class="row-check" id="toggleVisible" type="checkbox" aria-label="Select visible rows"></th>
               <th>Decision</th>
               <th>Type</th>
               <th>Model</th>
@@ -773,12 +790,11 @@ function renderDashboard(manifest) {
       </div>
       <aside class="panel viewer">
         <h2 id="viewerTitle">Select a finding</h2>
-        <p id="viewerMeta">Use the main table decisions for fast review, or the viewer buttons if you want to inspect one item at a time.</p>
+        <p id="viewerMeta">Use the row actions for quick review, or the viewer buttons if you want to inspect one item at a time.</p>
         <div class="preview" id="preview">No finding selected</div>
         <div class="actions">
           <button class="danger" id="viewerQuarantine">Quarantine</button>
           <button class="good" id="viewerKeep">Keep</button>
-          <button class="ghost" id="viewerSuggested">Suggested</button>
         </div>
         <div class="helper">Changing a decision here advances to the next visible finding.</div>
         <div class="meta-list" id="details"></div>
@@ -789,19 +805,16 @@ function renderDashboard(manifest) {
   <script>
     const manifest = ${data};
     const findings = manifest.audit.findings || [];
-    const byId = new Map(findings.map(finding => [finding.id, finding]));
     const storageKey = 'slopvault-audit-decisions:' + (manifest.audit.logPath || manifest.generatedAt);
-    const selectionKey = storageKey + ':selection';
     const reviewToken = new URLSearchParams(window.location.search).get('token') || '';
     const decisions = loadDecisions();
-    const selectedRows = loadSelection();
     let selectedId = findings[0]?.id || null;
     let visibleFindings = [];
 
     const els = {
       auditFindings: document.querySelector('#auditFindings'),
       quarantineCandidates: document.querySelector('#quarantineCandidates'),
-      overrideCount: document.querySelector('#overrideCount'),
+      keepCount: document.querySelector('#keepCount'),
       visibleCount: document.querySelector('#visibleCount'),
       rows: document.querySelector('#rows'),
       search: document.querySelector('#search'),
@@ -809,14 +822,7 @@ function renderDashboard(manifest) {
       eligibilityFilter: document.querySelector('#eligibilityFilter'),
       decisionFilter: document.querySelector('#decisionFilter'),
       reasonFilter: document.querySelector('#reasonFilter'),
-      toggleVisible: document.querySelector('#toggleVisible'),
-      exportDecisions: document.querySelector('#exportDecisions'),
       applyDecisions: document.querySelector('#applyDecisions'),
-      useSuggestedVisible: document.querySelector('#useSuggestedVisible'),
-      selectVisible: document.querySelector('#selectVisible'),
-      clearSelected: document.querySelector('#clearSelected'),
-      selectedQuarantine: document.querySelector('#selectedQuarantine'),
-      selectedKeep: document.querySelector('#selectedKeep'),
       saveState: document.querySelector('#saveState'),
       apiState: document.querySelector('#apiState'),
       viewerTitle: document.querySelector('#viewerTitle'),
@@ -824,7 +830,6 @@ function renderDashboard(manifest) {
       preview: document.querySelector('#preview'),
       viewerQuarantine: document.querySelector('#viewerQuarantine'),
       viewerKeep: document.querySelector('#viewerKeep'),
-      viewerSuggested: document.querySelector('#viewerSuggested'),
       details: document.querySelector('#details'),
     };
 
@@ -836,17 +841,9 @@ function renderDashboard(manifest) {
       input.addEventListener('input', render);
     }
 
-    els.exportDecisions.addEventListener('click', exportDecisions);
     els.applyDecisions.addEventListener('click', applyDecisions);
-    els.useSuggestedVisible.addEventListener('click', () => setVisibleToSuggested());
-    els.selectVisible.addEventListener('click', () => setSelectionForVisible(true));
-    els.clearSelected.addEventListener('click', () => clearSelectedRows());
-    els.selectedQuarantine.addEventListener('click', () => setSelectedRowsDecision('quarantine'));
-    els.selectedKeep.addEventListener('click', () => setSelectedRowsDecision('keep'));
-    els.toggleVisible.addEventListener('change', () => setSelectionForVisible(els.toggleVisible.checked));
     els.viewerQuarantine.addEventListener('click', () => setDecision(selectedId, 'quarantine', true));
     els.viewerKeep.addEventListener('click', () => setDecision(selectedId, 'keep', true));
-    els.viewerSuggested.addEventListener('click', () => resetDecision(selectedId, true));
 
     function hydrateReasonFilter() {
       const reasons = [...new Set(findings.flatMap(finding => finding.reasons || []))].sort();
@@ -867,18 +864,8 @@ function renderDashboard(manifest) {
       }
     }
 
-    function loadSelection() {
-      try {
-        const parsed = JSON.parse(localStorage.getItem(selectionKey) || '[]');
-        return new Set(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        return new Set();
-      }
-    }
-
     function saveUiState() {
       localStorage.setItem(storageKey, JSON.stringify(decisions));
-      localStorage.setItem(selectionKey, JSON.stringify(Array.from(selectedRows)));
       els.saveState.textContent = 'Saved locally';
       window.setTimeout(() => {
         els.saveState.textContent = '';
@@ -887,18 +874,6 @@ function renderDashboard(manifest) {
 
     function getDecision(finding) {
       return decisions[finding.id] || finding.defaultAction || 'keep';
-    }
-
-    function hasOverride(finding) {
-      return Object.prototype.hasOwnProperty.call(decisions, finding.id);
-    }
-
-    function resetDecision(id, advance = false) {
-      if (!id) return;
-      delete decisions[id];
-      saveUiState();
-      if (advance) selectNextVisible(id);
-      render();
     }
 
     function setDecision(id, action, advance = false) {
@@ -924,46 +899,6 @@ function renderDashboard(manifest) {
       }
     }
 
-    function setVisibleToSuggested() {
-      for (const finding of visibleFindings) {
-        delete decisions[finding.id];
-      }
-      saveUiState();
-      render();
-    }
-
-    function setSelectionForVisible(isSelected) {
-      for (const finding of visibleFindings) {
-        if (isSelected) {
-          selectedRows.add(finding.id);
-        } else {
-          selectedRows.delete(finding.id);
-        }
-      }
-      saveUiState();
-      render();
-    }
-
-    function clearSelectedRows() {
-      selectedRows.clear();
-      saveUiState();
-      render();
-    }
-
-    function setSelectedRowsDecision(action) {
-      for (const id of selectedRows) {
-        const finding = byId.get(id);
-        if (!finding) continue;
-        if (!action || action === finding.defaultAction) {
-          delete decisions[id];
-        } else {
-          decisions[id] = action;
-        }
-      }
-      saveUiState();
-      render();
-    }
-
     function filteredFindings() {
       const q = els.search.value.trim().toLowerCase();
       const type = els.typeFilter.value;
@@ -974,8 +909,7 @@ function renderDashboard(manifest) {
       return findings.filter(finding => {
         if (type && finding.mediaType !== type) return false;
         if (eligible && String(finding.quarantineEligible) !== eligible) return false;
-        if (decision === 'overridden' && !hasOverride(finding)) return false;
-        if (decision && decision !== 'overridden' && getDecision(finding) !== decision) return false;
+        if (decision && getDecision(finding) !== decision) return false;
         if (reason && !(finding.reasons || []).includes(reason)) return false;
         if (!q) return true;
         return [
@@ -999,11 +933,8 @@ function renderDashboard(manifest) {
 
       els.auditFindings.textContent = findings.length.toLocaleString();
       els.quarantineCandidates.textContent = findings.filter(finding => finding.quarantineEligible).length.toLocaleString();
-      els.overrideCount.textContent = Object.keys(decisions).length.toLocaleString();
+      els.keepCount.textContent = findings.filter(finding => getDecision(finding) === 'keep').length.toLocaleString();
       els.visibleCount.textContent = visibleFindings.length.toLocaleString();
-      els.toggleVisible.checked =
-        visibleFindings.length > 0 &&
-        visibleFindings.every(finding => selectedRows.has(finding.id));
 
       renderRows();
       showFinding(findings.find(finding => finding.id === selectedId));
@@ -1015,15 +946,10 @@ function renderDashboard(manifest) {
         const decision = getDecision(finding);
         const decisionClass = decision === 'quarantine' ? 'bad' : 'ok';
         const selected = finding.id === selectedId ? ' class="selected"' : '';
-        const checked = selectedRows.has(finding.id) ? ' checked' : '';
-        const marker = hasOverride(finding)
-          ? '<span class="badge">override</span>'
-          : '<span class="badge ok">suggested</span>';
         const trashClass = decision === 'quarantine' ? 'danger active' : 'ghost';
         const keepClass = decision === 'keep' ? 'good active' : 'ghost';
         return \`
           <tr data-id="\${escapeAttr(finding.id)}"\${selected}>
-            <td><input class="row-check" data-check-id="\${escapeAttr(finding.id)}" type="checkbox"\${checked} aria-label="Select row"></td>
             <td class="decision-cell">
               <div class="row-actions">
                 <button class="row-icon \${trashClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="quarantine" title="Quarantine" aria-label="Quarantine">
@@ -1037,7 +963,7 @@ function renderDashboard(manifest) {
                   </svg>
                 </button>
               </div>
-              <div class="decision-status"><span class="badge \${decisionClass}">\${decision}</span>\${marker}</div>
+              <div class="decision-status"><span class="badge \${decisionClass}">\${decision}</span></div>
             </td>
             <td>\${finding.mediaType || ''}</td>
             <td>\${finding.model || ''}</td>
@@ -1051,20 +977,6 @@ function renderDashboard(manifest) {
       for (const row of els.rows.querySelectorAll('tr')) {
         row.addEventListener('click', () => {
           selectedId = row.dataset.id;
-          render();
-        });
-      }
-
-      for (const checkbox of els.rows.querySelectorAll('[data-check-id]')) {
-        checkbox.addEventListener('click', (event) => event.stopPropagation());
-        checkbox.addEventListener('change', (event) => {
-          const id = event.target.dataset.checkId;
-          if (event.target.checked) {
-            selectedRows.add(id);
-          } else {
-            selectedRows.delete(id);
-          }
-          saveUiState();
           render();
         });
       }
@@ -1095,8 +1007,6 @@ function renderDashboard(manifest) {
       els.viewerMeta.innerHTML = \`
         <span class="badge \${finding.quarantineEligible ? 'bad' : 'warn'}">\${finding.quarantineEligible ? 'quarantine candidate' : 'report-only'}</span>
         <span class="badge \${decision === 'quarantine' ? 'bad' : 'ok'}">current: \${decision}</span>
-        <span class="badge">suggested: \${finding.defaultAction || 'keep'}</span>
-        \${hasOverride(finding) ? '<span class="badge">override saved</span>' : ''}
       \`;
 
       if (finding.mediaType === 'video') {
@@ -1116,19 +1026,6 @@ function renderDashboard(manifest) {
         <div><strong>Quarantine target:</strong> <code>\${escapeHtml(finding.quarantinePath || '')}</code></div>
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
       \`;
-    }
-
-    function exportDecisions() {
-      const exported = buildDecisionExport();
-      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'slopvault-audit-decisions-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
     }
 
     function getMediaUrl(finding) {
@@ -1186,16 +1083,22 @@ function renderDashboard(manifest) {
     async function applyDecisions() {
       const exported = buildDecisionExport();
       const quarantineCount = exported.decisions.filter(item => item.action === 'quarantine').length;
+      const keepCount = exported.decisions.filter(item => item.action === 'keep').length;
 
-      if (!quarantineCount) {
-        els.apiState.textContent = 'No quarantine decisions to apply';
+      if (!exported.decisions.length) {
+        els.apiState.textContent = 'No review decisions to apply';
         return;
       }
 
-      if (!confirm('Move ' + quarantineCount + ' reviewed file(s) to quarantine now?')) return;
+      if (!confirm(
+        'Apply review decisions now?\\n\\nQuarantine: ' +
+        quarantineCount +
+        '\\nKeep and hide from future reviews: ' +
+        keepCount
+      )) return;
 
       els.applyDecisions.disabled = true;
-      els.apiState.textContent = 'Applying quarantine... keep this tab open';
+      els.apiState.textContent = 'Applying review decisions... keep this tab open';
 
       try {
         const response = await fetch('/api/apply', {
