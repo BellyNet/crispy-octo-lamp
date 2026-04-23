@@ -14,6 +14,7 @@ const argv = minimist(process.argv.slice(2), {
     'help',
     'hash',
     'hash-findings',
+    'archive',
     'no-open',
     'skip-audit',
     'include-incomplete',
@@ -22,6 +23,7 @@ const argv = minimist(process.argv.slice(2), {
     port: 4777,
     hash: false,
     'hash-findings': false,
+    archive: false,
     'no-open': false,
     'skip-audit': false,
     'include-incomplete': true,
@@ -73,6 +75,7 @@ Options:
   --port <n>          Local dashboard port. Default: 4777.
   --hash              Compute md5 hashes while generating the manifest.
   --hash-findings     Hash every flagged audit finding before review.
+  --archive           Also keep timestamped audit logs.
   --skip-audit        Reuse the latest audit log instead of running a new scan.
   --include-incomplete=false
                       Skip repo incomplete files during audit.
@@ -90,6 +93,7 @@ function buildAuditArgs(apply, decisionsPath = null) {
   if (apply) args.push('--apply')
   if (decisionsPath) args.push('--decisions', decisionsPath)
   if (argv['hash-findings']) args.push('--hash-findings')
+  if (argv.archive) args.push('--archive')
 
   for (const name of [
     'slopvault-root',
@@ -233,10 +237,9 @@ async function applyDecisions(req, res) {
     )
   }
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const decisionsPath = path.join(
     manifestDir,
-    `slopvault-dashboard-decisions-${stamp}.json`
+    'slopvault-dashboard-decisions-latest.json'
   )
 
   fs.writeFileSync(
@@ -398,6 +401,9 @@ function getMediaContentType(filePath) {
 
 function findLatestAuditLog(dirPath) {
   if (!fs.existsSync(dirPath)) return null
+
+  const latestPath = path.join(dirPath, 'audit-slopvault-latest.json')
+  if (fs.existsSync(latestPath)) return latestPath
 
   return (
     fs

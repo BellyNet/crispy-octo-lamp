@@ -11,7 +11,14 @@ const argv = minimist(process.argv.slice(2), {
     d: 'dry-run',
     h: 'help',
   },
-  boolean: ['dry-run', 'apply', 'help', 'include-incomplete', 'hash-findings'],
+  boolean: [
+    'dry-run',
+    'apply',
+    'help',
+    'include-incomplete',
+    'hash-findings',
+    'archive',
+  ],
   default: {
     'dry-run': false,
     apply: false,
@@ -22,6 +29,7 @@ const argv = minimist(process.argv.slice(2), {
     'tail-seconds': 5,
     'tail-frames': 5,
     'hash-findings': false,
+    archive: false,
   },
 })
 
@@ -71,6 +79,7 @@ const tailSeconds = normalizePositiveInteger(argv['tail-seconds'], 5)
 const tailFrames = normalizePositiveInteger(argv['tail-frames'], 5)
 const includeIncomplete = Boolean(argv['include-incomplete'])
 const hashFindings = Boolean(argv['hash-findings'])
+const archiveLogs = Boolean(argv.archive)
 const dryRun = argv.apply ? false : true
 const decisions = decisionsPath ? loadDecisions(decisionsPath) : null
 const startedAt = new Date()
@@ -216,7 +225,7 @@ async function main() {
   console.log(`Flagged: ${summary.flaggedFiles}`)
   console.log(`Quarantine eligible: ${summary.quarantineEligibleFiles}`)
   console.log(`Moved: ${summary.movedFiles}`)
-  console.log(`Log file: ${path.join(logDir, `${logBase}.json`)}`)
+  console.log(`Log file: ${path.join(logDir, 'audit-slopvault-latest.json')}`)
 }
 
 function printHelp() {
@@ -237,6 +246,7 @@ Options:
   --tail-seconds <n>            Seek this far from end for video decode check.
   --tail-frames <n>             Decode this many tail frames for video check.
   --hash-findings               Hash every flagged finding during this run.
+  --archive                     Also write timestamped audit log copies.
   --include-incomplete          Include repo incomplete files. Default: true.
   -h, --help                    Show help.
 
@@ -646,21 +656,16 @@ async function quarantineFinding(finding) {
 }
 
 async function writeLogs(findings) {
-  const summaryPath = path.join(logDir, `${logBase}.json`)
-  const reportPath = path.join(logDir, `${logBase}.txt`)
+  const summaryPath = path.join(logDir, 'audit-slopvault-latest.json')
+  const reportPath = path.join(logDir, 'audit-slopvault-latest.txt')
+  const payload = {
+    ...summary,
+    runId: logBase,
+    finishedAt: new Date().toISOString(),
+    findings,
+  }
 
-  fs.writeFileSync(
-    summaryPath,
-    JSON.stringify(
-      {
-        ...summary,
-        finishedAt: new Date().toISOString(),
-        findings,
-      },
-      null,
-      2
-    )
-  )
+  fs.writeFileSync(summaryPath, JSON.stringify(payload, null, 2))
 
   const lines = [
     `Audit run: ${logBase}`,
@@ -687,4 +692,15 @@ async function writeLogs(findings) {
   }
 
   fs.writeFileSync(reportPath, `${lines.join('\n')}\n`)
+
+  if (archiveLogs) {
+    fs.writeFileSync(
+      path.join(logDir, `${logBase}.json`),
+      JSON.stringify(payload, null, 2)
+    )
+    fs.writeFileSync(
+      path.join(logDir, `${logBase}.txt`),
+      `${lines.join('\n')}\n`
+    )
+  }
 }

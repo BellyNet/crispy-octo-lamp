@@ -357,6 +357,9 @@ function getMediaType(ext) {
 function findLatestAuditLog(logDir) {
   if (!fs.existsSync(logDir)) return null
 
+  const latestPath = path.join(logDir, 'audit-slopvault-latest.json')
+  if (fs.existsSync(latestPath)) return latestPath
+
   return (
     fs
       .readdirSync(logDir)
