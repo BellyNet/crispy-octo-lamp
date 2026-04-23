@@ -512,13 +512,14 @@ function renderDashboard(manifest) {
     input::placeholder { color: #7990b4; }
     select {
       appearance: none;
-      padding-right: 34px;
+      padding-right: 44px;
+      line-height: 1.25;
       background-image:
         linear-gradient(45deg, transparent 50%, #9fc3ff 50%),
         linear-gradient(135deg, #9fc3ff 50%, transparent 50%);
       background-position:
-        calc(100% - 18px) calc(50% - 3px),
-        calc(100% - 12px) calc(50% - 3px);
+        calc(100% - 24px) calc(50% - 3px),
+        calc(100% - 18px) calc(50% - 3px);
       background-size: 6px 6px, 6px 6px;
       background-repeat: no-repeat;
     }
@@ -612,9 +613,32 @@ function renderDashboard(manifest) {
     .badge.ok { background: rgba(69, 212, 131, .16); color: #bafbd5; }
     .badge.warn { background: rgba(255, 191, 77, .16); color: #ffe0a3; }
     .badge.bad { background: rgba(255, 91, 110, .18); color: #ffd0d7; }
-    .decision-cell { min-width: 165px; }
-    .decision-cell select { width: 100%; min-width: 140px; }
+    .decision-cell { min-width: 150px; }
     .decision-status { margin-top: 6px; }
+    .row-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .row-icon {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+    }
+    .row-icon svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      pointer-events: none;
+    }
+    .row-icon.active {
+      box-shadow: inset 0 0 0 1px currentColor;
+    }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .row-check {
       width: 16px;
@@ -995,14 +1019,24 @@ function renderDashboard(manifest) {
         const marker = hasOverride(finding)
           ? '<span class="badge">override</span>'
           : '<span class="badge ok">suggested</span>';
+        const trashClass = decision === 'quarantine' ? 'danger active' : 'ghost';
+        const keepClass = decision === 'keep' ? 'good active' : 'ghost';
         return \`
           <tr data-id="\${escapeAttr(finding.id)}"\${selected}>
             <td><input class="row-check" data-check-id="\${escapeAttr(finding.id)}" type="checkbox"\${checked} aria-label="Select row"></td>
             <td class="decision-cell">
-              <select data-decision-id="\${escapeAttr(finding.id)}">
-                <option value="quarantine"\${decision === 'quarantine' ? ' selected' : ''}>Quarantine</option>
-                <option value="keep"\${decision === 'keep' ? ' selected' : ''}>Keep</option>
-              </select>
+              <div class="row-actions">
+                <button class="row-icon \${trashClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="quarantine" title="Quarantine" aria-label="Quarantine">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm-1 12h12l1-13H5l1 13z"/>
+                  </svg>
+                </button>
+                <button class="row-icon \${keepClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="keep" title="Keep" aria-label="Keep">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 4h11l3 3v13H5V4zm2 2v12h10V8.5L15.5 6H15v4H9V6H7zm4 0v2h2V6h-2zm-2 8h6v3H9v-3z"/>
+                  </svg>
+                </button>
+              </div>
               <div class="decision-status"><span class="badge \${decisionClass}">\${decision}</span>\${marker}</div>
             </td>
             <td>\${finding.mediaType || ''}</td>
@@ -1035,10 +1069,14 @@ function renderDashboard(manifest) {
         });
       }
 
-      for (const select of els.rows.querySelectorAll('[data-decision-id]')) {
-        select.addEventListener('click', (event) => event.stopPropagation());
-        select.addEventListener('change', (event) => {
-          setDecision(event.target.dataset.decisionId, event.target.value, true);
+      for (const button of els.rows.querySelectorAll('[data-action-id]')) {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setDecision(
+            event.currentTarget.dataset.actionId,
+            event.currentTarget.dataset.actionValue,
+            true
+          );
         });
       }
     }
