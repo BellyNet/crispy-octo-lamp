@@ -329,6 +329,26 @@ function createModelFolders(modelName) {
   }
 }
 
+function buildHashMetadata(modelName, absolutePath, mediaType, sizeBytes, uploadedDate) {
+  const relativePath = path
+    .relative(datasetDir, absolutePath)
+    .replace(/\\/g, '/')
+  const parts = relativePath.split('/').filter(Boolean)
+
+  return {
+    root: 'dataset',
+    model: modelName || parts[0] || null,
+    bucket: parts[1] || null,
+    relativePath,
+    filename: path.basename(absolutePath),
+    mediaType,
+    sizeBytes:
+      Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
+    modifiedAt: uploadedDate?.toISOString?.() || null,
+    source: 'milkmaid',
+  }
+}
+
 function downloadBufferWithProgress(mediaUrl, onProgress) {
   const proto = mediaUrl.startsWith('https') ? https : http
   return new Promise((resolve, reject) => {
@@ -652,9 +672,29 @@ async function scrapeGallery(browser, url, modelName, folders) {
               }
 
               knownFilenames.add(filename)
-              if (visualHash) addVisualHash(visualHash)
+              if (visualHash) {
+                addVisualHash(
+                  visualHash,
+                  buildHashMetadata(
+                    modelName,
+                    stillPath,
+                    'gif',
+                    buffer.length,
+                    uploadedDate
+                  )
+                )
+              }
               if (!isBitwiseDupe(hash)) {
-                addBitwiseHash(hash)
+                addBitwiseHash(
+                  hash,
+                  buildHashMetadata(
+                    modelName,
+                    stillPath,
+                    'gif',
+                    buffer.length,
+                    uploadedDate
+                  )
+                )
                 saveBitwiseHashCache()
               }
 
@@ -708,11 +748,31 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           if (!isBitwiseDupe(hash)) {
-            addBitwiseHash(hash)
+            addBitwiseHash(
+              hash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'image',
+                buffer.length,
+                uploadedDate
+              )
+            )
             saveBitwiseHashCache()
           }
 
-          if (visualHash) addVisualHash(visualHash)
+          if (visualHash) {
+            addVisualHash(
+              visualHash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'image',
+                buffer.length,
+                uploadedDate
+              )
+            )
+          }
           knownFilenames.add(filename)
           successCount++
           return logAndProgress(`✅ Saved: ${filename}`, true)

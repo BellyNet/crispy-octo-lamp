@@ -4,6 +4,7 @@ const os = require('os')
 const imghash = require('imghash')
 const sharp = require('sharp')
 const { createHash } = require('crypto')
+const { createHashStore } = require('./hashStore')
 
 const tmpDir = path.join(os.tmpdir(), 'thicc_visual_hash')
 
@@ -15,22 +16,19 @@ const datasetDir = path.join(
   'dataset'
 )
 const visualHashPath = path.join(datasetDir, 'visualHashes.json')
-
-let visualHashSet = new Set()
+const visualHashStore = createHashStore({
+  storePath: visualHashPath,
+  kind: 'visual',
+  algorithm: 'imghash-16-hex',
+})
 
 function loadVisualHashCache() {
-  if (fs.existsSync(visualHashPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(visualHashPath, 'utf-8'))
-      visualHashSet = new Set(data)
-    } catch (err) {
-      console.warn('⚠️ Failed to load visual hash cache:', err.message)
-    }
-  }
+  visualHashStore.load()
 }
 
 function saveVisualHashCache() {
-  fs.writeFileSync(visualHashPath, JSON.stringify([...visualHashSet], null, 2))
+  fs.mkdirSync(path.dirname(visualHashPath), { recursive: true })
+  visualHashStore.save()
 }
 
 async function getVisualHashFromBuffer(buffer) {
@@ -43,18 +41,26 @@ async function getVisualHashFromBuffer(buffer) {
     fs.unlinkSync(tmpPath)
     return visualHash
   } catch (err) {
-    console.warn('⚠️ Failed visual hash:', err.message)
+    console.warn(`Failed visual hash: ${err.message}`)
     if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
     return null
   }
 }
 
 function isVisualDupe(visualHash) {
-  return visualHashSet.has(visualHash)
+  return visualHashStore.has(visualHash)
 }
 
-function addVisualHash(visualHash) {
-  visualHashSet.add(visualHash)
+function addVisualHash(visualHash, metadata = null) {
+  return visualHashStore.add(visualHash, metadata)
+}
+
+function getVisualHashRecord(visualHash) {
+  return visualHashStore.get(visualHash)
+}
+
+function getVisualHashEntries() {
+  return visualHashStore.getAllEntries()
 }
 
 module.exports = {
@@ -63,4 +69,6 @@ module.exports = {
   getVisualHashFromBuffer,
   isVisualDupe,
   addVisualHash,
+  getVisualHashRecord,
+  getVisualHashEntries,
 }
