@@ -48,6 +48,7 @@ const dryRun = Boolean(argv['dry-run'])
 
 const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 const gifExts = new Set(['.gif'])
+const videoExts = new Set(['.mp4', '.webm', '.m4v', '.mov'])
 
 main().catch((err) => {
   console.error(`Fatal backfill error: ${err.stack || err.message}`)
@@ -65,10 +66,14 @@ async function main() {
   let bitwiseCount = 0
   let visualCount = 0
   let scannedCount = 0
+  const scannedByBucket = {}
+  const bitwiseByBucket = {}
+  const visualByBucket = {}
 
   for (const filePath of collectFiles(modelRoot)) {
     const ext = path.extname(filePath).toLowerCase()
-    if (!imageExts.has(ext) && !gifExts.has(ext)) continue
+    if (!imageExts.has(ext) && !gifExts.has(ext) && !videoExts.has(ext))
+      continue
 
     scannedCount += 1
     const buffer = fs.readFileSync(filePath)
@@ -82,21 +87,26 @@ async function main() {
       bucket: relativePath.split('/')[1] || null,
       relativePath,
       filename: path.basename(filePath),
-      mediaType: gifExts.has(ext) ? 'gif' : 'image',
+      mediaType: getMediaType(ext),
       sizeBytes: stat.size,
       modifiedAt: stat.mtime.toISOString(),
       source: 'backfill-model-hashes',
     }
+    const bucketName = metadata.bucket || 'unknown'
+
+    scannedByBucket[bucketName] = (scannedByBucket[bucketName] || 0) + 1
 
     const bitwiseHash = createHash('md5').update(buffer).digest('hex')
     addBitwiseHash(bitwiseHash, metadata)
     bitwiseCount += 1
+    bitwiseByBucket[bucketName] = (bitwiseByBucket[bucketName] || 0) + 1
 
     if (imageExts.has(ext)) {
       const visualHash = await getVisualHashFromBuffer(buffer)
       if (visualHash) {
         addVisualHash(visualHash, metadata)
         visualCount += 1
+        visualByBucket[bucketName] = (visualByBucket[bucketName] || 0) + 1
       }
     }
   }
@@ -109,8 +119,11 @@ async function main() {
   console.log(`Model: ${modelName}`)
   console.log(`Dataset root: ${datasetRoot}`)
   console.log(`Scanned files: ${scannedCount}`)
+  console.log(`Scanned by bucket: ${JSON.stringify(scannedByBucket)}`)
   console.log(`Bitwise updates: ${bitwiseCount}`)
+  console.log(`Bitwise by bucket: ${JSON.stringify(bitwiseByBucket)}`)
   console.log(`Visual updates: ${visualCount}`)
+  console.log(`Visual by bucket: ${JSON.stringify(visualByBucket)}`)
   console.log(
     dryRun
       ? 'Dry run only. No cache files were written.'
@@ -128,9 +141,15 @@ Options:
 
 Notes:
   This backfills structured hash metadata for one model at a time.
-  Current scope mirrors Milkmaid image handling: bitwise for images/GIFs,
-  visual for non-GIF images only.
+  Bitwise hashes cover images, GIFs, and videos.
+  Visual hashes currently cover non-GIF images only.
 `)
+}
+
+function getMediaType(ext) {
+  if (videoExts.has(ext)) return 'video'
+  if (gifExts.has(ext)) return 'gif'
+  return 'image'
 }
 
 function collectFiles(root) {

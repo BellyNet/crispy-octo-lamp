@@ -380,6 +380,16 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
   })
 }
 
+function hashFileFromPath(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('md5')
+    const stream = fs.createReadStream(filePath)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
+}
+
 function convertGifToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
@@ -932,6 +942,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
         fs.utimesSync(mp4Path, ts, ts)
       }
 
+      const mp4Stat = fs.statSync(mp4Path)
+      const mp4Hash = await hashFileFromPath(mp4Path)
+      addBitwiseHash(
+        mp4Hash,
+        buildHashMetadata(
+          modelName,
+          mp4Path,
+          'video',
+          mp4Stat.size,
+          uploadedDate
+        )
+      )
+      saveBitwiseHashCache()
+
       knownFilenames.add(path.basename(mp4Path))
 
       // Clean up the original GIF from tmp folder
@@ -1040,6 +1064,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
 
             moveFileIntoPlace(tmpPath, finalPath)
+
+            const finalStat = fs.statSync(finalPath)
+            const finalHash = await hashFileFromPath(finalPath)
+            addBitwiseHash(
+              finalHash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'video',
+                finalStat.size,
+                uploadedDate
+              )
+            )
+            saveBitwiseHashCache()
 
             successCount++
             logAndProgress(`✅ Saved lazy video: ${filename}`)
