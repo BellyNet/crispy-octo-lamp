@@ -49,6 +49,9 @@ const quarantineBase = path.resolve(
     argv['quarantine-root'] || path.join(__dirname, 'quarantine', 'slopvault')
   )
 )
+const decisionsPath = argv.decisions
+  ? path.resolve(String(argv.decisions))
+  : null
 const logDir = path.resolve(
   String(argv['log-dir'] || path.join(__dirname, 'logs'))
 )
@@ -66,6 +69,7 @@ const tailSeconds = normalizePositiveInteger(argv['tail-seconds'], 5)
 const tailFrames = normalizePositiveInteger(argv['tail-frames'], 5)
 const includeIncomplete = Boolean(argv['include-incomplete'])
 const dryRun = argv.apply ? false : true
+const decisions = decisionsPath ? loadDecisions(decisionsPath) : null
 const startedAt = new Date()
 const runStamp = formatTimestamp(startedAt)
 const logBase = `audit-slopvault-${runStamp}`
@@ -118,6 +122,7 @@ async function main() {
   console.log(`Dataset root: ${datasetRoot}`)
   console.log(`Incomplete root: ${incompleteRoot}`)
   console.log(`Quarantine base: ${quarantineBase}`)
+  if (decisionsPath) console.log(`Review decisions: ${decisionsPath}`)
   console.log(
     `Minimum sizes: video=${minVideoBytes} image=${minImageBytes} gif=${minGifBytes}`
   )
@@ -188,7 +193,7 @@ async function main() {
         }`
       )
 
-      if (!dryRun && finding.quarantineEligible) {
+      if (!dryRun && shouldQuarantineFinding(finding)) {
         await quarantineFinding(finding)
         summary.movedFiles += 1
       }
@@ -215,6 +220,7 @@ Options:
   --dataset-root <path>         Override dataset root.
   --incomplete-root <path>      Override incomplete root.
   --quarantine-root <path>      Override quarantine base.
+  --decisions <path>            Only apply dashboard-approved decisions.
   --log-dir <path>              Override audit log directory.
   --min-video-bytes <n>         Report videos smaller than this size.
   --min-image-bytes <n>         Report images smaller than this size.
@@ -242,6 +248,30 @@ function formatTimestamp(date) {
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true })
+}
+
+function loadDecisions(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
+    const parsed = JSON.parse(raw)
+    const items = Array.isArray(parsed?.decisions) ? parsed.decisions : []
+    const byId = new Map()
+
+    for (const item of items) {
+      if (!item?.id || !item?.action) continue
+      byId.set(item.id, item.action)
+    }
+
+    return { byId }
+  } catch (err) {
+    throw new Error(`Could not load decisions file ${filePath}: ${err.message}`)
+  }
+}
+
+function shouldQuarantineFinding(finding) {
+  if (!finding.quarantineEligible) return false
+  if (!decisions) return true
+  return decisions.byId.get(finding.id) === 'quarantine'
 }
 
 function collectMediaFiles(root) {
@@ -429,6 +459,7 @@ function buildFinding({
   const relativePath = path.relative(target.root, filePath)
 
   return {
+    id: createFindingId(target.label, relativePath),
     sourcePath: filePath,
     sourceType: target.label,
     mediaType,
@@ -440,6 +471,16 @@ function buildFinding({
     quarantineEligible,
     ...extra,
   }
+}
+
+function createFindingId(sourceType, relativePath) {
+  return `${sourceType}:${normalizePath(relativePath)}`
+}
+
+function normalizePath(value) {
+  return String(value || '')
+    .split(path.sep)
+    .join('/')
 }
 
 function getNormalizedBasename(filePath) {
