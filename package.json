@@ -24,7 +24,8 @@
     "sync": "node scrapyard/sync.js",
     "purge-hashes": "node scrapyard/purgeModelHashes.js",
     "backfill:sources": "node milkmaid/backfill-stufferdb-sources.js",
-    "backfill:model-hashes": "node scrapyard/backfillModelHashes.js"
+    "backfill:model-hashes": "node scrapyard/backfillModelHashes.js",
+    "validate:model-hashes": "node scrapyard/validateModelHashes.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
