@@ -425,36 +425,42 @@ function renderDashboard(manifest) {
   <title>Slopvault Audit Review</title>
   <style>
     :root {
-      --ink: #201a17;
-      --muted: #766b64;
-      --paper: #fff8ef;
-      --card: #fffdf8;
-      --line: #eadccd;
-      --accent: #b44b2a;
-      --accent-soft: #f5d0bf;
-      --good: #2e6f4e;
-      --warn: #996a11;
-      --bad: #9c2f22;
-      --shadow: rgba(91, 55, 31, .1);
+      --ink: #e8f0ff;
+      --muted: #8ea0bd;
+      --paper: #07111f;
+      --card: rgba(12, 24, 42, .78);
+      --card-solid: #0e1b2d;
+      --line: rgba(140, 167, 210, .18);
+      --accent: #35d0ff;
+      --accent-2: #79f2c9;
+      --good: #45d483;
+      --warn: #ffbf4d;
+      --bad: #ff5b6e;
+      --shadow: rgba(0, 0, 0, .28);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
+      font-family: "Segoe UI", "Aptos", "Helvetica Neue", Arial, sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at 20% 0%, rgba(180,75,42,.18), transparent 28rem),
-        linear-gradient(135deg, #fff8ef, #f5eadc 55%, #efe0cf);
+        radial-gradient(circle at 16% -10%, rgba(53, 208, 255, .28), transparent 26rem),
+        radial-gradient(circle at 84% 12%, rgba(121, 242, 201, .16), transparent 24rem),
+        linear-gradient(135deg, #050a13, #0b1525 48%, #101827);
+      min-height: 100vh;
     }
     header {
       padding: 34px 40px 22px;
       border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(7, 17, 31, .92), rgba(7, 17, 31, .55));
+      backdrop-filter: blur(16px);
     }
     h1 {
       margin: 0;
       font-size: clamp(34px, 5vw, 68px);
-      letter-spacing: -0.06em;
-      line-height: .9;
+      letter-spacing: -0.05em;
+      line-height: .92;
+      font-weight: 760;
     }
     .subhead { color: var(--muted); margin-top: 12px; max-width: 980px; }
     main { padding: 24px 40px 48px; }
@@ -465,23 +471,24 @@ function renderDashboard(manifest) {
       margin-bottom: 20px;
     }
     .card {
-      background: rgba(255,253,248,.82);
+      background: var(--card);
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 16px;
       box-shadow: 0 14px 40px var(--shadow);
+      backdrop-filter: blur(18px);
     }
     .card strong { display: block; font-size: 28px; }
     .card span { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
     .notice {
-      background: rgba(255,253,248,.9);
+      background: var(--card);
       border: 1px solid var(--line);
       border-radius: 20px;
       margin-bottom: 18px;
       padding: 16px 18px;
       box-shadow: 0 14px 40px var(--shadow);
     }
-    .notice code { background: #fff1df; border-radius: 8px; padding: 2px 6px; }
+    .notice code { background: rgba(53, 208, 255, .12); border-radius: 8px; padding: 2px 6px; color: var(--accent); }
     .controls {
       display: grid;
       grid-template-columns: minmax(220px, 1fr) 140px 170px 160px 150px;
@@ -498,18 +505,19 @@ function renderDashboard(manifest) {
     }
     button { cursor: pointer; }
     button.primary {
-      background: var(--accent);
-      color: #fff8ef;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #04101d;
       border-color: var(--accent);
+      font-weight: 700;
     }
     button.danger {
-      background: var(--bad);
-      color: #fff8ef;
+      background: rgba(255, 91, 110, .16);
+      color: #ffd9de;
       border-color: var(--bad);
     }
     button.good {
-      background: var(--good);
-      color: #fff8ef;
+      background: rgba(69, 212, 131, .16);
+      color: #d8ffe8;
       border-color: var(--good);
     }
     .layout {
@@ -519,7 +527,7 @@ function renderDashboard(manifest) {
       align-items: start;
     }
     .panel {
-      background: rgba(255,253,248,.9);
+      background: var(--card);
       border: 1px solid var(--line);
       border-radius: 22px;
       overflow: hidden;
@@ -540,28 +548,28 @@ function renderDashboard(manifest) {
     th {
       position: sticky;
       top: 0;
-      background: #fff3e3;
+      background: var(--card-solid);
       z-index: 1;
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: .06em;
     }
     tr { cursor: pointer; }
-    tr:hover, tr.selected { background: #fff3e3; }
+    tr:hover, tr.selected { background: rgba(53, 208, 255, .08); }
     .path { overflow-wrap: anywhere; }
     .badge {
       display: inline-block;
       border-radius: 999px;
       padding: 3px 8px;
-      background: var(--accent-soft);
-      color: #612511;
+      background: rgba(53, 208, 255, .13);
+      color: #c8f4ff;
       font-size: 12px;
       margin: 0 4px 4px 0;
       white-space: nowrap;
     }
-    .badge.ok { background: #d7eadc; color: var(--good); }
-    .badge.warn { background: #f4e0ad; color: var(--warn); }
-    .badge.bad { background: #f0c3bd; color: var(--bad); }
+    .badge.ok { background: rgba(69, 212, 131, .16); color: #bafbd5; }
+    .badge.warn { background: rgba(255, 191, 77, .16); color: #ffe0a3; }
+    .badge.bad { background: rgba(255, 91, 110, .18); color: #ffd0d7; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .viewer { padding: 18px; position: sticky; top: 16px; }
     .viewer h2 { margin: 0 0 8px; font-size: 22px; }
@@ -571,7 +579,7 @@ function renderDashboard(manifest) {
       min-height: 260px;
       display: grid;
       place-items: center;
-      background: #1d1714;
+      background: #020812;
       border-radius: 18px;
       overflow: hidden;
       margin-top: 14px;
@@ -583,7 +591,7 @@ function renderDashboard(manifest) {
       width: 100%;
       max-height: 520px;
       object-fit: contain;
-      background: #1d1714;
+      background: #020812;
     }
     .meta-list {
       display: grid;
@@ -774,7 +782,6 @@ function renderDashboard(manifest) {
       if (!id) return;
       const finding = findings.find(item => item.id === id);
       if (!finding) return;
-      if (action === 'quarantine' && !finding.quarantineEligible) return;
 
       if (action) {
         decisions[id] = action;
@@ -788,7 +795,6 @@ function renderDashboard(manifest) {
 
     function setVisibleDecisions(action) {
       for (const finding of visibleFindings) {
-        if (action === 'quarantine' && !finding.quarantineEligible) continue;
         decisions[finding.id] = action;
       }
       saveDecisions();
@@ -895,7 +901,6 @@ function renderDashboard(manifest) {
         els.preview.textContent = 'No preview available';
       }
 
-      els.viewerQuarantine.disabled = !finding.quarantineEligible;
       els.details.innerHTML = \`
         <div><strong>Reasons:</strong> \${(finding.reasons || []).map(escapeHtml).join(', ')}</div>
         <div><strong>Size:</strong> \${formatBytes(finding.sizeBytes || 0)}</div>

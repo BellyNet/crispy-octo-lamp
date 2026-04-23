@@ -269,8 +269,7 @@ function loadDecisions(filePath) {
 }
 
 function shouldQuarantineFinding(finding) {
-  if (!finding.quarantineEligible) return false
-  if (!decisions) return true
+  if (!decisions) return finding.quarantineEligible
   return decisions.byId.get(finding.id) === 'quarantine'
 }
 
