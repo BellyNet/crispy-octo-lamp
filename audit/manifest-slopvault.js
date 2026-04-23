@@ -32,9 +32,7 @@ const datasetRoot = path.resolve(
   String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
 )
 const quarantineRoot = path.resolve(
-  String(
-    argv['quarantine-root'] || path.join(__dirname, 'quarantine', 'slopvault')
-  )
+  String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
 )
 const outputDir = path.resolve(
   String(argv['output-dir'] || path.join(__dirname, 'manifests'))
@@ -72,6 +70,9 @@ async function main() {
   const records = []
   const roots = buildScanRoots()
   const auditLog = loadAuditLog(auditLogPath)
+  const persistedDecisions = loadLatestDecisions(
+    path.join(outputDir, 'slopvault-dashboard-decisions-latest.json')
+  )
 
   for (const scanRoot of roots) {
     if (!fs.existsSync(scanRoot.root)) continue
@@ -82,7 +83,7 @@ async function main() {
     }
   }
 
-  const manifest = buildManifest(records, auditLog)
+  const manifest = buildManifest(records, auditLog, persistedDecisions)
   const manifestPath = path.join(
     outputDir,
     `slopvault-manifest-${runStamp}.json`
@@ -228,11 +229,15 @@ async function buildRecord(filePath, scanRoot) {
   }
 }
 
-function buildManifest(records, auditLog) {
+function buildManifest(records, auditLog, persistedDecisions) {
   const duplicates = buildDuplicateGroups(records)
   const byMediaType = countBy(records, (record) => record.mediaType)
   const byRoot = countBy(records, (record) => record.root)
-  const auditFindings = buildAuditFindings(auditLog, records)
+  const auditFindings = buildAuditFindings(
+    auditLog,
+    records,
+    persistedDecisions
+  )
 
   return {
     generatedAt: new Date().toISOString(),
@@ -265,7 +270,7 @@ function buildManifest(records, auditLog) {
   }
 }
 
-function buildAuditFindings(auditLog, records) {
+function buildAuditFindings(auditLog, records, persistedDecisions) {
   if (!auditLog?.findings?.length) return []
 
   const recordsByPath = new Map(
@@ -275,31 +280,35 @@ function buildAuditFindings(auditLog, records) {
     ])
   )
 
-  return auditLog.findings.map((finding) => {
-    const sourcePath = finding.sourcePath || ''
-    const matchedRecord = recordsByPath.get(normalizeAbsolutePath(sourcePath))
-    const id =
-      finding.id || createFindingId(finding.sourceType, finding.relativePath)
-    const quarantineEligible = Boolean(finding.quarantineEligible)
+  const findings = auditLog.findings
+    .map((finding) => {
+      const sourcePath = finding.sourcePath || ''
+      const matchedRecord = recordsByPath.get(normalizeAbsolutePath(sourcePath))
+      const id =
+        finding.id || createFindingId(finding.sourceType, finding.relativePath)
+      const quarantineEligible = Boolean(finding.quarantineEligible)
 
-    return {
-      ...finding,
-      id,
-      sourcePath,
-      sourceFileUri: sourcePath ? pathToFileUri(sourcePath) : null,
-      quarantinePath: finding.quarantinePath || null,
-      quarantineFileUri: finding.quarantinePath
-        ? pathToFileUri(finding.quarantinePath)
-        : null,
-      relativePath: normalizePath(finding.relativePath || ''),
-      reasons: Array.isArray(finding.reasons) ? finding.reasons : [],
-      quarantineEligible,
-      defaultAction: quarantineEligible ? 'quarantine' : 'keep',
-      matchedRecordId: matchedRecord?.id || null,
-      model: matchedRecord?.model || inferModelFromFinding(finding),
-      bucket: matchedRecord?.bucket || inferBucketFromFinding(finding),
-    }
-  })
+      return {
+        ...finding,
+        id,
+        sourcePath,
+        sourceFileUri: sourcePath ? pathToFileUri(sourcePath) : null,
+        quarantinePath: finding.quarantinePath || null,
+        quarantineFileUri: finding.quarantinePath
+          ? pathToFileUri(finding.quarantinePath)
+          : null,
+        relativePath: normalizePath(finding.relativePath || ''),
+        reasons: Array.isArray(finding.reasons) ? finding.reasons : [],
+        quarantineEligible,
+        defaultAction: quarantineEligible ? 'quarantine' : 'keep',
+        matchedRecordId: matchedRecord?.id || null,
+        model: matchedRecord?.model || inferModelFromFinding(finding),
+        bucket: matchedRecord?.bucket || inferBucketFromFinding(finding),
+      }
+    })
+    .filter((finding) => persistedDecisions.get(finding.id) !== 'keep')
+
+  return findings
 }
 
 function omitFindings(auditLog) {
@@ -357,6 +366,9 @@ function getMediaType(ext) {
 function findLatestAuditLog(logDir) {
   if (!fs.existsSync(logDir)) return null
 
+  const latestPath = path.join(logDir, 'audit-slopvault-latest.json')
+  if (fs.existsSync(latestPath)) return latestPath
+
   return (
     fs
       .readdirSync(logDir)
@@ -381,6 +393,26 @@ function loadAuditLog(filePath) {
   parsed.logPath = filePath
   parsed.findings = Array.isArray(parsed.findings) ? parsed.findings : []
   return parsed
+}
+
+function loadLatestDecisions(filePath) {
+  if (!fs.existsSync(filePath)) return new Map()
+
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
+    const parsed = JSON.parse(raw)
+    const decisions = Array.isArray(parsed?.decisions) ? parsed.decisions : []
+    return new Map(
+      decisions
+        .filter((decision) => decision?.id && decision?.action)
+        .map((decision) => [String(decision.id), String(decision.action)])
+    )
+  } catch (err) {
+    console.warn(
+      `Could not load saved review decisions from ${filePath}: ${err.message}`
+    )
+    return new Map()
+  }
 }
 
 function createFindingId(sourceType, relativePath) {
@@ -488,20 +520,39 @@ function renderDashboard(manifest) {
       padding: 16px 18px;
       box-shadow: 0 14px 40px var(--shadow);
     }
-    .notice code { background: rgba(53, 208, 255, .12); border-radius: 8px; padding: 2px 6px; color: var(--accent); }
+    .notice code {
+      background: rgba(53, 208, 255, .12);
+      border-radius: 8px;
+      padding: 2px 6px;
+      color: var(--accent);
+    }
     .controls {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) 140px 170px 160px 150px;
+      grid-template-columns: minmax(220px, 1.1fr) 160px 170px 190px 170px;
       gap: 10px;
       margin-bottom: 18px;
     }
     input, select, button {
       border: 1px solid var(--line);
-      border-radius: 999px;
+      border-radius: 14px;
       background: var(--card);
       color: var(--ink);
       padding: 11px 14px;
       font: inherit;
+    }
+    input::placeholder { color: #7990b4; }
+    select {
+      appearance: none;
+      padding-right: 44px;
+      line-height: 1.25;
+      background-image:
+        linear-gradient(45deg, transparent 50%, #9fc3ff 50%),
+        linear-gradient(135deg, #9fc3ff 50%, transparent 50%);
+      background-position:
+        calc(100% - 24px) calc(50% - 3px),
+        calc(100% - 18px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
     }
     button { cursor: pointer; }
     button.primary {
@@ -520,9 +571,25 @@ function renderDashboard(manifest) {
       color: #d8ffe8;
       border-color: var(--good);
     }
+    button.ghost {
+      background: rgba(159, 195, 255, .08);
+    }
+    button:disabled,
+    select:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 18px 0;
+    }
+    .toolbar .spacer { flex: 1 1 auto; }
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr);
+      grid-template-columns: minmax(0, 1.3fr) minmax(360px, .7fr);
       gap: 18px;
       align-items: start;
     }
@@ -533,7 +600,7 @@ function renderDashboard(manifest) {
       overflow: hidden;
       box-shadow: 0 18px 50px var(--shadow);
     }
-    .table-wrap { max-height: 68vh; overflow: auto; }
+    .table-wrap { max-height: 72vh; overflow: auto; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -557,6 +624,13 @@ function renderDashboard(manifest) {
     tr { cursor: pointer; }
     tr:hover, tr.selected { background: rgba(53, 208, 255, .08); }
     .path { overflow-wrap: anywhere; }
+    .path code {
+      font-size: 12px;
+      color: #bcd2f7;
+      background: rgba(159, 195, 255, .08);
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
     .badge {
       display: inline-block;
       border-radius: 999px;
@@ -570,6 +644,32 @@ function renderDashboard(manifest) {
     .badge.ok { background: rgba(69, 212, 131, .16); color: #bafbd5; }
     .badge.warn { background: rgba(255, 191, 77, .16); color: #ffe0a3; }
     .badge.bad { background: rgba(255, 91, 110, .18); color: #ffd0d7; }
+    .decision-cell { min-width: 150px; }
+    .decision-status { margin-top: 6px; }
+    .row-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .row-icon {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+    }
+    .row-icon svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      pointer-events: none;
+    }
+    .row-icon.active {
+      box-shadow: inset 0 0 0 1px currentColor;
+    }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .viewer { padding: 18px; position: sticky; top: 16px; }
     .viewer h2 { margin: 0 0 8px; font-size: 22px; }
@@ -600,14 +700,21 @@ function renderDashboard(manifest) {
       font-size: 13px;
     }
     .meta-list div { overflow-wrap: anywhere; }
-    .footer-tools {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-      margin: 18px 0;
+    .meta-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
     }
-    @media (max-width: 1100px) {
+    .meta-link:hover { text-decoration: underline; }
+    .api-state {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .helper {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 1200px) {
       main, header { padding-left: 18px; padding-right: 18px; }
       .controls, .layout { grid-template-columns: 1fr; }
       .viewer { position: static; }
@@ -620,21 +727,19 @@ function renderDashboard(manifest) {
     <div class="subhead">
       Generated at ${escapeHtml(manifest.generatedAt)} from audit log
       ${manifest.audit.logPath ? `<code>${escapeHtml(manifest.audit.logPath)}</code>` : '<code>none found</code>'}.
-      Duplicate analysis is still in the manifest, but this page is intentionally focused on corrupt/quarantine candidates.
+      Default decisions are prefilled on load so you can review fast, change only the rows you disagree with, and apply the current decision set in one shot.
     </div>
   </header>
   <main>
     <section class="cards">
       <div class="card"><strong id="auditFindings"></strong><span>Audit Findings</span></div>
-      <div class="card"><strong id="quarantineCandidates"></strong><span>Quarantine Candidates</span></div>
-      <div class="card"><strong id="reviewedCount"></strong><span>Reviewed</span></div>
+      <div class="card"><strong id="quarantineCandidates"></strong><span>Current Quarantine</span></div>
+      <div class="card"><strong id="keepCount"></strong><span>Current Keep</span></div>
       <div class="card"><strong id="visibleCount"></strong><span>Visible</span></div>
     </section>
 
     <section class="notice">
-      This dashboard is the dry-run review step. Choose <strong>Quarantine</strong> or <strong>Keep</strong>, export the decisions JSON, then apply it with:
-      <code>npm run audit:slopvault -- --apply --decisions &lt;exported-json&gt;</code>.
-      The page itself does not move or delete files.
+      Every finding starts prefilled as either <strong>keep</strong> or <strong>quarantine</strong>. Change only the rows you disagree with, then click <strong>Apply Review Decisions</strong> to quarantine the current quarantine items and remember the current keep items so they stay out of future reviews.
     </section>
 
     <section class="controls">
@@ -647,26 +752,24 @@ function renderDashboard(manifest) {
       </select>
       <select id="eligibilityFilter">
         <option value="">All findings</option>
-        <option value="true">Quarantine candidates</option>
-        <option value="false">Report-only</option>
+        <option value="true">Suggested quarantine</option>
+        <option value="false">Suggested keep</option>
       </select>
       <select id="decisionFilter">
-        <option value="">All decisions</option>
-        <option value="quarantine">Quarantine</option>
-        <option value="keep">Keep</option>
-        <option value="unreviewed">Unreviewed</option>
+        <option value="">All current decisions</option>
+        <option value="quarantine">Current: quarantine</option>
+        <option value="keep">Current: keep</option>
       </select>
       <select id="reasonFilter">
         <option value="">All reasons</option>
       </select>
     </section>
 
-    <section class="footer-tools">
-      <button class="primary" id="exportDecisions">Export Decisions JSON</button>
-      <button id="markVisibleQuarantine">Mark Visible Quarantine</button>
-      <button id="markVisibleKeep">Mark Visible Keep</button>
-      <button id="clearVisible">Clear Visible</button>
+    <section class="toolbar">
+      <button class="primary" id="applyDecisions" disabled>Apply Review Decisions</button>
+      <span class="spacer"></span>
       <span id="saveState"></span>
+      <span class="api-state" id="apiState"></span>
     </section>
 
     <section class="layout">
@@ -687,13 +790,13 @@ function renderDashboard(manifest) {
       </div>
       <aside class="panel viewer">
         <h2 id="viewerTitle">Select a finding</h2>
-        <p id="viewerMeta">Pick a row to preview local media and review why it was flagged.</p>
+        <p id="viewerMeta">Use the row actions for quick review, or the viewer buttons if you want to inspect one item at a time.</p>
         <div class="preview" id="preview">No finding selected</div>
         <div class="actions">
           <button class="danger" id="viewerQuarantine">Quarantine</button>
           <button class="good" id="viewerKeep">Keep</button>
-          <button id="viewerReset">Reset</button>
         </div>
+        <div class="helper">Changing a decision here advances to the next visible finding.</div>
         <div class="meta-list" id="details"></div>
       </aside>
     </section>
@@ -703,6 +806,7 @@ function renderDashboard(manifest) {
     const manifest = ${data};
     const findings = manifest.audit.findings || [];
     const storageKey = 'slopvault-audit-decisions:' + (manifest.audit.logPath || manifest.generatedAt);
+    const reviewToken = new URLSearchParams(window.location.search).get('token') || '';
     const decisions = loadDecisions();
     let selectedId = findings[0]?.id || null;
     let visibleFindings = [];
@@ -710,7 +814,7 @@ function renderDashboard(manifest) {
     const els = {
       auditFindings: document.querySelector('#auditFindings'),
       quarantineCandidates: document.querySelector('#quarantineCandidates'),
-      reviewedCount: document.querySelector('#reviewedCount'),
+      keepCount: document.querySelector('#keepCount'),
       visibleCount: document.querySelector('#visibleCount'),
       rows: document.querySelector('#rows'),
       search: document.querySelector('#search'),
@@ -718,34 +822,28 @@ function renderDashboard(manifest) {
       eligibilityFilter: document.querySelector('#eligibilityFilter'),
       decisionFilter: document.querySelector('#decisionFilter'),
       reasonFilter: document.querySelector('#reasonFilter'),
-      exportDecisions: document.querySelector('#exportDecisions'),
-      markVisibleQuarantine: document.querySelector('#markVisibleQuarantine'),
-      markVisibleKeep: document.querySelector('#markVisibleKeep'),
-      clearVisible: document.querySelector('#clearVisible'),
+      applyDecisions: document.querySelector('#applyDecisions'),
       saveState: document.querySelector('#saveState'),
+      apiState: document.querySelector('#apiState'),
       viewerTitle: document.querySelector('#viewerTitle'),
       viewerMeta: document.querySelector('#viewerMeta'),
       preview: document.querySelector('#preview'),
       viewerQuarantine: document.querySelector('#viewerQuarantine'),
       viewerKeep: document.querySelector('#viewerKeep'),
-      viewerReset: document.querySelector('#viewerReset'),
       details: document.querySelector('#details'),
     };
 
     hydrateReasonFilter();
+    detectReviewServer();
     render();
 
     for (const input of [els.search, els.typeFilter, els.eligibilityFilter, els.decisionFilter, els.reasonFilter]) {
       input.addEventListener('input', render);
     }
 
-    els.exportDecisions.addEventListener('click', exportDecisions);
-    els.markVisibleQuarantine.addEventListener('click', () => setVisibleDecisions('quarantine'));
-    els.markVisibleKeep.addEventListener('click', () => setVisibleDecisions('keep'));
-    els.clearVisible.addEventListener('click', () => clearVisibleDecisions());
-    els.viewerQuarantine.addEventListener('click', () => setDecision(selectedId, 'quarantine'));
-    els.viewerKeep.addEventListener('click', () => setDecision(selectedId, 'keep'));
-    els.viewerReset.addEventListener('click', () => setDecision(selectedId, null));
+    els.applyDecisions.addEventListener('click', applyDecisions);
+    els.viewerQuarantine.addEventListener('click', () => setDecision(selectedId, 'quarantine', true));
+    els.viewerKeep.addEventListener('click', () => setDecision(selectedId, 'keep', true));
 
     function hydrateReasonFilter() {
       const reasons = [...new Set(findings.flatMap(finding => finding.reasons || []))].sort();
@@ -766,7 +864,7 @@ function renderDashboard(manifest) {
       }
     }
 
-    function saveDecisions() {
+    function saveUiState() {
       localStorage.setItem(storageKey, JSON.stringify(decisions));
       els.saveState.textContent = 'Saved locally';
       window.setTimeout(() => {
@@ -775,38 +873,30 @@ function renderDashboard(manifest) {
     }
 
     function getDecision(finding) {
-      return decisions[finding.id] || 'unreviewed';
+      return decisions[finding.id] || finding.defaultAction || 'keep';
     }
 
-    function setDecision(id, action) {
+    function setDecision(id, action, advance = false) {
       if (!id) return;
       const finding = findings.find(item => item.id === id);
       if (!finding) return;
 
-      if (action) {
-        decisions[id] = action;
-      } else {
+      if (!action || action === finding.defaultAction) {
         delete decisions[id];
+      } else {
+        decisions[id] = action;
       }
 
-      saveDecisions();
+      saveUiState();
+      if (advance) selectNextVisible(id);
       render();
     }
 
-    function setVisibleDecisions(action) {
-      for (const finding of visibleFindings) {
-        decisions[finding.id] = action;
+    function selectNextVisible(currentId) {
+      const index = visibleFindings.findIndex(item => item.id === currentId);
+      if (index >= 0 && index < visibleFindings.length - 1) {
+        selectedId = visibleFindings[index + 1].id;
       }
-      saveDecisions();
-      render();
-    }
-
-    function clearVisibleDecisions() {
-      for (const finding of visibleFindings) {
-        delete decisions[finding.id];
-      }
-      saveDecisions();
-      render();
     }
 
     function filteredFindings() {
@@ -843,7 +933,7 @@ function renderDashboard(manifest) {
 
       els.auditFindings.textContent = findings.length.toLocaleString();
       els.quarantineCandidates.textContent = findings.filter(finding => finding.quarantineEligible).length.toLocaleString();
-      els.reviewedCount.textContent = Object.keys(decisions).length.toLocaleString();
+      els.keepCount.textContent = findings.filter(finding => getDecision(finding) === 'keep').length.toLocaleString();
       els.visibleCount.textContent = visibleFindings.length.toLocaleString();
 
       renderRows();
@@ -854,11 +944,27 @@ function renderDashboard(manifest) {
       const page = visibleFindings.slice(0, 1000);
       els.rows.innerHTML = page.map(finding => {
         const decision = getDecision(finding);
-        const decisionClass = decision === 'quarantine' ? 'bad' : decision === 'keep' ? 'ok' : 'warn';
+        const decisionClass = decision === 'quarantine' ? 'bad' : 'ok';
         const selected = finding.id === selectedId ? ' class="selected"' : '';
+        const trashClass = decision === 'quarantine' ? 'danger active' : 'ghost';
+        const keepClass = decision === 'keep' ? 'good active' : 'ghost';
         return \`
           <tr data-id="\${escapeAttr(finding.id)}"\${selected}>
-            <td><span class="badge \${decisionClass}">\${decision}</span></td>
+            <td class="decision-cell">
+              <div class="row-actions">
+                <button class="row-icon \${trashClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="quarantine" title="Quarantine" aria-label="Quarantine">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm-1 12h12l1-13H5l1 13z"/>
+                  </svg>
+                </button>
+                <button class="row-icon \${keepClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="keep" title="Keep" aria-label="Keep">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 4h11l3 3v13H5V4zm2 2v12h10V8.5L15.5 6H15v4H9V6H7zm4 0v2h2V6h-2zm-2 8h6v3H9v-3z"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="decision-status"><span class="badge \${decisionClass}">\${decision}</span></div>
+            </td>
             <td>\${finding.mediaType || ''}</td>
             <td>\${finding.model || ''}</td>
             <td>\${(finding.reasons || []).map(reason => '<span class="badge warn">' + escapeHtml(reason) + '</span>').join('')}</td>
@@ -872,6 +978,17 @@ function renderDashboard(manifest) {
         row.addEventListener('click', () => {
           selectedId = row.dataset.id;
           render();
+        });
+      }
+
+      for (const button of els.rows.querySelectorAll('[data-action-id]')) {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setDecision(
+            event.currentTarget.dataset.actionId,
+            event.currentTarget.dataset.actionValue,
+            true
+          );
         });
       }
     }
@@ -889,14 +1006,13 @@ function renderDashboard(manifest) {
       els.viewerTitle.textContent = finding.relativePath || finding.sourcePath || finding.id;
       els.viewerMeta.innerHTML = \`
         <span class="badge \${finding.quarantineEligible ? 'bad' : 'warn'}">\${finding.quarantineEligible ? 'quarantine candidate' : 'report-only'}</span>
-        <span class="badge \${decision === 'quarantine' ? 'bad' : decision === 'keep' ? 'ok' : 'warn'}">decision: \${decision}</span>
-        <span class="badge">suggested: \${finding.defaultAction || 'keep'}</span>
+        <span class="badge \${decision === 'quarantine' ? 'bad' : 'ok'}">current: \${decision}</span>
       \`;
 
       if (finding.mediaType === 'video') {
-        els.preview.innerHTML = \`<video src="\${finding.sourceFileUri || ''}" controls preload="metadata"></video>\`;
+        els.preview.innerHTML = \`<video src="\${getMediaUrl(finding)}" controls preload="metadata"></video>\`;
       } else if (finding.mediaType === 'image' || finding.mediaType === 'gif') {
-        els.preview.innerHTML = \`<img src="\${finding.sourceFileUri || ''}" alt="">\`;
+        els.preview.innerHTML = \`<img src="\${getMediaUrl(finding)}" alt="">\`;
       } else {
         els.preview.textContent = 'No preview available';
       }
@@ -904,38 +1020,106 @@ function renderDashboard(manifest) {
       els.details.innerHTML = \`
         <div><strong>Reasons:</strong> \${(finding.reasons || []).map(escapeHtml).join(', ')}</div>
         <div><strong>Size:</strong> \${formatBytes(finding.sizeBytes || 0)}</div>
-        <div><strong>Source:</strong> <a href="\${finding.sourceFileUri || '#'}">\${escapeHtml(finding.sourcePath || '')}</a></div>
-        <div><strong>Quarantine target:</strong> \${escapeHtml(finding.quarantinePath || '')}</div>
+        <div><strong>Hash:</strong> \${escapeHtml(finding.contentHash?.value || 'not recorded')}</div>
+        <div><strong>Source:</strong> <a class="meta-link" href="\${getMediaUrl(finding)}" target="_blank" rel="noreferrer">Source</a></div>
+        <div><strong>Source Path:</strong> <code>\${escapeHtml(finding.sourcePath || '')}</code></div>
+        <div><strong>Quarantine target:</strong> <code>\${escapeHtml(finding.quarantinePath || '')}</code></div>
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
       \`;
     }
 
-    function exportDecisions() {
-      const exported = {
+    function getMediaUrl(finding) {
+      if (
+        (window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+        finding.sourcePath
+      ) {
+        const tokenParam = reviewToken ? '&token=' + encodeURIComponent(reviewToken) : '';
+        return '/media?path=' + encodeURIComponent(finding.sourcePath) + tokenParam;
+      }
+
+      return finding.sourceFileUri || '';
+    }
+
+    function buildDecisionExport() {
+      return {
         generatedAt: new Date().toISOString(),
         auditLogPath: manifest.audit.logPath,
         manifestGeneratedAt: manifest.generatedAt,
-        decisions: Object.entries(decisions).map(([id, action]) => {
-          const finding = findings.find(item => item.id === id);
+        decisions: findings.map((finding) => {
           return {
-            id,
-            action,
-            sourcePath: finding?.sourcePath || null,
-            relativePath: finding?.relativePath || null,
-            reasons: finding?.reasons || [],
-            quarantineEligible: Boolean(finding?.quarantineEligible),
+            id: finding.id,
+            action: getDecision(finding),
+            sourcePath: finding.sourcePath || null,
+            relativePath: finding.relativePath || null,
+            reasons: finding.reasons || [],
+            quarantineEligible: Boolean(finding.quarantineEligible),
+            contentHash: finding.contentHash || null,
           };
         }),
       };
-      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'slopvault-audit-decisions-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+    }
+
+    async function detectReviewServer() {
+      if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
+        els.applyDecisions.disabled = true;
+        els.apiState.textContent = 'Apply requires npm run review:slopvault';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/status', {
+          cache: 'no-store',
+          headers: { 'x-slopvault-token': reviewToken },
+        });
+        if (!response.ok) throw new Error('status unavailable');
+        els.applyDecisions.disabled = false;
+        els.apiState.textContent = 'Local review server connected';
+      } catch {
+        els.applyDecisions.disabled = true;
+        els.apiState.textContent = 'Apply server unavailable';
+      }
+    }
+
+    async function applyDecisions() {
+      const exported = buildDecisionExport();
+      const quarantineCount = exported.decisions.filter(item => item.action === 'quarantine').length;
+      const keepCount = exported.decisions.filter(item => item.action === 'keep').length;
+
+      if (!exported.decisions.length) {
+        els.apiState.textContent = 'No review decisions to apply';
+        return;
+      }
+
+      if (!confirm(
+        'Apply review decisions now?\\n\\nQuarantine: ' +
+        quarantineCount +
+        '\\nKeep and hide from future reviews: ' +
+        keepCount
+      )) return;
+
+      els.applyDecisions.disabled = true;
+      els.apiState.textContent = 'Applying review decisions... keep this tab open';
+
+      try {
+        const response = await fetch('/api/apply', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-slopvault-token': reviewToken,
+          },
+          body: JSON.stringify(exported),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error || 'Apply failed');
+        }
+
+        els.apiState.textContent = 'Applied. Reloading dashboard...';
+        window.setTimeout(() => window.location.reload(), 800);
+      } catch (err) {
+        els.applyDecisions.disabled = false;
+        els.apiState.textContent = 'Apply failed: ' + err.message;
+      }
     }
 
     function formatBytes(bytes) {

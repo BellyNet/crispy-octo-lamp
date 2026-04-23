@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const crypto = require('crypto')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
 const sharp = require('sharp')
@@ -10,7 +11,14 @@ const argv = minimist(process.argv.slice(2), {
     d: 'dry-run',
     h: 'help',
   },
-  boolean: ['dry-run', 'apply', 'help', 'include-incomplete'],
+  boolean: [
+    'dry-run',
+    'apply',
+    'help',
+    'include-incomplete',
+    'hash-findings',
+    'archive',
+  ],
   default: {
     'dry-run': false,
     apply: false,
@@ -20,6 +28,8 @@ const argv = minimist(process.argv.slice(2), {
     'min-gif-bytes': 8 * 1024,
     'tail-seconds': 5,
     'tail-frames': 5,
+    'hash-findings': false,
+    archive: false,
   },
 })
 
@@ -45,9 +55,7 @@ const incompleteRoot = path.resolve(
   String(argv['incomplete-root'] || path.join(rootDir, 'incomplete'))
 )
 const quarantineBase = path.resolve(
-  String(
-    argv['quarantine-root'] || path.join(__dirname, 'quarantine', 'slopvault')
-  )
+  String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
 )
 const decisionsPath = argv.decisions
   ? path.resolve(String(argv.decisions))
@@ -68,6 +76,8 @@ const minGifBytes = normalizePositiveInteger(argv['min-gif-bytes'], 8 * 1024)
 const tailSeconds = normalizePositiveInteger(argv['tail-seconds'], 5)
 const tailFrames = normalizePositiveInteger(argv['tail-frames'], 5)
 const includeIncomplete = Boolean(argv['include-incomplete'])
+const hashFindings = Boolean(argv['hash-findings'])
+const archiveLogs = Boolean(argv.archive)
 const dryRun = argv.apply ? false : true
 const decisions = decisionsPath ? loadDecisions(decisionsPath) : null
 const startedAt = new Date()
@@ -183,6 +193,8 @@ async function main() {
           (summary.flaggedByReason[reason] || 0) + 1
       }
 
+      const shouldMove = !dryRun && shouldQuarantineFinding(finding)
+
       if (finding.quarantineEligible) {
         summary.quarantineEligibleFiles += 1
       }
@@ -193,7 +205,11 @@ async function main() {
         }`
       )
 
-      if (!dryRun && shouldQuarantineFinding(finding)) {
+      if (hashFindings || shouldMove) {
+        await attachContentHash(finding)
+      }
+
+      if (shouldMove) {
         await quarantineFinding(finding)
         summary.movedFiles += 1
       }
@@ -207,7 +223,7 @@ async function main() {
   console.log(`Flagged: ${summary.flaggedFiles}`)
   console.log(`Quarantine eligible: ${summary.quarantineEligibleFiles}`)
   console.log(`Moved: ${summary.movedFiles}`)
-  console.log(`Log file: ${path.join(logDir, `${logBase}.json`)}`)
+  console.log(`Log file: ${path.join(logDir, 'audit-slopvault-latest.json')}`)
 }
 
 function printHelp() {
@@ -227,12 +243,15 @@ Options:
   --min-gif-bytes <n>           Report GIFs smaller than this size.
   --tail-seconds <n>            Seek this far from end for video decode check.
   --tail-frames <n>             Decode this many tail frames for video check.
+  --hash-findings               Hash every flagged finding during this run.
+  --archive                     Also write timestamped audit log copies.
   --include-incomplete          Include repo incomplete files. Default: true.
   -h, --help                    Show help.
 
 Notes:
   The script defaults to dry-run unless --apply is provided.
-  Apply mode only quarantines high-confidence problem files.
+  Apply mode quarantines high-confidence problem files by default.
+  With --decisions, apply mode quarantines dashboard-approved files.
   Quarantine paths mirror the Slopvault dataset/incomplete layout.
 `)
 }
@@ -472,6 +491,22 @@ function buildFinding({
   }
 }
 
+async function attachContentHash(finding) {
+  try {
+    finding.contentHash = {
+      algorithm: 'md5',
+      value: await hashFile(finding.sourcePath),
+    }
+  } catch (err) {
+    finding.contentHash = {
+      algorithm: 'md5',
+      value: null,
+      error: err.message,
+    }
+    summary.errors.push(`Failed to hash ${finding.sourcePath}: ${err.message}`)
+  }
+}
+
 function createFindingId(sourceType, relativePath) {
   return `${sourceType}:${normalizePath(relativePath)}`
 }
@@ -480,6 +515,17 @@ function normalizePath(value) {
   return String(value || '')
     .split(path.sep)
     .join('/')
+}
+
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('md5')
+    const stream = fs.createReadStream(filePath)
+
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 function getNormalizedBasename(filePath) {
@@ -608,21 +654,16 @@ async function quarantineFinding(finding) {
 }
 
 async function writeLogs(findings) {
-  const summaryPath = path.join(logDir, `${logBase}.json`)
-  const reportPath = path.join(logDir, `${logBase}.txt`)
+  const summaryPath = path.join(logDir, 'audit-slopvault-latest.json')
+  const reportPath = path.join(logDir, 'audit-slopvault-latest.txt')
+  const payload = {
+    ...summary,
+    runId: logBase,
+    finishedAt: new Date().toISOString(),
+    findings,
+  }
 
-  fs.writeFileSync(
-    summaryPath,
-    JSON.stringify(
-      {
-        ...summary,
-        finishedAt: new Date().toISOString(),
-        findings,
-      },
-      null,
-      2
-    )
-  )
+  fs.writeFileSync(summaryPath, JSON.stringify(payload, null, 2))
 
   const lines = [
     `Audit run: ${logBase}`,
@@ -649,4 +690,15 @@ async function writeLogs(findings) {
   }
 
   fs.writeFileSync(reportPath, `${lines.join('\n')}\n`)
+
+  if (archiveLogs) {
+    fs.writeFileSync(
+      path.join(logDir, `${logBase}.json`),
+      JSON.stringify(payload, null, 2)
+    )
+    fs.writeFileSync(
+      path.join(logDir, `${logBase}.txt`),
+      `${lines.join('\n')}\n`
+    )
+  }
 }
