@@ -248,6 +248,7 @@ function extractModelNameFromBreadcrumb(anchors) {
 function parseCliArgs(argv) {
   const args = minimist(argv, {
     string: ['model'],
+    boolean: ['review-errors'],
     alias: {
       m: 'model',
     },
@@ -256,6 +257,7 @@ function parseCliArgs(argv) {
   return {
     inputUrl: args._[0] || '',
     modelOverride: sanitize(args.model || ''),
+    reviewErrors: Boolean(args['review-errors']),
   }
 }
 
@@ -736,8 +738,9 @@ function launchReviewDashboardProcess() {
   return { port }
 }
 
-async function maybePauseForErrorReview(modelName, failures) {
+async function maybePauseForErrorReview(modelName, failures, reviewErrors) {
   if (
+    !reviewErrors ||
     failures <= 0 ||
     !process.stdin.isTTY ||
     !process.stdout.isTTY ||
@@ -1647,7 +1650,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
   let combinedTotal = 0
 
   try {
-    const { inputUrl: initialInputUrl, modelOverride } = parseCliArgs(
+    const { inputUrl: initialInputUrl, modelOverride, reviewErrors } = parseCliArgs(
       process.argv.slice(2)
     )
     let inputUrl = initialInputUrl
@@ -2212,7 +2215,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       })
     }
 
-    await maybePauseForErrorReview(modelName, errorCount)
+    await maybePauseForErrorReview(modelName, errorCount, reviewErrors)
 
     const nasSync = await runShellCommand(
       `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
