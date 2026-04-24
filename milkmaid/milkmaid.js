@@ -627,10 +627,12 @@ function startRunLog(modelName, inputUrl, folders) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const logPath = path.join(folders.logDir, `milkmaid-run-${stamp}.jsonl`)
   const summaryPath = path.join(folders.logDir, 'milkmaid-run-latest-summary.json')
+  const modelSummaryPath = path.join(folders.base, 'milkmaid-last-run.json')
   currentRunLog = {
     stamp,
     logPath,
     summaryPath,
+    modelSummaryPath,
     modelName,
     inputUrl,
     startedAt: new Date().toISOString(),
@@ -642,6 +644,21 @@ function startRunLog(modelName, inputUrl, folders) {
       failures: 0,
     },
   }
+
+  removeFileIfExists(modelSummaryPath)
+  fs.writeFileSync(
+    modelSummaryPath,
+    JSON.stringify(
+      {
+        startedAt: currentRunLog.startedAt,
+        modelName,
+        inputUrl,
+        status: 'running',
+      },
+      null,
+      2
+    ) + '\n'
+  )
 
   appendRunEvent('run_started', {
     modelName,
@@ -676,6 +693,17 @@ function finalizeRunLog(extra = {}) {
   }
 
   fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
+  fs.writeFileSync(
+    currentRunLog.modelSummaryPath,
+    JSON.stringify(
+      {
+        ...summary,
+        status: 'finished',
+      },
+      null,
+      2
+    ) + '\n'
+  )
   currentRunLog = null
 }
 
