@@ -149,11 +149,19 @@ function loadStore(filePath, kind) {
 
   for (const entry of parsed.entries || []) {
     for (const ref of entry.refs || []) {
-      if (!ref?.model || !ref?.relativePath) continue
-      if (!refsByModel.has(ref.model)) {
-        refsByModel.set(ref.model, new Set())
+      const relativePath =
+        typeof ref === 'string'
+          ? normalizePath(ref)
+          : normalizePath(ref?.relativePath || '')
+      if (!relativePath) continue
+
+      const modelName = relativePath.split('/')[0] || null
+      if (!modelName) continue
+
+      if (!refsByModel.has(modelName)) {
+        refsByModel.set(modelName, new Set())
       }
-      refsByModel.get(ref.model).add(normalizePath(ref.relativePath))
+      refsByModel.get(modelName).add(relativePath)
     }
   }
 
