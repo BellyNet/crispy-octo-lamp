@@ -7,7 +7,12 @@ const datasetDir = path.join(
   'dataset'
 )
 
-const filesToClear = ['visualHashes.json', 'bitwiseHashes.json']
+const filesToClear = [
+  'visualHashes.json',
+  'bitwiseHashes.json',
+  'visualHashes.v2.json',
+  'bitwiseHashes.v2.json',
+]
 
 // ✅ Clear hash cache files
 for (const file of filesToClear) {

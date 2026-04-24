@@ -1,6 +1,7 @@
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const { createHashStore } = require('./hashStore')
 
 const datasetDir = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
@@ -8,33 +9,36 @@ const datasetDir = path.join(
   'dataset'
 )
 
-const bitwiseHashPath = path.join(datasetDir, 'bitwiseHashes.json')
-let bitwiseHashSet = new Set()
+const bitwiseHashPath = path.join(datasetDir, 'bitwiseHashes.v2.json')
+const bitwiseHashStore = createHashStore({
+  storePath: bitwiseHashPath,
+  kind: 'bitwise',
+  algorithm: 'md5',
+})
 
 function loadBitwiseHashCache() {
-  if (fs.existsSync(bitwiseHashPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(bitwiseHashPath, 'utf-8'))
-      bitwiseHashSet = new Set(data)
-    } catch (err) {
-      console.warn('⚠️ Failed to load bitwise hash cache:', err.message)
-    }
-  }
+  bitwiseHashStore.load()
 }
 
 function saveBitwiseHashCache() {
-  fs.writeFileSync(
-    bitwiseHashPath,
-    JSON.stringify([...bitwiseHashSet], null, 2)
-  )
+  fs.mkdirSync(path.dirname(bitwiseHashPath), { recursive: true })
+  bitwiseHashStore.save()
 }
 
 function isBitwiseDupe(hash) {
-  return bitwiseHashSet.has(hash)
+  return bitwiseHashStore.has(hash)
 }
 
-function addBitwiseHash(hash) {
-  bitwiseHashSet.add(hash)
+function addBitwiseHash(hash, metadata = null) {
+  return bitwiseHashStore.add(hash, metadata)
+}
+
+function getBitwiseHashRecord(hash) {
+  return bitwiseHashStore.get(hash)
+}
+
+function getBitwiseHashEntries() {
+  return bitwiseHashStore.getAllEntries()
 }
 
 module.exports = {
@@ -42,4 +46,6 @@ module.exports = {
   saveBitwiseHashCache,
   isBitwiseDupe,
   addBitwiseHash,
+  getBitwiseHashRecord,
+  getBitwiseHashEntries,
 }

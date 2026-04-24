@@ -329,6 +329,26 @@ function createModelFolders(modelName) {
   }
 }
 
+function buildHashMetadata(modelName, absolutePath, mediaType, sizeBytes, uploadedDate) {
+  const relativePath = path
+    .relative(datasetDir, absolutePath)
+    .replace(/\\/g, '/')
+  const parts = relativePath.split('/').filter(Boolean)
+
+  return {
+    root: 'dataset',
+    model: modelName || parts[0] || null,
+    bucket: parts[1] || null,
+    relativePath,
+    filename: path.basename(absolutePath),
+    mediaType,
+    sizeBytes:
+      Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
+    modifiedAt: uploadedDate?.toISOString?.() || null,
+    source: 'milkmaid',
+  }
+}
+
 function downloadBufferWithProgress(mediaUrl, onProgress) {
   const proto = mediaUrl.startsWith('https') ? https : http
   return new Promise((resolve, reject) => {
@@ -357,6 +377,16 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
         res.on('end', () => resolve(Buffer.concat(chunks)))
       })
       .on('error', reject)
+  })
+}
+
+function hashFileFromPath(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('md5')
+    const stream = fs.createReadStream(filePath)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
   })
 }
 
@@ -652,9 +682,29 @@ async function scrapeGallery(browser, url, modelName, folders) {
               }
 
               knownFilenames.add(filename)
-              if (visualHash) addVisualHash(visualHash)
+              if (visualHash) {
+                addVisualHash(
+                  visualHash,
+                  buildHashMetadata(
+                    modelName,
+                    stillPath,
+                    'gif',
+                    buffer.length,
+                    uploadedDate
+                  )
+                )
+              }
               if (!isBitwiseDupe(hash)) {
-                addBitwiseHash(hash)
+                addBitwiseHash(
+                  hash,
+                  buildHashMetadata(
+                    modelName,
+                    stillPath,
+                    'gif',
+                    buffer.length,
+                    uploadedDate
+                  )
+                )
                 saveBitwiseHashCache()
               }
 
@@ -708,11 +758,31 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           if (!isBitwiseDupe(hash)) {
-            addBitwiseHash(hash)
+            addBitwiseHash(
+              hash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'image',
+                buffer.length,
+                uploadedDate
+              )
+            )
             saveBitwiseHashCache()
           }
 
-          if (visualHash) addVisualHash(visualHash)
+          if (visualHash) {
+            addVisualHash(
+              visualHash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'image',
+                buffer.length,
+                uploadedDate
+              )
+            )
+          }
           knownFilenames.add(filename)
           successCount++
           return logAndProgress(`✅ Saved: ${filename}`, true)
@@ -872,6 +942,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
         fs.utimesSync(mp4Path, ts, ts)
       }
 
+      const mp4Stat = fs.statSync(mp4Path)
+      const mp4Hash = await hashFileFromPath(mp4Path)
+      addBitwiseHash(
+        mp4Hash,
+        buildHashMetadata(
+          modelName,
+          mp4Path,
+          'video',
+          mp4Stat.size,
+          uploadedDate
+        )
+      )
+      saveBitwiseHashCache()
+
       knownFilenames.add(path.basename(mp4Path))
 
       // Clean up the original GIF from tmp folder
@@ -980,6 +1064,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
 
             moveFileIntoPlace(tmpPath, finalPath)
+
+            const finalStat = fs.statSync(finalPath)
+            const finalHash = await hashFileFromPath(finalPath)
+            addBitwiseHash(
+              finalHash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'video',
+                finalStat.size,
+                uploadedDate
+              )
+            )
+            saveBitwiseHashCache()
 
             successCount++
             logAndProgress(`✅ Saved lazy video: ${filename}`)
