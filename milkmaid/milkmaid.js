@@ -6,6 +6,7 @@ const { exec } = require('child_process')
 const { createHash } = require('crypto')
 const https = require('https')
 const http = require('http')
+const minimist = require('minimist')
 const pLimit = require('p-limit')
 const limit = pLimit(8)
 const lazyLimit = pLimit(4)
@@ -24,6 +25,7 @@ const {
   getVisualHashFromBuffer,
   isVisualDupe,
   addVisualHash,
+  getVisualHashRecord,
 } = require('../scrapyard/visualHasher')
 
 const {
@@ -31,6 +33,7 @@ const {
   saveBitwiseHashCache,
   isBitwiseDupe,
   addBitwiseHash,
+  getBitwiseHashRecord,
 } = require('../scrapyard/bitwiseHasher')
 
 const {
@@ -203,6 +206,20 @@ function extractModelNameFromBreadcrumb(anchors) {
   return last
 }
 
+function parseCliArgs(argv) {
+  const args = minimist(argv, {
+    string: ['model'],
+    alias: {
+      m: 'model',
+    },
+  })
+
+  return {
+    inputUrl: args._[0] || '',
+    modelOverride: sanitize(args.model || ''),
+  }
+}
+
 async function getBreadcrumbInfo(page) {
   return await page.evaluate(() => {
     const h2 = document.querySelector('.titrePage h2')
@@ -279,12 +296,25 @@ let totalCount = 0,
   lazyBytesDownloaded = 0
 
 const rootDir = path.join(__dirname, '..')
-const datasetDir = path.join(
+const slopvaultRoot = path.join(
   process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
-  '.slopvault',
+  '.slopvault'
+)
+const datasetDir = path.join(
+  slopvaultRoot,
   'dataset'
 )
+const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const permanentSkipFile = path.join(slopvaultRoot, 'milkmaid-permanent-skips.json')
 const tmpDir = path.join(rootDir, 'tmp')
+let currentRunLog = null
+let permanentSkipEntries = []
+let permanentSkipLookup = {
+  relativePaths: new Set(),
+  sourceUrls: new Set(),
+  mediaPageUrls: new Set(),
+  filenames: new Set(),
+}
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
@@ -303,9 +333,11 @@ function getIncompleteDirs(modelName) {
 function createModelFolders(modelName) {
   const base = path.join(datasetDir, modelName)
   const images = path.join(base, 'images')
+  const logDir = path.join(base, 'log')
 
   // Always create images folder
   fs.mkdirSync(images, { recursive: true })
+  fs.mkdirSync(logDir, { recursive: true })
 
   // Per-model incomplete dirs (gifs/videos) live in the project root,
   // while finished media lives in the dataset folder.
@@ -314,6 +346,7 @@ function createModelFolders(modelName) {
   return {
     base,
     images,
+    logDir,
     incompleteGifDir: incomplete.gifs,
     incompleteVideoDir: incomplete.videos,
     createGifFolder: () => {
@@ -327,6 +360,224 @@ function createModelFolders(modelName) {
       return webmPath
     },
   }
+}
+
+function getDatasetRelativePath(filePath) {
+  return path.relative(datasetDir, filePath).replace(/\\/g, '/')
+}
+
+function getQuarantineMirrorPath(filePath) {
+  return path.join(
+    quarantineDatasetDir,
+    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
+  )
+}
+
+function isQuarantinedPath(filePath) {
+  return fs.existsSync(getQuarantineMirrorPath(filePath))
+}
+
+function existsForRepair(filePath) {
+  return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
+}
+
+function getRecordRefs(record) {
+  return Array.isArray(record?.refs)
+    ? record.refs
+        .map((ref) => (typeof ref === 'string' ? ref : ref?.relativePath || ''))
+        .filter(Boolean)
+    : []
+}
+
+function getActiveRecordRefs(record) {
+  return getRecordRefs(record).filter((relativePath) =>
+    existsForRepair(path.join(datasetDir, relativePath.replace(/\//g, path.sep)))
+  )
+}
+
+function getBitwiseDuplicationRecord(hash) {
+  const record = getBitwiseHashRecord(hash)
+  const activeRefs = getActiveRecordRefs(record)
+  return {
+    record,
+    activeRefs,
+    isDuplicate: activeRefs.length > 0 && isBitwiseDupe(hash),
+  }
+}
+
+function getVisualDuplicationRecord(visualHash) {
+  const record = getVisualHashRecord(visualHash)
+  const activeRefs = getActiveRecordRefs(record)
+  return {
+    record,
+    activeRefs,
+    isDuplicate: activeRefs.length > 0 && isVisualDupe(visualHash),
+  }
+}
+
+function startRunLog(modelName, inputUrl, folders) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const logPath = path.join(folders.logDir, `milkmaid-run-${stamp}.jsonl`)
+  const summaryPath = path.join(folders.logDir, 'milkmaid-run-latest-summary.json')
+  currentRunLog = {
+    stamp,
+    logPath,
+    summaryPath,
+    modelName,
+    inputUrl,
+    startedAt: new Date().toISOString(),
+    counters: {
+      saved: 0,
+      duplicates: 0,
+      queuedVideos: 0,
+      convertedGifs: 0,
+      failures: 0,
+    },
+  }
+
+  appendRunEvent('run_started', {
+    modelName,
+    inputUrl,
+    logPath,
+  })
+}
+
+function appendRunEvent(type, payload = {}) {
+  if (!currentRunLog) return
+  fs.appendFileSync(
+    currentRunLog.logPath,
+    JSON.stringify({
+      at: new Date().toISOString(),
+      type,
+      ...payload,
+    }) + '\n'
+  )
+}
+
+function finalizeRunLog(extra = {}) {
+  if (!currentRunLog) return
+
+  const summary = {
+    startedAt: currentRunLog.startedAt,
+    finishedAt: new Date().toISOString(),
+    modelName: currentRunLog.modelName,
+    inputUrl: currentRunLog.inputUrl,
+    logPath: currentRunLog.logPath,
+    counters: currentRunLog.counters,
+    ...extra,
+  }
+
+  fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
+  currentRunLog = null
+}
+
+function normalizeSkipUrl(url) {
+  return String(url || '').trim().replace(/&acs=[^&]+/gi, '')
+}
+
+function buildPermanentSkipLookup(entries) {
+  return {
+    relativePaths: new Set(
+      entries.map((entry) => String(entry?.relativePath || '').trim()).filter(Boolean)
+    ),
+    sourceUrls: new Set(
+      entries.map((entry) => normalizeSkipUrl(entry?.sourceUrl)).filter(Boolean)
+    ),
+    mediaPageUrls: new Set(
+      entries.map((entry) => normalizeSkipUrl(entry?.mediaPageUrl)).filter(Boolean)
+    ),
+    filenames: new Set(
+      entries.map((entry) => String(entry?.filename || '').trim()).filter(Boolean)
+    ),
+  }
+}
+
+function loadPermanentSkips() {
+  if (!fs.existsSync(permanentSkipFile)) {
+    permanentSkipEntries = []
+    permanentSkipLookup = buildPermanentSkipLookup(permanentSkipEntries)
+    return
+  }
+
+  try {
+    const raw = fs.readFileSync(permanentSkipFile, 'utf8').trim()
+    const parsed = raw ? JSON.parse(raw) : { entries: [] }
+    permanentSkipEntries = Array.isArray(parsed?.entries) ? parsed.entries : []
+    permanentSkipLookup = buildPermanentSkipLookup(permanentSkipEntries)
+  } catch (err) {
+    console.warn(
+      `⚠️ Could not parse permanent skip file at ${permanentSkipFile}: ${err.message}`
+    )
+    permanentSkipEntries = []
+    permanentSkipLookup = buildPermanentSkipLookup(permanentSkipEntries)
+  }
+}
+
+function savePermanentSkips() {
+  fs.writeFileSync(
+    permanentSkipFile,
+    JSON.stringify(
+      {
+        version: 1,
+        entries: permanentSkipEntries,
+      },
+      null,
+      2
+    )
+  )
+}
+
+function addPermanentSkip(entry) {
+  const normalizedEntry = {
+    relativePath: String(entry?.relativePath || '').trim().replace(/\\/g, '/'),
+    sourceUrl: normalizeSkipUrl(entry?.sourceUrl),
+    mediaPageUrl: normalizeSkipUrl(entry?.mediaPageUrl),
+    filename: String(entry?.filename || '').trim(),
+    reason: String(entry?.reason || '').trim() || 'manual_skip',
+    note: String(entry?.note || '').trim() || null,
+    addedAt: entry?.addedAt || new Date().toISOString(),
+  }
+
+  const alreadyExists = permanentSkipEntries.some(
+    (existing) =>
+      (normalizedEntry.relativePath &&
+        existing?.relativePath === normalizedEntry.relativePath) ||
+      (normalizedEntry.sourceUrl &&
+        normalizeSkipUrl(existing?.sourceUrl) === normalizedEntry.sourceUrl) ||
+      (normalizedEntry.mediaPageUrl &&
+        normalizeSkipUrl(existing?.mediaPageUrl) === normalizedEntry.mediaPageUrl)
+  )
+
+  if (alreadyExists) return false
+
+  permanentSkipEntries.push(normalizedEntry)
+  permanentSkipLookup = buildPermanentSkipLookup(permanentSkipEntries)
+  savePermanentSkips()
+  return true
+}
+
+function getPermanentSkipMatch({ relativePath, mediaUrl, mediaPageUrl, filename }) {
+  const normalizedRelativePath = String(relativePath || '').trim().replace(/\\/g, '/')
+  const normalizedMediaUrl = normalizeSkipUrl(mediaUrl)
+  const normalizedMediaPageUrl = normalizeSkipUrl(mediaPageUrl)
+  const normalizedFilename = String(filename || '').trim()
+
+  return permanentSkipEntries.find((entry) => {
+    return (
+      (normalizedRelativePath &&
+        permanentSkipLookup.relativePaths.has(normalizedRelativePath) &&
+        entry.relativePath === normalizedRelativePath) ||
+      (normalizedMediaUrl &&
+        permanentSkipLookup.sourceUrls.has(normalizedMediaUrl) &&
+        normalizeSkipUrl(entry.sourceUrl) === normalizedMediaUrl) ||
+      (normalizedMediaPageUrl &&
+        permanentSkipLookup.mediaPageUrls.has(normalizedMediaPageUrl) &&
+        normalizeSkipUrl(entry.mediaPageUrl) === normalizedMediaPageUrl) ||
+      (normalizedFilename &&
+        permanentSkipLookup.filenames.has(normalizedFilename) &&
+        entry.filename === normalizedFilename)
+    )
+  }) || null
 }
 
 function buildHashMetadata(modelName, absolutePath, mediaType, sizeBytes, uploadedDate) {
@@ -479,6 +730,113 @@ function moveFileIntoPlace(sourcePath, destinationPath) {
   }
 }
 
+function removeFileIfExists(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false
+  fs.unlinkSync(filePath)
+  return true
+}
+
+function cleanupEmptyParentDirs(startPath, stopPath) {
+  let current = path.dirname(startPath)
+  const resolvedStop = path.resolve(stopPath)
+
+  while (
+    current &&
+    path.resolve(current).startsWith(resolvedStop) &&
+    path.resolve(current) !== resolvedStop
+  ) {
+    try {
+      if (fs.readdirSync(current).length > 0) break
+      fs.rmdirSync(current)
+      current = path.dirname(current)
+    } catch (err) {
+      break
+    }
+  }
+}
+
+function removeQuarantineMirrorIfExists(filePath) {
+  const mirrorPath = getQuarantineMirrorPath(filePath)
+  if (!removeFileIfExists(mirrorPath)) return false
+  cleanupEmptyParentDirs(mirrorPath, quarantineDatasetDir)
+  return true
+}
+
+function quoteForShell(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`
+}
+
+function runShellCommand(command, options = {}) {
+  return new Promise((resolve) => {
+    exec(command, options, (error, stdout, stderr) => {
+      resolve({
+        ok: !error,
+        code: error?.code ?? 0,
+        stdout: String(stdout || '').trim(),
+        stderr: String(stderr || '').trim(),
+        error: error?.message || null,
+      })
+    })
+  })
+}
+
+async function getVideoIntegrityReport(filePath) {
+  const quotedPath = quoteForShell(filePath)
+  const probe = await runShellCommand(
+    `ffprobe -v error -show_entries format=duration,size -show_streams -of json ${quotedPath}`
+  )
+  const tail = await runShellCommand(
+    `ffmpeg -v error -sseof -3 -i ${quotedPath} -frames:v 1 -f null -`
+  )
+
+  let duration = null
+  let size = null
+  let streamCount = 0
+
+  if (probe.ok && probe.stdout) {
+    try {
+      const parsed = JSON.parse(probe.stdout)
+      duration = Number.parseFloat(parsed?.format?.duration || '')
+      size = Number.parseInt(parsed?.format?.size || '', 10)
+      streamCount = Array.isArray(parsed?.streams) ? parsed.streams.length : 0
+    } catch (err) {
+      // Ignore JSON parse issues here; the raw stderr/stdout are logged below.
+    }
+  }
+
+  return {
+    probeOk: probe.ok,
+    probeCode: probe.code,
+    probeError: probe.error,
+    probeStdout: probe.stdout,
+    probeStderr: probe.stderr,
+    duration: Number.isFinite(duration) ? duration : null,
+    size: Number.isFinite(size) ? size : null,
+    streamCount,
+    tailDecodeOk: tail.ok,
+    tailDecodeCode: tail.code,
+    tailDecodeError: tail.error,
+    tailDecodeStderr: tail.stderr,
+  }
+}
+
+async function getRemoteVideoTailReport(url) {
+  const timeoutMicros = 20000000
+  return runShellCommand(
+    `ffmpeg -v error -rw_timeout ${timeoutMicros} -sseof -3 -i ${quoteForShell(url)} -frames:v 1 -f null -`
+  )
+}
+
+function shouldTraceLazyVideo(filename, finalPath) {
+  const traceMatch = String(process.env.MILKMAID_TRACE_MATCH || '').trim().toLowerCase()
+  if (traceMatch) {
+    return filename.toLowerCase().includes(traceMatch) ||
+      getDatasetRelativePath(finalPath).toLowerCase().includes(traceMatch)
+  }
+
+  return isQuarantinedPath(finalPath)
+}
+
 let completedTotal = 0
 let progressMode = 'scrape'
 
@@ -549,6 +907,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
       logAndProgress(
         `📸 ${modelName} - [${mode}] - ${urls.length} media links (tracking ${global.totalSearchTotal})`
       )
+      appendRunEvent('category_page_loaded', {
+        modelName,
+        categoryUrl: url,
+        mode,
+        mediaLinks: urls.length,
+        trackedTotal: global.totalSearchTotal || 0,
+      })
 
       const pages = await Promise.all(
         Array.from({ length: 8 }, () =>
@@ -605,6 +970,43 @@ async function scrapeGallery(browser, url, modelName, folders) {
             filename = filename.replace(/\.m4v$/i, '.mp4')
           }
 
+          const bucketName =
+            ext === '.gif'
+              ? 'gif'
+              : ['.mp4', '.webm'].includes(ext)
+                ? 'webm'
+                : 'images'
+          const candidateRelativePath = `${modelName}/${bucketName}/${filename}`
+
+          appendRunEvent('media_seen', {
+            modelName,
+            mediaPageUrl,
+            mediaUrl,
+            filename,
+            extension: ext,
+          })
+
+          const permanentSkipMatch = getPermanentSkipMatch({
+            relativePath: candidateRelativePath,
+            mediaUrl,
+            mediaPageUrl,
+            filename,
+          })
+          if (permanentSkipMatch) {
+            duplicateCount++
+            currentRunLog && currentRunLog.counters.duplicates++
+            appendRunEvent('skip_permanent', {
+              modelName,
+              filename,
+              relativePath: candidateRelativePath,
+              mediaUrl,
+              mediaPageUrl,
+              reason: permanentSkipMatch.reason || 'manual_skip',
+              note: permanentSkipMatch.note || null,
+            })
+            return logAndProgress(`🛑 Permanent skip: ${filename}`, true)
+          }
+
           let buffer = null
           let hash = null
           let visualHash = null
@@ -615,15 +1017,33 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             // Step 2: Bitwise (fast) hash
             hash = createHash('md5').update(buffer).digest('hex')
-            if (isBitwiseDupe(hash)) {
+            const bitwiseMatch = getBitwiseDuplicationRecord(hash)
+            if (bitwiseMatch.isDuplicate) {
               duplicateCount++
+              currentRunLog && currentRunLog.counters.duplicates++
+              appendRunEvent('duplicate_bitwise', {
+                modelName,
+                filename,
+                hash,
+                activeRefs: bitwiseMatch.activeRefs.slice(0, 5),
+              })
               return logAndProgress(`♻️ Bitwise dupe: ${filename}`, true)
             }
 
             // Step 3: Visual (slow) hash
             visualHash = await getVisualHashFromBuffer(buffer)
-            if (visualHash && isVisualDupe(visualHash)) {
+            const visualMatch = visualHash
+              ? getVisualDuplicationRecord(visualHash)
+              : null
+            if (visualMatch?.isDuplicate) {
               duplicateCount++
+              currentRunLog && currentRunLog.counters.duplicates++
+              appendRunEvent('duplicate_visual', {
+                modelName,
+                filename,
+                visualHash,
+                activeRefs: visualMatch.activeRefs.slice(0, 5),
+              })
               return logAndProgress(
                 `👁️ Visual dupe (global): ${filename}`,
                 true
@@ -643,8 +1063,15 @@ async function scrapeGallery(browser, url, modelName, folders) {
               const webmFolder = folders.createWebmFolder()
               const mp4Path = path.join(webmFolder, mp4Name)
 
-              if (knownFilenames.has(mp4Name) || fs.existsSync(mp4Path)) {
+              if (knownFilenames.has(mp4Name) || existsForRepair(mp4Path)) {
                 duplicateCount++
+                currentRunLog && currentRunLog.counters.duplicates++
+                appendRunEvent('skip_existing_conversion', {
+                  modelName,
+                  filename,
+                  targetPath: getDatasetRelativePath(mp4Path),
+                  quarantinedMirrorExists: isQuarantinedPath(mp4Path),
+                })
                 return logAndProgress(
                   `♻️ Already converted gif > mp4: ${mp4Name}`,
                   true
@@ -669,6 +1096,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 tmpPath,
                 mp4Path,
                 filename,
+              })
+              currentRunLog && currentRunLog.counters.queuedVideos++
+              appendRunEvent('queued_gif_conversion', {
+                modelName,
+                filename,
+                gifPath: getDatasetRelativePath(gifSavePath),
+                mp4TargetPath: getDatasetRelativePath(mp4Path),
               })
 
               return logAndProgress(logGifConversion(completedTotal), true)
@@ -709,6 +1143,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
               }
 
               successCount++
+              currentRunLog && currentRunLog.counters.saved++
+              appendRunEvent('saved_still_gif', {
+                modelName,
+                filename,
+                savedPath: getDatasetRelativePath(stillPath),
+                hash,
+                visualHash,
+              })
               return logAndProgress(`🖼️ Saved still gif: ${filename}`, true)
             }
           }
@@ -717,8 +1159,15 @@ async function scrapeGallery(browser, url, modelName, folders) {
             const webmFolder = folders.createWebmFolder() // Create only when needed
             const finalPath = path.join(webmFolder, filename)
 
-            if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+            if (knownFilenames.has(filename) || existsForRepair(finalPath)) {
               duplicateCount++
+              currentRunLog && currentRunLog.counters.duplicates++
+              appendRunEvent('skip_existing_video', {
+                modelName,
+                filename,
+                savedPath: getDatasetRelativePath(finalPath),
+                quarantinedMirrorExists: isQuarantinedPath(finalPath),
+              })
               return logAndProgress(
                 `⛔ Skipping mp4 – already handled: ${filename}`,
                 true
@@ -734,15 +1183,31 @@ async function scrapeGallery(browser, url, modelName, folders) {
               filename,
               uploadedDate,
             })
+            currentRunLog && currentRunLog.counters.queuedVideos++
+            appendRunEvent('queued_lazy_video', {
+              modelName,
+              filename,
+              mediaUrl,
+              savedPath: getDatasetRelativePath(finalPath),
+            })
 
             return logAndProgress(`🐌 Queued lazy video: ${filename}`, true)
           }
 
           if (
             knownFilenames.has(filename) ||
-            fs.existsSync(path.join(images, filename))
+            existsForRepair(path.join(images, filename))
           ) {
             duplicateCount++
+            currentRunLog && currentRunLog.counters.duplicates++
+            appendRunEvent('skip_existing_image', {
+              modelName,
+              filename,
+              savedPath: getDatasetRelativePath(path.join(images, filename)),
+              quarantinedMirrorExists: isQuarantinedPath(
+                path.join(images, filename)
+              ),
+            })
             return logAndProgress(`♻️ Skipped (exists): ${filename}`, true)
           }
 
@@ -785,9 +1250,23 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
           knownFilenames.add(filename)
           successCount++
+          currentRunLog && currentRunLog.counters.saved++
+          appendRunEvent('saved_image', {
+            modelName,
+            filename,
+            savedPath: getDatasetRelativePath(finalPath),
+            hash,
+            visualHash,
+          })
           return logAndProgress(`✅ Saved: ${filename}`, true)
         } catch (err) {
           errorCount++
+          currentRunLog && currentRunLog.counters.failures++
+          appendRunEvent('media_error', {
+            modelName,
+            mediaPageUrl,
+            error: err.message,
+          })
           logAndProgress(
             `❌ Error processing ${mediaPageUrl}: ${err.message}`,
             true
@@ -828,41 +1307,71 @@ async function scrapeGallery(browser, url, modelName, folders) {
 }
 
 ;(async () => {
-  let inputUrl = process.argv[2]
-  if (!inputUrl || !inputUrl.includes('/category/'))
-    return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
+  let browser = null
+  let modelName = null
+  let categoryRunList = []
+  let combinedTotal = 0
 
-  inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
+  try {
+    const { inputUrl: initialInputUrl, modelOverride } = parseCliArgs(
+      process.argv.slice(2)
+    )
+    let inputUrl = initialInputUrl
+    if (!inputUrl || !inputUrl.includes('/category/'))
+      return logAndProgress(
+        '⚠️  Usage: node milkmaid.js <gallery-url> [--model <canonical-or-alias>]'
+      )
 
-  const categoryId = inputUrl.match(/category\/?(\d+)/)?.[1]
-  if (!categoryId) return logAndProgress('❌ Invalid category URL')
+    inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    executablePath: executablePath(),
-    args: ['--no-sandbox', '--ignore-certificate-errors'],
-    ignoreHTTPSErrors: true, // ✅ add this too
-  })
+    const categoryId = inputUrl.match(/category\/?(\d+)/)?.[1]
+    if (!categoryId) return logAndProgress('❌ Invalid category URL')
 
-  const tempPage = await createScraperPage(browser, {
-    site: 'stufferdb',
-    interceptMedia: true,
-  })
-  await tempPage.goto(inputUrl, { waitUntil: 'domcontentloaded' })
+    browser = await puppeteer.launch({
+      headless: 'new',
+      executablePath: executablePath(),
+      args: ['--no-sandbox', '--ignore-certificate-errors'],
+      ignoreHTTPSErrors: true, // ✅ add this too
+    })
 
-  loadVisualHashCache()
-  loadBitwiseHashCache()
+    const tempPage = await createScraperPage(browser, {
+      site: 'stufferdb',
+      interceptMedia: true,
+    })
+    await tempPage.goto(inputUrl, { waitUntil: 'domcontentloaded' })
 
-  const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
-  const rawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
+    loadVisualHashCache()
+    loadBitwiseHashCache()
+    loadPermanentSkips()
 
-  const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
-  const modelName = resolveAndTrackModel(aliasMapPath, rawName, inputUrl)
+    const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
+    const inferredRawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
+    const rawName = modelOverride || inferredRawName
 
-  const folders = createModelFolders(modelName)
+    if (modelOverride) {
+      console.log(
+        `🏷️ Using manual model override: ${modelOverride} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
+      )
+    } else if (inferredRawName === 'unknown_cow') {
+      console.log(
+        '⚠️ Could not confidently infer model from breadcrumbs. Use --model <canonical-or-alias> to force the correct model.'
+      )
+    }
 
-  const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
-  const categoryRunList = await buildCategoryRunList(browser, plainUrl)
+    const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
+    modelName = resolveAndTrackModel(aliasMapPath, rawName, inputUrl)
+
+    const folders = createModelFolders(modelName)
+
+    const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
+    categoryRunList = await buildCategoryRunList(browser, plainUrl)
+    startRunLog(modelName, inputUrl, folders)
+    appendRunEvent('category_run_list_built', {
+      modelName,
+      categoryUrls: categoryRunList,
+      inferredRawName,
+      modelOverride: modelOverride || null,
+    })
 
   console.log(`🗂️ Category run list for ${modelName}:`)
   for (const categoryUrl of categoryRunList) {
@@ -876,25 +1385,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
     )
   )
 
-  const combinedTotal =
-    categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
+    combinedTotal =
+      categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
 
-  console.log(`📊 Combined media total: ${combinedTotal}`)
-  console.log(`💦 Starting scrape for ${modelName}`)
+    console.log(`📊 Combined media total: ${combinedTotal}`)
+    console.log(`💦 Starting scrape for ${modelName}`)
 
-  for (let i = 0; i < categoryRunList.length; i++) {
-    const categoryUrl = categoryRunList[i]
-    const categoryTotal = categoryCounts[i] || 0
+    for (let i = 0; i < categoryRunList.length; i++) {
+      const categoryUrl = categoryRunList[i]
+      const categoryTotal = categoryCounts[i] || 0
 
-    resetProgressCounter(categoryTotal)
+      resetProgressCounter(categoryTotal)
 
-    logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
-    logScrollingMessage(
-      `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
-    )
+      logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
+      logScrollingMessage(
+        `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
+      )
 
-    await scrapeGallery(browser, categoryUrl, modelName, folders)
-  }
+      await scrapeGallery(browser, categoryUrl, modelName, folders)
+    }
 
   logAndProgress('🧮 Scrape complete')
 
@@ -914,8 +1423,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
     const isKnown =
       knownFilenames.has(mp4Name) ||
       skippedFilenames.has(mp4Name) ||
-      fs.existsSync(mp4Path)
+      existsForRepair(mp4Path)
     if (isKnown) {
+      appendRunEvent('skip_gif_conversion_known', {
+        modelName,
+        filename: mp4Name,
+        savedPath: getDatasetRelativePath(mp4Path),
+        quarantinedMirrorExists: isQuarantinedPath(mp4Path),
+      })
       logAndProgress(
         `🚫 Skipping gif conversion (already known or failed): ${mp4Name}`
       )
@@ -925,7 +1440,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   for (const { tmpPath, mp4Path, filename } of filteredGifs) {
     try {
-      if (fs.existsSync(mp4Path)) {
+      if (existsForRepair(mp4Path)) {
+        appendRunEvent('skip_gif_conversion_existing', {
+          modelName,
+          filename,
+          savedPath: getDatasetRelativePath(mp4Path),
+          quarantinedMirrorExists: isQuarantinedPath(mp4Path),
+        })
         logAndProgress(`♻️ Already exists: ${mp4Path}`)
         continue
       }
@@ -957,12 +1478,26 @@ async function scrapeGallery(browser, url, modelName, folders) {
       saveBitwiseHashCache()
 
       knownFilenames.add(path.basename(mp4Path))
+      currentRunLog && currentRunLog.counters.convertedGifs++
+      currentRunLog && currentRunLog.counters.saved++
+      appendRunEvent('converted_gif_to_mp4', {
+        modelName,
+        filename,
+        savedPath: getDatasetRelativePath(mp4Path),
+        hash: mp4Hash,
+      })
 
       // Clean up the original GIF from tmp folder
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
 
       logAndProgress(`✅ Converted GIF to MP4: ${filename}`)
     } catch (err) {
+      currentRunLog && currentRunLog.counters.failures++
+      appendRunEvent('gif_conversion_error', {
+        modelName,
+        filename,
+        error: err.message,
+      })
       logAndProgress(`❌ Conversion failed for ${filename}: ${err.message}`)
       skippedFilenames.add(path.basename(mp4Path))
     }
@@ -1004,8 +1539,15 @@ async function scrapeGallery(browser, url, modelName, folders) {
     lazyVideoQueue.map(
       ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
         lazyLimit(async () => {
-          if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
+          if (knownFilenames.has(filename) || existsForRepair(finalPath)) {
             duplicateCount++
+            currentRunLog && currentRunLog.counters.duplicates++
+            appendRunEvent('skip_lazy_existing', {
+              modelName,
+              filename,
+              savedPath: getDatasetRelativePath(finalPath),
+              quarantinedMirrorExists: isQuarantinedPath(finalPath),
+            })
             return logAndProgress(
               `♻️ Lazy dupe (pre-download): ${filename}`,
               true
@@ -1013,6 +1555,27 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           knownFilenames.add(filename) // ✅ Mark as claimed early
+          const quarantineMirrorPath = getQuarantineMirrorPath(finalPath)
+          const traceLazyVideo = shouldTraceLazyVideo(filename, finalPath)
+          const hadQuarantineMirror = fs.existsSync(quarantineMirrorPath)
+          let bytesDownloadedForFile = 0
+          let responseContentLength = 0
+          let responseContentType = null
+          let responseEtag = null
+          let responseLastModified = null
+          let responseEndedCleanly = false
+          let responseWasAborted = false
+          let responseCloseBeforeEnd = false
+
+          if (hadQuarantineMirror && fs.existsSync(finalPath)) {
+            const removed = removeFileIfExists(finalPath)
+            appendRunEvent('repair_cleared_stale_dataset_copy', {
+              modelName,
+              filename,
+              savedPath: getDatasetRelativePath(finalPath),
+              removed,
+            })
+          }
 
           logAndProgress(`🚀 STARTING lazy task #${i}: ${filename}`)
           logAndProgress(logLazyDownload(i))
@@ -1023,6 +1586,17 @@ async function scrapeGallery(browser, url, modelName, folders) {
           let lastDraw = Date.now()
 
           try {
+            if (traceLazyVideo) {
+              appendRunEvent('lazy_video_trace_started', {
+                modelName,
+                filename,
+                url,
+                savedPath: getDatasetRelativePath(finalPath),
+                tmpPath: path.relative(rootDir, tmpPath).replace(/\\/g, '/'),
+                hadQuarantineMirror,
+              })
+            }
+
             await new Promise((resolve, reject) => {
               const proto = url.startsWith('https') ? https : http
               stream.on('error', reject)
@@ -1033,9 +1607,29 @@ async function scrapeGallery(browser, url, modelName, folders) {
                     return reject(new Error(`HTTP ${res.statusCode}`))
                   }
 
+                  responseContentLength =
+                    parseInt(res.headers['content-length'] || '0', 10) || 0
+                  responseContentType = res.headers['content-type'] || null
+                  responseEtag = res.headers.etag || null
+                  responseLastModified = res.headers['last-modified'] || null
+
+                  if (traceLazyVideo) {
+                    appendRunEvent('lazy_video_trace_headers', {
+                      modelName,
+                      filename,
+                      url,
+                      statusCode: res.statusCode,
+                      contentLength: responseContentLength,
+                      contentType: responseContentType,
+                      etag: responseEtag,
+                      lastModified: responseLastModified,
+                    })
+                  }
+
                   res.on('data', (chunk) => {
                     stream.write(chunk)
                     lazyBytesDownloaded += chunk.length
+                    bytesDownloadedForFile += chunk.length
 
                     const now = Date.now()
                     if (now - lastDraw > 250) {
@@ -1045,7 +1639,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   })
 
                   res.on('end', () => {
+                    responseEndedCleanly = true
                     stream.end(resolve)
+                  })
+
+                  res.on('aborted', () => {
+                    responseWasAborted = true
+                  })
+
+                  res.on('close', () => {
+                    if (!responseEndedCleanly) {
+                      responseCloseBeforeEnd = true
+                    }
                   })
 
                   res.on('error', (err) => {
@@ -1056,7 +1661,59 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 .on('error', reject)
             })
 
-            const duration = await getVideoDuration(tmpPath)
+            const tmpIntegrity = await getVideoIntegrityReport(tmpPath)
+
+            if (traceLazyVideo) {
+              const remoteTail = await getRemoteVideoTailReport(url)
+              appendRunEvent('lazy_video_trace_validation', {
+                modelName,
+                filename,
+                url,
+                bytesDownloaded: bytesDownloadedForFile,
+                responseContentLength,
+                responseContentType,
+                responseEtag,
+                responseLastModified,
+                responseEndedCleanly,
+                responseWasAborted,
+                responseCloseBeforeEnd,
+                tmpSize: fs.existsSync(tmpPath) ? fs.statSync(tmpPath).size : null,
+                probeOk: tmpIntegrity.probeOk,
+                duration: tmpIntegrity.duration,
+                streamCount: tmpIntegrity.streamCount,
+                tailDecodeOk: tmpIntegrity.tailDecodeOk,
+                tailDecodeCode: tmpIntegrity.tailDecodeCode,
+                tailDecodeError: tmpIntegrity.tailDecodeError,
+                probeError: tmpIntegrity.probeError,
+                probeStderr: tmpIntegrity.probeStderr,
+                tailDecodeStderr: tmpIntegrity.tailDecodeStderr,
+                remoteTailDecodeOk: remoteTail.ok,
+                remoteTailDecodeCode: remoteTail.code,
+                remoteTailDecodeError: remoteTail.error,
+                remoteTailDecodeStderr: remoteTail.stderr,
+              })
+            }
+
+            const duration = tmpIntegrity.duration
+
+            if (
+              !tmpIntegrity.probeOk ||
+              !tmpIntegrity.tailDecodeOk ||
+              !Number.isFinite(duration) ||
+              duration <= 0
+            ) {
+              throw new Error(
+                [
+                  !tmpIntegrity.probeOk ? 'ffprobe_failed' : null,
+                  !tmpIntegrity.tailDecodeOk ? 'tail_decode_error' : null,
+                  !Number.isFinite(duration) || duration <= 0
+                    ? 'invalid_duration'
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(',')
+              )
+            }
 
             if (uploadedDate) {
               const ts = uploadedDate.getTime() / 1000
@@ -1080,6 +1737,22 @@ async function scrapeGallery(browser, url, modelName, folders) {
             saveBitwiseHashCache()
 
             successCount++
+            currentRunLog && currentRunLog.counters.saved++
+            appendRunEvent('saved_lazy_video', {
+              modelName,
+              filename,
+              savedPath: getDatasetRelativePath(finalPath),
+              hash: finalHash,
+            })
+            const removedQuarantineMirror =
+              removeQuarantineMirrorIfExists(finalPath)
+            if (removedQuarantineMirror) {
+              appendRunEvent('repair_cleared_quarantine_copy', {
+                modelName,
+                filename,
+                savedPath: getDatasetRelativePath(finalPath),
+              })
+            }
             logAndProgress(`✅ Saved lazy video: ${filename}`)
 
             const isSmallFile = fs.statSync(finalPath).size < 5 * 1024 * 1024 // <5MB
@@ -1094,11 +1767,30 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   const ts = uploadedDate.getTime() / 1000
                   fs.utimesSync(gifPath, ts, ts)
                 }
+                currentRunLog && currentRunLog.counters.convertedGifs++
+                currentRunLog && currentRunLog.counters.saved++
+                appendRunEvent('converted_short_video_to_gif', {
+                  modelName,
+                  filename,
+                  gifPath: getDatasetRelativePath(gifPath),
+                })
                 logAndProgress(`🎁 Converted short mp4 to gif: ${gifName}`)
               }
             }
           } catch (err) {
             errorCount++
+            currentRunLog && currentRunLog.counters.failures++
+            appendRunEvent('lazy_video_error', {
+              modelName,
+              filename,
+              error: err.message,
+              bytesDownloaded: bytesDownloadedForFile,
+              responseContentLength,
+              responseEndedCleanly,
+              responseWasAborted,
+              responseCloseBeforeEnd,
+              hadQuarantineMirror,
+            })
             logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
@@ -1108,22 +1800,44 @@ async function scrapeGallery(browser, url, modelName, folders) {
     )
   )
 
-  await browser.close()
+    await browser.close()
+    browser = null
 
-  saveVisualHashCache()
+    saveVisualHashCache()
 
-  exec(
-    `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`,
-    (err) => {
-      if (err && err.code > 3) {
-        console.error('❌ NAS sync failed with code', err.code)
-      } else {
-        console.log('✅ NAS sync complete.')
+    exec(
+      `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`,
+      (err) => {
+        if (err && err.code > 3) {
+          console.error('❌ NAS sync failed with code', err.code)
+        } else {
+          console.log('✅ NAS sync complete.')
+        }
       }
-    }
-  )
+    )
 
-  console.log(
-    `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
-  )
+    console.log(
+      `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
+    )
+  } catch (err) {
+    appendRunEvent('run_error', {
+      modelName,
+      error: err.message,
+    })
+    throw err
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {})
+    }
+
+    if (currentRunLog) {
+      finalizeRunLog({
+        successCount,
+        duplicateCount,
+        errorCount,
+        categoryRunList,
+        combinedTotal,
+      })
+    }
+  }
 })()
