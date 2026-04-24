@@ -587,6 +587,10 @@ function isQuarantinedPath(filePath) {
   return fs.existsSync(getQuarantineMirrorPath(filePath))
 }
 
+function normalizePath(filePath) {
+  return String(filePath || '').replace(/\\/g, '/')
+}
+
 function existsForRepair(filePath) {
   return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
 }
