@@ -313,7 +313,9 @@ function buildAuditFindings(auditLog, records, persistedDecisions) {
         bucket: matchedRecord?.bucket || inferBucketFromFinding(finding),
       }
     })
-    .filter((finding) => !isResolvedDecision(persistedDecisions.get(finding.id)))
+    .filter(
+      (finding) => !isResolvedAuditDecision(persistedDecisions.get(finding.id))
+    )
 
   return findings
 }
@@ -396,7 +398,7 @@ function buildRunErrorFindings(records, persistedDecisions) {
         runLogPath: summary.logPath || null,
       }
 
-      if (isResolvedDecision(persistedDecisions.get(finding.id))) continue
+      if (isResolvedRunDecision(persistedDecisions.get(finding.id))) continue
       findings.push(finding)
     }
   }
@@ -450,7 +452,11 @@ function inferMediaTypeFromError(error, matchedRecord) {
   return 'image'
 }
 
-function isResolvedDecision(action) {
+function isResolvedAuditDecision(action) {
+  return action === 'keep' || action === 'quarantine'
+}
+
+function isResolvedRunDecision(action) {
   return action === 'keep' || action === 'permanent-skip'
 }
 
