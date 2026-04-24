@@ -238,6 +238,8 @@ function buildManifest(records, auditLog, persistedDecisions) {
     records,
     persistedDecisions
   )
+  const runErrorFindings = buildRunErrorFindings(records, persistedDecisions)
+  const findings = [...auditFindings, ...runErrorFindings]
 
   return {
     generatedAt: new Date().toISOString(),
@@ -252,10 +254,11 @@ function buildManifest(records, auditLog, persistedDecisions) {
       datasetFiles: records.filter((record) => record.root === 'dataset')
         .length,
       quarantineFiles: records.filter((record) => record.quarantined).length,
-      auditFindings: auditFindings.length,
+      auditFindings: findings.length,
       auditQuarantineEligible: auditFindings.filter(
         (finding) => finding.quarantineEligible
       ).length,
+      runErrorFindings: runErrorFindings.length,
       byMediaType,
       byRoot,
     },
@@ -263,7 +266,7 @@ function buildManifest(records, auditLog, persistedDecisions) {
       logPath: auditLog?.logPath || null,
       generatedAt: auditLog?.finishedAt || auditLog?.startedAt || null,
       summary: auditLog ? omitFindings(auditLog) : null,
-      findings: auditFindings,
+      findings,
     },
     duplicates,
     records,
@@ -291,6 +294,7 @@ function buildAuditFindings(auditLog, records, persistedDecisions) {
       return {
         ...finding,
         id,
+        reviewType: 'audit',
         sourcePath,
         sourceFileUri: sourcePath ? pathToFileUri(sourcePath) : null,
         quarantinePath: finding.quarantinePath || null,
@@ -301,14 +305,153 @@ function buildAuditFindings(auditLog, records, persistedDecisions) {
         reasons: Array.isArray(finding.reasons) ? finding.reasons : [],
         quarantineEligible,
         defaultAction: quarantineEligible ? 'quarantine' : 'keep',
+        supportedActions: quarantineEligible
+          ? ['keep', 'quarantine']
+          : ['keep'],
         matchedRecordId: matchedRecord?.id || null,
         model: matchedRecord?.model || inferModelFromFinding(finding),
         bucket: matchedRecord?.bucket || inferBucketFromFinding(finding),
       }
     })
-    .filter((finding) => persistedDecisions.get(finding.id) !== 'keep')
+    .filter((finding) => !isResolvedDecision(persistedDecisions.get(finding.id)))
 
   return findings
+}
+
+function buildRunErrorFindings(records, persistedDecisions) {
+  const findings = []
+  const recordsByRelativePath = new Map(
+    records.map((record) => [normalizePath(record.datasetRelativePath), record])
+  )
+
+  for (const modelName of collectDatasetModels()) {
+    const runSummaryPath = path.join(datasetRoot, modelName, 'milkmaid-last-run.json')
+    if (!fs.existsSync(runSummaryPath)) continue
+
+    let summary = null
+    try {
+      summary = JSON.parse(fs.readFileSync(runSummaryPath, 'utf8'))
+    } catch (err) {
+      console.warn(`Could not parse ${runSummaryPath}: ${err.message}`)
+      continue
+    }
+
+    const errors = Array.isArray(summary?.errors) ? summary.errors : []
+    const runLogContext = loadRunLogContext(summary?.logPath)
+    for (const error of errors) {
+      const context = runLogContext.get(String(error.filename || '').trim()) || null
+      const normalizedSavedPath = normalizePath(
+        error.savedPath || context?.savedPath || ''
+      )
+      const matchedRecord = normalizedSavedPath
+        ? recordsByRelativePath.get(`dataset/${normalizedSavedPath}`)
+        : null
+      const mediaType = inferMediaTypeFromError(error, matchedRecord)
+      const id = createFindingId(
+        'run_error',
+        `${modelName}/${error.filename || error.at || error.error || 'unknown'}`
+      )
+
+      const finding = {
+        id,
+        reviewType: 'run_error',
+        sourceType: 'run_error',
+        model: modelName,
+        bucket:
+          matchedRecord?.bucket ||
+          normalizePath(error.savedPath || '').split('/')[1] ||
+          null,
+        filename: error.filename || null,
+        mediaType,
+        relativePath: normalizedSavedPath,
+        sourcePath: matchedRecord?.absolutePath || null,
+        sourceFileUri: matchedRecord?.absolutePath
+          ? pathToFileUri(matchedRecord.absolutePath)
+          : null,
+        quarantinePath: null,
+        quarantineFileUri: null,
+        mediaUrl: error.mediaUrl || context?.mediaUrl || null,
+        mediaPageUrl: error.mediaPageUrl || context?.mediaPageUrl || null,
+        reasons: [error.error || error.category || 'run_error'].filter(Boolean),
+        quarantineEligible: false,
+        defaultAction: 'keep',
+        supportedActions: ['keep', 'permanent-skip'],
+        matchedRecordId: matchedRecord?.id || null,
+        savedPath: normalizedSavedPath,
+        sizeBytes: matchedRecord?.sizeBytes || null,
+        contentHash: matchedRecord?.md5
+          ? { algorithm: 'md5', value: matchedRecord.md5 }
+          : null,
+        errorCategory: error.category || 'run_error',
+        errorDetails: error.error || null,
+        bytesDownloaded: error.bytesDownloaded ?? null,
+        responseContentLength: error.responseContentLength ?? null,
+        hadQuarantineMirror:
+          typeof error.hadQuarantineMirror === 'boolean'
+            ? error.hadQuarantineMirror
+            : null,
+        runStartedAt: summary.startedAt || null,
+        runFinishedAt: summary.finishedAt || null,
+        runInputUrl: summary.inputUrl || null,
+        runLogPath: summary.logPath || null,
+      }
+
+      if (isResolvedDecision(persistedDecisions.get(finding.id))) continue
+      findings.push(finding)
+    }
+  }
+
+  return findings
+}
+
+function loadRunLogContext(logPath) {
+  const byFilename = new Map()
+  if (!logPath || !fs.existsSync(logPath)) return byFilename
+
+  try {
+    const lines = fs
+      .readFileSync(logPath, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+
+    for (const item of lines) {
+      const filename = String(item?.filename || '').trim()
+      if (!filename) continue
+
+      if (!byFilename.has(filename)) byFilename.set(filename, {})
+      const next = byFilename.get(filename)
+
+      if (item.mediaUrl && !next.mediaUrl) next.mediaUrl = item.mediaUrl
+      if (item.mediaPageUrl && !next.mediaPageUrl) next.mediaPageUrl = item.mediaPageUrl
+      if (item.savedPath && !next.savedPath) next.savedPath = normalizePath(item.savedPath)
+    }
+  } catch (err) {
+    console.warn(`Could not parse Milkmaid run log ${logPath}: ${err.message}`)
+  }
+
+  return byFilename
+}
+
+function collectDatasetModels() {
+  if (!fs.existsSync(datasetRoot)) return []
+  return fs
+    .readdirSync(datasetRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b))
+}
+
+function inferMediaTypeFromError(error, matchedRecord) {
+  if (matchedRecord?.mediaType) return matchedRecord.mediaType
+  const ext = path.extname(error?.filename || '').toLowerCase()
+  if (['.mp4', '.webm', '.m4v', '.mov'].includes(ext)) return 'video'
+  if (ext === '.gif') return 'gif'
+  return 'image'
+}
+
+function isResolvedDecision(action) {
+  return action === 'keep' || action === 'permanent-skip'
 }
 
 function omitFindings(auditLog) {
@@ -571,6 +714,11 @@ function renderDashboard(manifest) {
       color: #d8ffe8;
       border-color: var(--good);
     }
+    button.warn {
+      background: rgba(255, 191, 77, .16);
+      color: #ffe0a3;
+      border-color: var(--warn);
+    }
     button.ghost {
       background: rgba(159, 195, 255, .08);
     }
@@ -727,19 +875,20 @@ function renderDashboard(manifest) {
     <div class="subhead">
       Generated at ${escapeHtml(manifest.generatedAt)} from audit log
       ${manifest.audit.logPath ? `<code>${escapeHtml(manifest.audit.logPath)}</code>` : '<code>none found</code>'}.
-      Default decisions are prefilled on load so you can review fast, change only the rows you disagree with, and apply the current decision set in one shot.
+      Audit findings and latest Milkmaid run errors are combined here. Default decisions are prefilled on load so you can review fast, change only the rows you disagree with, and apply the current decision set in one shot.
     </div>
   </header>
   <main>
     <section class="cards">
-      <div class="card"><strong id="auditFindings"></strong><span>Audit Findings</span></div>
+      <div class="card"><strong id="auditFindings"></strong><span>Review Findings</span></div>
       <div class="card"><strong id="quarantineCandidates"></strong><span>Current Quarantine</span></div>
       <div class="card"><strong id="keepCount"></strong><span>Current Keep</span></div>
+      <div class="card"><strong id="skipCount"></strong><span>Permanent Skip</span></div>
       <div class="card"><strong id="visibleCount"></strong><span>Visible</span></div>
     </section>
 
     <section class="notice">
-      Every finding starts prefilled as either <strong>keep</strong> or <strong>quarantine</strong>. Change only the rows you disagree with, then click <strong>Apply Review Decisions</strong> to quarantine the current quarantine items and remember the current keep items so they stay out of future reviews.
+      Every finding starts prefilled as either <strong>keep</strong> or <strong>quarantine</strong>. Run-error rows can also be marked <strong>permanent skip</strong>, which writes them into Milkmaid's skip list so future scrapes never retry those broken upstream files.
     </section>
 
     <section class="controls">
@@ -759,6 +908,7 @@ function renderDashboard(manifest) {
         <option value="">All current decisions</option>
         <option value="quarantine">Current: quarantine</option>
         <option value="keep">Current: keep</option>
+        <option value="permanent-skip">Current: permanent skip</option>
       </select>
       <select id="reasonFilter">
         <option value="">All reasons</option>
@@ -794,6 +944,7 @@ function renderDashboard(manifest) {
         <div class="preview" id="preview">No finding selected</div>
         <div class="actions">
           <button class="danger" id="viewerQuarantine">Quarantine</button>
+          <button class="warn" id="viewerPermanentSkip">Permanent Skip</button>
           <button class="good" id="viewerKeep">Keep</button>
         </div>
         <div class="helper">Changing a decision here advances to the next visible finding.</div>
@@ -815,6 +966,7 @@ function renderDashboard(manifest) {
       auditFindings: document.querySelector('#auditFindings'),
       quarantineCandidates: document.querySelector('#quarantineCandidates'),
       keepCount: document.querySelector('#keepCount'),
+      skipCount: document.querySelector('#skipCount'),
       visibleCount: document.querySelector('#visibleCount'),
       rows: document.querySelector('#rows'),
       search: document.querySelector('#search'),
@@ -829,6 +981,7 @@ function renderDashboard(manifest) {
       viewerMeta: document.querySelector('#viewerMeta'),
       preview: document.querySelector('#preview'),
       viewerQuarantine: document.querySelector('#viewerQuarantine'),
+      viewerPermanentSkip: document.querySelector('#viewerPermanentSkip'),
       viewerKeep: document.querySelector('#viewerKeep'),
       details: document.querySelector('#details'),
     };
@@ -843,6 +996,7 @@ function renderDashboard(manifest) {
 
     els.applyDecisions.addEventListener('click', applyDecisions);
     els.viewerQuarantine.addEventListener('click', () => setDecision(selectedId, 'quarantine', true));
+    els.viewerPermanentSkip.addEventListener('click', () => setDecision(selectedId, 'permanent-skip', true));
     els.viewerKeep.addEventListener('click', () => setDecision(selectedId, 'keep', true));
 
     function hydrateReasonFilter() {
@@ -913,11 +1067,15 @@ function renderDashboard(manifest) {
         if (reason && !(finding.reasons || []).includes(reason)) return false;
         if (!q) return true;
         return [
+          finding.reviewType,
           finding.model,
           finding.bucket,
+          finding.filename,
           finding.relativePath,
           finding.sourcePath,
           finding.quarantinePath,
+          finding.mediaUrl,
+          finding.mediaPageUrl,
           ...(finding.reasons || []),
         ]
           .filter(Boolean)
@@ -934,6 +1092,7 @@ function renderDashboard(manifest) {
       els.auditFindings.textContent = findings.length.toLocaleString();
       els.quarantineCandidates.textContent = findings.filter(finding => finding.quarantineEligible).length.toLocaleString();
       els.keepCount.textContent = findings.filter(finding => getDecision(finding) === 'keep').length.toLocaleString();
+      els.skipCount.textContent = findings.filter(finding => getDecision(finding) === 'permanent-skip').length.toLocaleString();
       els.visibleCount.textContent = visibleFindings.length.toLocaleString();
 
       renderRows();
@@ -944,10 +1103,17 @@ function renderDashboard(manifest) {
       const page = visibleFindings.slice(0, 1000);
       els.rows.innerHTML = page.map(finding => {
         const decision = getDecision(finding);
-        const decisionClass = decision === 'quarantine' ? 'bad' : 'ok';
+        const decisionClass =
+          decision === 'quarantine'
+            ? 'bad'
+            : decision === 'permanent-skip'
+              ? 'warn'
+              : 'ok';
         const selected = finding.id === selectedId ? ' class="selected"' : '';
         const trashClass = decision === 'quarantine' ? 'danger active' : 'ghost';
+        const skipClass = decision === 'permanent-skip' ? 'warn active' : 'ghost';
         const keepClass = decision === 'keep' ? 'good active' : 'ghost';
+        const supportsPermanentSkip = (finding.supportedActions || []).includes('permanent-skip');
         return \`
           <tr data-id="\${escapeAttr(finding.id)}"\${selected}>
             <td class="decision-cell">
@@ -957,6 +1123,12 @@ function renderDashboard(manifest) {
                     <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm-1 12h12l1-13H5l1 13z"/>
                   </svg>
                 </button>
+                \${supportsPermanentSkip ? \`
+                <button class="row-icon \${skipClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="permanent-skip" title="Permanent skip" aria-label="Permanent skip">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm5.66 14.24-7.9-7.9a8 8 0 0 1 7.9 7.9zM6.34 7.76l7.9 7.9a8 8 0 0 1-7.9-7.9z"/>
+                  </svg>
+                </button>\` : ''}
                 <button class="row-icon \${keepClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="keep" title="Keep" aria-label="Keep">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M5 4h11l3 3v13H5V4zm2 2v12h10V8.5L15.5 6H15v4H9V6H7zm4 0v2h2V6h-2zm-2 8h6v3H9v-3z"/>
@@ -1003,27 +1175,47 @@ function renderDashboard(manifest) {
       }
 
       const decision = getDecision(finding);
+      const decisionClass =
+        decision === 'quarantine'
+          ? 'bad'
+          : decision === 'permanent-skip'
+            ? 'warn'
+            : 'ok';
       els.viewerTitle.textContent = finding.relativePath || finding.sourcePath || finding.id;
       els.viewerMeta.innerHTML = \`
         <span class="badge \${finding.quarantineEligible ? 'bad' : 'warn'}">\${finding.quarantineEligible ? 'quarantine candidate' : 'report-only'}</span>
-        <span class="badge \${decision === 'quarantine' ? 'bad' : 'ok'}">current: \${decision}</span>
+        <span class="badge \${decisionClass}">current: \${decision}</span>
+        <span class="badge">\${escapeHtml(finding.reviewType || 'audit')}</span>
       \`;
 
       if (finding.mediaType === 'video') {
-        els.preview.innerHTML = \`<video src="\${getMediaUrl(finding)}" controls preload="metadata"></video>\`;
+        const mediaUrl = getMediaUrl(finding);
+        els.preview.innerHTML = mediaUrl
+          ? \`<video src="\${mediaUrl}" controls preload="metadata"></video>\`
+          : 'No local preview available';
       } else if (finding.mediaType === 'image' || finding.mediaType === 'gif') {
-        els.preview.innerHTML = \`<img src="\${getMediaUrl(finding)}" alt="">\`;
+        const mediaUrl = getMediaUrl(finding);
+        els.preview.innerHTML = mediaUrl
+          ? \`<img src="\${mediaUrl}" alt="">\`
+          : 'No local preview available';
       } else {
         els.preview.textContent = 'No preview available';
       }
+
+      els.viewerQuarantine.disabled = !(finding.supportedActions || []).includes('quarantine');
+      els.viewerPermanentSkip.disabled = !(finding.supportedActions || []).includes('permanent-skip');
+      els.viewerKeep.disabled = !(finding.supportedActions || []).includes('keep');
 
       els.details.innerHTML = \`
         <div><strong>Reasons:</strong> \${(finding.reasons || []).map(escapeHtml).join(', ')}</div>
         <div><strong>Size:</strong> \${formatBytes(finding.sizeBytes || 0)}</div>
         <div><strong>Hash:</strong> \${escapeHtml(finding.contentHash?.value || 'not recorded')}</div>
-        <div><strong>Source:</strong> <a class="meta-link" href="\${getMediaUrl(finding)}" target="_blank" rel="noreferrer">Source</a></div>
+        <div><strong>Source:</strong> \${finding.sourcePath ? '<a class="meta-link" href="' + getMediaUrl(finding) + '" target="_blank" rel="noreferrer">Source</a>' : 'No local file'}</div>
+        <div><strong>Media URL:</strong> \${finding.mediaUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaUrl) + '" target="_blank" rel="noreferrer">Open media URL</a>' : 'n/a'}</div>
+        <div><strong>Gallery Page:</strong> \${finding.mediaPageUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaPageUrl) + '" target="_blank" rel="noreferrer">Open gallery page</a>' : 'n/a'}</div>
         <div><strong>Source Path:</strong> <code>\${escapeHtml(finding.sourcePath || '')}</code></div>
         <div><strong>Quarantine target:</strong> <code>\${escapeHtml(finding.quarantinePath || '')}</code></div>
+        <div><strong>Saved Path:</strong> <code>\${escapeHtml(finding.savedPath || finding.relativePath || '')}</code></div>
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
       \`;
     }
@@ -1049,9 +1241,14 @@ function renderDashboard(manifest) {
           return {
             id: finding.id,
             action: getDecision(finding),
+            reviewType: finding.reviewType || 'audit',
+            filename: finding.filename || null,
             sourcePath: finding.sourcePath || null,
             relativePath: finding.relativePath || null,
+            mediaUrl: finding.mediaUrl || null,
+            mediaPageUrl: finding.mediaPageUrl || null,
             reasons: finding.reasons || [],
+            error: finding.errorDetails || null,
             quarantineEligible: Boolean(finding.quarantineEligible),
             contentHash: finding.contentHash || null,
           };
@@ -1084,6 +1281,7 @@ function renderDashboard(manifest) {
       const exported = buildDecisionExport();
       const quarantineCount = exported.decisions.filter(item => item.action === 'quarantine').length;
       const keepCount = exported.decisions.filter(item => item.action === 'keep').length;
+      const permanentSkipCount = exported.decisions.filter(item => item.action === 'permanent-skip').length;
 
       if (!exported.decisions.length) {
         els.apiState.textContent = 'No review decisions to apply';
@@ -1093,6 +1291,8 @@ function renderDashboard(manifest) {
       if (!confirm(
         'Apply review decisions now?\\n\\nQuarantine: ' +
         quarantineCount +
+        '\\nPermanent skip: ' +
+        permanentSkipCount +
         '\\nKeep and hide from future reviews: ' +
         keepCount
       )) return;
