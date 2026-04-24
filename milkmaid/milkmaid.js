@@ -79,7 +79,46 @@ function loadModelRegistry(registryPath) {
 }
 
 function saveModelRegistry(registryPath, registry) {
-  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2))
+  fs.writeFileSync(
+    registryPath,
+    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
+  )
+}
+
+function sortStringValues(values) {
+  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  )
+}
+
+function sortStufferSources(sources) {
+  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
+    const left =
+      String(a?.discoveredAs || '') ||
+      String(a?.categoryId || '') ||
+      String(a?.url || '')
+    const right =
+      String(b?.discoveredAs || '') ||
+      String(b?.categoryId || '') ||
+      String(b?.url || '')
+    return left.localeCompare(right)
+  })
+}
+
+function sortModelRegistry(registry) {
+  return Object.fromEntries(
+    Object.entries(registry || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([canonicalName, entry]) => [
+        canonicalName,
+        {
+          aliases: sortStringValues(entry?.aliases),
+          sources: {
+            stufferdb: sortStufferSources(entry?.sources?.stufferdb),
+          },
+        },
+      ])
+  )
 }
 
 function ensureModelEntryShape(entry, canonicalName) {
@@ -490,6 +529,52 @@ function updateQuarantineManifestForRepair(filePath, details = {}) {
       Number.isFinite(details.durationSeconds) ? details.durationSeconds : null,
     sourceUrl: details.sourceUrl || null,
     mediaPageUrl: details.mediaPageUrl || null,
+  }
+
+  saveQuarantineManifest(manifest)
+  return true
+}
+
+function updateQuarantineManifestForRepairAttempt(filePath, details = {}) {
+  const relativePath = getDatasetRelativePath(filePath)
+  const quarantinePath = getQuarantineMirrorPath(filePath)
+  const manifest = loadQuarantineManifest()
+  const item = manifest.items.find(
+    (entry) =>
+      normalizePath(entry?.relativePath) === normalizePath(relativePath) ||
+      entry?.quarantinePath === quarantinePath
+  )
+
+  if (!item) {
+    return false
+  }
+
+  item.state = {
+    activeDatasetExists: fs.existsSync(filePath),
+    activeDatasetPath: filePath,
+    quarantineExists: fs.existsSync(quarantinePath),
+    repairState:
+      fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+        ? 'repaired'
+        : fs.existsSync(filePath) && fs.existsSync(quarantinePath)
+          ? 'replacement_present_pending_review'
+          : !fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+            ? 'missing_both'
+            : 'quarantined',
+  }
+
+  item.repair = {
+    ...(item.repair || {}),
+    lastAttemptAt: new Date().toISOString(),
+    lastAttemptBy: 'milkmaid',
+    lastAttemptOutcome: details.outcome || 'failed',
+    lastAttemptError: details.error || null,
+    lastAttemptSourceUrl: details.sourceUrl || null,
+    lastAttemptMediaPageUrl: details.mediaPageUrl || null,
+    lastAttemptBytesDownloaded:
+      Number.isFinite(details.bytesDownloaded) ? details.bytesDownloaded : null,
+    lastAttemptExpectedBytes:
+      Number.isFinite(details.expectedBytes) ? details.expectedBytes : null,
   }
 
   saveQuarantineManifest(manifest)
@@ -1931,6 +2016,16 @@ async function scrapeGallery(browser, url, modelName, folders) {
           } catch (err) {
             errorCount++
             currentRunLog && currentRunLog.counters.failures++
+            const manifestUpdated =
+              hadQuarantineMirror &&
+              updateQuarantineManifestForRepairAttempt(finalPath, {
+                outcome: 'failed',
+                error: err.message,
+                sourceUrl: url,
+                mediaPageUrl,
+                bytesDownloaded: bytesDownloadedForFile,
+                expectedBytes: responseContentLength,
+              })
             appendRunEvent('lazy_video_error', {
               modelName,
               filename,
@@ -1941,6 +2036,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               responseWasAborted,
               responseCloseBeforeEnd,
               hadQuarantineMirror,
+              manifestUpdated,
             })
             logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
