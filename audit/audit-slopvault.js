@@ -5,6 +5,15 @@ const crypto = require('crypto')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
 const sharp = require('sharp')
+const {
+  loadBitwiseHashCache,
+  getBitwiseHashRecord,
+} = require('../scrapyard/bitwiseHasher')
+const {
+  loadVisualHashCache,
+  getVisualHashFromBuffer,
+  getVisualHashRecord,
+} = require('../scrapyard/visualHasher')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -56,6 +65,10 @@ const incompleteRoot = path.resolve(
 )
 const quarantineBase = path.resolve(
   String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
+)
+const quarantineManifestPath = path.join(
+  quarantineBase,
+  'quarantine-manifest.json'
 )
 const decisionsPath = argv.decisions
   ? path.resolve(String(argv.decisions))
@@ -111,11 +124,14 @@ const summary = {
   flaggedFiles: 0,
   movedFiles: 0,
   quarantineEligibleFiles: 0,
+  manifestEntriesTracked: 0,
   rootsScanned: [],
   flaggedByReason: {},
   flaggedByType: {},
   errors: [],
+  quarantineManifestPath,
 }
+let quarantineManifest = null
 
 main().catch((err) => {
   console.error(`Fatal audit error: ${err.message}`)
@@ -124,6 +140,10 @@ main().catch((err) => {
 
 async function main() {
   ensureDir(logDir)
+  ensureDir(quarantineBase)
+  loadBitwiseHashCache()
+  loadVisualHashCache()
+  quarantineManifest = loadQuarantineManifest()
 
   console.log(
     `Starting Slopvault media audit in ${dryRun ? 'dry-run' : 'apply'} mode`
@@ -207,6 +227,7 @@ async function main() {
 
       if (hashFindings || shouldMove) {
         await attachContentHash(finding)
+        await attachHashLinkage(finding)
       }
 
       if (shouldMove) {
@@ -223,6 +244,7 @@ async function main() {
   console.log(`Flagged: ${summary.flaggedFiles}`)
   console.log(`Quarantine eligible: ${summary.quarantineEligibleFiles}`)
   console.log(`Moved: ${summary.movedFiles}`)
+  console.log(`Quarantine manifest: ${quarantineManifestPath}`)
   console.log(`Log file: ${path.join(logDir, 'audit-slopvault-latest.json')}`)
 }
 
@@ -267,6 +289,233 @@ function formatTimestamp(date) {
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true })
+}
+
+function loadQuarantineManifest() {
+  if (!fs.existsSync(quarantineManifestPath)) {
+    return {
+      version: 1,
+      updatedAt: null,
+      items: [],
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(quarantineManifestPath, 'utf-8').replace(/^\uFEFF/, '')
+    const parsed = raw.trim() ? JSON.parse(raw) : {}
+    return {
+      version: parsed?.version || 1,
+      updatedAt: parsed?.updatedAt || null,
+      items: Array.isArray(parsed?.items) ? parsed.items : [],
+    }
+  } catch (err) {
+    summary.errors.push(
+      `Could not load quarantine manifest ${quarantineManifestPath}: ${err.message}`
+    )
+    return {
+      version: 1,
+      updatedAt: null,
+      items: [],
+    }
+  }
+}
+
+function saveQuarantineManifest() {
+  if (!quarantineManifest) return
+
+  refreshQuarantineManifestState()
+  quarantineManifest.updatedAt = new Date().toISOString()
+  summary.manifestEntriesTracked = quarantineManifest.items.length
+
+  fs.writeFileSync(
+    quarantineManifestPath,
+    JSON.stringify(quarantineManifest, null, 2)
+  )
+}
+
+function refreshQuarantineManifestState() {
+  if (!quarantineManifest?.items) return
+
+  for (const item of quarantineManifest.items) {
+    item.state = buildCurrentManifestState(item)
+  }
+}
+
+function buildCurrentManifestState(item) {
+  const activeDatasetPath =
+    item.sourceType === 'dataset' && item.relativePath
+      ? path.join(datasetRoot, item.relativePath)
+      : null
+  const quarantineExists = item.quarantinePath
+    ? fs.existsSync(item.quarantinePath)
+    : false
+  const activeDatasetExists = activeDatasetPath
+    ? fs.existsSync(activeDatasetPath)
+    : false
+
+  let repairState = 'quarantined'
+  if (activeDatasetExists && !quarantineExists) {
+    repairState = 'repaired'
+  } else if (activeDatasetExists && quarantineExists) {
+    repairState = 'replacement_present_pending_review'
+  } else if (!activeDatasetExists && !quarantineExists) {
+    repairState = 'missing_both'
+  }
+
+  return {
+    activeDatasetExists,
+    activeDatasetPath,
+    quarantineExists,
+    repairState,
+  }
+}
+
+function upsertQuarantineManifestEntry(finding) {
+  if (!quarantineManifest) return
+
+  const nextEntry = {
+    id: finding.id,
+    sourceType: finding.sourceType,
+    mediaType: finding.mediaType,
+    model: getFindingModelName(finding),
+    relativePath: normalizePath(finding.relativePath),
+    sourcePathAtAudit: finding.sourcePath,
+    quarantinePath: finding.quarantinePath,
+    reasons: [...finding.reasons],
+    sizeBytes: finding.sizeBytes,
+    modifiedAt: finding.modifiedAt,
+    contentHash: finding.contentHash || null,
+    hashLinkage: finding.hashLinkage || null,
+    audit: {
+      runId: logBase,
+      mode: summary.mode,
+      movedAt: new Date().toISOString(),
+      decisionBacked: Boolean(decisions),
+    },
+    state: buildCurrentManifestState({
+      sourceType: finding.sourceType,
+      relativePath: normalizePath(finding.relativePath),
+      quarantinePath: finding.quarantinePath,
+    }),
+  }
+
+  const existingIndex = quarantineManifest.items.findIndex(
+    (item) =>
+      item.id === nextEntry.id ||
+      (item.quarantinePath && item.quarantinePath === nextEntry.quarantinePath)
+  )
+
+  if (existingIndex >= 0) {
+    quarantineManifest.items[existingIndex] = {
+      ...quarantineManifest.items[existingIndex],
+      ...nextEntry,
+    }
+  } else {
+    quarantineManifest.items.push(nextEntry)
+  }
+}
+
+function getFindingModelName(finding) {
+  const normalizedRelativePath = normalizePath(finding.relativePath)
+  const parts = normalizedRelativePath.split('/').filter(Boolean)
+  if (!parts.length) return null
+  return parts[0]
+}
+
+function getHashRecordRefs(record) {
+  return Array.isArray(record?.refs)
+    ? record.refs
+        .map((ref) =>
+          typeof ref === 'string' ? normalizePath(ref) : normalizePath(ref?.relativePath)
+        )
+        .filter(Boolean)
+    : []
+}
+
+function summarizeRecordRefs(refs) {
+  const normalizedRefs = [...new Set(refs.map((ref) => normalizePath(ref)).filter(Boolean))]
+  let activeCount = 0
+  let quarantineCount = 0
+  let missingCount = 0
+
+  for (const ref of normalizedRefs) {
+    const activePath = path.join(datasetRoot, ref.replace(/\//g, path.sep))
+    const quarantinePath = path.join(
+      quarantineBase,
+      'dataset',
+      ref.replace(/\//g, path.sep)
+    )
+
+    if (fs.existsSync(activePath)) {
+      activeCount += 1
+    } else if (fs.existsSync(quarantinePath)) {
+      quarantineCount += 1
+    } else {
+      missingCount += 1
+    }
+  }
+
+  return {
+    refCount: normalizedRefs.length,
+    activeCount,
+    quarantineCount,
+    missingCount,
+    refs: normalizedRefs,
+  }
+}
+
+async function attachHashLinkage(finding) {
+  const linkage = {
+    bitwise: null,
+    visual: null,
+  }
+
+  if (finding.contentHash?.value) {
+    const bitwiseRecord = getBitwiseHashRecord(finding.contentHash.value)
+    if (bitwiseRecord) {
+      linkage.bitwise = {
+        hash: finding.contentHash.value,
+        ...summarizeRecordRefs(getHashRecordRefs(bitwiseRecord)),
+      }
+    } else {
+      linkage.bitwise = {
+        hash: finding.contentHash.value,
+        refCount: 0,
+        activeCount: 0,
+        quarantineCount: 0,
+        missingCount: 0,
+        refs: [],
+      }
+    }
+  }
+
+  if (finding.sourceType === 'dataset' && ['image', 'gif'].includes(finding.mediaType)) {
+    try {
+      const buffer = fs.readFileSync(finding.sourcePath)
+      const visualHash = await getVisualHashFromBuffer(buffer)
+      if (visualHash) {
+        const visualRecord = getVisualHashRecord(visualHash)
+        linkage.visual = {
+          hash: visualHash,
+          ...(visualRecord
+            ? summarizeRecordRefs(getHashRecordRefs(visualRecord))
+            : {
+                refCount: 0,
+                activeCount: 0,
+                quarantineCount: 0,
+                missingCount: 0,
+                refs: [],
+              }),
+        }
+      }
+    } catch (err) {
+      summary.errors.push(
+        `Failed to build visual hash linkage for ${finding.sourcePath}: ${err.message}`
+      )
+    }
+  }
+
+  finding.hashLinkage = linkage
 }
 
 function loadDecisions(filePath) {
@@ -651,11 +900,16 @@ async function quarantineFinding(finding) {
     fs.copyFileSync(finding.sourcePath, finding.quarantinePath)
     fs.unlinkSync(finding.sourcePath)
   }
+
+  upsertQuarantineManifestEntry(finding)
 }
 
 async function writeLogs(findings) {
   const summaryPath = path.join(logDir, 'audit-slopvault-latest.json')
   const reportPath = path.join(logDir, 'audit-slopvault-latest.txt')
+
+  saveQuarantineManifest()
+
   const payload = {
     ...summary,
     runId: logBase,
@@ -672,6 +926,8 @@ async function writeLogs(findings) {
     `Flagged files: ${summary.flaggedFiles}`,
     `Quarantine eligible: ${summary.quarantineEligibleFiles}`,
     `Moved files: ${summary.movedFiles}`,
+    `Tracked quarantine entries: ${summary.manifestEntriesTracked}`,
+    `Quarantine manifest: ${quarantineManifestPath}`,
     '',
   ]
 
