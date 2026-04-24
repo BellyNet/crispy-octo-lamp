@@ -93,7 +93,7 @@ function createHashStore({ storePath, kind, algorithm }) {
         .sort((a, b) => a.hash.localeCompare(b.hash)),
     }
 
-    fs.writeFileSync(storePath, JSON.stringify(payload, null, 2))
+    fs.writeFileSync(storePath, JSON.stringify(payload))
   }
 
   function has(hash) {
