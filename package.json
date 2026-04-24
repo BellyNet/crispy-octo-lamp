@@ -27,6 +27,7 @@
     "remap:model": "node scrapyard/remapModelData.js",
     "backfill:sources": "node milkmaid/backfill-stufferdb-sources.js",
     "backfill:model-hashes": "node scrapyard/backfillModelHashes.js",
+    "match:errored-video-visuals": "node scrapyard/matchErroredVideoVisuals.js",
     "backfill:quarantine-manifest": "node scrapyard/backfillQuarantineManifest.js",
     "validate:model-hashes": "node scrapyard/validateModelHashes.js",
     "validate:quarantine": "node scrapyard/validateQuarantineState.js"

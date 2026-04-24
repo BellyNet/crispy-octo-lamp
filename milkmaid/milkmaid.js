@@ -23,6 +23,7 @@ const {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
+  getVisualHashFromVideoPath,
   isVisualDupe,
   addVisualHash,
   getVisualHashRecord,
@@ -1818,6 +1819,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
       )
       saveBitwiseHashCache()
 
+      const mp4VisualHash = await getVisualHashFromVideoPath(mp4Path)
+      if (mp4VisualHash) {
+        addVisualHash(
+          mp4VisualHash,
+          buildHashMetadata(
+            modelName,
+            mp4Path,
+            'video',
+            mp4Stat.size,
+            uploadedDate
+          )
+        )
+        saveVisualHashCache()
+      }
+
       knownFilenames.add(path.basename(mp4Path))
       currentRunLog && currentRunLog.counters.convertedGifs++
       currentRunLog && currentRunLog.counters.saved++
@@ -1826,6 +1842,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
         filename,
         savedPath: getDatasetRelativePath(mp4Path),
         hash: mp4Hash,
+        visualHash: mp4VisualHash,
       })
 
       const removedQuarantineMirror = removeQuarantineMirrorIfExists(mp4Path)
@@ -2100,6 +2117,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
             )
             saveBitwiseHashCache()
 
+            const finalVisualHash = await getVisualHashFromVideoPath(finalPath)
+            if (finalVisualHash) {
+              addVisualHash(
+                finalVisualHash,
+                buildHashMetadata(
+                  modelName,
+                  finalPath,
+                  'video',
+                  finalStat.size,
+                  uploadedDate
+                )
+              )
+              saveVisualHashCache()
+            }
+
             successCount++
             currentRunLog && currentRunLog.counters.saved++
             appendRunEvent('saved_lazy_video', {
@@ -2107,6 +2139,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               filename,
               savedPath: getDatasetRelativePath(finalPath),
               hash: finalHash,
+              visualHash: finalVisualHash,
             })
             const removedQuarantineMirror =
               removeQuarantineMirrorIfExists(finalPath)

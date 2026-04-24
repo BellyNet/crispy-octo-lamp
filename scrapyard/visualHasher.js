@@ -63,6 +63,104 @@ async function getVisualHashFromBuffer(buffer) {
   }
 }
 
+async function getVisualHashFromVideoPath(videoPath) {
+  const hash = createHash('md5').update(videoPath).digest('hex')
+  const outputPath = path.join(tmpDir, `vh_video_${hash}.png`)
+  const duration = await probeVideoDuration(videoPath)
+  const timestamps = buildVideoFrameTimestamps(duration)
+
+  for (const timestamp of timestamps) {
+    try {
+      await extractVideoFrameWithFfmpeg(videoPath, outputPath, timestamp)
+      const visualHash = await imghash.hash(outputPath, 16, 'hex')
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
+      return visualHash
+    } catch (err) {
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
+    }
+  }
+
+  return null
+}
+
+function buildVideoFrameTimestamps(durationSeconds) {
+  const base = [0.2, 0.5, 0.8]
+  if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+    return base
+      .map((ratio) => Math.max(0, Math.min(durationSeconds - 0.1, durationSeconds * ratio)))
+      .concat([1, 0, 3])
+      .filter((value, index, list) => Number.isFinite(value) && value >= 0 && list.indexOf(value) === index)
+  }
+
+  return [1, 0, 3]
+}
+
+function probeVideoDuration(videoPath) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        videoPath,
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }
+    )
+
+    let stdout = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+
+    child.on('error', () => resolve(null))
+    child.on('exit', (code) => {
+      if (code !== 0) return resolve(null)
+      const duration = Number.parseFloat(stdout.trim())
+      resolve(Number.isFinite(duration) ? duration : null)
+    })
+  })
+}
+
+function extractVideoFrameWithFfmpeg(inputPath, outputPath, timestampSeconds) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'ffmpeg',
+      [
+        '-y',
+        '-loglevel',
+        'error',
+        '-ss',
+        String(timestampSeconds),
+        '-i',
+        inputPath,
+        '-frames:v',
+        '1',
+        outputPath,
+      ],
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      }
+    )
+
+    let stderr = ''
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0 && fs.existsSync(outputPath)) return resolve()
+      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
+    })
+  })
+}
+
 function normalizeImageWithFfmpeg(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -115,6 +213,7 @@ module.exports = {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
+  getVisualHashFromVideoPath,
   isVisualDupe,
   addVisualHash,
   getVisualHashRecord,
