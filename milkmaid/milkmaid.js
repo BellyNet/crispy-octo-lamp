@@ -220,6 +220,45 @@ function parseCliArgs(argv) {
   }
 }
 
+function askQuestion(prompt) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    })
+
+    rl.question(prompt, (answer) => {
+      rl.close()
+      resolve(answer)
+    })
+  })
+}
+
+async function promptForModelName(registryPath, inferredRawName) {
+  const inferredName = sanitize(inferredRawName) || 'unknown_cow'
+  const registry = loadModelRegistry(registryPath)
+  const inferredCanonical =
+    findCanonicalModelName(registry, inferredName) || inferredName
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return inferredCanonical
+  }
+
+  const prompt =
+    inferredName === 'unknown_cow'
+      ? `\nDetected model: unknown_cow\nType the correct model name, or press Enter to keep unknown_cow: `
+      : `\nDetected model: ${inferredCanonical}\nPress Enter or type "y" to accept, or type a different model name: `
+
+  const rawAnswer = await askQuestion(prompt)
+  const normalizedAnswer = sanitize(rawAnswer)
+
+  if (!normalizedAnswer || normalizedAnswer === 'y' || normalizedAnswer === 'yes') {
+    return inferredCanonical
+  }
+
+  return normalizedAnswer
+}
+
 async function getBreadcrumbInfo(page) {
   return await page.evaluate(() => {
     const h2 = document.querySelector('.titrePage h2')
@@ -1318,9 +1357,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     )
     let inputUrl = initialInputUrl
     if (!inputUrl || !inputUrl.includes('/category/'))
-      return logAndProgress(
-        '⚠️  Usage: node milkmaid.js <gallery-url> [--model <canonical-or-alias>]'
-      )
+      return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
 
     inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
 
@@ -1346,19 +1383,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
     const inferredRawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
-    const rawName = modelOverride || inferredRawName
+    const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
+    const rawName = modelOverride
+      ? modelOverride
+      : await promptForModelName(aliasMapPath, inferredRawName)
 
     if (modelOverride) {
       console.log(
         `🏷️ Using manual model override: ${modelOverride} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
       )
-    } else if (inferredRawName === 'unknown_cow') {
+    } else {
       console.log(
-        '⚠️ Could not confidently infer model from breadcrumbs. Use --model <canonical-or-alias> to force the correct model.'
+        `🏷️ Confirmed model: ${rawName} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
       )
     }
 
-    const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
     modelName = resolveAndTrackModel(aliasMapPath, rawName, inputUrl)
 
     const folders = createModelFolders(modelName)
