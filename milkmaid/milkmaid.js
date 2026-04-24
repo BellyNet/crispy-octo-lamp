@@ -643,6 +643,7 @@ function startRunLog(modelName, inputUrl, folders) {
       convertedGifs: 0,
       failures: 0,
     },
+    errors: [],
   }
 
   removeFileIfExists(modelSummaryPath)
@@ -679,6 +680,15 @@ function appendRunEvent(type, payload = {}) {
   )
 }
 
+function recordRunError(category, details = {}) {
+  if (!currentRunLog) return
+  currentRunLog.errors.push({
+    at: new Date().toISOString(),
+    category,
+    ...details,
+  })
+}
+
 function finalizeRunLog(extra = {}) {
   if (!currentRunLog) return
 
@@ -689,6 +699,7 @@ function finalizeRunLog(extra = {}) {
     inputUrl: currentRunLog.inputUrl,
     logPath: currentRunLog.logPath,
     counters: currentRunLog.counters,
+    errors: currentRunLog.errors,
     ...extra,
   }
 
@@ -709,6 +720,22 @@ function finalizeRunLog(extra = {}) {
 
 function normalizeSkipUrl(url) {
   return String(url || '').trim().replace(/&acs=[^&]+/gi, '')
+}
+
+function isNuisanceMediaAsset(filename, ext) {
+  const lowerFilename = String(filename || '').trim().toLowerCase()
+  const lowerExt = String(ext || '').trim().toLowerCase()
+
+  if (lowerExt === '.ico') return true
+
+  return [
+    'ajax_loader',
+    'ajax-loader',
+    'favicon',
+    'loader.gif',
+    'loading.gif',
+    'preloader',
+  ].some((token) => lowerFilename.includes(token))
 }
 
 function buildPermanentSkipLookup(entries) {
@@ -1166,6 +1193,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
       async function scrapeMediaOnPage(page, mediaPageUrl, i) {
         totalCount++
+        let mediaUrl = null
+        let filename = null
+        let ext = null
 
         try {
           await page.goto(mediaPageUrl, {
@@ -1187,7 +1217,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             ? new Date(uploadedDateIso)
             : null
 
-          const mediaUrl = await page.evaluate(() => {
+          mediaUrl = await page.evaluate(() => {
             const video = document.querySelector('video.vjs-tech[src]')
             const img = document.querySelector('#theMainImage')
             return video?.src || img?.src || null
@@ -1196,14 +1226,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
           if (!mediaUrl) return
 
           const parsed = new URL(mediaUrl)
-          let filename = decodeURIComponent(
+          filename = decodeURIComponent(
             path.basename(parsed.pathname).split('?')[0]
           )
 
-          let ext = path.extname(filename).toLowerCase()
+          ext = path.extname(filename).toLowerCase()
           if (ext === '.m4v') {
             ext = '.mp4'
             filename = filename.replace(/\.m4v$/i, '.mp4')
+          }
+
+          if (isNuisanceMediaAsset(filename, ext)) {
+            appendRunEvent('skip_nuisance_media', {
+              modelName,
+              mediaPageUrl,
+              mediaUrl,
+              filename,
+              extension: ext,
+            })
+            return logAndProgress(`🚫 Skipped nuisance asset: ${filename}`, true)
           }
 
           const bucketName =
@@ -1499,9 +1540,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
         } catch (err) {
           errorCount++
           currentRunLog && currentRunLog.counters.failures++
+          recordRunError('media_error', {
+            modelName,
+            mediaPageUrl,
+            mediaUrl,
+            filename,
+            extension: ext,
+            error: err.message,
+          })
           appendRunEvent('media_error', {
             modelName,
             mediaPageUrl,
+            mediaUrl,
+            filename,
+            extension: ext,
             error: err.message,
           })
           logAndProgress(
@@ -1746,6 +1798,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
       logAndProgress(`✅ Converted GIF to MP4: ${filename}`)
     } catch (err) {
       currentRunLog && currentRunLog.counters.failures++
+      recordRunError('gif_conversion_error', {
+        modelName,
+        filename,
+        tmpPath: path.relative(rootDir, tmpPath).replace(/\\/g, '/'),
+        mp4Path: getDatasetRelativePath(mp4Path),
+        error: err.message,
+      })
       appendRunEvent('gif_conversion_error', {
         modelName,
         filename,
@@ -2054,9 +2113,27 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 bytesDownloaded: bytesDownloadedForFile,
                 expectedBytes: responseContentLength,
               })
+            recordRunError('lazy_video_error', {
+              modelName,
+              filename,
+              mediaUrl: url,
+              mediaPageUrl,
+              savedPath: getDatasetRelativePath(finalPath),
+              error: err.message,
+              bytesDownloaded: bytesDownloadedForFile,
+              responseContentLength,
+              responseEndedCleanly,
+              responseWasAborted,
+              responseCloseBeforeEnd,
+              hadQuarantineMirror,
+              manifestUpdated: Boolean(manifestUpdated),
+            })
             appendRunEvent('lazy_video_error', {
               modelName,
               filename,
+              mediaUrl: url,
+              mediaPageUrl,
+              savedPath: getDatasetRelativePath(finalPath),
               error: err.message,
               bytesDownloaded: bytesDownloadedForFile,
               responseContentLength,
@@ -2095,6 +2172,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
       `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
     )
   } catch (err) {
+    recordRunError('run_error', {
+      modelName,
+      inputUrl: currentRunLog?.inputUrl || null,
+      error: err.message,
+    })
     appendRunEvent('run_error', {
       modelName,
       error: err.message,
