@@ -2,7 +2,7 @@ const { executablePath } = require('puppeteer')
 const puppeteer = require('puppeteer')
 const fs = require('fs')
 const path = require('path')
-const { exec } = require('child_process')
+const { exec, spawn } = require('child_process')
 const { createHash } = require('crypto')
 const https = require('https')
 const http = require('http')
@@ -716,6 +716,51 @@ function finalizeRunLog(extra = {}) {
     ) + '\n'
   )
   currentRunLog = null
+}
+
+function launchReviewDashboardProcess() {
+  const reviewScriptPath = path.join(rootDir, 'audit', 'review-slopvault.js')
+  const port = 4700 + Math.floor(Math.random() * 200)
+  const child = spawn(
+    process.execPath,
+    [reviewScriptPath, '--skip-audit', '--port', String(port)],
+    {
+      cwd: rootDir,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    }
+  )
+
+  child.unref()
+  return { port }
+}
+
+async function maybePauseForErrorReview(modelName, failures) {
+  if (
+    failures <= 0 ||
+    !process.stdin.isTTY ||
+    !process.stdout.isTTY ||
+    process.env.MILKMAID_SKIP_ERROR_REVIEW === '1'
+  ) {
+    return
+  }
+
+  try {
+    const { port } = launchReviewDashboardProcess()
+    logAndProgress('')
+    logAndProgress(
+      `🩺 Opened Slopvault review dashboard for ${modelName} on port ${port} before NAS sync.`
+    )
+    logAndProgress(
+      'Review the run errors, mark bad upstream files as permanent-skip if needed, then return here.'
+    )
+  } catch (err) {
+    logAndProgress(`⚠️ Could not launch review dashboard: ${err.message}`)
+    return
+  }
+
+  await askQuestion('\nPress Enter when you are ready to continue to NAS sync: ')
 }
 
 function normalizeSkipUrl(url) {
@@ -2157,16 +2202,27 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     saveVisualHashCache()
 
-    exec(
-      `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`,
-      (err) => {
-        if (err && err.code > 3) {
-          console.error('❌ NAS sync failed with code', err.code)
-        } else {
-          console.log('✅ NAS sync complete.')
-        }
-      }
+    if (currentRunLog) {
+      finalizeRunLog({
+        successCount,
+        duplicateCount,
+        errorCount,
+        categoryRunList,
+        combinedTotal,
+      })
+    }
+
+    await maybePauseForErrorReview(modelName, errorCount)
+
+    const nasSync = await runShellCommand(
+      `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
     )
+
+    if (!nasSync.ok && nasSync.code > 3) {
+      console.error('❌ NAS sync failed with code', nasSync.code)
+    } else {
+      console.log('✅ NAS sync complete.')
+    }
 
     console.log(
       `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
