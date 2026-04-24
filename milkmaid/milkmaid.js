@@ -344,6 +344,11 @@ const datasetDir = path.join(
   'dataset'
 )
 const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const quarantineManifestPath = path.join(
+  slopvaultRoot,
+  'quarantine',
+  'quarantine-manifest.json'
+)
 const permanentSkipFile = path.join(slopvaultRoot, 'milkmaid-permanent-skips.json')
 const tmpDir = path.join(rootDir, 'tmp')
 let currentRunLog = null
@@ -410,6 +415,85 @@ function getQuarantineMirrorPath(filePath) {
     quarantineDatasetDir,
     getDatasetRelativePath(filePath).replace(/\//g, path.sep)
   )
+}
+
+function loadQuarantineManifest() {
+  if (!fs.existsSync(quarantineManifestPath)) {
+    return {
+      version: 1,
+      updatedAt: null,
+      items: [],
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(quarantineManifestPath, 'utf8').trim()
+    const parsed = raw ? JSON.parse(raw) : {}
+    return {
+      version: parsed?.version || 1,
+      updatedAt: parsed?.updatedAt || null,
+      items: Array.isArray(parsed?.items) ? parsed.items : [],
+    }
+  } catch (err) {
+    logAndProgress(`⚠️ Could not read quarantine manifest: ${err.message}`)
+    return {
+      version: 1,
+      updatedAt: null,
+      items: [],
+    }
+  }
+}
+
+function saveQuarantineManifest(manifest) {
+  fs.mkdirSync(path.dirname(quarantineManifestPath), { recursive: true })
+  manifest.updatedAt = new Date().toISOString()
+  fs.writeFileSync(quarantineManifestPath, JSON.stringify(manifest, null, 2))
+}
+
+function updateQuarantineManifestForRepair(filePath, details = {}) {
+  const relativePath = getDatasetRelativePath(filePath)
+  const quarantinePath = getQuarantineMirrorPath(filePath)
+  const manifest = loadQuarantineManifest()
+  const item = manifest.items.find(
+    (entry) =>
+      normalizePath(entry?.relativePath) === normalizePath(relativePath) ||
+      entry?.quarantinePath === quarantinePath
+  )
+
+  if (!item) {
+    return false
+  }
+
+  item.state = {
+    activeDatasetExists: fs.existsSync(filePath),
+    activeDatasetPath: filePath,
+    quarantineExists: fs.existsSync(quarantinePath),
+    repairState:
+      fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+        ? 'repaired'
+        : fs.existsSync(filePath) && fs.existsSync(quarantinePath)
+          ? 'replacement_present_pending_review'
+          : !fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+            ? 'missing_both'
+            : 'quarantined',
+  }
+
+  item.repair = {
+    ...(item.repair || {}),
+    repairedAt: new Date().toISOString(),
+    repairedBy: 'milkmaid',
+    replacementPath: filePath,
+    replacementRelativePath: relativePath,
+    replacementHash: details.hash || null,
+    replacementSizeBytes: details.sizeBytes ?? null,
+    replacementDurationSeconds:
+      Number.isFinite(details.durationSeconds) ? details.durationSeconds : null,
+    sourceUrl: details.sourceUrl || null,
+    mediaPageUrl: details.mediaPageUrl || null,
+  }
+
+  saveQuarantineManifest(manifest)
+  return true
 }
 
 function isQuarantinedPath(filePath) {
@@ -1221,6 +1305,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               tmpPath,
               filename,
               uploadedDate,
+              mediaPageUrl,
             })
             currentRunLog && currentRunLog.counters.queuedVideos++
             appendRunEvent('queued_lazy_video', {
@@ -1526,6 +1611,22 @@ async function scrapeGallery(browser, url, modelName, folders) {
         hash: mp4Hash,
       })
 
+      const removedQuarantineMirror = removeQuarantineMirrorIfExists(mp4Path)
+      if (removedQuarantineMirror) {
+        const repairedManifestEntry = updateQuarantineManifestForRepair(mp4Path, {
+          hash: mp4Hash,
+          sizeBytes: mp4Stat.size,
+          sourceUrl: null,
+          mediaPageUrl: null,
+        })
+        appendRunEvent('repair_cleared_quarantine_copy', {
+          modelName,
+          filename: path.basename(mp4Path),
+          savedPath: getDatasetRelativePath(mp4Path),
+          manifestUpdated: repairedManifestEntry,
+        })
+      }
+
       // Clean up the original GIF from tmp folder
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
 
@@ -1576,7 +1677,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   await Promise.all(
     lazyVideoQueue.map(
-      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
+      ({ url, path: finalPath, tmpPath, filename, uploadedDate, mediaPageUrl }, i) =>
         lazyLimit(async () => {
           if (knownFilenames.has(filename) || existsForRepair(finalPath)) {
             duplicateCount++
@@ -1786,10 +1887,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
             const removedQuarantineMirror =
               removeQuarantineMirrorIfExists(finalPath)
             if (removedQuarantineMirror) {
+              const repairedManifestEntry = updateQuarantineManifestForRepair(
+                finalPath,
+                {
+                  hash: finalHash,
+                  sizeBytes: finalStat.size,
+                  durationSeconds: duration,
+                  sourceUrl: url,
+                  mediaPageUrl,
+                }
+              )
               appendRunEvent('repair_cleared_quarantine_copy', {
                 modelName,
                 filename,
                 savedPath: getDatasetRelativePath(finalPath),
+                manifestUpdated: repairedManifestEntry,
               })
             }
             logAndProgress(`✅ Saved lazy video: ${filename}`)
