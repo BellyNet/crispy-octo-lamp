@@ -55,6 +55,7 @@ const datasetDir = path.join(
 const tmpDir = path.join(__dirname, 'tmp')
 const incompleteDir = path.join(__dirname, 'incomplete')
 const incompleteGifDir = path.join(incompleteDir, 'gifs')
+const skippedImagesLog = path.join(__dirname, 'skipped_images.txt')
 
 let completedTotal = 0
 let taskCompleted = false
@@ -188,10 +189,14 @@ const knownFilenames = new Set()
 const gifsToConvert = []
 const lazyVideoQueue = []
 
-fs.readdirSync(datasetDir).forEach((folder) => {
-  const folderPath = path.join(datasetDir, folder)
-  if (fs.lstatSync(folderPath).isDirectory()) {
-    fs.readdirSync(folderPath).forEach((f) => knownFilenames.add(f))
+fs.readdirSync(datasetDir).forEach((model) => {
+  const modelPath = path.join(datasetDir, model)
+  if (!fs.lstatSync(modelPath).isDirectory()) return
+  for (const sub of ['images', 'webm', 'gif']) {
+    const subPath = path.join(modelPath, sub)
+    try {
+      fs.readdirSync(subPath).forEach((f) => knownFilenames.add(f))
+    } catch {}
   }
 })
 
@@ -242,7 +247,7 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   const modelName = aliasMap[rawName] || rawName
   if (!aliasMap[rawName]) {
     aliasMap[rawName] = rawName
-    fs.writeFileSync('model_aliases.json', JSON.stringify(aliasMap, null, 2))
+    fs.writeFileSync(aliasMapPath, JSON.stringify(aliasMap, null, 2))
   }
   const folders = createModelFolders(modelName)
 
@@ -333,10 +338,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
         fs.utimesSync(mp4Path, ts, ts) // ✅ timestamp converted mp4
       }
 
-      knownHashes.add(
-        createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
-      )
-      addBitwiseHash(hash)
+      const mp4Hash = createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
+      knownHashes.add(mp4Hash)
+      addBitwiseHash(mp4Hash)
       saveBitwiseHashCache()
 
       knownFilenames.add(path.basename(mp4Path))
@@ -389,56 +393,36 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
             fs.utimesSync(finalPath, ts, ts)
           }
 
-          // after writing finalPath
-          if (fs.existsSync(finalPath)) {
-            try {
-              const { size } = fs.statSync(finalPath)
-              const isSmallFile = size < 5 * 1024 * 1024 // < 5MB
+          if (isImage) {
+            if (!isBitwiseDupe(hash)) {
+              addBitwiseHash(hash)
+              saveBitwiseHashCache()
+            }
+            knownFilenames.add(filename)
+            lazyCompleted++
+            logLazyProgress()
+            logAndProgress(`🖼️ Saved deferred image: ${filename}`)
+            return
+          }
 
-              const duration = await getVideoDuration(finalPath)
-              if (duration <= 6 && isSmallFile) {
-                const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
-                const gifPath = path.join(folders.gif, gifName)
-
-                if (!fs.existsSync(gifPath)) {
-                  await convertShortMp4ToGif(finalPath, gifPath)
-                  if (uploadedDate) {
-                    const ts = uploadedDate.getTime() / 1000
-                    fs.utimesSync(gifPath, ts, ts) // ✅ set date on new .gif
-                  }
-                  lazyCompleted++
-                  logLazyProgress()
-
-                  logAndProgress(`🎁 Converted to gif: ${gifName}`)
-                }
-              }
-
-              if (isImage) {
-                fs.writeFileSync(finalPath, buffer)
+          // Short MP4 → also generate a GIF preview
+          try {
+            const { size } = fs.statSync(finalPath)
+            const duration = await getVideoDuration(finalPath)
+            if (duration <= 6 && size < 5 * 1024 * 1024) {
+              const gifName = filename.replace(/\.(mp4|m4v)$/i, ‘.gif’)
+              const gifPath = path.join(folders.gif, gifName)
+              if (!fs.existsSync(gifPath)) {
+                await convertShortMp4ToGif(finalPath, gifPath)
                 if (uploadedDate) {
                   const ts = uploadedDate.getTime() / 1000
-                  fs.utimesSync(finalPath, ts, ts)
+                  fs.utimesSync(gifPath, ts, ts)
                 }
-
-                const hash = createHash('md5').update(buffer).digest('hex')
-                if (!isBitwiseDupe(hash)) {
-                  addBitwiseHash(hash)
-                  saveBitwiseHashCache()
-                }
-
-                knownFilenames.add(filename)
-
-                lazyCompleted++
-                logLazyProgress()
-
-                logAndProgress(`🖼️ Saved deferred image: ${filename}`)
-                return
+                logAndProgress(`🎁 Converted to gif: ${gifName}`)
               }
-            } catch (err) {
-              console.warn(
-                `⚠️ Couldn’t convert ${filename} to gif: ${err.message}`
-              )
             }
+          } catch (err) {
+            console.warn(`⚠️ Couldn’t convert ${filename} to gif: ${err.message}`)
           }
 
           if (!isBitwiseDupe(hash)) {
@@ -470,7 +454,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   console.log(`\n⏱️ Total scrape time: ${mins}m ${secs}s`)
   console.log('\n' + getCompletionLine())
 
-  syncToNAS(modelName)
   await browser.close()
 }
 
@@ -600,11 +583,11 @@ async function processPost(
             logAndProgress(`🧷 Saved fallback image: ${filename}`)
           } catch (e) {
             logAndProgress(`❌ Fallback image failed: ${e.message}`)
-            fs.appendFileSync('skipped_images.txt', `${url}\n`)
+            fs.appendFileSync(skippedImagesLog, `${url}\n`)
           }
         } else {
           logAndProgress(`❌ No fallback found in DOM for ${filename}`)
-          fs.appendFileSync('skipped_images.txt', `${url}\n`)
+          fs.appendFileSync(skippedImagesLog, `${url}\n`)
         }
 
         continue // ⛔ Skip the rest of this media loop
