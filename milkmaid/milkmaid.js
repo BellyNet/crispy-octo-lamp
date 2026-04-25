@@ -13,6 +13,11 @@ const lazyLimit = pLimit(4)
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const chalk = require('chalk').default
+const MEDIA_PAGE_CONCURRENCY = 4
+const MEDIA_PAGE_TIMEOUT_MS = 20000
+const MEDIA_PAGE_RETRY_TIMEOUT_MS = 30000
+const LAZY_REQUEST_TIMEOUT_MS = 30000
+const LAZY_IDLE_TIMEOUT_MS = 30000
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
@@ -1233,7 +1238,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       })
 
       const pages = await Promise.all(
-        Array.from({ length: 8 }, () =>
+        Array.from({ length: MEDIA_PAGE_CONCURRENCY }, () =>
           createScraperPage(browser, {
             site: 'stufferdb',
             interceptMedia: false,
@@ -1252,10 +1257,30 @@ async function scrapeGallery(browser, url, modelName, folders) {
         let ext = null
 
         try {
-          await page.goto(mediaPageUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: 20000,
-          })
+          try {
+            await page.goto(mediaPageUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: MEDIA_PAGE_TIMEOUT_MS,
+            })
+          } catch (error) {
+            if (!/Navigation timeout/i.test(error.message || '')) {
+              throw error
+            }
+
+            appendRunEvent('media_page_retry', {
+              modelName,
+              mediaPageUrl,
+              attempt: 2,
+              timeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+              reason: error.message,
+            })
+
+            await sleep(750)
+            await page.goto(mediaPageUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+            })
+          }
 
           const uploadedDateIso = await page.evaluate(() => {
             const anchor = document.querySelector('#datepost dd a')
@@ -1984,12 +2009,68 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             await new Promise((resolve, reject) => {
               const proto = url.startsWith('https') ? https : http
+              let req = null
+              let settled = false
+              let idleTimer = null
+
+              const cleanup = () => {
+                if (idleTimer) {
+                  clearTimeout(idleTimer)
+                  idleTimer = null
+                }
+              }
+
+              const resetIdleTimer = () => {
+                cleanup()
+                idleTimer = setTimeout(() => {
+                  if (settled) return
+                  settled = true
+                  req?.destroy(
+                    new Error(
+                      `No lazy download progress for ${LAZY_IDLE_TIMEOUT_MS}ms`
+                    )
+                  )
+                  stream.destroy(
+                    new Error(
+                      `No lazy download progress for ${LAZY_IDLE_TIMEOUT_MS}ms`
+                    )
+                  )
+                  reject(
+                    new Error(
+                      `No lazy download progress for ${LAZY_IDLE_TIMEOUT_MS}ms`
+                    )
+                  )
+                }, LAZY_IDLE_TIMEOUT_MS)
+              }
+
+              const rejectOnce = (error) => {
+                if (settled) return
+                settled = true
+                cleanup()
+                reject(error)
+              }
+
+              const resolveOnce = () => {
+                if (settled) return
+                settled = true
+                cleanup()
+                resolve()
+              }
+
               stream.on('error', reject)
-              proto
-                .get(url, (res) => {
+              req = proto.get(url, (res) => {
+                resetIdleTimer()
+
+                appendRunEvent('lazy_video_download_started', {
+                  modelName,
+                  filename,
+                  url,
+                  savedPath: getDatasetRelativePath(finalPath),
+                })
+
                   if (res.statusCode !== 200) {
                     res.resume()
-                    return reject(new Error(`HTTP ${res.statusCode}`))
+                    return rejectOnce(new Error(`HTTP ${res.statusCode}`))
                   }
 
                   responseContentLength =
@@ -2012,6 +2093,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   }
 
                   res.on('data', (chunk) => {
+                    resetIdleTimer()
                     stream.write(chunk)
                     lazyBytesDownloaded += chunk.length
                     bytesDownloadedForFile += chunk.length
@@ -2025,7 +2107,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
                   res.on('end', () => {
                     responseEndedCleanly = true
-                    stream.end(resolve)
+                    cleanup()
+                    stream.end(resolveOnce)
                   })
 
                   res.on('aborted', () => {
@@ -2040,10 +2123,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
                   res.on('error', (err) => {
                     stream.destroy(err)
-                    reject(err)
+                    rejectOnce(err)
                   })
                 })
-                .on('error', reject)
+              req.setTimeout(LAZY_REQUEST_TIMEOUT_MS, () => {
+                responseWasAborted = true
+                req.destroy(
+                  new Error(
+                    `Lazy request timeout after ${LAZY_REQUEST_TIMEOUT_MS}ms`
+                  )
+                )
+              })
+              req.on('error', rejectOnce)
             })
 
             const tmpIntegrity = await getVideoIntegrityReport(tmpPath)
