@@ -40,6 +40,12 @@ const outputDir = path.resolve(
 const dashboardDir = path.resolve(
   String(argv['dashboard-dir'] || path.join(__dirname, 'dashboard'))
 )
+const videoCandidatePath = path.resolve(
+  String(
+    argv['video-candidates'] ||
+      path.join(__dirname, '..', 'tmp', 'errored-video-visual-candidates.json')
+  )
+)
 const auditLogPath = argv['audit-log']
   ? path.resolve(String(argv['audit-log']))
   : findLatestAuditLog(path.join(__dirname, 'logs'))
@@ -239,7 +245,15 @@ function buildManifest(records, auditLog, persistedDecisions) {
     persistedDecisions
   )
   const runErrorFindings = buildRunErrorFindings(records, persistedDecisions)
-  const findings = [...auditFindings, ...runErrorFindings]
+  const videoDuplicateFindings = buildVideoDuplicateFindings(
+    records,
+    persistedDecisions
+  )
+  const findings = [
+    ...auditFindings,
+    ...runErrorFindings,
+    ...videoDuplicateFindings,
+  ]
 
   return {
     generatedAt: new Date().toISOString(),
@@ -259,6 +273,7 @@ function buildManifest(records, auditLog, persistedDecisions) {
         (finding) => finding.quarantineEligible
       ).length,
       runErrorFindings: runErrorFindings.length,
+      videoDuplicateFindings: videoDuplicateFindings.length,
       byMediaType,
       byRoot,
     },
@@ -320,6 +335,111 @@ function buildAuditFindings(auditLog, records, persistedDecisions) {
   return findings
 }
 
+function buildVideoDuplicateFindings(records, persistedDecisions) {
+  const candidateData = loadVideoCandidates(videoCandidatePath)
+  if (!candidateData?.matched?.length) return []
+
+  const recordsByDatasetRelative = new Map()
+  for (const record of records) {
+    const key = normalizePath(record.datasetRelativePath || '')
+    if (!key) continue
+    if (!recordsByDatasetRelative.has(key))
+      recordsByDatasetRelative.set(key, [])
+    recordsByDatasetRelative.get(key).push(record)
+  }
+
+  return candidateData.matched
+    .map((candidate) => {
+      const targetRelativePath = normalizePath(candidate.relativePath || '')
+      if (!targetRelativePath) return null
+
+      const targetRecords = recordsByDatasetRelative.get(
+        `dataset/${targetRelativePath}`
+      ) || [null]
+      const targetRecord =
+        targetRecords.find((record) => record?.quarantined) ||
+        targetRecords.find((record) => record?.root === 'dataset') ||
+        targetRecords[0] ||
+        null
+      const id = createFindingId(
+        'video_duplicate_candidate',
+        targetRelativePath
+      )
+
+      return {
+        id,
+        reviewType: 'video_duplicate_candidate',
+        sourceType: 'video_duplicate_candidate',
+        model: candidate.model || targetRecord?.model || null,
+        bucket:
+          targetRecord?.bucket ||
+          normalizePath(targetRelativePath).split('/')[1] ||
+          null,
+        filename:
+          path.basename(targetRelativePath) || targetRecord?.filename || null,
+        mediaType: 'video',
+        relativePath: targetRelativePath,
+        sourcePath: targetRecord?.absolutePath || null,
+        sourceFileUri: targetRecord?.absolutePath
+          ? pathToFileUri(targetRecord.absolutePath)
+          : null,
+        quarantinePath: targetRecord?.quarantined
+          ? targetRecord.absolutePath
+          : null,
+        quarantineFileUri:
+          targetRecord?.quarantined && targetRecord?.absolutePath
+            ? pathToFileUri(targetRecord.absolutePath)
+            : null,
+        reasons: ['video_duplicate_candidate'],
+        quarantineEligible: false,
+        defaultAction: 'keep',
+        supportedActions: ['keep'],
+        matchedRecordId: targetRecord?.id || null,
+        sizeBytes: targetRecord?.sizeBytes || null,
+        durationSeconds: candidate.durationSeconds ?? null,
+        width: candidate.width ?? null,
+        height: candidate.height ?? null,
+        mediaUrl: candidate.mediaUrl || null,
+        mediaPageUrl: candidate.mediaPageUrl || null,
+        duplicateCandidates: (candidate.matches || []).map((match) => {
+          const matchRelativePath = normalizePath(match.relativePath || '')
+          const matchRecords = matchRelativePath
+            ? recordsByDatasetRelative.get(`dataset/${matchRelativePath}`) || [
+                null,
+              ]
+            : [null]
+          const matchRecord =
+            matchRecords.find((record) => !record?.quarantined) ||
+            matchRecords[0] ||
+            null
+
+          return {
+            relativePath: matchRelativePath,
+            model: match.model || null,
+            sourcePath: matchRecord?.absolutePath || null,
+            sourceFileUri: matchRecord?.absolutePath
+              ? pathToFileUri(matchRecord.absolutePath)
+              : null,
+            sharedFrameCount: match.sharedFrameCount ?? 0,
+            sharedFrames: Array.isArray(match.sharedFrames)
+              ? match.sharedFrames
+              : [],
+            durationSeconds: match.durationSeconds ?? null,
+            durationDeltaSeconds: match.durationDeltaSeconds ?? null,
+            width: match.width ?? null,
+            height: match.height ?? null,
+            sizeBytes: match.sizeBytes ?? matchRecord?.sizeBytes ?? null,
+          }
+        }),
+      }
+    })
+    .filter(Boolean)
+    .filter(
+      (finding) =>
+        !isResolvedDuplicateDecision(persistedDecisions.get(finding.id))
+    )
+}
+
 function buildRunErrorFindings(records, persistedDecisions) {
   const findings = []
   const recordsByRelativePath = new Map(
@@ -327,7 +447,11 @@ function buildRunErrorFindings(records, persistedDecisions) {
   )
 
   for (const modelName of collectDatasetModels()) {
-    const runSummaryPath = path.join(datasetRoot, modelName, 'milkmaid-last-run.json')
+    const runSummaryPath = path.join(
+      datasetRoot,
+      modelName,
+      'milkmaid-last-run.json'
+    )
     if (!fs.existsSync(runSummaryPath)) continue
 
     let summary = null
@@ -341,7 +465,8 @@ function buildRunErrorFindings(records, persistedDecisions) {
     const errors = Array.isArray(summary?.errors) ? summary.errors : []
     const runLogContext = loadRunLogContext(summary?.logPath)
     for (const error of errors) {
-      const context = runLogContext.get(String(error.filename || '').trim()) || null
+      const context =
+        runLogContext.get(String(error.filename || '').trim()) || null
       const normalizedSavedPath = normalizePath(
         error.savedPath || context?.savedPath || ''
       )
@@ -425,8 +550,10 @@ function loadRunLogContext(logPath) {
       const next = byFilename.get(filename)
 
       if (item.mediaUrl && !next.mediaUrl) next.mediaUrl = item.mediaUrl
-      if (item.mediaPageUrl && !next.mediaPageUrl) next.mediaPageUrl = item.mediaPageUrl
-      if (item.savedPath && !next.savedPath) next.savedPath = normalizePath(item.savedPath)
+      if (item.mediaPageUrl && !next.mediaPageUrl)
+        next.mediaPageUrl = item.mediaPageUrl
+      if (item.savedPath && !next.savedPath)
+        next.savedPath = normalizePath(item.savedPath)
     }
   } catch (err) {
     console.warn(`Could not parse Milkmaid run log ${logPath}: ${err.message}`)
@@ -458,6 +585,10 @@ function isResolvedAuditDecision(action) {
 
 function isResolvedRunDecision(action) {
   return action === 'keep' || action === 'permanent-skip'
+}
+
+function isResolvedDuplicateDecision(action) {
+  return action === 'keep'
 }
 
 function omitFindings(auditLog) {
@@ -537,7 +668,7 @@ function loadAuditLog(filePath) {
     throw new Error(`Audit log not found: ${filePath}`)
   }
 
-  const raw = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
+  const raw = readTextFileAuto(filePath)
   const parsed = JSON.parse(raw)
   parsed.logPath = filePath
   parsed.findings = Array.isArray(parsed.findings) ? parsed.findings : []
@@ -548,7 +679,7 @@ function loadLatestDecisions(filePath) {
   if (!fs.existsSync(filePath)) return new Map()
 
   try {
-    const raw = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
+    const raw = readTextFileAuto(filePath)
     const parsed = JSON.parse(raw)
     const decisions = Array.isArray(parsed?.decisions) ? parsed.decisions : []
     return new Map(
@@ -562,6 +693,30 @@ function loadLatestDecisions(filePath) {
     )
     return new Map()
   }
+}
+
+function loadVideoCandidates(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null
+
+  try {
+    const raw = readTextFileAuto(filePath)
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch (err) {
+    console.warn(
+      `Could not load video duplicate candidates from ${filePath}: ${err.message}`
+    )
+    return null
+  }
+}
+
+function readTextFileAuto(filePath) {
+  const buffer = fs.readFileSync(filePath)
+  const isUtf16LeBom =
+    buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe
+  const hasNullStride = buffer.length >= 4 && buffer[1] === 0x00
+  const encoding = isUtf16LeBom || hasNullStride ? 'utf16le' : 'utf8'
+  return buffer.toString(encoding).replace(/^\uFEFF/, '')
 }
 
 function createFindingId(sourceType, relativePath) {
@@ -881,7 +1036,7 @@ function renderDashboard(manifest) {
     <div class="subhead">
       Generated at ${escapeHtml(manifest.generatedAt)} from audit log
       ${manifest.audit.logPath ? `<code>${escapeHtml(manifest.audit.logPath)}</code>` : '<code>none found</code>'}.
-      Audit findings and latest Milkmaid run errors are combined here. Default decisions are prefilled on load so you can review fast, change only the rows you disagree with, and apply the current decision set in one shot.
+      Audit findings, latest Milkmaid run errors, and targeted video duplicate leads are combined here. Default decisions are prefilled on load so you can review fast, change only the rows you disagree with, and apply the current decision set in one shot.
     </div>
   </header>
   <main>
@@ -894,7 +1049,7 @@ function renderDashboard(manifest) {
     </section>
 
     <section class="notice">
-      Every finding starts prefilled as either <strong>keep</strong> or <strong>quarantine</strong>. Run-error rows can also be marked <strong>permanent skip</strong>, which writes them into Milkmaid's skip list so future scrapes never retry those broken upstream files.
+      Every finding starts prefilled as either <strong>keep</strong> or <strong>quarantine</strong>. Run-error rows can also be marked <strong>permanent skip</strong>, which writes them into Milkmaid's skip list so future scrapes never retry those broken upstream files. Video duplicate rows are just leads for manual verification.
     </section>
 
     <section class="controls">
@@ -1222,8 +1377,40 @@ function renderDashboard(manifest) {
         <div><strong>Source Path:</strong> <code>\${escapeHtml(finding.sourcePath || '')}</code></div>
         <div><strong>Quarantine target:</strong> <code>\${escapeHtml(finding.quarantinePath || '')}</code></div>
         <div><strong>Saved Path:</strong> <code>\${escapeHtml(finding.savedPath || finding.relativePath || '')}</code></div>
+        \${renderDuplicateCandidates(finding)}
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
       \`;
+    }
+
+    function renderDuplicateCandidates(finding) {
+      const candidates = Array.isArray(finding.duplicateCandidates)
+        ? finding.duplicateCandidates
+        : [];
+      if (!candidates.length) return '';
+
+      return '<div><strong>Suggested clean matches:</strong></div>' +
+        candidates.slice(0, 3).map(candidate => {
+          const sourceLink = candidate.sourcePath
+            ? '<a class="meta-link" href="' + getReviewMediaUrl(candidate.sourcePath) + '" target="_blank" rel="noreferrer">Open local match</a>'
+            : 'No local file';
+          const durationText =
+            typeof candidate.durationSeconds === 'number'
+              ? candidate.durationSeconds.toFixed(3) + 's'
+              : 'n/a';
+          const deltaText =
+            typeof candidate.durationDeltaSeconds === 'number'
+              ? candidate.durationDeltaSeconds.toFixed(3) + 's'
+              : 'n/a';
+
+          return '<div class="duplicate-candidate">' +
+            '<div><strong>' + escapeHtml(candidate.relativePath || '') + '</strong></div>' +
+            '<div><strong>Shared frames:</strong> ' + escapeHtml(String(candidate.sharedFrameCount || 0)) + '</div>' +
+            '<div><strong>Duration:</strong> ' + escapeHtml(durationText) + ' <span class="helper">(delta ' + escapeHtml(deltaText) + ')</span></div>' +
+            '<div><strong>Resolution:</strong> ' + escapeHtml(formatResolution(candidate.width, candidate.height)) + '</div>' +
+            '<div><strong>Size:</strong> ' + escapeHtml(formatBytes(candidate.sizeBytes || 0)) + '</div>' +
+            '<div><strong>Match file:</strong> ' + sourceLink + '</div>' +
+          '</div>';
+        }).join('');
     }
 
     function getMediaUrl(finding) {
@@ -1236,6 +1423,18 @@ function renderDashboard(manifest) {
       }
 
       return finding.sourceFileUri || '';
+    }
+
+    function getReviewMediaUrl(sourcePath) {
+      if (
+        window.location.protocol === 'http:' ||
+        window.location.protocol === 'https:'
+      ) {
+        const tokenParam = reviewToken ? '&token=' + encodeURIComponent(reviewToken) : '';
+        return '/media?path=' + encodeURIComponent(sourcePath) + tokenParam;
+      }
+
+      return '';
     }
 
     function buildDecisionExport() {
@@ -1337,6 +1536,11 @@ function renderDashboard(manifest) {
         unit++;
       }
       return value.toFixed(unit ? 1 : 0) + ' ' + units[unit];
+    }
+
+    function formatResolution(width, height) {
+      if (!width || !height) return 'n/a';
+      return width + 'x' + height;
     }
 
     function escapeHtml(value) {

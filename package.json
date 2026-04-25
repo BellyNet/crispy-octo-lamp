@@ -19,6 +19,7 @@
     "hoghaul": "node hoghaul/hoghaul.js",
     "milkmaid": "node milkmaid/milkmaid.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
+    "salvage:tail-video": "node audit/salvage-tail-videos.js --input",
     "manifest:slopvault": "node audit/manifest-slopvault.js",
     "review:slopvault": "node audit/review-slopvault.js",
     "sync": "node scrapyard/sync.js",

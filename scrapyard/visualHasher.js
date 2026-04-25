@@ -20,7 +20,7 @@ const visualHashPath = path.join(datasetDir, 'visualHashes.v2.json')
 const visualHashStore = createHashStore({
   storePath: visualHashPath,
   kind: 'visual',
-  algorithm: 'imghash-16-hex',
+  algorithm: 'imghash-16-hex|video-3frame-imghash-16-hex',
 })
 
 function loadVisualHashCache() {
@@ -63,24 +63,43 @@ async function getVisualHashFromBuffer(buffer) {
   }
 }
 
-async function getVisualHashFromVideoPath(videoPath) {
+async function getVideoFrameHashesFromPath(videoPath, options = {}) {
   const hash = createHash('md5').update(videoPath).digest('hex')
-  const outputPath = path.join(tmpDir, `vh_video_${hash}.png`)
+  const outputPrefix = path.join(tmpDir, `vh_video_${hash}`)
   const duration = await probeVideoDuration(videoPath)
-  const timestamps = buildVideoFrameTimestamps(duration)
+  const timestamps = Array.isArray(options.timestamps)
+    ? options.timestamps
+    : buildVideoFrameTimestamps(duration)
+  const frameHashes = []
 
-  for (const timestamp of timestamps) {
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestamp = timestamps[index]
+    const outputPath = `${outputPrefix}_${index}.png`
     try {
       await extractVideoFrameWithFfmpeg(videoPath, outputPath, timestamp)
       const visualHash = await imghash.hash(outputPath, 16, 'hex')
       if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
-      return visualHash
+      frameHashes.push(visualHash)
     } catch (err) {
       if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
     }
   }
 
-  return null
+  const signatureParts = frameHashes
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+
+  return signatureParts
+}
+
+async function getVisualHashFromVideoPath(videoPath, options = {}) {
+  const signatureParts = await getVideoFrameHashesFromPath(videoPath, options)
+
+  if (signatureParts.length < 2) {
+    return null
+  }
+
+  return signatureParts.join('|')
 }
 
 function buildVideoFrameTimestamps(durationSeconds) {
@@ -209,13 +228,19 @@ function getVisualHashEntries() {
   return visualHashStore.getAllEntries()
 }
 
+function removeVisualRefs(matchRef) {
+  return visualHashStore.removeRefs(matchRef)
+}
+
 module.exports = {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
+  getVideoFrameHashesFromPath,
   getVisualHashFromVideoPath,
   isVisualDupe,
   addVisualHash,
   getVisualHashRecord,
   getVisualHashEntries,
+  removeVisualRefs,
 }
