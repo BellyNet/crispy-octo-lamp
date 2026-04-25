@@ -15,6 +15,7 @@ const ansiEscapes = require('ansi-escapes')
 const chalk = require('chalk').default
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
+const mediaDates = require('./media-dates.js')
 bannerMilkmaid()
 
 // Helpers
@@ -1131,6 +1132,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 fs.utimesSync(gifSavePath, ts, ts)
               }
 
+              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'gif', filename, buffer, uploadedDate)
+
               gifsToConvert.push({
                 tmpPath,
                 mp4Path,
@@ -1153,6 +1156,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 const ts = uploadedDate.getTime() / 1000
                 fs.utimesSync(stillPath, ts, ts)
               }
+              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, buffer, uploadedDate)
 
               knownFilenames.add(filename)
               if (visualHash) {
@@ -1260,6 +1264,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
             const ts = uploadedDate.getTime() / 1000
             fs.utimesSync(finalPath, ts, ts)
           }
+
+          await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, buffer, uploadedDate)
 
           if (!isBitwiseDupe(hash)) {
             addBitwiseHash(
@@ -1501,6 +1507,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
         const ts = uploadedDate.getTime() / 1000
         fs.utimesSync(mp4Path, ts, ts)
       }
+
+      // mp4Name is the converted filename (.gif → .mp4)
+      await mediaDates.recordVideoDates(path.join(datasetDir, modelName), 'webm', mp4Name, mp4Path, uploadedDate)
 
       const mp4Stat = fs.statSync(mp4Path)
       const mp4Hash = await hashFileFromPath(mp4Path)
@@ -1761,6 +1770,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             moveFileIntoPlace(tmpPath, finalPath)
 
+            await mediaDates.recordVideoDates(path.join(datasetDir, modelName), 'webm', filename, finalPath, uploadedDate)
+
             const finalStat = fs.statSync(finalPath)
             const finalHash = await hashFileFromPath(finalPath)
             addBitwiseHash(
@@ -1878,5 +1889,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
         combinedTotal,
       })
     }
+
+    mediaDates.flushAllSidecars()
   }
 })()
