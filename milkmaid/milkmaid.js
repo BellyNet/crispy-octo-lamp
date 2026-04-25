@@ -249,7 +249,7 @@ function extractModelNameFromBreadcrumb(anchors) {
 function parseCliArgs(argv) {
   const args = minimist(argv, {
     string: ['model'],
-    boolean: ['review-errors'],
+    boolean: ['review-errors', 'skip-nas-sync'],
     alias: {
       m: 'model',
     },
@@ -259,6 +259,7 @@ function parseCliArgs(argv) {
     inputUrl: args._[0] || '',
     modelOverride: sanitize(args.model || ''),
     reviewErrors: Boolean(args['review-errors']),
+    skipNasSync: Boolean(args['skip-nas-sync']),
   }
 }
 
@@ -1655,9 +1656,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
   let combinedTotal = 0
 
   try {
-    const { inputUrl: initialInputUrl, modelOverride, reviewErrors } = parseCliArgs(
-      process.argv.slice(2)
-    )
+    const {
+      inputUrl: initialInputUrl,
+      modelOverride,
+      reviewErrors,
+      skipNasSync,
+    } = parseCliArgs(process.argv.slice(2))
     let inputUrl = initialInputUrl
     if (!inputUrl || !inputUrl.includes('/category/'))
       return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
@@ -2254,14 +2258,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     await maybePauseForErrorReview(modelName, errorCount, reviewErrors)
 
-    const nasSync = await runShellCommand(
-      `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
-    )
-
-    if (!nasSync.ok && nasSync.code > 3) {
-      console.error('❌ NAS sync failed with code', nasSync.code)
+    if (skipNasSync) {
+      console.log('⏭️ NAS sync skipped by --skip-nas-sync')
     } else {
-      console.log('✅ NAS sync complete.')
+      const nasSync = await runShellCommand(
+        `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
+      )
+
+      if (!nasSync.ok && nasSync.code > 3) {
+        console.error('❌ NAS sync failed with code', nasSync.code)
+      } else {
+        console.log('✅ NAS sync complete.')
+      }
     }
 
     console.log(

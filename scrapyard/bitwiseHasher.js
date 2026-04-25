@@ -41,6 +41,10 @@ function getBitwiseHashEntries() {
   return bitwiseHashStore.getAllEntries()
 }
 
+function removeBitwiseRefs(matchRef) {
+  return bitwiseHashStore.removeRefs(matchRef)
+}
+
 module.exports = {
   loadBitwiseHashCache,
   saveBitwiseHashCache,
@@ -48,4 +52,5 @@ module.exports = {
   addBitwiseHash,
   getBitwiseHashRecord,
   getBitwiseHashEntries,
+  removeBitwiseRefs,
 }
