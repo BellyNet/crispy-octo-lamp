@@ -1449,7 +1449,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 fs.utimesSync(gifSavePath, ts, ts)
               }
 
-              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'gif', filename, buffer, uploadedDate)
+              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'gif', filename, uploadedDate)
 
               gifsToConvert.push({
                 tmpPath,
@@ -1473,7 +1473,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 const ts = uploadedDate.getTime() / 1000
                 fs.utimesSync(stillPath, ts, ts)
               }
-              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, buffer, uploadedDate)
+              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, uploadedDate)
 
               knownFilenames.add(filename)
               if (visualHash) {
@@ -1583,7 +1583,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             fs.utimesSync(finalPath, ts, ts)
           }
 
-          await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, buffer, uploadedDate)
+          await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, uploadedDate)
 
           if (!isBitwiseDupe(hash)) {
             addBitwiseHash(

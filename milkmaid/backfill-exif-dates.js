@@ -73,18 +73,10 @@ async function processUser(username) {
 
   if (!files.length) {
     log(`  ${username}: no media files found`)
-    return { exif: 0, video: 0, filename: 0, uploaded: 0, none: 0, skipped: 0 }
+    return { video: 0, filename: 0, uploaded: 0, none: 0, skipped: 0 }
   }
 
-  // Load existing sidecar to check what's already done
-  const sidecarFile = path.join(userDir, mediaDates.SIDECAR_FILENAME)
-  let sidecar = { __version: 2 }
-  try {
-    const raw = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'))
-    sidecar = raw.__version === 2 ? raw : { __version: 2 }
-  } catch {}
-
-  const tally = { exif: 0, video: 0, filename: 0, uploaded: 0, none: 0, skipped: 0 }
+  const tally = { video: 0, filename: 0, uploaded: 0, none: 0, skipped: 0 }
   let done = 0
 
   const limit = pLimit(CONCURRENCY)
@@ -95,54 +87,43 @@ async function processUser(username) {
     files.map((file) =>
       limit(async () => {
         const key = `${file.folder}/${file.filename}`
-
-        // Skip if already in sidecar (unless --force)
-        if (!FORCE && sidecar[key]) {
-          tally.skipped++
-          done++
-          return
-        }
-
         const ext = path.extname(file.filename).toLowerCase()
         const isVideo = VIDEO_EXTS.has(ext)
-        const filenameDate = mediaDates.extractFilenameDate(file.filename)
 
-        let exifDate = null
-        let videoDate = null
-        let uploadedDate = null
-
-        if (isVideo) {
-          videoDate = await mediaDates.extractVideoDateFromFile(file.filePath)
-        } else {
-          // Read buffer for EXIF extraction
-          try {
-            const buffer = fs.readFileSync(file.filePath)
-            exifDate = await mediaDates.extractExifFromBuffer(buffer)
-          } catch {}
+        // Use the shared recordXxxDates helpers which handle skip-if-exists internally
+        if (!FORCE) {
+          const existing = mediaDates.resolveDateFromSidecar(userDir, file.folder, file.filename)
+          if (existing !== null) {
+            tally.skipped++
+            done++
+            if (done % 50 === 0 || done === files.length) {
+              process.stdout.write(`  ${username}: ${bar(done, files.length)}\r`)
+            }
+            return
+          }
         }
 
-        // Get mtime as the upload date (set by milkmaid to platform upload date)
+        let uploadedDate = null
         try {
           const stat = fs.statSync(file.filePath)
           const mt = stat.mtime
           if (mt && mt.getFullYear() >= 1990 && mt.getFullYear() <= 2035) {
-            uploadedDate = mt.toISOString()
+            uploadedDate = mt
           }
         } catch {}
 
-        sidecar[key] = {
-          exif: exifDate || null,
-          video: videoDate || null,
-          filename: filenameDate || null,
-          uploaded: uploadedDate || null,
+        if (isVideo) {
+          await mediaDates.recordVideoDates(userDir, file.folder, file.filename, file.filePath, uploadedDate)
+        } else {
+          await mediaDates.recordImageDates(userDir, file.folder, file.filename, uploadedDate)
         }
 
         // Tally the best source
-        if (exifDate)        tally.exif++
-        else if (videoDate)  tally.video++
-        else if (filenameDate) tally.filename++
-        else if (uploadedDate) tally.uploaded++
-        else                 tally.none++
+        const resolved = mediaDates.resolveDateFromSidecar(userDir, file.folder, file.filename)
+        if (resolved?.source === 'mp4')      tally.video++
+        else if (resolved?.source === 'filename') tally.filename++
+        else if (resolved?.date)             tally.uploaded++
+        else                                 tally.none++
 
         done++
         if (done % 50 === 0 || done === files.length) {
@@ -152,13 +133,12 @@ async function processUser(username) {
     )
   )
 
-  // Write sidecar
-  fs.writeFileSync(sidecarFile, JSON.stringify(sidecar), 'utf8')
+  mediaDates.flushAllSidecars()
 
   const newlyProcessed = files.length - tally.skipped
   log(
     `  ${username}: done  ` +
-    `exif=${tally.exif} video=${tally.video} filename=${tally.filename} ` +
+    `video=${tally.video} filename=${tally.filename} ` +
     `upload=${tally.uploaded} none=${tally.none} skipped=${tally.skipped}` +
     (newlyProcessed !== files.length ? ` (${tally.skipped} already cached)` : '')
   )
@@ -199,7 +179,7 @@ async function run() {
 
   log(`Users to process: ${users.length}\n`)
 
-  const totals = { exif: 0, video: 0, filename: 0, uploaded: 0, none: 0, skipped: 0 }
+  const totals = { video: 0, filename: 0, uploaded: 0, none: 0, skipped: 0 }
 
   for (const username of users) {
     const t = await processUser(username)
@@ -208,7 +188,6 @@ async function run() {
 
   log('\n─────────────────────────────────────────')
   log('Summary across all users:')
-  log(`  EXIF date found:       ${totals.exif}`)
   log(`  Video container date:  ${totals.video}`)
   log(`  Filename timestamp:    ${totals.filename}`)
   log(`  Upload date only:      ${totals.uploaded}`)
