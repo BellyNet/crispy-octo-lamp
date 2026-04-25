@@ -231,13 +231,7 @@ async function resolveDateForFile(userDir, folder, filename, filePath) {
   const ext = path.extname(filename).toLowerCase()
   let result = null
 
-  if (['.jpg', '.jpeg', '.png', '.gif', '.tiff'].includes(ext)) {
-    try {
-      const buffer = await fs.promises.readFile(filePath)
-      const exifDate = await mediaDates.extractExifFromBuffer(buffer)
-      if (exifDate) result = { date: exifDate, source: 'exif' }
-    } catch {}
-  } else if (['.mp4', '.webm', '.mov'].includes(ext)) {
+  if (['.mp4', '.webm', '.mov'].includes(ext)) {
     const videoDate = await mediaDates.extractVideoDateFromFile(filePath)
     if (videoDate) result = { date: videoDate, source: 'mp4' }
   }
