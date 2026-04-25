@@ -1,0 +1,2 @@
+- Make a dashboard and sort all models by date, based on photo / video / filename metadata instead of when it was downloaded
+- Check for dupes in model fodlers, as well as across all models

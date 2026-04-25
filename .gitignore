@@ -40,3 +40,7 @@ slopvault-*.log
 slopvault-diff.txt
 Tagger/final
 *.ps1
+
+# Claude Code internals
+.claude/
+worktree.md
