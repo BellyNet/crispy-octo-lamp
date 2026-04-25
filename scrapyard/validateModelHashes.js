@@ -65,8 +65,10 @@ function main() {
       (report) =>
         report.bitwise.missingCount === 0 &&
         report.visual.missingCount === 0 &&
+        report.videoVisual.missingCount === 0 &&
         report.bitwise.extraCount === 0 &&
-        report.visual.extraCount === 0
+        report.visual.extraCount === 0 &&
+        report.videoVisual.extraCount === 0
     ).length,
     bitwiseModelsMissing: modelReports.filter(
       (report) => report.bitwise.missingCount > 0
@@ -100,8 +102,10 @@ function main() {
     const status =
       report.bitwise.missingCount === 0 &&
       report.visual.missingCount === 0 &&
+      report.videoVisual.missingCount === 0 &&
       report.bitwise.extraCount === 0 &&
-      report.visual.extraCount === 0
+      report.visual.extraCount === 0 &&
+      report.videoVisual.extraCount === 0
         ? 'OK'
         : 'NEEDS_BACKFILL'
 
@@ -112,6 +116,7 @@ function main() {
         `files=${report.actual.totalFiles}`,
         `bitwiseMissing=${report.bitwise.missingCount}`,
         `visualMissing=${report.visual.missingCount}`,
+        `videoVisualMissing=${report.videoVisual.missingCount}`,
       ].join(' ')
     )
 
@@ -123,6 +128,11 @@ function main() {
     if (report.visual.missingSample.length) {
       console.log(
         `  visual missing sample: ${report.visual.missingSample.join(', ')}`
+      )
+    }
+    if (report.videoVisual.missingSample.length) {
+      console.log(
+        `  video visual missing sample: ${report.videoVisual.missingSample.join(', ')}`
       )
     }
   }
@@ -181,9 +191,24 @@ function buildModelReport(modelName, bitwiseStore, visualStore) {
       .filter((file) => file.mediaType === 'image')
       .map((file) => file.relativePath)
   )
+  const actualVideoVisualPaths = new Set(
+    files
+      .filter((file) => file.mediaType === 'video')
+      .map((file) => file.relativePath)
+  )
 
   const bitwiseRefs = bitwiseStore.refsByModel.get(modelName) || new Set()
   const visualRefs = visualStore.refsByModel.get(modelName) || new Set()
+  const visualImageRefs = new Set(
+    [...visualRefs].filter((relativePath) =>
+      imageExts.has(path.extname(relativePath).toLowerCase())
+    )
+  )
+  const visualVideoRefs = new Set(
+    [...visualRefs].filter((relativePath) =>
+      videoExts.has(path.extname(relativePath).toLowerCase())
+    )
+  )
 
   return {
     model: modelName,
@@ -192,9 +217,11 @@ function buildModelReport(modelName, bitwiseStore, visualStore) {
       byBucket: countBy(files, (file) => file.bucket),
       bitwiseExpected: actualBitwisePaths.size,
       visualExpected: actualVisualPaths.size,
+      videoVisualPossible: actualVideoVisualPaths.size,
     },
     bitwise: comparePathSets(actualBitwisePaths, bitwiseRefs),
-    visual: comparePathSets(actualVisualPaths, visualRefs),
+    visual: comparePathSets(actualVisualPaths, visualImageRefs),
+    videoVisual: comparePathSets(actualVideoVisualPaths, visualVideoRefs),
   }
 }
 

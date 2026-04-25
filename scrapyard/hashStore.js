@@ -125,6 +125,30 @@ function createHashStore({ storePath, kind, algorithm }) {
     return [...entries.values()]
   }
 
+  function removeRefs(matchRef) {
+    if (typeof matchRef !== 'function') return 0
+
+    let removedCount = 0
+    for (const [hash, entry] of entries.entries()) {
+      const nextRefs = (entry.refs || []).filter((ref) => {
+        const keep = !matchRef(ref)
+        if (!keep) removedCount += 1
+        return keep
+      })
+
+      if (nextRefs.length === 0) {
+        entries.delete(hash)
+      } else if (nextRefs.length !== (entry.refs || []).length) {
+        entries.set(hash, {
+          hash: entry.hash,
+          refs: nextRefs,
+        })
+      }
+    }
+
+    return removedCount
+  }
+
   return {
     load,
     save,
@@ -132,6 +156,7 @@ function createHashStore({ storePath, kind, algorithm }) {
     get,
     add,
     getAllEntries,
+    removeRefs,
   }
 }
 

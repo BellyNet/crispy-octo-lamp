@@ -51,6 +51,16 @@ const dashboardDir = path.resolve(
 const dashboardPath = path.join(dashboardDir, 'slopvault-dashboard.html')
 const port = Number.parseInt(argv.port, 10) || 4777
 const reviewToken = crypto.randomBytes(16).toString('hex')
+const slopvaultRoot = path.resolve(
+  String(
+    argv['slopvault-root'] ||
+      path.join(
+        process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
+        '.slopvault'
+      )
+  )
+)
+const permanentSkipFile = path.join(slopvaultRoot, 'milkmaid-permanent-skips.json')
 
 main().catch((err) => {
   console.error(`Fatal review error: ${err.stack || err.message}`)
@@ -268,15 +278,79 @@ async function applyDecisions(req, res) {
     )
   )
 
+  const permanentSkipsAdded = applyPermanentSkipDecisions(decisions)
+
   await runNodeScript('audit-slopvault.js', buildAuditArgs(true, decisionsPath))
   await regenerateManifest()
 
   sendJson(res, {
     ok: true,
     decisionsPath,
+    permanentSkipsAdded,
     dashboardPath,
     latestAuditLog: findLatestAuditLog(logDir),
   })
+}
+
+function applyPermanentSkipDecisions(decisions) {
+  const entries = loadPermanentSkipEntries()
+  let added = 0
+
+  for (const decision of decisions) {
+    if (decision?.action !== 'permanent-skip') continue
+
+    const entry = {
+      relativePath: normalizeRelativePath(decision.relativePath),
+      sourceUrl: normalizeSkipUrl(decision.mediaUrl),
+      mediaPageUrl: normalizeSkipUrl(decision.mediaPageUrl),
+      filename: String(decision.filename || '').trim(),
+      reason: String(decision.error || decision.reason || 'review_permanent_skip'),
+      note: 'Marked permanent-skip from Slopvault review dashboard.',
+      addedAt: new Date().toISOString(),
+    }
+
+    if (
+      entries.some(
+        (existing) =>
+          (entry.relativePath && existing.relativePath === entry.relativePath) ||
+          (entry.sourceUrl && normalizeSkipUrl(existing.sourceUrl) === entry.sourceUrl) ||
+          (entry.mediaPageUrl &&
+            normalizeSkipUrl(existing.mediaPageUrl) === entry.mediaPageUrl)
+      )
+    ) {
+      continue
+    }
+
+    entries.push(entry)
+    added += 1
+  }
+
+  if (added > 0) {
+    fs.writeFileSync(
+      permanentSkipFile,
+      JSON.stringify({ version: 1, entries }, null, 2)
+    )
+  }
+
+  return added
+}
+
+function loadPermanentSkipEntries() {
+  if (!fs.existsSync(permanentSkipFile)) return []
+  try {
+    const parsed = JSON.parse(fs.readFileSync(permanentSkipFile, 'utf8'))
+    return Array.isArray(parsed?.entries) ? parsed.entries : []
+  } catch {
+    return []
+  }
+}
+
+function normalizeSkipUrl(url) {
+  return String(url || '').trim().replace(/&acs=[^&]+/gi, '')
+}
+
+function normalizeRelativePath(value) {
+  return String(value || '').trim().replace(/\\/g, '/')
 }
 
 function readJsonBody(req) {

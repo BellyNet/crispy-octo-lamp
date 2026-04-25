@@ -2,7 +2,7 @@ const { executablePath } = require('puppeteer')
 const puppeteer = require('puppeteer')
 const fs = require('fs')
 const path = require('path')
-const { exec } = require('child_process')
+const { exec, spawn } = require('child_process')
 const { createHash } = require('crypto')
 const https = require('https')
 const http = require('http')
@@ -13,6 +13,11 @@ const lazyLimit = pLimit(4)
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const chalk = require('chalk').default
+const MEDIA_PAGE_CONCURRENCY = 4
+const MEDIA_PAGE_TIMEOUT_MS = 20000
+const MEDIA_PAGE_RETRY_TIMEOUT_MS = 30000
+const LAZY_REQUEST_TIMEOUT_MS = 30000
+const LAZY_IDLE_TIMEOUT_MS = 30000
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 bannerMilkmaid()
@@ -23,6 +28,7 @@ const {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
+  getVisualHashFromVideoPath,
   isVisualDupe,
   addVisualHash,
   getVisualHashRecord,
@@ -79,7 +85,46 @@ function loadModelRegistry(registryPath) {
 }
 
 function saveModelRegistry(registryPath, registry) {
-  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2))
+  fs.writeFileSync(
+    registryPath,
+    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
+  )
+}
+
+function sortStringValues(values) {
+  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  )
+}
+
+function sortStufferSources(sources) {
+  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
+    const left =
+      String(a?.discoveredAs || '') ||
+      String(a?.categoryId || '') ||
+      String(a?.url || '')
+    const right =
+      String(b?.discoveredAs || '') ||
+      String(b?.categoryId || '') ||
+      String(b?.url || '')
+    return left.localeCompare(right)
+  })
+}
+
+function sortModelRegistry(registry) {
+  return Object.fromEntries(
+    Object.entries(registry || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([canonicalName, entry]) => [
+        canonicalName,
+        {
+          aliases: sortStringValues(entry?.aliases),
+          sources: {
+            stufferdb: sortStufferSources(entry?.sources?.stufferdb),
+          },
+        },
+      ])
+  )
 }
 
 function ensureModelEntryShape(entry, canonicalName) {
@@ -209,6 +254,7 @@ function extractModelNameFromBreadcrumb(anchors) {
 function parseCliArgs(argv) {
   const args = minimist(argv, {
     string: ['model'],
+    boolean: ['review-errors', 'skip-nas-sync'],
     alias: {
       m: 'model',
     },
@@ -217,6 +263,8 @@ function parseCliArgs(argv) {
   return {
     inputUrl: args._[0] || '',
     modelOverride: sanitize(args.model || ''),
+    reviewErrors: Boolean(args['review-errors']),
+    skipNasSync: Boolean(args['skip-nas-sync']),
   }
 }
 
@@ -344,6 +392,11 @@ const datasetDir = path.join(
   'dataset'
 )
 const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const quarantineManifestPath = path.join(
+  slopvaultRoot,
+  'quarantine',
+  'quarantine-manifest.json'
+)
 const permanentSkipFile = path.join(slopvaultRoot, 'milkmaid-permanent-skips.json')
 const tmpDir = path.join(rootDir, 'tmp')
 let currentRunLog = null
@@ -412,8 +465,137 @@ function getQuarantineMirrorPath(filePath) {
   )
 }
 
+function loadQuarantineManifest() {
+  if (!fs.existsSync(quarantineManifestPath)) {
+    return {
+      version: 1,
+      updatedAt: null,
+      items: [],
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(quarantineManifestPath, 'utf8').trim()
+    const parsed = raw ? JSON.parse(raw) : {}
+    return {
+      version: parsed?.version || 1,
+      updatedAt: parsed?.updatedAt || null,
+      items: Array.isArray(parsed?.items) ? parsed.items : [],
+    }
+  } catch (err) {
+    logAndProgress(`⚠️ Could not read quarantine manifest: ${err.message}`)
+    return {
+      version: 1,
+      updatedAt: null,
+      items: [],
+    }
+  }
+}
+
+function saveQuarantineManifest(manifest) {
+  fs.mkdirSync(path.dirname(quarantineManifestPath), { recursive: true })
+  manifest.updatedAt = new Date().toISOString()
+  fs.writeFileSync(quarantineManifestPath, JSON.stringify(manifest, null, 2))
+}
+
+function updateQuarantineManifestForRepair(filePath, details = {}) {
+  const relativePath = getDatasetRelativePath(filePath)
+  const quarantinePath = getQuarantineMirrorPath(filePath)
+  const manifest = loadQuarantineManifest()
+  const item = manifest.items.find(
+    (entry) =>
+      normalizePath(entry?.relativePath) === normalizePath(relativePath) ||
+      entry?.quarantinePath === quarantinePath
+  )
+
+  if (!item) {
+    return false
+  }
+
+  item.state = {
+    activeDatasetExists: fs.existsSync(filePath),
+    activeDatasetPath: filePath,
+    quarantineExists: fs.existsSync(quarantinePath),
+    repairState:
+      fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+        ? 'repaired'
+        : fs.existsSync(filePath) && fs.existsSync(quarantinePath)
+          ? 'replacement_present_pending_review'
+          : !fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+            ? 'missing_both'
+            : 'quarantined',
+  }
+
+  item.repair = {
+    ...(item.repair || {}),
+    repairedAt: new Date().toISOString(),
+    repairedBy: 'milkmaid',
+    replacementPath: filePath,
+    replacementRelativePath: relativePath,
+    replacementHash: details.hash || null,
+    replacementSizeBytes: details.sizeBytes ?? null,
+    replacementDurationSeconds:
+      Number.isFinite(details.durationSeconds) ? details.durationSeconds : null,
+    sourceUrl: details.sourceUrl || null,
+    mediaPageUrl: details.mediaPageUrl || null,
+  }
+
+  saveQuarantineManifest(manifest)
+  return true
+}
+
+function updateQuarantineManifestForRepairAttempt(filePath, details = {}) {
+  const relativePath = getDatasetRelativePath(filePath)
+  const quarantinePath = getQuarantineMirrorPath(filePath)
+  const manifest = loadQuarantineManifest()
+  const item = manifest.items.find(
+    (entry) =>
+      normalizePath(entry?.relativePath) === normalizePath(relativePath) ||
+      entry?.quarantinePath === quarantinePath
+  )
+
+  if (!item) {
+    return false
+  }
+
+  item.state = {
+    activeDatasetExists: fs.existsSync(filePath),
+    activeDatasetPath: filePath,
+    quarantineExists: fs.existsSync(quarantinePath),
+    repairState:
+      fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+        ? 'repaired'
+        : fs.existsSync(filePath) && fs.existsSync(quarantinePath)
+          ? 'replacement_present_pending_review'
+          : !fs.existsSync(filePath) && !fs.existsSync(quarantinePath)
+            ? 'missing_both'
+            : 'quarantined',
+  }
+
+  item.repair = {
+    ...(item.repair || {}),
+    lastAttemptAt: new Date().toISOString(),
+    lastAttemptBy: 'milkmaid',
+    lastAttemptOutcome: details.outcome || 'failed',
+    lastAttemptError: details.error || null,
+    lastAttemptSourceUrl: details.sourceUrl || null,
+    lastAttemptMediaPageUrl: details.mediaPageUrl || null,
+    lastAttemptBytesDownloaded:
+      Number.isFinite(details.bytesDownloaded) ? details.bytesDownloaded : null,
+    lastAttemptExpectedBytes:
+      Number.isFinite(details.expectedBytes) ? details.expectedBytes : null,
+  }
+
+  saveQuarantineManifest(manifest)
+  return true
+}
+
 function isQuarantinedPath(filePath) {
   return fs.existsSync(getQuarantineMirrorPath(filePath))
+}
+
+function normalizePath(filePath) {
+  return String(filePath || '').replace(/\\/g, '/')
 }
 
 function existsForRepair(filePath) {
@@ -458,10 +640,12 @@ function startRunLog(modelName, inputUrl, folders) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const logPath = path.join(folders.logDir, `milkmaid-run-${stamp}.jsonl`)
   const summaryPath = path.join(folders.logDir, 'milkmaid-run-latest-summary.json')
+  const modelSummaryPath = path.join(folders.base, 'milkmaid-last-run.json')
   currentRunLog = {
     stamp,
     logPath,
     summaryPath,
+    modelSummaryPath,
     modelName,
     inputUrl,
     startedAt: new Date().toISOString(),
@@ -472,7 +656,23 @@ function startRunLog(modelName, inputUrl, folders) {
       convertedGifs: 0,
       failures: 0,
     },
+    errors: [],
   }
+
+  removeFileIfExists(modelSummaryPath)
+  fs.writeFileSync(
+    modelSummaryPath,
+    JSON.stringify(
+      {
+        startedAt: currentRunLog.startedAt,
+        modelName,
+        inputUrl,
+        status: 'running',
+      },
+      null,
+      2
+    ) + '\n'
+  )
 
   appendRunEvent('run_started', {
     modelName,
@@ -493,6 +693,15 @@ function appendRunEvent(type, payload = {}) {
   )
 }
 
+function recordRunError(category, details = {}) {
+  if (!currentRunLog) return
+  currentRunLog.errors.push({
+    at: new Date().toISOString(),
+    category,
+    ...details,
+  })
+}
+
 function finalizeRunLog(extra = {}) {
   if (!currentRunLog) return
 
@@ -503,15 +712,89 @@ function finalizeRunLog(extra = {}) {
     inputUrl: currentRunLog.inputUrl,
     logPath: currentRunLog.logPath,
     counters: currentRunLog.counters,
+    errors: currentRunLog.errors,
     ...extra,
   }
 
   fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
+  fs.writeFileSync(
+    currentRunLog.modelSummaryPath,
+    JSON.stringify(
+      {
+        ...summary,
+        status: 'finished',
+      },
+      null,
+      2
+    ) + '\n'
+  )
   currentRunLog = null
+}
+
+function launchReviewDashboardProcess() {
+  const reviewScriptPath = path.join(rootDir, 'audit', 'review-slopvault.js')
+  const port = 4700 + Math.floor(Math.random() * 200)
+  const child = spawn(
+    process.execPath,
+    [reviewScriptPath, '--skip-audit', '--port', String(port)],
+    {
+      cwd: rootDir,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    }
+  )
+
+  child.unref()
+  return { port }
+}
+
+async function maybePauseForErrorReview(modelName, failures, reviewErrors) {
+  if (
+    !reviewErrors ||
+    failures <= 0 ||
+    !process.stdin.isTTY ||
+    !process.stdout.isTTY ||
+    process.env.MILKMAID_SKIP_ERROR_REVIEW === '1'
+  ) {
+    return
+  }
+
+  try {
+    const { port } = launchReviewDashboardProcess()
+    logAndProgress('')
+    logAndProgress(
+      `🩺 Opened Slopvault review dashboard for ${modelName} on port ${port} before NAS sync.`
+    )
+    logAndProgress(
+      'Review the run errors, mark bad upstream files as permanent-skip if needed, then return here.'
+    )
+  } catch (err) {
+    logAndProgress(`⚠️ Could not launch review dashboard: ${err.message}`)
+    return
+  }
+
+  await askQuestion('\nPress Enter when you are ready to continue to NAS sync: ')
 }
 
 function normalizeSkipUrl(url) {
   return String(url || '').trim().replace(/&acs=[^&]+/gi, '')
+}
+
+function isNuisanceMediaAsset(filename, ext) {
+  const lowerFilename = String(filename || '').trim().toLowerCase()
+  const lowerExt = String(ext || '').trim().toLowerCase()
+
+  if (lowerExt === '.ico') return true
+
+  return [
+    'ajax_loader',
+    'ajax-loader',
+    'favicon',
+    'loader.gif',
+    'loading.gif',
+    'preloader',
+  ].some((token) => lowerFilename.includes(token))
 }
 
 function buildPermanentSkipLookup(entries) {
@@ -955,7 +1238,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       })
 
       const pages = await Promise.all(
-        Array.from({ length: 8 }, () =>
+        Array.from({ length: MEDIA_PAGE_CONCURRENCY }, () =>
           createScraperPage(browser, {
             site: 'stufferdb',
             interceptMedia: false,
@@ -969,12 +1252,35 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
       async function scrapeMediaOnPage(page, mediaPageUrl, i) {
         totalCount++
+        let mediaUrl = null
+        let filename = null
+        let ext = null
 
         try {
-          await page.goto(mediaPageUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: 20000,
-          })
+          try {
+            await page.goto(mediaPageUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: MEDIA_PAGE_TIMEOUT_MS,
+            })
+          } catch (error) {
+            if (!/Navigation timeout/i.test(error.message || '')) {
+              throw error
+            }
+
+            appendRunEvent('media_page_retry', {
+              modelName,
+              mediaPageUrl,
+              attempt: 2,
+              timeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+              reason: error.message,
+            })
+
+            await sleep(750)
+            await page.goto(mediaPageUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+            })
+          }
 
           const uploadedDateIso = await page.evaluate(() => {
             const anchor = document.querySelector('#datepost dd a')
@@ -990,7 +1296,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             ? new Date(uploadedDateIso)
             : null
 
-          const mediaUrl = await page.evaluate(() => {
+          mediaUrl = await page.evaluate(() => {
             const video = document.querySelector('video.vjs-tech[src]')
             const img = document.querySelector('#theMainImage')
             return video?.src || img?.src || null
@@ -999,14 +1305,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
           if (!mediaUrl) return
 
           const parsed = new URL(mediaUrl)
-          let filename = decodeURIComponent(
+          filename = decodeURIComponent(
             path.basename(parsed.pathname).split('?')[0]
           )
 
-          let ext = path.extname(filename).toLowerCase()
+          ext = path.extname(filename).toLowerCase()
           if (ext === '.m4v') {
             ext = '.mp4'
             filename = filename.replace(/\.m4v$/i, '.mp4')
+          }
+
+          if (isNuisanceMediaAsset(filename, ext)) {
+            appendRunEvent('skip_nuisance_media', {
+              modelName,
+              mediaPageUrl,
+              mediaUrl,
+              filename,
+              extension: ext,
+            })
+            return logAndProgress(`🚫 Skipped nuisance asset: ${filename}`, true)
           }
 
           const bucketName =
@@ -1221,6 +1538,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               tmpPath,
               filename,
               uploadedDate,
+              mediaPageUrl,
             })
             currentRunLog && currentRunLog.counters.queuedVideos++
             appendRunEvent('queued_lazy_video', {
@@ -1301,9 +1619,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
         } catch (err) {
           errorCount++
           currentRunLog && currentRunLog.counters.failures++
+          recordRunError('media_error', {
+            modelName,
+            mediaPageUrl,
+            mediaUrl,
+            filename,
+            extension: ext,
+            error: err.message,
+          })
           appendRunEvent('media_error', {
             modelName,
             mediaPageUrl,
+            mediaUrl,
+            filename,
+            extension: ext,
             error: err.message,
           })
           logAndProgress(
@@ -1352,9 +1681,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
   let combinedTotal = 0
 
   try {
-    const { inputUrl: initialInputUrl, modelOverride } = parseCliArgs(
-      process.argv.slice(2)
-    )
+    const {
+      inputUrl: initialInputUrl,
+      modelOverride,
+      reviewErrors,
+      skipNasSync,
+    } = parseCliArgs(process.argv.slice(2))
     let inputUrl = initialInputUrl
     if (!inputUrl || !inputUrl.includes('/category/'))
       return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
@@ -1516,6 +1848,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
       )
       saveBitwiseHashCache()
 
+      const mp4VisualHash = await getVisualHashFromVideoPath(mp4Path)
+      if (mp4VisualHash) {
+        addVisualHash(
+          mp4VisualHash,
+          buildHashMetadata(
+            modelName,
+            mp4Path,
+            'video',
+            mp4Stat.size,
+            uploadedDate
+          )
+        )
+        saveVisualHashCache()
+      }
+
       knownFilenames.add(path.basename(mp4Path))
       currentRunLog && currentRunLog.counters.convertedGifs++
       currentRunLog && currentRunLog.counters.saved++
@@ -1524,7 +1871,24 @@ async function scrapeGallery(browser, url, modelName, folders) {
         filename,
         savedPath: getDatasetRelativePath(mp4Path),
         hash: mp4Hash,
+        visualHash: mp4VisualHash,
       })
+
+      const removedQuarantineMirror = removeQuarantineMirrorIfExists(mp4Path)
+      if (removedQuarantineMirror) {
+        const repairedManifestEntry = updateQuarantineManifestForRepair(mp4Path, {
+          hash: mp4Hash,
+          sizeBytes: mp4Stat.size,
+          sourceUrl: null,
+          mediaPageUrl: null,
+        })
+        appendRunEvent('repair_cleared_quarantine_copy', {
+          modelName,
+          filename: path.basename(mp4Path),
+          savedPath: getDatasetRelativePath(mp4Path),
+          manifestUpdated: repairedManifestEntry,
+        })
+      }
 
       // Clean up the original GIF from tmp folder
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
@@ -1532,6 +1896,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
       logAndProgress(`✅ Converted GIF to MP4: ${filename}`)
     } catch (err) {
       currentRunLog && currentRunLog.counters.failures++
+      recordRunError('gif_conversion_error', {
+        modelName,
+        filename,
+        tmpPath: path.relative(rootDir, tmpPath).replace(/\\/g, '/'),
+        mp4Path: getDatasetRelativePath(mp4Path),
+        error: err.message,
+      })
       appendRunEvent('gif_conversion_error', {
         modelName,
         filename,
@@ -1576,7 +1947,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   await Promise.all(
     lazyVideoQueue.map(
-      ({ url, path: finalPath, tmpPath, filename, uploadedDate }, i) =>
+      ({ url, path: finalPath, tmpPath, filename, uploadedDate, mediaPageUrl }, i) =>
         lazyLimit(async () => {
           if (knownFilenames.has(filename) || existsForRepair(finalPath)) {
             duplicateCount++
@@ -1638,12 +2009,68 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             await new Promise((resolve, reject) => {
               const proto = url.startsWith('https') ? https : http
+              let req = null
+              let settled = false
+              let idleTimer = null
+
+              const cleanup = () => {
+                if (idleTimer) {
+                  clearTimeout(idleTimer)
+                  idleTimer = null
+                }
+              }
+
+              const resetIdleTimer = () => {
+                cleanup()
+                idleTimer = setTimeout(() => {
+                  if (settled) return
+                  settled = true
+                  req?.destroy(
+                    new Error(
+                      `No lazy download progress for ${LAZY_IDLE_TIMEOUT_MS}ms`
+                    )
+                  )
+                  stream.destroy(
+                    new Error(
+                      `No lazy download progress for ${LAZY_IDLE_TIMEOUT_MS}ms`
+                    )
+                  )
+                  reject(
+                    new Error(
+                      `No lazy download progress for ${LAZY_IDLE_TIMEOUT_MS}ms`
+                    )
+                  )
+                }, LAZY_IDLE_TIMEOUT_MS)
+              }
+
+              const rejectOnce = (error) => {
+                if (settled) return
+                settled = true
+                cleanup()
+                reject(error)
+              }
+
+              const resolveOnce = () => {
+                if (settled) return
+                settled = true
+                cleanup()
+                resolve()
+              }
+
               stream.on('error', reject)
-              proto
-                .get(url, (res) => {
+              req = proto.get(url, (res) => {
+                resetIdleTimer()
+
+                appendRunEvent('lazy_video_download_started', {
+                  modelName,
+                  filename,
+                  url,
+                  savedPath: getDatasetRelativePath(finalPath),
+                })
+
                   if (res.statusCode !== 200) {
                     res.resume()
-                    return reject(new Error(`HTTP ${res.statusCode}`))
+                    return rejectOnce(new Error(`HTTP ${res.statusCode}`))
                   }
 
                   responseContentLength =
@@ -1666,6 +2093,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   }
 
                   res.on('data', (chunk) => {
+                    resetIdleTimer()
                     stream.write(chunk)
                     lazyBytesDownloaded += chunk.length
                     bytesDownloadedForFile += chunk.length
@@ -1679,7 +2107,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
                   res.on('end', () => {
                     responseEndedCleanly = true
-                    stream.end(resolve)
+                    cleanup()
+                    stream.end(resolveOnce)
                   })
 
                   res.on('aborted', () => {
@@ -1694,10 +2123,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
                   res.on('error', (err) => {
                     stream.destroy(err)
-                    reject(err)
+                    rejectOnce(err)
                   })
                 })
-                .on('error', reject)
+              req.setTimeout(LAZY_REQUEST_TIMEOUT_MS, () => {
+                responseWasAborted = true
+                req.destroy(
+                  new Error(
+                    `Lazy request timeout after ${LAZY_REQUEST_TIMEOUT_MS}ms`
+                  )
+                )
+              })
+              req.on('error', rejectOnce)
             })
 
             const tmpIntegrity = await getVideoIntegrityReport(tmpPath)
@@ -1775,6 +2212,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
             )
             saveBitwiseHashCache()
 
+            const finalVisualHash = await getVisualHashFromVideoPath(finalPath)
+            if (finalVisualHash) {
+              addVisualHash(
+                finalVisualHash,
+                buildHashMetadata(
+                  modelName,
+                  finalPath,
+                  'video',
+                  finalStat.size,
+                  uploadedDate
+                )
+              )
+              saveVisualHashCache()
+            }
+
             successCount++
             currentRunLog && currentRunLog.counters.saved++
             appendRunEvent('saved_lazy_video', {
@@ -1782,14 +2234,26 @@ async function scrapeGallery(browser, url, modelName, folders) {
               filename,
               savedPath: getDatasetRelativePath(finalPath),
               hash: finalHash,
+              visualHash: finalVisualHash,
             })
             const removedQuarantineMirror =
               removeQuarantineMirrorIfExists(finalPath)
             if (removedQuarantineMirror) {
+              const repairedManifestEntry = updateQuarantineManifestForRepair(
+                finalPath,
+                {
+                  hash: finalHash,
+                  sizeBytes: finalStat.size,
+                  durationSeconds: duration,
+                  sourceUrl: url,
+                  mediaPageUrl,
+                }
+              )
               appendRunEvent('repair_cleared_quarantine_copy', {
                 modelName,
                 filename,
                 savedPath: getDatasetRelativePath(finalPath),
+                manifestUpdated: repairedManifestEntry,
               })
             }
             logAndProgress(`✅ Saved lazy video: ${filename}`)
@@ -1819,9 +2283,22 @@ async function scrapeGallery(browser, url, modelName, folders) {
           } catch (err) {
             errorCount++
             currentRunLog && currentRunLog.counters.failures++
-            appendRunEvent('lazy_video_error', {
+            const manifestUpdated =
+              hadQuarantineMirror &&
+              updateQuarantineManifestForRepairAttempt(finalPath, {
+                outcome: 'failed',
+                error: err.message,
+                sourceUrl: url,
+                mediaPageUrl,
+                bytesDownloaded: bytesDownloadedForFile,
+                expectedBytes: responseContentLength,
+              })
+            recordRunError('lazy_video_error', {
               modelName,
               filename,
+              mediaUrl: url,
+              mediaPageUrl,
+              savedPath: getDatasetRelativePath(finalPath),
               error: err.message,
               bytesDownloaded: bytesDownloadedForFile,
               responseContentLength,
@@ -1829,6 +2306,22 @@ async function scrapeGallery(browser, url, modelName, folders) {
               responseWasAborted,
               responseCloseBeforeEnd,
               hadQuarantineMirror,
+              manifestUpdated: Boolean(manifestUpdated),
+            })
+            appendRunEvent('lazy_video_error', {
+              modelName,
+              filename,
+              mediaUrl: url,
+              mediaPageUrl,
+              savedPath: getDatasetRelativePath(finalPath),
+              error: err.message,
+              bytesDownloaded: bytesDownloadedForFile,
+              responseContentLength,
+              responseEndedCleanly,
+              responseWasAborted,
+              responseCloseBeforeEnd,
+              hadQuarantineMirror,
+              manifestUpdated,
             })
             logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
@@ -1844,21 +2337,41 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     saveVisualHashCache()
 
-    exec(
-      `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`,
-      (err) => {
-        if (err && err.code > 3) {
-          console.error('❌ NAS sync failed with code', err.code)
-        } else {
-          console.log('✅ NAS sync complete.')
-        }
+    if (currentRunLog) {
+      finalizeRunLog({
+        successCount,
+        duplicateCount,
+        errorCount,
+        categoryRunList,
+        combinedTotal,
+      })
+    }
+
+    await maybePauseForErrorReview(modelName, errorCount, reviewErrors)
+
+    if (skipNasSync) {
+      console.log('⏭️ NAS sync skipped by --skip-nas-sync')
+    } else {
+      const nasSync = await runShellCommand(
+        `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
+      )
+
+      if (!nasSync.ok && nasSync.code > 3) {
+        console.error('❌ NAS sync failed with code', nasSync.code)
+      } else {
+        console.log('✅ NAS sync complete.')
       }
-    )
+    }
 
     console.log(
       `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
     )
   } catch (err) {
+    recordRunError('run_error', {
+      modelName,
+      inputUrl: currentRunLog?.inputUrl || null,
+      error: err.message,
+    })
     appendRunEvent('run_error', {
       modelName,
       error: err.message,
