@@ -40,6 +40,7 @@
     "validate:model-hashes": "node scrapyard/validateModelHashes.js",
     "validate:quarantine": "node scrapyard/validateQuarantineState.js",
     "dashboard": "node dashboard/server.js",
+    "review:orientation": "node dashboard/orientation-review-server.js",
     "backfill:exif": "node milkmaid/backfill-exif-dates.js"
   },
   "dependencies": {
