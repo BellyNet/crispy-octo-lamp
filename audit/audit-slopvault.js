@@ -237,6 +237,42 @@ async function main() {
     }
   }
 
+  for (const finding of collectDecisionBackedFindings()) {
+    findings.push(finding)
+    summary.flaggedFiles += 1
+    summary.flaggedByType[finding.mediaType] =
+      (summary.flaggedByType[finding.mediaType] || 0) + 1
+
+    for (const reason of finding.reasons) {
+      summary.flaggedByReason[reason] =
+        (summary.flaggedByReason[reason] || 0) + 1
+    }
+
+    const shouldMove = !dryRun && shouldQuarantineFinding(finding)
+
+    if (finding.quarantineEligible) {
+      summary.quarantineEligibleFiles += 1
+    }
+
+    console.log(
+      `[FLAG] ${finding.relativePath} :: ${finding.reasons.join(', ')}${
+        finding.quarantineEligible ? ' :: quarantine' : ' :: report-only'
+      }`
+    )
+
+    if (hashFindings || shouldMove) {
+      if (!finding.contentHash?.value) {
+        await attachContentHash(finding)
+      }
+      await attachHashLinkage(finding)
+    }
+
+    if (shouldMove) {
+      await quarantineFinding(finding)
+      summary.movedFiles += 1
+    }
+  }
+
   await writeLogs(findings)
 
   console.log('')
@@ -530,7 +566,7 @@ function loadDecisions(filePath) {
       byId.set(item.id, item.action)
     }
 
-    return { byId }
+    return { byId, items }
   } catch (err) {
     throw new Error(`Could not load decisions file ${filePath}: ${err.message}`)
   }
@@ -539,6 +575,43 @@ function loadDecisions(filePath) {
 function shouldQuarantineFinding(finding) {
   if (!decisions) return finding.quarantineEligible
   return decisions.byId.get(finding.id) === 'quarantine'
+}
+
+function collectDecisionBackedFindings() {
+  if (!decisions?.items?.length) return []
+
+  return decisions.items
+    .filter((item) => item?.action === 'quarantine')
+    .filter((item) => item?.reviewType === 'exact_duplicate')
+    .map((item) => {
+      const sourcePath = path.resolve(String(item.sourcePath || ''))
+      const quarantinePath = path.resolve(String(item.quarantinePath || ''))
+      const relativePath = normalizePath(item.relativePath || '')
+
+      if (!sourcePath || !quarantinePath || !relativePath) return null
+      if (!fs.existsSync(sourcePath)) return null
+      if (sourcePath.toLowerCase() === quarantinePath.toLowerCase()) return null
+
+      const stat = fs.statSync(sourcePath)
+
+      return {
+        id: String(item.id),
+        sourcePath,
+        sourceType: String(item.sourceType || 'dataset'),
+        mediaType: String(item.mediaType || inferMediaTypeFromFilePath(sourcePath)),
+        relativePath,
+        quarantinePath,
+        sizeBytes: stat.size,
+        modifiedAt: stat.mtime.toISOString(),
+        reasons:
+          Array.isArray(item.reasons) && item.reasons.length
+            ? item.reasons
+            : ['exact_duplicate'],
+        quarantineEligible: true,
+        contentHash: item.contentHash || null,
+      }
+    })
+    .filter(Boolean)
 }
 
 function collectMediaFiles(root) {
@@ -754,6 +827,13 @@ async function attachContentHash(finding) {
     }
     summary.errors.push(`Failed to hash ${finding.sourcePath}: ${err.message}`)
   }
+}
+
+function inferMediaTypeFromFilePath(filePath) {
+  const ext = path.extname(filePath).toLowerCase()
+  if (videoExtensions.has(ext)) return 'video'
+  if (gifExtensions.has(ext)) return 'gif'
+  return 'image'
 }
 
 function createFindingId(sourceType, relativePath) {

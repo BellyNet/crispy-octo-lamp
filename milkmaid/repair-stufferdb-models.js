@@ -56,6 +56,12 @@ async function main() {
     totalModelsInRegistry: queue.length,
     selectedModels: selectedQueue.length,
     stopOnError: Boolean(argv['stop-on-error']),
+    totals: {
+      filesSaved: 0,
+      sourceItemsHandled: 0,
+      duplicates: 0,
+      errors: 0,
+    },
     results: [],
   }
 
@@ -72,6 +78,7 @@ async function main() {
 
     const result = await runModelRepair(item)
     report.results.push(result)
+    report.totals = calculateTotals(report.results)
     writeReport(report)
 
     if (
@@ -277,6 +284,7 @@ function runCommand(command, args, { cwd, label }) {
 }
 
 function writeReport(report) {
+  report.totals = calculateTotals(report.results)
   const payload = JSON.stringify(report, null, 2)
   fs.writeFileSync(latestReportPath, payload)
 
@@ -284,6 +292,7 @@ function writeReport(report) {
     `Generated: ${report.generatedAt}`,
     `Registry: ${report.registryPath}`,
     `Selected models: ${report.selectedModels}`,
+    `Totals: saved=${report.totals.filesSaved} sourceItems=${report.totals.sourceItemsHandled} dupes=${report.totals.duplicates} errors=${report.totals.errors}`,
     '',
   ]
 
@@ -307,4 +316,25 @@ function writeReport(report) {
   }
 
   fs.writeFileSync(latestTextPath, lines.join('\n'))
+}
+
+function calculateTotals(results) {
+  return (Array.isArray(results) ? results : []).reduce(
+    (totals, item) => {
+      const summary = item?.lastRunSummary
+      if (!summary || summary.parseError) return totals
+
+      totals.filesSaved += Number(summary.successCount || 0)
+      totals.sourceItemsHandled += Number(summary.combinedTotal || 0)
+      totals.duplicates += Number(summary.duplicateCount || 0)
+      totals.errors += Number(summary.errorCount || 0)
+      return totals
+    },
+    {
+      filesSaved: 0,
+      sourceItemsHandled: 0,
+      duplicates: 0,
+      errors: 0,
+    }
+  )
 }
