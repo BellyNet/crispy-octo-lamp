@@ -39,6 +39,7 @@ const {
 const mediaDates = require('../milkmaid/media-dates.js')
 const { createScraperPage } = require('../scrapyard/pageHelpers')
 const { bannerHoghaul } = require('../banners.js')
+const { resolveAndTrackModel } = require('../scrapyard/modelRegistry.js')
 
 loadBitwiseHashCache()
 bannerHoghaul()
@@ -62,7 +63,6 @@ const incompleteGifDir = path.join(incompleteDir, 'gifs')
 const incompleteVideoDir = path.join(incompleteDir, 'videos')
 const skippedImagesLog = path.join(__dirname, 'skipped_images.txt')
 const aliasMapPath = path.join(rootDir, 'model_aliases.json')
-const coomerSourcesPath = path.join(__dirname, 'coomer_sources.json')
 
 for (const d of [tmpDir, incompleteGifDir, incompleteVideoDir]) {
   fs.mkdirSync(d, { recursive: true })
@@ -365,24 +365,10 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
     const rawName = sanitize(username)
 
-    // ── Alias map ─────────────────────────────────────────────────────────────
-    let aliasMap = {}
-    try { aliasMap = JSON.parse(fs.readFileSync(aliasMapPath, 'utf-8')) } catch {
-      fs.writeFileSync(aliasMapPath, JSON.stringify({}, null, 2))
-    }
-    const modelName = aliasMap[rawName] || rawName
-    if (!aliasMap[rawName]) {
-      aliasMap[rawName] = rawName
-      fs.writeFileSync(aliasMapPath, JSON.stringify(aliasMap, null, 2))
-    }
-
-    // ── Record Coomer source URL ───────────────────────────────────────────────
-    let coomerSources = {}
-    try { coomerSources = JSON.parse(fs.readFileSync(coomerSourcesPath, 'utf-8')) } catch {}
-    if (!coomerSources[modelName]) {
-      coomerSources[modelName] = { url: userUrl, addedAt: new Date().toISOString() }
-      fs.writeFileSync(coomerSourcesPath, JSON.stringify(coomerSources, null, 2))
-    }
+    // ── Unified model registry (shared with milkmaid) ─────────────────────────
+    // resolveAndTrackModel finds/creates the canonical name, records the alias,
+    // and upserts the Coomer URL under sources.coomer — all in model_aliases.json
+    const modelName = resolveAndTrackModel(aliasMapPath, rawName, 'coomer', userUrl)
 
     const folders = createModelFolders(modelName)
     startRunLog(modelName, userUrl, folders.logDir)

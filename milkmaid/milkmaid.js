@@ -57,166 +57,13 @@ const {
   logScrollingMessage,
 } = require('../stuffinglogger')
 
-function sanitize(name) {
-  return String(name || '')
-    .replace(/[^a-z0-9_\-]/gi, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase()
-}
+const {
+  sanitize,
+  loadModelRegistry,
+  findCanonicalModelName,
+  resolveAndTrackModel,
+} = require('../scrapyard/modelRegistry.js')
 
-function loadModelRegistry(registryPath) {
-  if (!fs.existsSync(registryPath)) {
-    const emptyRegistry = {}
-    fs.writeFileSync(registryPath, JSON.stringify(emptyRegistry, null, 2))
-    return emptyRegistry
-  }
-
-  try {
-    const raw = fs.readFileSync(registryPath, 'utf-8').trim()
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch (err) {
-    console.warn(
-      `⚠️ Could not parse model registry at ${registryPath}: ${err.message}`
-    )
-    return {}
-  }
-}
-
-function saveModelRegistry(registryPath, registry) {
-  fs.writeFileSync(
-    registryPath,
-    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
-  )
-}
-
-function sortStringValues(values) {
-  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
-    a.localeCompare(b)
-  )
-}
-
-function sortStufferSources(sources) {
-  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
-    const left =
-      String(a?.discoveredAs || '') ||
-      String(a?.categoryId || '') ||
-      String(a?.url || '')
-    const right =
-      String(b?.discoveredAs || '') ||
-      String(b?.categoryId || '') ||
-      String(b?.url || '')
-    return left.localeCompare(right)
-  })
-}
-
-function sortModelRegistry(registry) {
-  return Object.fromEntries(
-    Object.entries(registry || {})
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([canonicalName, entry]) => [
-        canonicalName,
-        {
-          aliases: sortStringValues(entry?.aliases),
-          sources: {
-            stufferdb: sortStufferSources(entry?.sources?.stufferdb),
-          },
-        },
-      ])
-  )
-}
-
-function ensureModelEntryShape(entry, canonicalName) {
-  const aliasSet = new Set(
-    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
-  )
-
-  if (canonicalName) aliasSet.add(canonicalName)
-
-  return {
-    aliases: Array.from(aliasSet),
-    sources: {
-      stufferdb: Array.isArray(entry?.sources?.stufferdb)
-        ? entry.sources.stufferdb
-        : [],
-    },
-  }
-}
-
-function findCanonicalModelName(registry, rawName) {
-  const normalizedRaw = sanitize(rawName)
-  if (!normalizedRaw) return null
-
-  for (const [canonicalName, entry] of Object.entries(registry)) {
-    if (sanitize(canonicalName) === normalizedRaw) return canonicalName
-
-    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) {
-      return canonicalName
-    }
-  }
-
-  return null
-}
-
-function upsertStufferSource(entry, sourceUrl, rawName) {
-  const cleanedUrl = String(sourceUrl || '').replace(/&acs=[^&]+/gi, '')
-  const categoryId = cleanedUrl.match(/category\/?(\d+)/)?.[1] || null
-  const now = new Date().toISOString()
-
-  if (!entry.sources) entry.sources = {}
-  if (!Array.isArray(entry.sources.stufferdb)) entry.sources.stufferdb = []
-
-  const sourceIndex = entry.sources.stufferdb.findIndex(
-    (source) =>
-      source?.url === cleanedUrl ||
-      (categoryId && source?.categoryId === categoryId)
-  )
-
-  const nextSource = {
-    url: cleanedUrl,
-    categoryId,
-    discoveredAs: rawName,
-    lastCheckedAt: now,
-  }
-
-  if (sourceIndex >= 0) {
-    entry.sources.stufferdb[sourceIndex] = {
-      ...entry.sources.stufferdb[sourceIndex],
-      ...nextSource,
-    }
-  } else {
-    entry.sources.stufferdb.push(nextSource)
-  }
-}
-
-function resolveAndTrackModel(registryPath, rawName, sourceUrl) {
-  const registry = loadModelRegistry(registryPath)
-  const cleanedRawName = sanitize(rawName) || 'unknown_cow'
-  const existingCanonical = findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName = existingCanonical || cleanedRawName
-
-  registry[canonicalName] = ensureModelEntryShape(
-    registry[canonicalName],
-    canonicalName
-  )
-
-  const aliases = registry[canonicalName].aliases
-  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
-    aliases.push(cleanedRawName)
-  }
-
-  registry[canonicalName].aliases = Array.from(
-    new Set(aliases.filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b))
-
-  upsertStufferSource(registry[canonicalName], sourceUrl, cleanedRawName)
-  saveModelRegistry(registryPath, registry)
-
-  return canonicalName
-}
 
 function extractModelNameFromBreadcrumb(anchors) {
   const genericFolderNames = new Set([
@@ -1736,7 +1583,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       )
     }
 
-    modelName = resolveAndTrackModel(aliasMapPath, rawName, inputUrl)
+    modelName = resolveAndTrackModel(aliasMapPath, rawName, 'stufferdb', inputUrl)
 
     const folders = createModelFolders(modelName)
 
