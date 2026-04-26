@@ -245,6 +245,11 @@ function buildManifest(records, auditLog, persistedDecisions) {
     persistedDecisions
   )
   const runErrorFindings = buildRunErrorFindings(records, persistedDecisions)
+  const exactDuplicateFindings = buildExactDuplicateFindings(
+    records,
+    duplicates,
+    persistedDecisions
+  )
   const videoDuplicateFindings = buildVideoDuplicateFindings(
     records,
     persistedDecisions
@@ -252,6 +257,7 @@ function buildManifest(records, auditLog, persistedDecisions) {
   const findings = [
     ...auditFindings,
     ...runErrorFindings,
+    ...exactDuplicateFindings,
     ...videoDuplicateFindings,
   ]
 
@@ -273,6 +279,7 @@ function buildManifest(records, auditLog, persistedDecisions) {
         (finding) => finding.quarantineEligible
       ).length,
       runErrorFindings: runErrorFindings.length,
+      exactDuplicateFindings: exactDuplicateFindings.length,
       videoDuplicateFindings: videoDuplicateFindings.length,
       byMediaType,
       byRoot,
@@ -440,6 +447,100 @@ function buildVideoDuplicateFindings(records, persistedDecisions) {
     )
 }
 
+function buildExactDuplicateFindings(records, duplicateGroups, persistedDecisions) {
+  const recordsById = new Map(records.map((record) => [record.id, record]))
+
+  return (Array.isArray(duplicateGroups) ? duplicateGroups : [])
+    .filter((group) => Array.isArray(group.records) && group.records.length > 1)
+    .filter((group) => String(group.key || '').startsWith('md5:'))
+    .flatMap((group) => {
+      const groupRecords = group.records
+        .map((recordId) => recordsById.get(recordId))
+        .filter(Boolean)
+
+      if (groupRecords.length < 2) return []
+
+      const preferredRecord = choosePreferredDuplicateRecord(groupRecords)
+      const activeDatasetRecords = groupRecords.filter(
+        (record) => record.root === 'dataset' && !record.quarantined
+      )
+
+      if (activeDatasetRecords.length < 2) return []
+
+      return activeDatasetRecords.map((record) => {
+        const id = createFindingId(
+          'exact_duplicate',
+          normalizePath(record.relativePath || record.id)
+        )
+
+        const duplicateCandidates = groupRecords
+          .filter((other) => other.id !== record.id)
+          .map((other) => ({
+            relativePath:
+              normalizePath(other.datasetRelativePath || other.relativePath || ''),
+            model: other.model || null,
+            sourcePath: other.absolutePath || null,
+            sourceFileUri: other.absolutePath
+              ? pathToFileUri(other.absolutePath)
+              : null,
+            sizeBytes: other.sizeBytes || null,
+            mediaType: other.mediaType || null,
+            root: other.root || null,
+            quarantined: Boolean(other.quarantined),
+            modifiedAt: other.modifiedAt || null,
+          }))
+
+        const reasons = ['exact_duplicate']
+        if (record.model && preferredRecord?.model && record.model !== preferredRecord.model) {
+          reasons.push('cross_model_duplicate')
+        }
+
+        const finding = {
+          id,
+          reviewType: 'exact_duplicate',
+          sourceType: record.root,
+          model: record.model || null,
+          bucket: record.bucket || null,
+          filename: record.filename || null,
+          mediaType: record.mediaType || null,
+          relativePath: normalizePath(record.relativePath || ''),
+          sourcePath: record.absolutePath || null,
+          sourceFileUri: record.absolutePath ? pathToFileUri(record.absolutePath) : null,
+          quarantinePath: record.absolutePath
+            ? getDuplicateQuarantinePath(record)
+            : null,
+          quarantineFileUri: null,
+          reasons,
+          quarantineEligible: true,
+          defaultAction: record.id === preferredRecord?.id ? 'keep' : 'quarantine',
+          supportedActions: ['keep', 'quarantine'],
+          matchedRecordId: record.id,
+          sizeBytes: record.sizeBytes || null,
+          contentHash: record.md5
+            ? { algorithm: 'md5', value: record.md5 }
+            : null,
+          savedPath: normalizePath(record.datasetRelativePath || record.relativePath || ''),
+          duplicateGroupKey: group.key,
+          duplicateGroupCount: groupRecords.length,
+          duplicateCandidates,
+          preferredDuplicateRecordId: preferredRecord?.id || null,
+          preferredDuplicateRelativePath: preferredRecord
+            ? normalizePath(
+                preferredRecord.datasetRelativePath ||
+                  preferredRecord.relativePath ||
+                  ''
+              )
+            : null,
+        }
+
+        return isResolvedDuplicateDecision(persistedDecisions.get(finding.id))
+          ? null
+          : finding
+      })
+    })
+    .filter(Boolean)
+}
+
 function buildRunErrorFindings(records, persistedDecisions) {
   const findings = []
   const recordsByRelativePath = new Map(
@@ -588,7 +689,42 @@ function isResolvedRunDecision(action) {
 }
 
 function isResolvedDuplicateDecision(action) {
-  return action === 'keep'
+  return action === 'keep' || action === 'quarantine'
+}
+
+function choosePreferredDuplicateRecord(records) {
+  return [...records].sort((left, right) => {
+    const leftQuarantineRank = left.quarantined ? 1 : 0
+    const rightQuarantineRank = right.quarantined ? 1 : 0
+    if (leftQuarantineRank !== rightQuarantineRank) {
+      return leftQuarantineRank - rightQuarantineRank
+    }
+
+    const leftDatasetRank = left.root === 'dataset' ? 0 : 1
+    const rightDatasetRank = right.root === 'dataset' ? 0 : 1
+    if (leftDatasetRank !== rightDatasetRank) {
+      return leftDatasetRank - rightDatasetRank
+    }
+
+    if ((left.sizeBytes || 0) !== (right.sizeBytes || 0)) {
+      return (right.sizeBytes || 0) - (left.sizeBytes || 0)
+    }
+
+    return normalizePath(left.datasetRelativePath || left.relativePath || '').localeCompare(
+      normalizePath(right.datasetRelativePath || right.relativePath || '')
+    )
+  })[0] || null
+}
+
+function getDuplicateQuarantinePath(record) {
+  const normalized = normalizePath(record.relativePath || '')
+  if (!normalized) return null
+
+  return path.join(
+    quarantineRoot,
+    'dataset',
+    ...normalized.split('/').filter(Boolean)
+  )
 }
 
 function omitFindings(auditLog) {
@@ -1264,6 +1400,7 @@ function renderDashboard(manifest) {
       const page = visibleFindings.slice(0, 1000);
       els.rows.innerHTML = page.map(finding => {
         const decision = getDecision(finding);
+        const supportsQuarantine = (finding.supportedActions || []).includes('quarantine');
         const decisionClass =
           decision === 'quarantine'
             ? 'bad'
@@ -1279,11 +1416,12 @@ function renderDashboard(manifest) {
           <tr data-id="\${escapeAttr(finding.id)}"\${selected}>
             <td class="decision-cell">
               <div class="row-actions">
+                \${supportsQuarantine ? \`
                 <button class="row-icon \${trashClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="quarantine" title="Quarantine" aria-label="Quarantine">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm-1 12h12l1-13H5l1 13z"/>
                   </svg>
-                </button>
+                </button>\` : ''}
                 \${supportsPermanentSkip ? \`
                 <button class="row-icon \${skipClass}" data-action-id="\${escapeAttr(finding.id)}" data-action-value="permanent-skip" title="Permanent skip" aria-label="Permanent skip">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1372,11 +1510,13 @@ function renderDashboard(manifest) {
         <div><strong>Size:</strong> \${formatBytes(finding.sizeBytes || 0)}</div>
         <div><strong>Hash:</strong> \${escapeHtml(finding.contentHash?.value || 'not recorded')}</div>
         <div><strong>Source:</strong> \${finding.sourcePath ? '<a class="meta-link" href="' + getMediaUrl(finding) + '" target="_blank" rel="noreferrer">Source</a>' : 'No local file'}</div>
-        <div><strong>Media URL:</strong> \${finding.mediaUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaUrl) + '" target="_blank" rel="noreferrer">Open media URL</a>' : 'n/a'}</div>
+        <div><strong>Primary Review Link:</strong> \${finding.mediaPageUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaPageUrl) + '" target="_blank" rel="noreferrer">Open StufferDB picture page</a>' : finding.mediaUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaUrl) + '" target="_blank" rel="noreferrer">Open source media URL</a>' : 'n/a'}</div>
+        <div><strong>Raw Media URL:</strong> \${finding.mediaUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaUrl) + '" target="_blank" rel="noreferrer">Open source media URL</a>' : 'n/a'}</div>
         <div><strong>Gallery Page:</strong> \${finding.mediaPageUrl ? '<a class="meta-link" href="' + escapeAttr(finding.mediaPageUrl) + '" target="_blank" rel="noreferrer">Open gallery page</a>' : 'n/a'}</div>
         <div><strong>Source Path:</strong> <code>\${escapeHtml(finding.sourcePath || '')}</code></div>
         <div><strong>Quarantine target:</strong> <code>\${escapeHtml(finding.quarantinePath || '')}</code></div>
         <div><strong>Saved Path:</strong> <code>\${escapeHtml(finding.savedPath || finding.relativePath || '')}</code></div>
+        \${finding.preferredDuplicateRelativePath ? '<div><strong>Suggested keep:</strong> <code>' + escapeHtml(finding.preferredDuplicateRelativePath) + '</code></div>' : ''}
         \${renderDuplicateCandidates(finding)}
         <div><strong>ID:</strong> \${escapeHtml(finding.id)}</div>
       \`;
@@ -1388,11 +1528,27 @@ function renderDashboard(manifest) {
         : [];
       if (!candidates.length) return '';
 
-      return '<div><strong>Suggested clean matches:</strong></div>' +
-        candidates.slice(0, 3).map(candidate => {
+      const heading =
+        finding.reviewType === 'exact_duplicate'
+          ? 'Duplicate copies in dataset/quarantine:'
+          : 'Suggested clean matches:';
+
+      return '<div><strong>' + heading + '</strong></div>' +
+        candidates.slice(0, 6).map(candidate => {
           const sourceLink = candidate.sourcePath
             ? '<a class="meta-link" href="' + getReviewMediaUrl(candidate.sourcePath) + '" target="_blank" rel="noreferrer">Open local match</a>'
             : 'No local file';
+
+          if (finding.reviewType === 'exact_duplicate') {
+            return '<div class="duplicate-candidate">' +
+              '<div><strong>' + escapeHtml(candidate.relativePath || '') + '</strong></div>' +
+              '<div><strong>Model:</strong> ' + escapeHtml(candidate.model || 'n/a') + '</div>' +
+              '<div><strong>Location:</strong> ' + escapeHtml(candidate.root || 'n/a') + (candidate.quarantined ? ' <span class="helper">(already quarantined)</span>' : '') + '</div>' +
+              '<div><strong>Size:</strong> ' + escapeHtml(formatBytes(candidate.sizeBytes || 0)) + '</div>' +
+              '<div><strong>Match file:</strong> ' + sourceLink + '</div>' +
+            '</div>';
+          }
+
           const durationText =
             typeof candidate.durationSeconds === 'number'
               ? candidate.durationSeconds.toFixed(3) + 's'
@@ -1448,8 +1604,11 @@ function renderDashboard(manifest) {
             action: getDecision(finding),
             reviewType: finding.reviewType || 'audit',
             filename: finding.filename || null,
+            sourceType: finding.sourceType || null,
+            mediaType: finding.mediaType || null,
             sourcePath: finding.sourcePath || null,
             relativePath: finding.relativePath || null,
+            quarantinePath: finding.quarantinePath || null,
             mediaUrl: finding.mediaUrl || null,
             mediaPageUrl: finding.mediaPageUrl || null,
             reasons: finding.reasons || [],

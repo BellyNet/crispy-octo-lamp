@@ -6,6 +6,12 @@ const reportDir = path.join(rootDir, 'tmp', 'repair-stufferdb')
 const inputPath = path.join(reportDir, 'repair-stufferdb-latest.json')
 const latestJsonPath = path.join(reportDir, 'repair-failure-summary-latest.json')
 const latestMdPath = path.join(reportDir, 'repair-failure-summary-latest.md')
+const BUCKET_LABELS = {
+  page_timeout_concurrency: 'page concurrency / timeout issues',
+  bad_source_configuration: 'bad source configuration',
+  process_crash_case: 'process crash cases',
+  upstream_bad_media: 'upstream-bad media',
+}
 
 main()
 
@@ -29,6 +35,9 @@ function main() {
       topLevelRunErrors: 0,
     },
     scrapeFailures: [],
+    bucketCounts: {},
+    bucketModels: {},
+    buckets: [],
     byErrorMessage: {},
     byCategory: {},
     byModel: {},
@@ -68,7 +77,7 @@ function main() {
       summary.byErrorMessage[message] =
         (summary.byErrorMessage[message] || 0) + 1
 
-      summary.failures.push({
+      const failure = {
         model: row.model,
         category,
         error: message,
@@ -80,11 +89,39 @@ function main() {
         filename: error.filename || null,
         savedPath: error.savedPath || null,
         sourceCommand: row.scrape?.command || null,
+      }
+
+      const bucket = classifyFailure(failure)
+      summary.bucketCounts[bucket.key] = (summary.bucketCounts[bucket.key] || 0) + 1
+      if (!summary.bucketModels[bucket.key]) {
+        summary.bucketModels[bucket.key] = new Set()
+      }
+      summary.bucketModels[bucket.key].add(row.model)
+
+      summary.failures.push({
+        ...failure,
+        bucket: bucket.key,
+        bucketLabel: bucket.label,
+        bucketReason: bucket.reason,
       })
     }
   }
 
   summary.scrapeFailures.sort((a, b) => a.model.localeCompare(b.model))
+  summary.buckets = Object.entries(summary.bucketCounts)
+    .map(([key, count]) => ({
+      key,
+      label: BUCKET_LABELS[key] || key,
+      count,
+      models: Array.from(summary.bucketModels[key] || []).sort(),
+    }))
+    .sort((left, right) => right.count - left.count)
+  summary.bucketModels = Object.fromEntries(
+    Object.entries(summary.bucketModels).map(([key, models]) => [
+      key,
+      Array.from(models).sort(),
+    ])
+  )
   summary.failures.sort((a, b) => {
     if (a.model !== b.model) return a.model.localeCompare(b.model)
     return String(a.at || '').localeCompare(String(b.at || ''))
@@ -116,9 +153,25 @@ function renderMarkdown(summary) {
     `- Lazy video errors: ${summary.totals.lazyVideoErrors}`,
     `- Top-level run errors: ${summary.totals.topLevelRunErrors}`,
     '',
-    '## Scrape Failures',
+    '## Bucketed Failures',
     '',
   ]
+
+  if (!summary.buckets.length) {
+    lines.push('None.', '')
+  } else {
+    for (const bucket of summary.buckets) {
+      lines.push(
+        `- \`${bucket.label}\` :: ${bucket.count} :: models=\`${bucket.models.join(', ') || 'n/a'}\``
+      )
+    }
+    lines.push('')
+  }
+
+  lines.push(
+    '## Scrape Failures',
+    '',
+  )
 
   if (!summary.scrapeFailures.length) {
     lines.push('None.', '')
@@ -145,9 +198,11 @@ function renderMarkdown(summary) {
   for (const failure of summary.failures) {
     const parts = [
       `- \`${failure.model}\``,
+      `bucket=\`${failure.bucketLabel}\``,
       `\`${failure.category}\``,
       `\`${failure.error}\``,
     ]
+    if (failure.bucketReason) parts.push(`reason=\`${failure.bucketReason}\``)
     if (failure.filename) parts.push(`file=\`${failure.filename}\``)
     if (failure.savedPath) parts.push(`saved=\`${failure.savedPath}\``)
     if (failure.mediaPageUrl) parts.push(`page=${toMdLink('gallery', failure.mediaPageUrl)}`)
@@ -162,4 +217,68 @@ function renderMarkdown(summary) {
 
 function toMdLink(label, url) {
   return url ? `[${label}](${url})` : 'n/a'
+}
+
+function classifyFailure(failure) {
+  const category = String(failure.category || 'unknown')
+  const error = String(failure.error || 'unknown').toLowerCase()
+  const inputUrl = String(failure.inputUrl || '')
+  const mediaUrl = String(failure.mediaUrl || '')
+
+  if (error.includes('navigation timeout')) {
+    return bucket(
+      'page_timeout_concurrency',
+      'navigation timeout while opening category or picture pages'
+    )
+  }
+
+  if (category === 'gif_conversion_error') {
+    return bucket(
+      'process_crash_case',
+      'local conversion code failed during post-download processing'
+    )
+  }
+
+  if (category === 'run_error') {
+    return bucket(
+      'process_crash_case',
+      'top-level run failed outside a single media item'
+    )
+  }
+
+  if (
+    inputUrl.includes('stufferai.com/index?/category/') ||
+    mediaUrl.includes('cdn.stufferdb.com/index?/category/')
+  ) {
+    return bucket(
+      'bad_source_configuration',
+      'source/category mapping looks misconfigured or inconsistent'
+    )
+  }
+
+  if (
+    category === 'lazy_video_error' ||
+    error.includes('tail_decode_error') ||
+    error.includes('ffprobe_failed') ||
+    error.includes('invalid_duration') ||
+    error.includes('http 404')
+  ) {
+    return bucket(
+      'upstream_bad_media',
+      'downloaded media is missing, truncated, or structurally invalid'
+    )
+  }
+
+  return bucket(
+    'process_crash_case',
+    'unclassified internal failure that needs code-side diagnosis'
+  )
+}
+
+function bucket(key, reason) {
+  return {
+    key,
+    label: BUCKET_LABELS[key] || key,
+    reason,
+  }
 }

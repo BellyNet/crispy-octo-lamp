@@ -1688,6 +1688,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       }
 
       // mp4Name is the converted filename (.gif → .mp4)
+      const mp4Name = path.basename(mp4Path)
       await mediaDates.recordVideoDates(path.join(datasetDir, modelName), 'webm', mp4Name, mp4Path, uploadedDate)
 
       const mp4Stat = fs.statSync(mp4Path)

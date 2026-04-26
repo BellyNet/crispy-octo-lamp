@@ -19,6 +19,7 @@ const argv = minimist(process.argv.slice(2), {
     'no-open',
     'skip-audit',
     'include-incomplete',
+    'reuse-manifest',
   ],
   default: {
     port: 4777,
@@ -29,6 +30,7 @@ const argv = minimist(process.argv.slice(2), {
     'no-open': false,
     'skip-audit': false,
     'include-incomplete': true,
+    'reuse-manifest': false,
   },
 })
 
@@ -85,7 +87,20 @@ async function main() {
     )
   }
 
-  await regenerateManifest()
+  const shouldReuseManifest = Boolean(argv['reuse-manifest'])
+  const latestManifestPath = path.join(manifestDir, 'slopvault-manifest-latest.json')
+  const latestDashboardPath = path.join(dashboardDir, 'slopvault-dashboard.html')
+
+  if (
+    shouldReuseManifest &&
+    fs.existsSync(latestManifestPath) &&
+    fs.existsSync(latestDashboardPath)
+  ) {
+    console.log(`Reusing manifest: ${latestManifestPath}`)
+    console.log(`Reusing dashboard: ${latestDashboardPath}`)
+  } else {
+    await regenerateManifest()
+  }
   await startServer()
 }
 
@@ -99,6 +114,7 @@ Options:
   --archive           Also keep timestamped audit logs.
   --fresh             Force a new audit scan before opening the dashboard.
   --skip-audit        Reuse the latest audit log instead of running a new scan.
+  --reuse-manifest    Reuse the latest manifest/dashboard when they already exist.
   --include-incomplete=false
                       Skip repo incomplete files during audit.
   --no-open           Do not open the dashboard automatically.
