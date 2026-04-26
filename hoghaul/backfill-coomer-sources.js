@@ -3,22 +3,21 @@
 /**
  * backfill-coomer-sources.js
  *
- * Searches Coomer.st for every model in the shared registry that doesn't
- * already have a coomer source, and adds any matches it finds.
- *
- * Coomer's public API returns all creators as a JSON array. We fetch it once
- * and match locally against every alias in the registry.
+ * For every model in the shared registry that doesn't already have a coomer
+ * source, tries a direct lookup on each Coomer-supported service using every
+ * known alias. Records any hits under sources.coomer in the registry.
  *
  * Usage:
- *   node hoghaul/backfill-coomer-sources.js [--dry-run] [--force]
+ *   node hoghaul/backfill-coomer-sources.js [--dry-run] [--force] [--delay=ms]
  *
  * Options:
- *   --dry-run   Print matches but don't write to the registry
- *   --force     Re-check models that already have a coomer source
+ *   --dry-run     Print matches but don't write to the registry
+ *   --force       Re-check models that already have a coomer source
+ *   --delay=300   Milliseconds between requests (default: 300)
  */
 
 const https = require('https')
-const path = require('path')
+const path  = require('path')
 const minimist = require('minimist')
 
 const {
@@ -27,133 +26,135 @@ const {
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
 
-const argv = minimist(process.argv.slice(2))
+const argv    = minimist(process.argv.slice(2))
 const DRY_RUN = !!argv['dry-run']
 const FORCE   = !!argv.force
+const DELAY   = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 const COOMER_HOST  = 'coomer.st'
 
-// ─── FETCH ────────────────────────────────────────────────────────────────────
+// All services Coomer aggregates from
+const SERVICES = ['onlyfans', 'fansly', 'patreon', 'candfans', 'subscribestar', 'gumroad', 'afdian', 'boosty']
+
+// ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'hoghaul-backfill/1.0' } }, (res) => {
+    const req = https.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/css',   // required by Coomer to bypass DDG caching (see their 403 body)
+        'Referer': `https://${COOMER_HOST}/`,
+      },
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return httpsGet(res.headers.location).then(resolve).catch(reject)
+      }
       let body = ''
       res.on('data', (c) => (body += c))
       res.on('end', () => resolve({ status: res.statusCode, body }))
-    }).on('error', reject)
+    })
+    req.on('error', reject)
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
   })
 }
 
-async function fetchAllCreators() {
-  console.log(`  Fetching creator list from ${COOMER_HOST}...`)
-  // Coomer paginates at 50 per page; keep fetching until we get an empty page
-  const all = []
-  let offset = 0
-  while (true) {
-    const url = `https://${COOMER_HOST}/api/v1/creators.txt?o=${offset}`
-    const { status, body } = await httpsGet(url)
-    if (status !== 200) throw new Error(`Coomer API returned HTTP ${status}`)
-    const page = JSON.parse(body)
-    if (!Array.isArray(page) || page.length === 0) break
-    all.push(...page)
-    offset += page.length
-    process.stdout.write(`  Fetched ${all.length} creators so far...\r`)
-  }
-  console.log(`  Fetched ${all.length} total creators.          `)
-  return all
-}
-
-// ─── MATCH ────────────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /**
- * Build a lookup map: sanitized_name → [{ service, id, name, url }]
- * One creator can appear on multiple services (OF + Fansly), so we keep all.
+ * Check if a specific username exists on a specific Coomer service.
+ * Returns the creator object on hit, null on miss, throws on error.
  */
-function buildCreatorIndex(creators) {
-  const index = new Map()
-  for (const c of creators) {
-    // API returns: { id, name, service, ... }
-    const key = sanitize(c.name || c.id || '')
-    if (!key) continue
-    const url = `https://${COOMER_HOST}/${c.service}/user/${c.id}`
-    const entry = { service: c.service, id: c.id, name: c.name, url }
-    if (!index.has(key)) index.set(key, [])
-    index.get(key).push(entry)
+async function lookupCreator(service, username) {
+  // The /profile suffix is required — the bare /user/{id} endpoint returns 404
+  const apiUrl = `https://${COOMER_HOST}/api/v1/${service}/user/${encodeURIComponent(username)}/profile`
+  const { status, body } = await httpsGet(apiUrl)
+  if (status === 200) {
+    try { return JSON.parse(body) } catch { return { id: username, service } }
   }
-  return index
-}
-
-function findMatches(canonicalName, aliases, creatorIndex) {
-  const candidates = new Set([sanitize(canonicalName), ...aliases.map(sanitize)])
-  const matches = []
-  for (const key of candidates) {
-    if (creatorIndex.has(key)) {
-      matches.push(...creatorIndex.get(key))
-    }
-  }
-  // Deduplicate by URL
-  const seen = new Set()
-  return matches.filter((m) => {
-    if (seen.has(m.url)) return false
-    seen.add(m.url)
-    return true
-  })
+  if (status === 404) return null
+  throw new Error(`HTTP ${status}`)
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 async function run() {
   console.log('\nBackfill Coomer sources into model registry')
-  console.log(`Registry: ${registryPath}`)
+  console.log(`Registry:  ${registryPath}`)
+  console.log(`Services:  ${SERVICES.join(', ')}`)
   if (DRY_RUN) console.log('Mode: --dry-run (no writes)')
-  if (FORCE)   console.log('Mode: --force (re-checking models with existing coomer sources)')
-  console.log('')
+  if (FORCE)   console.log('Mode: --force (re-checking all models)')
+  console.log(`Delay: ${DELAY}ms between requests\n`)
 
-  const registry = loadModelRegistry(registryPath)
+  const registry   = loadModelRegistry(registryPath)
   const modelNames = Object.keys(registry)
   console.log(`Models in registry: ${modelNames.length}`)
 
-  // Skip models that already have coomer sources unless --force
   const toCheck = modelNames.filter((name) => {
     if (FORCE) return true
-    const sources = registry[name]?.sources?.coomer
-    return !Array.isArray(sources) || sources.length === 0
+    const srcs = registry[name]?.sources?.coomer
+    return !Array.isArray(srcs) || srcs.length === 0
   })
-  console.log(`Models to check: ${toCheck.length}\n`)
+  console.log(`Models to check:    ${toCheck.length}\n`)
 
   if (toCheck.length === 0) {
     console.log('Nothing to do. Use --force to re-check all models.')
     return
   }
 
-  const creators = await fetchAllCreators()
-  const creatorIndex = buildCreatorIndex(creators)
-  console.log('')
-
   let matched = 0
   let skipped = 0
+  let errors  = 0
 
-  for (const canonicalName of toCheck) {
-    const entry = registry[canonicalName]
-    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-    const matches = findMatches(canonicalName, aliases, creatorIndex)
+  for (let i = 0; i < toCheck.length; i++) {
+    const canonicalName = toCheck[i]
+    const entry  = registry[canonicalName]
+    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : [canonicalName]
 
-    if (matches.length === 0) {
+    // Deduplicated sanitized names to try as usernames
+    const usernames = [...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean))]
+
+    process.stdout.write(`  [${i + 1}/${toCheck.length}] ${canonicalName}...`)
+
+    const hits = [] // { service, username, url, creator }
+
+    for (const username of usernames) {
+      for (const service of SERVICES) {
+        try {
+          const creator = await lookupCreator(service, username)
+          if (creator) {
+            const url = `https://${COOMER_HOST}/${service}/user/${username}`
+            hits.push({ service, username, url, name: creator.name || username })
+          }
+          await sleep(DELAY)
+        } catch (err) {
+          // Non-fatal — skip this service/username combo
+          errors++
+          await sleep(DELAY * 2)
+        }
+      }
+    }
+
+    if (hits.length === 0) {
+      process.stdout.write(' not found\n')
       skipped++
       continue
     }
 
     matched++
-    for (const m of matches) {
-      console.log(`  ✅ ${canonicalName}  →  ${m.url}  (${m.service}, found as "${m.name}")`)
+    process.stdout.write('\n')
+    for (const hit of hits) {
+      console.log(`    ✅ ${hit.url}  (${hit.service}, id="${hit.name}")`)
       if (!DRY_RUN) {
-        resolveAndTrackModel(registryPath, canonicalName, 'coomer', m.url)
+        resolveAndTrackModel(registryPath, canonicalName, 'coomer', hit.url)
       }
     }
   }
 
   console.log('\n─────────────────────────────────────────')
-  console.log(`Matched: ${matched}  |  No match: ${skipped}  |  Checked: ${toCheck.length}`)
+  console.log(`Matched:  ${matched}`)
+  console.log(`No match: ${skipped}`)
+  console.log(`Errors:   ${errors}`)
+  console.log(`Checked:  ${toCheck.length}`)
   if (DRY_RUN) console.log('(dry-run — registry not modified)')
   console.log('')
 }

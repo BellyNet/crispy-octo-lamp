@@ -41,6 +41,8 @@ slopvault-diff.txt
 Tagger/final
 *.ps1
 
+hoghaul/coomer_sources.json
+
 # Claude Code internals
 .claude/
 worktree.md
