@@ -41,7 +41,8 @@
     "validate:quarantine": "node scrapyard/validateQuarantineState.js",
     "dashboard": "node dashboard/server.js",
     "backfill:dates": "node milkmaid/backfill-exif-dates.js",
-    "backfill:coomer": "node hoghaul/backfill-coomer-sources.js"
+    "backfill:coomer": "node hoghaul/backfill-coomer-sources.js",
+    "backfill:coomer-interactive": "node hoghaul/backfill-coomer-sources-interactive.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
