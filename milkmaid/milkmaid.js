@@ -192,11 +192,15 @@ function upsertStufferSource(entry, sourceUrl, rawName) {
   }
 }
 
-function resolveAndTrackModel(registryPath, rawName, sourceUrl) {
+function resolveAndTrackModel(registryPath, rawName, sourceUrl, canonicalOverride) {
   const registry = loadModelRegistry(registryPath)
   const cleanedRawName = sanitize(rawName) || 'unknown_cow'
-  const existingCanonical = findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName = existingCanonical || cleanedRawName
+  const cleanedCanonicalOverride = sanitize(canonicalOverride)
+  const existingCanonical = cleanedCanonicalOverride
+    ? findCanonicalModelName(registry, cleanedCanonicalOverride)
+    : findCanonicalModelName(registry, cleanedRawName)
+  const canonicalName =
+    existingCanonical || cleanedCanonicalOverride || cleanedRawName
 
   registry[canonicalName] = ensureModelEntryShape(
     registry[canonicalName],
@@ -283,29 +287,45 @@ function askQuestion(prompt) {
   })
 }
 
-async function promptForModelName(registryPath, inferredRawName) {
+async function promptForModelSelection(registryPath, inferredRawName) {
   const inferredName = sanitize(inferredRawName) || 'unknown_cow'
   const registry = loadModelRegistry(registryPath)
   const inferredCanonical =
     findCanonicalModelName(registry, inferredName) || inferredName
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    return inferredCanonical
+    return {
+      aliasName: inferredName,
+      canonicalName: inferredCanonical,
+    }
   }
 
   const prompt =
     inferredName === 'unknown_cow'
-      ? `\nDetected model: unknown_cow\nType the correct model name, or press Enter to keep unknown_cow: `
-      : `\nDetected model: ${inferredCanonical}\nPress Enter or type "y" to accept, or type a different model name: `
+      ? `\nDetected page alias: unknown_cow\nPress Enter or type "y" to keep it, or type "n" to enter alias and bucket separately: `
+      : `\nDetected page alias: ${inferredName}\nResolved bucket: ${inferredCanonical}\nPress Enter or type "y" to accept, or type "n" to edit alias and bucket: `
 
   const rawAnswer = await askQuestion(prompt)
   const normalizedAnswer = sanitize(rawAnswer)
 
   if (!normalizedAnswer || normalizedAnswer === 'y' || normalizedAnswer === 'yes') {
-    return inferredCanonical
+    return {
+      aliasName: inferredName,
+      canonicalName: inferredCanonical,
+    }
   }
 
-  return normalizedAnswer
+  const aliasAnswer = await askQuestion(
+    `Page alias [${inferredName}]: `
+  )
+  const canonicalAnswer = await askQuestion(
+    `Save this alias under model [${inferredCanonical}]: `
+  )
+
+  return {
+    aliasName: sanitize(aliasAnswer) || inferredName,
+    canonicalName: sanitize(canonicalAnswer) || inferredCanonical,
+  }
 }
 
 async function getBreadcrumbInfo(page) {
@@ -1722,9 +1742,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
     const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
     const inferredRawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
     const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
-    const rawName = modelOverride
-      ? modelOverride
-      : await promptForModelName(aliasMapPath, inferredRawName)
+    const modelSelection = modelOverride
+      ? {
+          aliasName: modelOverride,
+          canonicalName: modelOverride,
+        }
+      : await promptForModelSelection(aliasMapPath, inferredRawName)
+    const rawName = modelSelection.aliasName
+    const canonicalModelName = modelSelection.canonicalName
 
     if (modelOverride) {
       console.log(
@@ -1732,11 +1757,16 @@ async function scrapeGallery(browser, url, modelName, folders) {
       )
     } else {
       console.log(
-        `🏷️ Confirmed model: ${rawName} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
+        `🏷️ Confirmed alias: ${rawName} -> bucket: ${canonicalModelName} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
       )
     }
 
-    modelName = resolveAndTrackModel(aliasMapPath, rawName, inputUrl)
+    modelName = resolveAndTrackModel(
+      aliasMapPath,
+      rawName,
+      inputUrl,
+      canonicalModelName
+    )
 
     const folders = createModelFolders(modelName)
 
@@ -1747,6 +1777,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       modelName,
       categoryUrls: categoryRunList,
       inferredRawName,
+      canonicalModelName,
       modelOverride: modelOverride || null,
     })
 
