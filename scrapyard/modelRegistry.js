@@ -173,11 +173,21 @@ function upsertGenericSource(entry, platform, sourceUrl, rawName) {
  * platform: 'stufferdb' | 'coomer' | any future string
  * sourceUrl: the full URL for this model on that platform (pass null to skip source upsert)
  */
-function resolveAndTrackModel(registryPath, rawName, platform, sourceUrl) {
+function resolveAndTrackModel(
+  registryPath,
+  rawName,
+  platform,
+  sourceUrl,
+  canonicalOverride
+) {
   const registry = loadModelRegistry(registryPath)
   const cleanedRawName = sanitize(rawName) || 'unknown_model'
-  const existingCanonical = findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName = existingCanonical || cleanedRawName
+  const cleanedCanonicalOverride = sanitize(canonicalOverride)
+  const existingCanonical = cleanedCanonicalOverride
+    ? findCanonicalModelName(registry, cleanedCanonicalOverride)
+    : findCanonicalModelName(registry, cleanedRawName)
+  const canonicalName =
+    existingCanonical || cleanedCanonicalOverride || cleanedRawName
 
   registry[canonicalName] = ensureModelEntryShape(registry[canonicalName], canonicalName)
 
