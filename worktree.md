@@ -89,6 +89,48 @@ Important runtime files:
 
 ## What Has Been Done
 
+### Unified model registry + Coomer integration (latest session)
+
+`model_aliases.json` is now the **single source of truth** for all model names
+and sources across every scraper. Both milkmaid (StufferDB) and hoghaul (Coomer)
+write into it through the shared `scrapyard/modelRegistry.js` module.
+
+**`scrapyard/modelRegistry.js`** (new shared module)
+- `sanitize`, `loadModelRegistry`, `saveModelRegistry`, `sortModelRegistry`
+- `findCanonicalModelName`, `ensureModelEntryShape` — preserves all existing platform sources
+- `upsertStufferdbSource`, `upsertCoomerSource`, `upsertGenericSource`
+- `resolveAndTrackModel(registryPath, rawName, platform, sourceUrl)` — unified entry point; any future platform is one argument away
+
+**`milkmaid/milkmaid.js`** — refactored to import from `modelRegistry.js`
+- Removed ~160 lines of inline registry logic
+- Call site updated: `resolveAndTrackModel(aliasMapPath, rawName, 'stufferdb', inputUrl)`
+
+**`hoghaul/backfill-coomer-sources.js`** (new)
+- Iterates all 78 registry models, tries every alias × every Coomer service
+- Uses `/api/v1/{service}/user/{username}/profile` endpoint (`Accept: text/css` required)
+- Writes hits to `sources.coomer` via `resolveAndTrackModel`
+- Supports `--dry-run`, `--force`, `--delay=ms`
+- Result: **26 of 78 models** matched and written to registry; 0 errors
+
+**`hoghaul/backfill-coomer-sources-interactive.js`** (new)
+- For the 52 models the auto-backfill missed
+- Auto-probes all aliases first, then drops into a readline loop
+- Type a username → probed against all 8 services → open hits in Yandex for y/s
+- Paste a full `coomer.st` URL → validated via API → confirm to save
+- `s` = skip model, `q` = quit; saves immediately on each accept
+
+**EXIF removal** (completed earlier in session)
+- `milkmaid/backfill-exif-dates.js` — rewritten: all `exifr` calls removed, now uses `media-dates.js` sidecars only
+- `dashboard/server.js` — live EXIF fallback removed; only video date extraction remains
+- `package.json` — `exifr` dependency removed; script renamed `backfill:dates`
+
+**Coomer API notes for future agents**
+- Endpoint: `GET https://coomer.st/api/v1/{service}/user/{username}/profile`
+- Required header: `Accept: text/css` (without it you get HTTP 403)
+- Services: `onlyfans fansly patreon candfans subscribestar gumroad afdian boosty`
+- Stored URL format (browseable, not API): `https://coomer.st/{service}/user/{username}`
+- Search endpoint (`/api/v1/creators?q=...`) exists but ignores the `q` param — direct profile lookup is the only reliable method
+
 ### Milkmaid repair-awareness
 
 Milkmaid is now repair-aware:
@@ -208,6 +250,21 @@ These were the models still needing focused diagnosis after the full repair run:
 - the remaining failures there are now true source-side media failures, not whole-run hangs
 
 ## Useful Commands
+
+Auto-backfill Coomer sources for all registry models:
+
+```powershell
+npm run backfill:coomer
+# or with options:
+node hoghaul/backfill-coomer-sources.js --dry-run --delay=500
+node hoghaul/backfill-coomer-sources.js --force
+```
+
+Interactive Coomer backfill (for models the auto-pass missed):
+
+```powershell
+npm run backfill:coomer-interactive
+```
 
 Full repair batch:
 
