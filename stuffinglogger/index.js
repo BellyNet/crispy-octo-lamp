@@ -12,26 +12,44 @@ let persistentEmoji = pickEmoji(scrapeEmojis)
 let pinnedLineText = ''
 let reservedProgressRow = false
 
+function hasPinnedTerminalSupport() {
+  return Boolean(
+    process.stdout.isTTY &&
+      Number.isFinite(process.stdout.rows) &&
+      process.stdout.rows > 0
+  )
+}
+
 function ensurePinnedRow() {
   if (reservedProgressRow) return
+  if (!hasPinnedTerminalSupport()) return
   process.stdout.write('\n')
   reservedProgressRow = true
 }
 
 function redrawPinnedLine() {
-  if (!reservedProgressRow) return
+  if (!reservedProgressRow || !hasPinnedTerminalSupport()) return
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
   readline.clearLine(process.stdout, 0)
   process.stdout.write(pinnedLineText)
 }
 
 function setPinnedLine(text) {
-  ensurePinnedRow()
   pinnedLineText = text || ''
+  if (!hasPinnedTerminalSupport()) {
+    process.stdout.write(`${pinnedLineText}\n`)
+    return
+  }
+  ensurePinnedRow()
   redrawPinnedLine()
 }
 
 function logScrollingMessage(message = '') {
+  if (!hasPinnedTerminalSupport()) {
+    process.stdout.write(`${message}\n`)
+    return
+  }
+
   ensurePinnedRow()
 
   // Jump to pinned row, clear it, print a newline log above it, then redraw bar
@@ -222,6 +240,50 @@ function drawPinnedLine(text) {
   setPinnedLine(text)
 }
 
+function formatBytes(bytes) {
+  const safeBytes = Number(bytes) || 0
+  if (safeBytes <= 0) return '0 B'
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = safeBytes
+  let unitIndex = 0
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex++
+  }
+
+  const decimals = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`
+}
+
+function formatSpeed(bytesPerSecond) {
+  const safeSpeed = Number(bytesPerSecond) || 0
+  if (safeSpeed <= 0) return null
+  return `${formatBytes(safeSpeed)}/s`
+}
+
+function formatEta(seconds) {
+  const safeSeconds = Number(seconds)
+  if (!Number.isFinite(safeSeconds) || safeSeconds < 0) return null
+
+  const rounded = Math.max(Math.round(safeSeconds), 0)
+  const hours = Math.floor(rounded / 3600)
+  const minutes = Math.floor((rounded % 3600) / 60)
+  const secs = rounded % 60
+
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m ${secs}s`
+  return `${secs}s`
+}
+
+function truncateLabel(text, maxLength = 42) {
+  const normalized = String(text || '').trim()
+  if (!normalized) return null
+  if (normalized.length <= maxLength) return normalized
+  return `...${normalized.slice(-(maxLength - 3))}`
+}
+
 function logProgress(current, total) {
   const safeTotal = Math.max(total || 1, 1)
   const ratio = current / safeTotal
@@ -234,16 +296,37 @@ function logProgress(current, total) {
   drawPinnedLine(`${leftText}${bar}`)
 }
 
-function logLazyProgress(percent, downloadedBytes, totalBytes = 0) {
+function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {}) {
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
   const ratio = safePercent / 100
-  const mbDone = (downloadedBytes / 1024 / 1024).toFixed(2)
-  const mbTotal =
-    totalBytes > 0 ? ` / ${(totalBytes / 1024 / 1024).toFixed(2)} MB` : ''
   const leftText = `${chalk.cyan(`${safePercent.toFixed(1)}%`)} ${chalk.magentaBright('🐷')} ${chalk.gray('slow stuffing...')} `
   const bar = buildEmojiBar(leftText, ratio)
+  const details = [
+    `${formatBytes(downloadedBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : '?'}`,
+  ]
 
-  drawPinnedLine(`${leftText}${bar} ${chalk.gray(`(${mbDone} MB${mbTotal})`)}`)
+  const speedText = formatSpeed(options.speedBytesPerSecond)
+  if (speedText) details.push(speedText)
+
+  const etaText = totalBytes > 0 ? formatEta(options.etaSeconds) : null
+  if (etaText) details.push(`ETA ${etaText}`)
+
+  if (
+    Number.isFinite(options.completedCount) &&
+    Number.isFinite(options.totalCount) &&
+    options.totalCount > 0
+  ) {
+    details.push(`${options.completedCount}/${options.totalCount} done`)
+  }
+
+  if (Number.isFinite(options.activeCount) && options.activeCount > 0) {
+    details.push(`${options.activeCount} active`)
+  }
+
+  const currentLabel = truncateLabel(options.currentLabel)
+  if (currentLabel) details.push(currentLabel)
+
+  drawPinnedLine(`${leftText}${bar} ${chalk.gray(`(${details.join(' | ')})`)}`)
 }
 
 function logGifConversion(index) {

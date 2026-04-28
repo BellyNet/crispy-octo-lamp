@@ -47,8 +47,6 @@ const {
   logProgress,
   logLazyProgress,
   resetProgressBar,
-  logGifConversion,
-  logLazyDownload,
   getCompletionLine,
   getScrapeLine,
   getStatusHeader,
@@ -401,6 +399,10 @@ let totalCount = 0,
   lastDraw = 0,
   totalLazyBytes = 0,
   lazyBytesDownloaded = 0
+let lazyDownloadStartedAt = 0,
+  lazyActiveDownloads = 0,
+  lazyCompletedDownloads = 0,
+  lazyCurrentLabel = ''
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.join(
@@ -429,6 +431,21 @@ let permanentSkipLookup = {
 }
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+
+function addRunSavedBytes(bytes) {
+  if (!currentRunLog) return
+  currentRunLog.transfer.savedBytes += Number(bytes) || 0
+}
+
+function setRunLazyExpectedBytes(bytes) {
+  if (!currentRunLog) return
+  currentRunLog.transfer.lazyExpectedBytes = Number(bytes) || 0
+}
+
+function setRunLazyTransferredBytes(bytes) {
+  if (!currentRunLog) return
+  currentRunLog.transfer.lazyTransferredBytes = Number(bytes) || 0
+}
 
 function getIncompleteDirs(modelName) {
   // Per-model scratch space so unfinished work never "bleeds" into the next run
@@ -676,6 +693,11 @@ function startRunLog(modelName, inputUrl, folders) {
       convertedGifs: 0,
       failures: 0,
     },
+    transfer: {
+      savedBytes: 0,
+      lazyExpectedBytes: 0,
+      lazyTransferredBytes: 0,
+    },
     errors: [],
   }
 
@@ -726,13 +748,20 @@ function finalizeRunLog(extra = {}) {
   if (!currentRunLog) return
 
   const { status = 'finished', ...rest } = extra
+  const finishedAt = new Date().toISOString()
+  const durationMs = Math.max(
+    new Date(finishedAt).getTime() - new Date(currentRunLog.startedAt).getTime(),
+    0
+  )
   const summary = {
     startedAt: currentRunLog.startedAt,
-    finishedAt: new Date().toISOString(),
+    finishedAt,
+    durationMs,
     modelName: currentRunLog.modelName,
     inputUrl: currentRunLog.inputUrl,
     logPath: currentRunLog.logPath,
     counters: currentRunLog.counters,
+    transfer: currentRunLog.transfer,
     errors: currentRunLog.errors,
     ...rest,
   }
@@ -1184,7 +1213,23 @@ function logAndProgress(message, increment = false) {
     const percent = totalLazyBytes
       ? (lazyBytesDownloaded / totalLazyBytes) * 100
       : 0
-    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes)
+    const elapsedSeconds = lazyDownloadStartedAt
+      ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
+      : 0
+    const speedBytesPerSecond = elapsedSeconds
+      ? lazyBytesDownloaded / elapsedSeconds
+      : 0
+    const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
+    const etaSeconds =
+      speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
+      speedBytesPerSecond,
+      etaSeconds,
+      activeCount: lazyActiveDownloads,
+      completedCount: lazyCompletedDownloads,
+      totalCount: lazyVideoQueue.length,
+      currentLabel: lazyCurrentLabel,
+    })
   } else {
     logProgress(completedTotal, global.totalSearchTotal || 1)
   }
@@ -1456,6 +1501,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             knownFilenames.add(filename)
             successCount++
             currentRunLog && currentRunLog.counters.saved++
+            addRunSavedBytes(buffer.length)
             appendRunEvent('saved_gif', {
               modelName,
               filename,
@@ -1564,6 +1610,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           knownFilenames.add(filename)
           successCount++
           currentRunLog && currentRunLog.counters.saved++
+          addRunSavedBytes(buffer.length)
           appendRunEvent('saved_image', {
             modelName,
             filename,
@@ -1750,6 +1797,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
   lastDraw = 0
   totalLazyBytes = 0
   lazyBytesDownloaded = 0
+  lazyDownloadStartedAt = Date.now()
+  lazyActiveDownloads = 0
+  lazyCompletedDownloads = 0
+  lazyCurrentLabel = ''
+  setRunLazyExpectedBytes(0)
+  setRunLazyTransferredBytes(0)
   setProgressMode('lazy')
 
   // Pre-fetch expected file sizes (best-effort)
@@ -1761,6 +1814,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           .get(url, { method: 'HEAD' }, (res) => {
             const size = parseInt(res.headers['content-length']) || 0
             totalLazyBytes += size
+            setRunLazyExpectedBytes(totalLazyBytes)
             res.destroy()
             resolve()
           })
@@ -1773,9 +1827,27 @@ async function scrapeGallery(browser, url, modelName, folders) {
     const percent = totalLazyBytes
       ? (lazyBytesDownloaded / totalLazyBytes) * 100
       : 0
+    const elapsedSeconds = lazyDownloadStartedAt
+      ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
+      : 0
+    const speedBytesPerSecond = elapsedSeconds
+      ? lazyBytesDownloaded / elapsedSeconds
+      : 0
+    const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
+    const etaSeconds =
+      speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
 
-    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes)
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
+      speedBytesPerSecond,
+      etaSeconds,
+      activeCount: lazyActiveDownloads,
+      completedCount: lazyCompletedDownloads,
+      totalCount: lazyVideoQueue.length,
+      currentLabel: lazyCurrentLabel,
+    })
   }
+
+  drawLazyProgress()
 
   await Promise.all(
     lazyVideoQueue.map(
@@ -1797,6 +1869,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           knownFilenames.add(filename) // ✅ Mark as claimed early
+          lazyActiveDownloads++
+          lazyCurrentLabel = filename
+          drawLazyProgress()
           const quarantineMirrorPath = getQuarantineMirrorPath(finalPath)
           const traceLazyVideo = shouldTraceLazyVideo(filename, finalPath)
           const hadQuarantineMirror = fs.existsSync(quarantineMirrorPath)
@@ -1818,10 +1893,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
               removed,
             })
           }
-
-          logAndProgress(`🚀 STARTING lazy task #${i}: ${filename}`)
-          logAndProgress(logLazyDownload(i))
-          logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
 
           fs.mkdirSync(path.dirname(tmpPath), { recursive: true })
           const stream = fs.createWriteStream(tmpPath)
@@ -1928,6 +1999,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                     resetIdleTimer()
                     stream.write(chunk)
                     lazyBytesDownloaded += chunk.length
+                    setRunLazyTransferredBytes(lazyBytesDownloaded)
                     bytesDownloadedForFile += chunk.length
 
                     const now = Date.now()
@@ -2063,6 +2135,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             successCount++
             currentRunLog && currentRunLog.counters.saved++
+            addRunSavedBytes(finalStat.size)
             appendRunEvent('saved_lazy_video', {
               modelName,
               filename,
@@ -2139,6 +2212,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
             knownFilenames.delete(filename) // allow retry in future runs
+          } finally {
+            lazyActiveDownloads = Math.max(lazyActiveDownloads - 1, 0)
+            lazyCompletedDownloads++
+            if (lazyCurrentLabel === filename) {
+              lazyCurrentLabel = ''
+            }
+            setRunLazyTransferredBytes(lazyBytesDownloaded)
+            drawLazyProgress()
           }
         })
     )
