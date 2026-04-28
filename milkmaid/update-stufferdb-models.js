@@ -1,7 +1,7 @@
 const fs = require('fs')
 const path = require('path')
-const minimist = require('minimist')
 const { spawn } = require('child_process')
+const minimist = require('minimist')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -26,11 +26,10 @@ const registryPath = path.resolve(
   String(argv.registry || path.join(rootDir, 'model_aliases.json'))
 )
 const logDir = path.resolve(
-  String(argv['log-dir'] || path.join(rootDir, 'tmp', 'repair-stufferdb'))
+  String(argv['log-dir'] || path.join(rootDir, 'tmp', 'update-stufferdb'))
 )
-const latestReportPath = path.join(logDir, 'repair-stufferdb-latest.json')
-const latestTextPath = path.join(logDir, 'repair-stufferdb-latest.txt')
-const runStamp = new Date().toISOString().replace(/[:.]/g, '-')
+const latestReportPath = path.join(logDir, 'update-stufferdb-latest.json')
+const latestTextPath = path.join(logDir, 'update-stufferdb-latest.txt')
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
 const singleModel = argv.model ? String(argv.model).trim() : null
 const explicitModels = String(argv.models || '')
@@ -40,7 +39,7 @@ const explicitModels = String(argv.models || '')
 const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
 
 main().catch((err) => {
-  console.error(`Fatal repair-runner error: ${err.stack || err.message}`)
+  console.error(`Fatal updater error: ${err.stack || err.message}`)
   process.exitCode = 1
 })
 
@@ -48,7 +47,6 @@ async function main() {
   ensureDir(logDir)
   const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'))
   const queue = buildQueue(registry)
-
   const selectedQueue = applySelection(queue)
   const report = {
     generatedAt: new Date().toISOString(),
@@ -66,17 +64,17 @@ async function main() {
   }
 
   console.log(
-    `Repair queue: ${selectedQueue.length} model(s) selected from ${queue.length} with StufferDB sources`
+    `Update queue: ${selectedQueue.length} model(s) selected from ${queue.length} with StufferDB sources`
   )
 
   for (let index = 0; index < selectedQueue.length; index += 1) {
     const item = selectedQueue[index]
     console.log('')
     console.log(
-      `[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`
+      `[${index + 1}/${selectedQueue.length}] Updating ${item.model} from ${item.sources.length} source(s)`
     )
 
-    const result = await runModelRepair(item)
+    const result = await runModelUpdate(item)
     report.results.push(result)
     report.totals = calculateTotals(report.results)
     writeReport(report)
@@ -99,17 +97,21 @@ async function main() {
 }
 
 function printHelp() {
-  console.log(`Usage: node milkmaid/repair-stufferdb-models.js [options]
+  console.log(`Usage: node milkmaid/update-stufferdb-models.js [options]
 
 Options:
-  --model <name>         Repair one model only.
-  --models <a,b,c>       Repair a comma-separated set of models.
+  --model <name>         Update one model only.
+  --models <a,b,c>       Update a comma-separated set of models.
   --start-from <name>    Start from this canonical model name.
   --limit <n>            Only process the first n selected models.
   --registry <path>      Override model_aliases.json path.
-  --log-dir <path>       Override repair runner report directory.
+  --log-dir <path>       Override updater report directory.
   --stop-on-error        Stop the batch when one model fails.
   -h, --help             Show help.
+
+Notes:
+  Each model is scraped once per configured StufferDB source URL.
+  After scraping, hashes are pruned, backfilled (including video visuals), and validated.
 `)
 }
 
@@ -154,11 +156,10 @@ function applySelection(queue) {
   return next
 }
 
-async function runModelRepair(item) {
-  const startedAt = new Date().toISOString()
+async function runModelUpdate(item) {
   const result = {
     model: item.model,
-    startedAt,
+    startedAt: new Date().toISOString(),
     sourceUrls: item.sources,
     scrapeRuns: [],
     scrape: null,
@@ -167,7 +168,7 @@ async function runModelRepair(item) {
     validation: null,
     finishedAt: null,
     lastRunSummaryPath: null,
-    lastRunSummary: null,
+    sourceSummaries: [],
   }
 
   for (const sourceUrl of item.sources) {
@@ -182,7 +183,25 @@ async function runModelRepair(item) {
       ],
       { cwd: rootDir, label: `milkmaid:${item.model}` }
     )
+
     result.scrapeRuns.push(scrapeRun)
+
+    const runSummary = readLastRunSummary(item.model)
+    if (runSummary) {
+      result.sourceSummaries.push({
+        sourceUrl,
+        status: runSummary.status || null,
+        saved: Number(runSummary.successCount || 0),
+        duplicates: Number(runSummary.duplicateCount || 0),
+        errors: Number(runSummary.errorCount || 0),
+        finishedAt: runSummary.finishedAt || null,
+        categoryRunList: Array.isArray(runSummary.categoryRunList)
+          ? runSummary.categoryRunList
+          : [],
+      })
+      result.lastRunSummaryPath = getLastRunSummaryPath(item.model)
+    }
+
     if (!scrapeRun.ok && argv['stop-on-error']) {
       break
     }
@@ -201,12 +220,9 @@ async function runModelRepair(item) {
       { cwd: rootDir, label: `prune:${item.model}` }
     )
   } else {
-    result.hashPrune = {
-      ok: false,
-      skipped: true,
-      code: null,
-      command: 'pruneModelHashes skipped because scrape failed',
-    }
+    result.hashPrune = skippedCommandResult(
+      'pruneModelHashes skipped because one or more scrapes failed'
+    )
   }
 
   if (result.scrape.ok) {
@@ -221,12 +237,9 @@ async function runModelRepair(item) {
       { cwd: rootDir, label: `backfill:${item.model}` }
     )
   } else {
-    result.hashBackfill = {
-      ok: false,
-      skipped: true,
-      code: null,
-      command: 'backfillModelHashes skipped because scrape failed',
-    }
+    result.hashBackfill = skippedCommandResult(
+      'backfillModelHashes skipped because one or more scrapes failed'
+    )
   }
 
   const validationPath = path.join(logDir, `${item.model}.validate.json`)
@@ -243,28 +256,33 @@ async function runModelRepair(item) {
   )
   result.validation = hydrateValidationResult(result.validation, validationPath)
 
-  const latestRunSummaryPath = path.join(
+  result.finishedAt = new Date().toISOString()
+  return result
+}
+
+function getLastRunSummaryPath(modelName) {
+  return path.join(
     process.env.APPDATA || '',
     '.slopvault',
     'dataset',
-    item.model,
+    modelName,
     'milkmaid-last-run.json'
   )
-  result.lastRunSummaryPath = latestRunSummaryPath
-  if (fs.existsSync(latestRunSummaryPath)) {
-    try {
-      result.lastRunSummary = JSON.parse(
-        fs.readFileSync(latestRunSummaryPath, 'utf8')
-      )
-    } catch (err) {
-      result.lastRunSummary = {
-        parseError: err.message,
-      }
-    }
+}
+
+function readLastRunSummary(modelName) {
+  const summaryPath = getLastRunSummaryPath(modelName)
+  if (!fs.existsSync(summaryPath)) {
+    return null
   }
 
-  result.finishedAt = new Date().toISOString()
-  return result
+  try {
+    return JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
+  } catch (err) {
+    return {
+      parseError: err.message,
+    }
+  }
 }
 
 function summarizeScrapeRuns(scrapeRuns) {
@@ -275,6 +293,15 @@ function summarizeScrapeRuns(scrapeRuns) {
     failures: failures.length,
     labels: scrapeRuns.map((run) => run.label),
     commands: scrapeRuns.map((run) => run.command),
+  }
+}
+
+function skippedCommandResult(command) {
+  return {
+    ok: false,
+    skipped: true,
+    code: null,
+    command,
   }
 }
 
@@ -362,12 +389,10 @@ function writeReport(report) {
       ].join(' :: ')
     )
 
-    const summary = item.lastRunSummary
-    if (summary && !summary.parseError) {
-      lines.push(
-        `  saved=${summary.successCount || 0} dupes=${summary.duplicateCount || 0} errors=${summary.errorCount || 0}`
-      )
-    }
+    const aggregate = summarizeSourceSummaries(item.sourceSummaries)
+    lines.push(
+      `  saved=${aggregate.saved} dupes=${aggregate.duplicates} errors=${aggregate.errors}`
+    )
 
     if (item.validation?.summary && !item.validation.summary.parseError) {
       lines.push(
@@ -379,16 +404,26 @@ function writeReport(report) {
   fs.writeFileSync(latestTextPath, lines.join('\n'))
 }
 
-function calculateTotals(results) {
-  return (Array.isArray(results) ? results : []).reduce(
-    (totals, item) => {
-      const summary = item?.lastRunSummary
-      if (!summary || summary.parseError) return totals
+function summarizeSourceSummaries(sourceSummaries) {
+  return sourceSummaries.reduce(
+    (totals, summary) => {
+      totals.saved += Number(summary.saved || 0)
+      totals.duplicates += Number(summary.duplicates || 0)
+      totals.errors += Number(summary.errors || 0)
+      return totals
+    },
+    { saved: 0, duplicates: 0, errors: 0 }
+  )
+}
 
-      totals.filesSaved += Number(summary.successCount || 0)
-      totals.sourceItemsHandled += Number(summary.combinedTotal || 0)
-      totals.duplicates += Number(summary.duplicateCount || 0)
-      totals.errors += Number(summary.errorCount || 0)
+function calculateTotals(results) {
+  return results.reduce(
+    (totals, result) => {
+      const perSourceTotals = summarizeSourceSummaries(result.sourceSummaries)
+      totals.filesSaved += perSourceTotals.saved
+      totals.sourceItemsHandled += perSourceTotals.saved + perSourceTotals.duplicates
+      totals.duplicates += perSourceTotals.duplicates
+      totals.errors += perSourceTotals.errors
       return totals
     },
     {

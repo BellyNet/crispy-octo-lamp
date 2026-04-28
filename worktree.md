@@ -16,14 +16,44 @@ We are currently back on `main`.
 
 ## Important Files
 
-- [F:\Dev\LoRA-Training\milkmaid\milkmaid.js](F:/Dev/LoRA-Training/milkmaid/milkmaid.js)
+### Scrapers
+- [F:\Dev\LoRA-Training\milkmaid\milkmaid.js](F:/Dev/LoRA-Training/milkmaid/milkmaid.js) — StufferDB scraper
+- [F:\Dev\LoRA-Training\hoghaul\hoghaul.js](F:/Dev/LoRA-Training/hoghaul/hoghaul.js) — Coomer.st scraper
+
+### Model Registry (single source of truth)
+- [F:\Dev\LoRA-Training\model_aliases.json](F:/Dev/LoRA-Training/model_aliases.json) — unified registry: all models, aliases, and per-platform sources
+- [F:\Dev\LoRA-Training\scrapyard\modelRegistry.js](F:/Dev/LoRA-Training/scrapyard/modelRegistry.js) — shared registry module used by all scrapers
+
+  Registry format:
+  ```json
+  {
+    "canonical_name": {
+      "aliases": ["alias1", "alias2"],
+      "sources": {
+        "stufferdb": [{ "url", "categoryId", "discoveredAs", "lastCheckedAt" }],
+        "coomer":    [{ "url", "service", "discoveredAs", "lastCheckedAt" }]
+      }
+    }
+  }
+  ```
+  All scrapers call `resolveAndTrackModel(registryPath, rawName, platform, sourceUrl)` — never write the registry directly.
+
+### Coomer backfill tools
+- [F:\Dev\LoRA-Training\hoghaul\backfill-coomer-sources.js](F:/Dev/LoRA-Training/hoghaul/backfill-coomer-sources.js) — auto-backfill: checks every alias against Coomer API, writes hits
+- [F:\Dev\LoRA-Training\hoghaul\backfill-coomer-sources-interactive.js](F:/Dev/LoRA-Training/hoghaul/backfill-coomer-sources-interactive.js) — interactive: for the 52 models not auto-matched; try username variants, paste URLs
+
+### Milkmaid repair / reporting
 - [F:\Dev\LoRA-Training\milkmaid\repair-stufferdb-models.js](F:/Dev/LoRA-Training/milkmaid/repair-stufferdb-models.js)
 - [F:\Dev\LoRA-Training\milkmaid\report-repair-failures.js](F:/Dev/LoRA-Training/milkmaid/report-repair-failures.js)
+
+### Audit
 - [F:\Dev\LoRA-Training\audit\audit-slopvault.js](F:/Dev/LoRA-Training/audit/audit-slopvault.js)
 - [F:\Dev\LoRA-Training\audit\manifest-slopvault.js](F:/Dev/LoRA-Training/audit/manifest-slopvault.js)
 - [F:\Dev\LoRA-Training\audit\review-slopvault.js](F:/Dev/LoRA-Training/audit/review-slopvault.js)
 - [F:\Dev\LoRA-Training\audit\salvage-tail-videos.js](F:/Dev/LoRA-Training/audit/salvage-tail-videos.js)
 - [F:\Dev\LoRA-Training\audit\salvage-quarantine-tail-videos.js](F:/Dev/LoRA-Training/audit/salvage-quarantine-tail-videos.js)
+
+### Hashing / scrapyard
 - [F:\Dev\LoRA-Training\scrapyard\hashStore.js](F:/Dev/LoRA-Training/scrapyard/hashStore.js)
 - [F:\Dev\LoRA-Training\scrapyard\bitwiseHasher.js](F:/Dev/LoRA-Training/scrapyard/bitwiseHasher.js)
 - [F:\Dev\LoRA-Training\scrapyard\visualHasher.js](F:/Dev/LoRA-Training/scrapyard/visualHasher.js)
@@ -248,6 +278,9 @@ npm run salvage:tail-batch
    - quality ranking
    - keep/delete review
    - orientation/cleanup checks
+
+6. Run `npm run backfill:coomer-interactive` to manually resolve the 52 models
+   still missing a Coomer source — try spelling variations and paste confirmed URLs.
 
 ## Local Notes
 

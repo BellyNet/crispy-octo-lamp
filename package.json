@@ -19,6 +19,7 @@
     "hoghaul": "node hoghaul/hoghaul.js",
     "milkmaid": "node milkmaid/milkmaid.js",
     "repair:stufferdb": "node milkmaid/repair-stufferdb-models.js",
+    "update:stufferdb": "node milkmaid/update-stufferdb-models.js",
     "report:repair-failures": "node milkmaid/report-repair-failures.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
     "salvage:tail-video": "node audit/salvage-tail-videos.js --input",
@@ -43,7 +44,8 @@
     "review:orientation": "node dashboard/orientation-review-server.js",
     "backfill:dates": "node milkmaid/backfill-exif-dates.js",
     "backfill:coomer": "node hoghaul/backfill-coomer-sources.js",
-    "backfill:coomer-interactive": "node hoghaul/backfill-coomer-sources-interactive.js"
+    "backfill:coomer-interactive": "node hoghaul/backfill-coomer-sources-interactive.js",
+    "backfill:exif": "node milkmaid/backfill-exif-dates.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
