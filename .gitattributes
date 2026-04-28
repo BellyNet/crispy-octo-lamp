@@ -1,0 +1,13 @@
+# Normalize all text files to LF in the repo and on checkout.
+# Overrides core.autocrlf for this project so Git matches .editorconfig (eol=lf).
+* text=auto eol=lf
+
+# Explicitly mark binary files so Git never touches their line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.webm binary
+*.ico binary
+*.zip binary

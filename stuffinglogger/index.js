@@ -6,57 +6,101 @@ const ansiEscapes = require('ansi-escapes')
 const scrapeEmojis = ['🐷', '🐽', '🍰', '🍕', '🧁', '🐄']
 const lazyEmojis = ['🥛', '🧈', '🍮', '🫃', '🍓', '💞']
 const gifEmojis = ['🧈', '🍑', '🍮', '🫃', '🐄', '🐷']
+const FOOTER_ROWS = 2
 
 let persistentEmoji = pickEmoji(scrapeEmojis)
-
-let pinnedLineText = ''
-let reservedProgressRow = false
+let pinnedFooterLines = Array(FOOTER_ROWS).fill('')
+let reservedFooterRows = false
 
 function hasPinnedTerminalSupport() {
   return Boolean(
     process.stdout.isTTY &&
       Number.isFinite(process.stdout.rows) &&
-      process.stdout.rows > 0
+      process.stdout.rows > FOOTER_ROWS &&
+      Number.isFinite(process.stdout.columns) &&
+      process.stdout.columns > 20
   )
 }
 
-function ensurePinnedRow() {
-  if (reservedProgressRow) return
-  if (!hasPinnedTerminalSupport()) return
-  process.stdout.write('\n')
-  reservedProgressRow = true
+function getTerminalWidth() {
+  return process.stdout.columns || 80
 }
 
-function redrawPinnedLine() {
-  if (!reservedProgressRow || !hasPinnedTerminalSupport()) return
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
-  readline.clearLine(process.stdout, 0)
-  process.stdout.write(pinnedLineText)
+function getFooterRowOffset(index) {
+  return process.stdout.rows - FOOTER_ROWS + index
 }
 
-function setPinnedLine(text) {
-  pinnedLineText = text || ''
+function fitPlainText(text, maxWidth = getTerminalWidth()) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  if (normalized.length <= maxWidth) return normalized
+  if (maxWidth <= 3) return normalized.slice(0, maxWidth)
+  return `${normalized.slice(0, maxWidth - 3)}...`
+}
+
+function fitRenderedText(text, maxWidth = getTerminalWidth()) {
+  const visibleLength = stripAnsi(String(text || '')).length
+  if (visibleLength <= maxWidth) return text
+  return fitPlainText(stripAnsi(String(text || '')), maxWidth)
+}
+
+function ensurePinnedRows() {
+  if (reservedFooterRows || !hasPinnedTerminalSupport()) return
+  process.stdout.write('\n'.repeat(FOOTER_ROWS))
+  reservedFooterRows = true
+}
+
+function clearPinnedFooter() {
+  if (!reservedFooterRows || !hasPinnedTerminalSupport()) return
+
+  for (let index = 0; index < FOOTER_ROWS; index++) {
+    process.stdout.write(ansiEscapes.cursorTo(0, getFooterRowOffset(index)))
+    readline.clearLine(process.stdout, 0)
+  }
+}
+
+function redrawPinnedFooter() {
+  if (!reservedFooterRows || !hasPinnedTerminalSupport()) return
+
+  clearPinnedFooter()
+
+  for (let index = 0; index < FOOTER_ROWS; index++) {
+    process.stdout.write(ansiEscapes.cursorTo(0, getFooterRowOffset(index)))
+    process.stdout.write(fitRenderedText(pinnedFooterLines[index] || ''))
+  }
+}
+
+function setPinnedFooter(lines) {
+  const nextLines = Array.from({ length: FOOTER_ROWS }, (_, index) =>
+    fitRenderedText(lines[index] || '')
+  )
+  pinnedFooterLines = nextLines
+
   if (!hasPinnedTerminalSupport()) {
-    process.stdout.write(`${pinnedLineText}\n`)
+    for (const line of nextLines) {
+      if (line) process.stdout.write(`${stripAnsi(line)}\n`)
+    }
     return
   }
-  ensurePinnedRow()
-  redrawPinnedLine()
+
+  ensurePinnedRows()
+  redrawPinnedFooter()
 }
 
 function logScrollingMessage(message = '') {
+  const normalized = fitPlainText(message)
+
   if (!hasPinnedTerminalSupport()) {
-    process.stdout.write(`${message}\n`)
+    process.stdout.write(`${normalized}\n`)
     return
   }
 
-  ensurePinnedRow()
-
-  // Jump to pinned row, clear it, print a newline log above it, then redraw bar
+  ensurePinnedRows()
+  clearPinnedFooter()
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
   readline.clearLine(process.stdout, 0)
-  process.stdout.write(`${message}\n`)
-  redrawPinnedLine()
+  process.stdout.write(`${normalized}\n`)
+  redrawPinnedFooter()
 }
 
 const scrapeLines = [
@@ -222,22 +266,16 @@ function getMidPhrase(current, total) {
 }
 
 function buildEmojiBar(leftText, ratio, emoji = persistentEmoji) {
-  const terminalWidth = process.stdout.columns || 80
+  const terminalWidth = getTerminalWidth()
   const visibleLeft = stripAnsi(leftText).length
   const innerWidth = Math.max(terminalWidth - visibleLeft - 3, 10)
-
   const boundedRatio = Math.max(0, Math.min(1, ratio || 0))
   const filledWidth = Math.floor(innerWidth * boundedRatio)
-
   const emojiWidth = 2
   const emojiCount = Math.floor(filledWidth / emojiWidth)
   const emptyCount = Math.max(innerWidth - emojiCount * emojiWidth, 0)
 
   return `[${emoji.repeat(emojiCount)}${'—'.repeat(emptyCount)}]`
-}
-
-function drawPinnedLine(text) {
-  setPinnedLine(text)
 }
 
 function formatBytes(bytes) {
@@ -263,28 +301,23 @@ function formatSpeed(bytesPerSecond) {
   return `${formatBytes(safeSpeed)}/s`
 }
 
-function formatEta(seconds) {
-  const safeSeconds = Number(seconds)
-  if (!Number.isFinite(safeSeconds) || safeSeconds < 0) return null
+function formatDuration(durationMs) {
+  const safeMs = Number(durationMs) || 0
+  const roundedSeconds = Math.max(Math.round(safeMs / 1000), 0)
+  const hours = Math.floor(roundedSeconds / 3600)
+  const minutes = Math.floor((roundedSeconds % 3600) / 60)
+  const seconds = roundedSeconds % 60
 
-  const rounded = Math.max(Math.round(safeSeconds), 0)
-  const hours = Math.floor(rounded / 3600)
-  const minutes = Math.floor((rounded % 3600) / 60)
-  const secs = rounded % 60
-
-  if (hours > 0) return `${hours}h ${minutes}m`
-  if (minutes > 0) return `${minutes}m ${secs}s`
-  return `${secs}s`
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
 }
 
-function truncateLabel(text, maxLength = 42) {
-  const normalized = String(text || '').trim()
-  if (!normalized) return null
-  if (normalized.length <= maxLength) return normalized
-  return `...${normalized.slice(-(maxLength - 3))}`
+function buildDetailLine(parts) {
+  return fitPlainText(parts.filter(Boolean).join(' | '))
 }
 
-function logProgress(current, total) {
+function logProgress(current, total, options = {}) {
   const safeTotal = Math.max(total || 1, 1)
   const ratio = current / safeTotal
   const progressStats = chalk.cyan(`${current}/${safeTotal}`)
@@ -292,8 +325,18 @@ function logProgress(current, total) {
   const phrase = chalk.gray(getMidPhrase(current, safeTotal))
   const leftText = `${progressStats} ${pig} ${phrase} `
   const bar = buildEmojiBar(leftText, ratio)
+  const detailLine = buildDetailLine([
+    options.totalTransferredBytes > 0
+      ? `Run ${formatBytes(options.totalTransferredBytes)} downloaded`
+      : null,
+    Number.isFinite(options.savedCount) ? `${options.savedCount} saved` : null,
+    Number.isFinite(options.duplicateCount)
+      ? `${options.duplicateCount} dupes`
+      : null,
+    Number.isFinite(options.errorCount) ? `${options.errorCount} errors` : null,
+  ])
 
-  drawPinnedLine(`${leftText}${bar}`)
+  setPinnedFooter([`${leftText}${bar}`, chalk.gray(detailLine)])
 }
 
 function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {}) {
@@ -301,32 +344,26 @@ function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {})
   const ratio = safePercent / 100
   const leftText = `${chalk.cyan(`${safePercent.toFixed(1)}%`)} ${chalk.magentaBright('🐷')} ${chalk.gray('slow stuffing...')} `
   const bar = buildEmojiBar(leftText, ratio)
-  const details = [
-    `${formatBytes(downloadedBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : '?'}`,
-  ]
+  const detailLine = buildDetailLine([
+    options.totalTransferredBytes > 0
+      ? `Run ${formatBytes(options.totalTransferredBytes)}`
+      : null,
+    `Lazy ${formatBytes(downloadedBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : '?'}`,
+    options.averageSpeedBytesPerSecond
+      ? `Avg ${formatSpeed(options.averageSpeedBytesPerSecond)}`
+      : null,
+    totalBytes > 0 && Number.isFinite(options.etaSeconds)
+      ? `ETA ${formatDuration(options.etaSeconds * 1000)}`
+      : null,
+    Number.isFinite(options.completedCount) && Number.isFinite(options.totalCount)
+      ? `${options.completedCount}/${options.totalCount} done`
+      : null,
+    Number.isFinite(options.activeCount) && options.activeCount > 0
+      ? `${options.activeCount} active`
+      : null,
+  ])
 
-  const speedText = formatSpeed(options.speedBytesPerSecond)
-  if (speedText) details.push(speedText)
-
-  const etaText = totalBytes > 0 ? formatEta(options.etaSeconds) : null
-  if (etaText) details.push(`ETA ${etaText}`)
-
-  if (
-    Number.isFinite(options.completedCount) &&
-    Number.isFinite(options.totalCount) &&
-    options.totalCount > 0
-  ) {
-    details.push(`${options.completedCount}/${options.totalCount} done`)
-  }
-
-  if (Number.isFinite(options.activeCount) && options.activeCount > 0) {
-    details.push(`${options.activeCount} active`)
-  }
-
-  const currentLabel = truncateLabel(options.currentLabel)
-  if (currentLabel) details.push(currentLabel)
-
-  drawPinnedLine(`${leftText}${bar} ${chalk.gray(`(${details.join(' | ')})`)}`)
+  setPinnedFooter([`${leftText}${bar}`, chalk.gray(detailLine)])
 }
 
 function logGifConversion(index) {
@@ -342,15 +379,18 @@ function getCompletionLine() {
 }
 
 module.exports = {
-  logProgress,
-  logLazyProgress,
-  resetProgressBar,
-  logGifConversion,
-  logLazyDownload,
+  clearPinnedFooter,
+  formatBytes,
+  formatDuration,
   getCompletionLine,
+  getMilestoneBucket,
+  getMilestoneLine,
   getScrapeLine,
   getStatusHeader,
-  getMilestoneLine,
-  getMilestoneBucket,
+  logGifConversion,
+  logLazyDownload,
+  logLazyProgress,
+  logProgress,
   logScrollingMessage,
+  resetProgressBar,
 }

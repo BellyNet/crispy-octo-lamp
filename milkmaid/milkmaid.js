@@ -44,6 +44,9 @@ const {
 } = require('../scrapyard/bitwiseHasher')
 
 const {
+  clearPinnedFooter,
+  formatBytes,
+  formatDuration,
   logProgress,
   logLazyProgress,
   resetProgressBar,
@@ -401,8 +404,7 @@ let totalCount = 0,
   lazyBytesDownloaded = 0
 let lazyDownloadStartedAt = 0,
   lazyActiveDownloads = 0,
-  lazyCompletedDownloads = 0,
-  lazyCurrentLabel = ''
+  lazyCompletedDownloads = 0
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.join(
@@ -437,14 +439,24 @@ function addRunSavedBytes(bytes) {
   currentRunLog.transfer.savedBytes += Number(bytes) || 0
 }
 
+function addRunTransferredBytes(bytes, phase = 'scrape') {
+  if (!currentRunLog) return
+
+  const safeBytes = Number(bytes) || 0
+  if (safeBytes <= 0) return
+
+  currentRunLog.transfer.transferredBytes += safeBytes
+
+  if (phase === 'lazy') {
+    currentRunLog.transfer.lazyTransferredBytes += safeBytes
+  } else {
+    currentRunLog.transfer.scrapeTransferredBytes += safeBytes
+  }
+}
+
 function setRunLazyExpectedBytes(bytes) {
   if (!currentRunLog) return
   currentRunLog.transfer.lazyExpectedBytes = Number(bytes) || 0
-}
-
-function setRunLazyTransferredBytes(bytes) {
-  if (!currentRunLog) return
-  currentRunLog.transfer.lazyTransferredBytes = Number(bytes) || 0
 }
 
 function getIncompleteDirs(modelName) {
@@ -695,8 +707,13 @@ function startRunLog(modelName, inputUrl, folders) {
     },
     transfer: {
       savedBytes: 0,
+      transferredBytes: 0,
+      scrapeTransferredBytes: 0,
       lazyExpectedBytes: 0,
       lazyTransferredBytes: 0,
+    },
+    timings: {
+      lazyDurationMs: 0,
     },
     errors: [],
   }
@@ -744,16 +761,25 @@ function recordRunError(category, details = {}) {
   })
 }
 
-function finalizeRunLog(extra = {}) {
-  if (!currentRunLog) return
+function buildRunSummary(extra = {}) {
+  if (!currentRunLog) return null
 
-  const { status = 'finished', ...rest } = extra
-  const finishedAt = new Date().toISOString()
+  const { status = 'finished', finishedAt = new Date().toISOString(), ...rest } = extra
   const durationMs = Math.max(
     new Date(finishedAt).getTime() - new Date(currentRunLog.startedAt).getTime(),
     0
   )
-  const summary = {
+  const averageBytesPerSecond =
+    durationMs > 0
+      ? currentRunLog.transfer.transferredBytes / (durationMs / 1000)
+      : 0
+  const lazyDurationMs = currentRunLog.timings.lazyDurationMs || 0
+  const lazyAverageBytesPerSecond =
+    lazyDurationMs > 0
+      ? currentRunLog.transfer.lazyTransferredBytes / (lazyDurationMs / 1000)
+      : 0
+
+  return {
     startedAt: currentRunLog.startedAt,
     finishedAt,
     durationMs,
@@ -762,9 +788,25 @@ function finalizeRunLog(extra = {}) {
     logPath: currentRunLog.logPath,
     counters: currentRunLog.counters,
     transfer: currentRunLog.transfer,
+    timings: currentRunLog.timings,
+    throughput: {
+      averageBytesPerSecond,
+      lazyAverageBytesPerSecond,
+    },
     errors: currentRunLog.errors,
+    status,
     ...rest,
   }
+}
+
+function finalizeRunLog(extra = {}) {
+  if (!currentRunLog) return
+
+  const { status = 'finished', ...rest } = extra
+  const summary = buildRunSummary({
+    status,
+    ...rest,
+  })
 
   fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
   fs.writeFileSync(
@@ -772,13 +814,53 @@ function finalizeRunLog(extra = {}) {
     JSON.stringify(
       {
         ...summary,
-        status,
       },
       null,
       2
     ) + '\n'
   )
   currentRunLog = null
+  return summary
+}
+
+function logRunSummaryTable(summary) {
+  if (!summary) return
+
+  const rows = [
+    ['Duration', formatDuration(summary.durationMs)],
+    ['Downloaded', formatBytes(summary.transfer.transferredBytes)],
+    ['Saved size', formatBytes(summary.transfer.savedBytes)],
+    ['Run avg speed', summary.throughput.averageBytesPerSecond
+      ? `${formatBytes(summary.throughput.averageBytesPerSecond)}/s`
+      : 'n/a'],
+    ['Lazy downloaded', formatBytes(summary.transfer.lazyTransferredBytes)],
+    ['Lazy expected', summary.transfer.lazyExpectedBytes > 0
+      ? formatBytes(summary.transfer.lazyExpectedBytes)
+      : 'n/a'],
+    ['Lazy avg speed', summary.throughput.lazyAverageBytesPerSecond
+      ? `${formatBytes(summary.throughput.lazyAverageBytesPerSecond)}/s`
+      : 'n/a'],
+    ['Saved / Dupes / Errors', `${summary.successCount} / ${summary.duplicateCount} / ${summary.errorCount}`],
+  ]
+
+  const labelWidth = Math.max(...rows.map(([label]) => label.length))
+  const valueWidth = Math.max(...rows.map(([, value]) => String(value).length))
+  const top = `╔${'═'.repeat(labelWidth + 2)}╤${'═'.repeat(valueWidth + 2)}╗`
+  const mid = `╟${'─'.repeat(labelWidth + 2)}┼${'─'.repeat(valueWidth + 2)}╢`
+  const bottom = `╚${'═'.repeat(labelWidth + 2)}╧${'═'.repeat(valueWidth + 2)}╝`
+
+  console.log('')
+  console.log(chalk.magentaBright('╔════════════════ Milkmaid Run Summary ════════════════╗'))
+  console.log(top)
+
+  rows.forEach(([label, value], index) => {
+    const paddedLabel = label.padEnd(labelWidth, ' ')
+    const paddedValue = String(value).padEnd(valueWidth, ' ')
+    console.log(`║ ${chalk.cyan(paddedLabel)} │ ${chalk.white(paddedValue)} ║`)
+    if (index < rows.length - 1) console.log(mid)
+  })
+
+  console.log(bottom)
 }
 
 function launchReviewDashboardProcess() {
@@ -987,14 +1069,16 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
         res.on('data', (chunk) => {
           downloadedBytes += chunk.length
           chunks.push(chunk)
-          if (onProgress && totalBytes > 0) {
-            const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
-            const speed = (
-              downloadedBytes /
-              1024 /
-              ((Date.now() - start) / 1000)
-            ).toFixed(1)
-            onProgress(percent, speed, chunk)
+          addRunTransferredBytes(chunk.length, 'scrape')
+          if (onProgress) {
+            const elapsedSeconds = Math.max((Date.now() - start) / 1000, 0.001)
+            onProgress({
+              chunkBytes: chunk.length,
+              downloadedBytes,
+              totalBytes,
+              percent: totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : null,
+              averageBytesPerSecond: downloadedBytes / elapsedSeconds,
+            })
           }
         })
         res.on('end', () => resolve(Buffer.concat(chunks)))
@@ -1202,13 +1286,7 @@ function resetProgressCounter(total = null) {
   }
 }
 
-function logAndProgress(message, increment = false) {
-  if (increment) {
-    completedTotal++
-  }
-
-  logScrollingMessage(message)
-
+function drawCurrentProgressBar() {
   if (progressMode === 'lazy') {
     const percent = totalLazyBytes
       ? (lazyBytesDownloaded / totalLazyBytes) * 100
@@ -1222,17 +1300,33 @@ function logAndProgress(message, increment = false) {
     const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
     const etaSeconds =
       speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
+
     logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
-      speedBytesPerSecond,
+      averageSpeedBytesPerSecond: speedBytesPerSecond,
       etaSeconds,
       activeCount: lazyActiveDownloads,
       completedCount: lazyCompletedDownloads,
       totalCount: lazyVideoQueue.length,
-      currentLabel: lazyCurrentLabel,
+      totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
     })
-  } else {
-    logProgress(completedTotal, global.totalSearchTotal || 1)
+    return
   }
+
+  logProgress(completedTotal, global.totalSearchTotal || 1, {
+    totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
+    savedCount: successCount,
+    duplicateCount,
+    errorCount,
+  })
+}
+
+function logAndProgress(message, increment = false) {
+  if (increment) {
+    completedTotal++
+  }
+
+  logScrollingMessage(message)
+  drawCurrentProgressBar()
 }
 
 let grandCompleted = 0
@@ -1247,7 +1341,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   process.stdout.write('\n') // Reserve one lines
   grandCompleted++
-  logProgress(grandCompleted, global.totalSearchTotal)
+  logProgress(grandCompleted, global.totalSearchTotal, {
+    totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
+    savedCount: successCount,
+    duplicateCount,
+    errorCount,
+  })
 
   try {
     while (url) {
@@ -1409,10 +1508,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
           let buffer = null
           let hash = null
           let visualHash = null
+          let lastTransferRedrawAt = 0
+          const handleTransferProgress = () => {
+            const now = Date.now()
+            if (now - lastTransferRedrawAt < 250) return
+            lastTransferRedrawAt = now
+            drawCurrentProgressBar()
+          }
 
           // Step 1: Fetch file buffer
           if (!['.mp4', '.webm', '.gif'].includes(ext)) {
-            buffer = await downloadBufferWithProgress(mediaUrl)
+            buffer = await downloadBufferWithProgress(
+              mediaUrl,
+              handleTransferProgress
+            )
 
             // Step 2: Bitwise (fast) hash
             hash = createHash('md5').update(buffer).digest('hex')
@@ -1452,7 +1561,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           if (ext === '.gif') {
-            buffer = await downloadBufferWithProgress(mediaUrl)
+            buffer = await downloadBufferWithProgress(
+              mediaUrl,
+              handleTransferProgress
+            )
             hash = createHash('md5').update(buffer).digest('hex')
 
             const gifFolder = folders.createGifFolder()
@@ -1567,9 +1679,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
             })
             return logAndProgress(`♻️ Skipped (exists): ${filename}`, true)
           }
-
-          buffer = await downloadBufferWithProgress(mediaUrl)
-          hash = createHash('md5').update(buffer).digest('hex')
 
           const finalPath = path.join(images, filename)
           fs.writeFileSync(finalPath, buffer)
@@ -1800,9 +1909,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
   lazyDownloadStartedAt = Date.now()
   lazyActiveDownloads = 0
   lazyCompletedDownloads = 0
-  lazyCurrentLabel = ''
   setRunLazyExpectedBytes(0)
-  setRunLazyTransferredBytes(0)
   setProgressMode('lazy')
 
   // Pre-fetch expected file sizes (best-effort)
@@ -1838,12 +1945,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
       speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
 
     logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
-      speedBytesPerSecond,
+      averageSpeedBytesPerSecond: speedBytesPerSecond,
       etaSeconds,
       activeCount: lazyActiveDownloads,
       completedCount: lazyCompletedDownloads,
       totalCount: lazyVideoQueue.length,
-      currentLabel: lazyCurrentLabel,
+      totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
     })
   }
 
@@ -1870,7 +1977,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
           knownFilenames.add(filename) // ✅ Mark as claimed early
           lazyActiveDownloads++
-          lazyCurrentLabel = filename
           drawLazyProgress()
           const quarantineMirrorPath = getQuarantineMirrorPath(finalPath)
           const traceLazyVideo = shouldTraceLazyVideo(filename, finalPath)
@@ -1999,7 +2105,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                     resetIdleTimer()
                     stream.write(chunk)
                     lazyBytesDownloaded += chunk.length
-                    setRunLazyTransferredBytes(lazyBytesDownloaded)
+                    addRunTransferredBytes(chunk.length, 'lazy')
                     bytesDownloadedForFile += chunk.length
 
                     const now = Date.now()
@@ -2215,15 +2321,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
           } finally {
             lazyActiveDownloads = Math.max(lazyActiveDownloads - 1, 0)
             lazyCompletedDownloads++
-            if (lazyCurrentLabel === filename) {
-              lazyCurrentLabel = ''
-            }
-            setRunLazyTransferredBytes(lazyBytesDownloaded)
             drawLazyProgress()
           }
         })
     )
   )
+
+  if (currentRunLog) {
+    currentRunLog.timings.lazyDurationMs = Math.max(
+      Date.now() - lazyDownloadStartedAt,
+      0
+    )
+  }
 
     await browser.close()
     browser = null
@@ -2231,6 +2340,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     saveVisualHashCache()
 
     await maybePauseForErrorReview(modelName, errorCount, reviewErrors)
+    clearPinnedFooter()
 
     if (skipNasSync) {
       console.log('⏭️ NAS sync skipped by --skip-nas-sync')
@@ -2245,6 +2355,15 @@ async function scrapeGallery(browser, url, modelName, folders) {
         console.log('✅ NAS sync complete.')
       }
     }
+
+    const liveSummary = buildRunSummary({
+      successCount,
+      duplicateCount,
+      errorCount,
+      categoryRunList,
+      combinedTotal,
+    })
+    logRunSummaryTable(liveSummary)
 
     console.log(
       `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
