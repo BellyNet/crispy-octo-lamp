@@ -40,7 +40,9 @@ const datasetRoot = path.resolve(
   )
 )
 const reportDir = path.resolve(
-  String(argv['report-dir'] || path.join(process.cwd(), 'tmp', 'cleanup-gif-mp4'))
+  String(
+    argv['report-dir'] || path.join(process.cwd(), 'tmp', 'cleanup-gif-mp4')
+  )
 )
 const reportPath = path.join(reportDir, 'remove-gif-derived-mp4s-latest.json')
 
@@ -50,9 +52,9 @@ function main() {
   ensureDir(reportDir)
   const matches = collectMatches(datasetRoot)
   const deletedRelativePaths = matches.map((match) => match.mp4RelativePath)
-  const affectedModels = Array.from(new Set(matches.map((match) => match.model))).sort(
-    (a, b) => a.localeCompare(b)
-  )
+  const affectedModels = Array.from(
+    new Set(matches.map((match) => match.model))
+  ).sort((a, b) => a.localeCompare(b))
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -95,7 +97,9 @@ function main() {
   console.log(`Affected models: ${affectedModels.length}`)
   console.log(argv.apply ? 'Mode: apply' : 'Mode: dry-run')
   if (argv.apply) {
-    console.log(`Bitwise refs removed: ${report.hashCleanup.bitwiseRefsRemoved}`)
+    console.log(
+      `Bitwise refs removed: ${report.hashCleanup.bitwiseRefsRemoved}`
+    )
     console.log(`Visual refs removed: ${report.hashCleanup.visualRefsRemoved}`)
   }
   console.log(`Report: ${reportPath}`)

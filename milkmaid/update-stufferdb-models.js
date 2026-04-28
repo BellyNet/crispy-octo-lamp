@@ -421,7 +421,8 @@ function calculateTotals(results) {
     (totals, result) => {
       const perSourceTotals = summarizeSourceSummaries(result.sourceSummaries)
       totals.filesSaved += perSourceTotals.saved
-      totals.sourceItemsHandled += perSourceTotals.saved + perSourceTotals.duplicates
+      totals.sourceItemsHandled +=
+        perSourceTotals.saved + perSourceTotals.duplicates
       totals.duplicates += perSourceTotals.duplicates
       totals.errors += perSourceTotals.errors
       return totals

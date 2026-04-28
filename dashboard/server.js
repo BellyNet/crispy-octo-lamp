@@ -20,7 +20,8 @@ const APPDATA =
   process.env.APPDATA ||
   path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
 const slopvaultRoot = path.join(APPDATA, '.slopvault')
-const datasetDir = process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+const datasetDir =
+  process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
 const THUMB_DIR = path.join(slopvaultRoot, '.dashboard-thumbs')
 
 const MEDIA_FOLDERS = ['images', 'gif', 'webm']
@@ -37,14 +38,17 @@ async function findFfTools() {
   if (ffprobeFound) {
     ffprobePath = ffprobeFound
     // ffmpeg lives alongside ffprobe
-    const guess = ffprobeFound.replace(/ffprobe(\.exe)?$/i, (m) => m.replace('ffprobe', 'ffmpeg'))
+    const guess = ffprobeFound.replace(/ffprobe(\.exe)?$/i, (m) =>
+      m.replace('ffprobe', 'ffmpeg')
+    )
     try {
       await execFileAsync(guess, ['-version'], { timeout: 3000 })
       ffmpegPath = guess
       console.log(`  ffmpeg:  ${guess}`)
     } catch {}
   }
-  if (!ffmpegPath) console.log('  ffmpeg: not found — video thumbnails unavailable')
+  if (!ffmpegPath)
+    console.log('  ffmpeg: not found — video thumbnails unavailable')
 }
 
 // ─── VIDEO THUMBNAILS ─────────────────────────────────────────────────────────
@@ -61,30 +65,44 @@ async function getDuration(videoPath) {
     )
     const d = parseFloat(JSON.parse(stdout)?.format?.duration)
     return isFinite(d) && d > 0 ? d : null
-  } catch { return null }
+  } catch {
+    return null
+  }
 }
 
 async function extractFrame(videoPath, seekSec, outPath) {
   if (!ffmpegPath) return false
   try {
-    await execFileAsync(ffmpegPath, [
-      '-ss', seekSec.toFixed(2),
-      '-i', videoPath,
-      '-vframes', '1',
-      '-q:v', '4',
-      '-vf', 'scale=360:-2',
-      '-y', outPath,
-    ], { timeout: 20000 })
+    await execFileAsync(
+      ffmpegPath,
+      [
+        '-ss',
+        seekSec.toFixed(2),
+        '-i',
+        videoPath,
+        '-vframes',
+        '1',
+        '-q:v',
+        '4',
+        '-vf',
+        'scale=360:-2',
+        '-y',
+        outPath,
+      ],
+      { timeout: 20000 }
+    )
     const stat = fs.statSync(outPath)
     return stat.size > 8000 // < 8 KB → near-black frame, skip
-  } catch { return false }
+  } catch {
+    return false
+  }
 }
 
 async function generateThumbnail(videoPath, thumbPath) {
   const duration = await getDuration(videoPath)
   if (!duration) return false
 
-  const seekPoints = [0.20, 0.35, 0.50, 0.65].map((p) => duration * p)
+  const seekPoints = [0.2, 0.35, 0.5, 0.65].map((p) => duration * p)
 
   for (const seek of seekPoints) {
     const tmp = thumbPath + '.tmp.jpg'
@@ -93,7 +111,9 @@ async function generateThumbnail(videoPath, thumbPath) {
       fs.renameSync(tmp, thumbPath)
       return true
     }
-    try { fs.unlinkSync(tmp) } catch {}
+    try {
+      fs.unlinkSync(tmp)
+    } catch {}
   }
   return false
 }
@@ -107,18 +127,25 @@ function buildSourceMap() {
     const map = {}
     for (const [canonical, entry] of Object.entries(registry)) {
       const names = [canonical, ...(entry.aliases || [])]
-      const coomer    = (entry.sources?.coomer    || []).map((s) => s.url).filter(Boolean)
-      const stufferdb = (entry.sources?.stufferdb || []).map((s) => s.url).filter(Boolean)
+      const coomer = (entry.sources?.coomer || [])
+        .map((s) => s.url)
+        .filter(Boolean)
+      const stufferdb = (entry.sources?.stufferdb || [])
+        .map((s) => s.url)
+        .filter(Boolean)
       for (const name of names) {
         if (!map[name]) map[name] = { coomer: [], stufferdb: [] }
-        for (const u of coomer)    if (!map[name].coomer.includes(u))    map[name].coomer.push(u)
-        for (const u of stufferdb) if (!map[name].stufferdb.includes(u)) map[name].stufferdb.push(u)
+        for (const u of coomer)
+          if (!map[name].coomer.includes(u)) map[name].coomer.push(u)
+        for (const u of stufferdb)
+          if (!map[name].stufferdb.includes(u)) map[name].stufferdb.push(u)
       }
     }
     return map
-  } catch { return {} }
+  } catch {
+    return {}
+  }
 }
-
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -132,7 +159,11 @@ function getMediaType(folder, filename) {
 function safeSubPath(base, ...parts) {
   const resolved = path.resolve(path.join(base, ...parts))
   const baseResolved = path.resolve(base)
-  if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) return null
+  if (
+    resolved !== baseResolved &&
+    !resolved.startsWith(baseResolved + path.sep)
+  )
+    return null
   return resolved
 }
 
@@ -145,7 +176,11 @@ function isSane(date) {
 // ─── DATE RESOLUTION ──────────────────────────────────────────────────────────
 
 async function resolveDateForFile(userDir, folder, filename, filePath) {
-  const fromSidecar = mediaDates.resolveDateFromSidecar(userDir, folder, filename)
+  const fromSidecar = mediaDates.resolveDateFromSidecar(
+    userDir,
+    folder,
+    filename
+  )
   if (fromSidecar && fromSidecar.date) return fromSidecar
 
   const ext = path.extname(filename).toLowerCase()
@@ -164,8 +199,10 @@ async function resolveDateForFile(userDir, folder, filename, filePath) {
   if (!result) {
     try {
       const stat = await fs.promises.stat(filePath)
-      if (isSane(stat.mtime)) result = { date: stat.mtime.toISOString(), source: 'uploaded' }
-      else if (isSane(stat.birthtime)) result = { date: stat.birthtime.toISOString(), source: 'filesystem' }
+      if (isSane(stat.mtime))
+        result = { date: stat.mtime.toISOString(), source: 'uploaded' }
+      else if (isSane(stat.birthtime))
+        result = { date: stat.birthtime.toISOString(), source: 'filesystem' }
     } catch {}
   }
 
@@ -180,12 +217,19 @@ app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 // Users list — returns [{ name, sources: { coomer: [], stufferdb: [] } }, ...]
 app.get('/api/users', async (_req, res) => {
   try {
-    const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+    const entries = await fs.promises.readdir(datasetDir, {
+      withFileTypes: true,
+    })
     const sourceMap = buildSourceMap()
     const users = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => ({ name: e.name, sources: sourceMap[e.name] || { coomer: [], stufferdb: [] } }))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      .map((e) => ({
+        name: e.name,
+        sources: sourceMap[e.name] || { coomer: [], stufferdb: [] },
+      }))
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      )
     res.json(users)
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -202,11 +246,16 @@ app.get('/api/users/:username/media', async (req, res) => {
   for (const folder of MEDIA_FOLDERS) {
     const folderPath = path.join(userDir, folder)
     let files
-    try { files = await fs.promises.readdir(folderPath) } catch { continue }
+    try {
+      files = await fs.promises.readdir(folderPath)
+    } catch {
+      continue
+    }
     for (const file of files) {
       if (!MEDIA_EXTS.has(path.extname(file).toLowerCase())) continue
       rawFiles.push({
-        filename: file, folder,
+        filename: file,
+        folder,
         filePath: path.join(folderPath, file),
         type: getMediaType(folder, file),
         url: `/media/${encodeURIComponent(username)}/${folder}/${encodeURIComponent(file)}`,
@@ -216,19 +265,29 @@ app.get('/api/users/:username/media', async (req, res) => {
 
   const limit = pLimit(16)
   const allMedia = await Promise.all(
-    rawFiles.map((item) => limit(async () => {
-      const meta = await resolveDateForFile(userDir, item.folder, item.filename, item.filePath)
-      const isVideo = item.type === 'video'
-      return {
-        filename: item.filename, folder: item.folder,
-        type: item.type, url: item.url,
-        date: meta.date, source: meta.source,
-        dateMs: meta.date ? new Date(meta.date).getTime() : 0,
-        thumbnailUrl: isVideo
-          ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
-          : null,
-      }
-    }))
+    rawFiles.map((item) =>
+      limit(async () => {
+        const meta = await resolveDateForFile(
+          userDir,
+          item.folder,
+          item.filename,
+          item.filePath
+        )
+        const isVideo = item.type === 'video'
+        return {
+          filename: item.filename,
+          folder: item.folder,
+          type: item.type,
+          url: item.url,
+          date: meta.date,
+          source: meta.source,
+          dateMs: meta.date ? new Date(meta.date).getTime() : 0,
+          thumbnailUrl: isVideo
+            ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
+            : null,
+        }
+      })
+    )
   )
 
   allMedia.sort((a, b) => a.dateMs - b.dateMs)
@@ -242,18 +301,26 @@ app.get('/thumbnail/:username/:filename', async (req, res) => {
 
   const userThumbDir = path.join(THUMB_DIR, username)
   fs.mkdirSync(userThumbDir, { recursive: true })
-  const thumbPath = path.join(userThumbDir, path.basename(filename, path.extname(filename)) + '.jpg')
+  const thumbPath = path.join(
+    userThumbDir,
+    path.basename(filename, path.extname(filename)) + '.jpg'
+  )
 
   // Serve from cache
   if (fs.existsSync(thumbPath)) {
-    return res.sendFile(path.basename(thumbPath), { root: userThumbDir }, (err) => {
-      if (err && !res.headersSent) res.status(404).send('Not found')
-    })
+    return res.sendFile(
+      path.basename(thumbPath),
+      { root: userThumbDir },
+      (err) => {
+        if (err && !res.headersSent) res.status(404).send('Not found')
+      }
+    )
   }
 
   // Find the actual video file (could be in webm folder)
   const videoPath = safeSubPath(datasetDir, username, 'webm', filename)
-  if (!videoPath || !fs.existsSync(videoPath)) return res.status(404).send('Not found')
+  if (!videoPath || !fs.existsSync(videoPath))
+    return res.status(404).send('Not found')
 
   const ok = await generateThumbnail(videoPath, thumbPath)
   if (!ok) return res.status(404).send('Could not generate thumbnail')
@@ -282,22 +349,41 @@ async function prewarmThumbnails() {
   if (!ffmpegPath) return
 
   let dirs
-  try { dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true }) } catch { return }
-  const modelDirs = dirs.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+  try {
+    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  const modelDirs = dirs.filter(
+    (e) => e.isDirectory() && !e.name.startsWith('.')
+  )
 
   const allVideos = []
   for (const dir of modelDirs) {
     const webmDir = path.join(datasetDir, dir.name, 'webm')
     let files
-    try { files = await fs.promises.readdir(webmDir) } catch { continue }
+    try {
+      files = await fs.promises.readdir(webmDir)
+    } catch {
+      continue
+    }
     for (const file of files) {
-      if (!['.mp4', '.webm'].includes(path.extname(file).toLowerCase())) continue
-      allVideos.push({ username: dir.name, filename: file, videoPath: path.join(webmDir, file) })
+      if (!['.mp4', '.webm'].includes(path.extname(file).toLowerCase()))
+        continue
+      allVideos.push({
+        username: dir.name,
+        filename: file,
+        videoPath: path.join(webmDir, file),
+      })
     }
   }
 
   const missing = allVideos.filter(({ username, filename }) => {
-    const thumbPath = path.join(THUMB_DIR, username, path.basename(filename, path.extname(filename)) + '.jpg')
+    const thumbPath = path.join(
+      THUMB_DIR,
+      username,
+      path.basename(filename, path.extname(filename)) + '.jpg'
+    )
     return !fs.existsSync(thumbPath)
   })
 
@@ -306,22 +392,29 @@ async function prewarmThumbnails() {
     return
   }
 
-  console.log(`  Thumbs:    generating ${missing.length} missing (${allVideos.length - missing.length} cached)…`)
+  console.log(
+    `  Thumbs:    generating ${missing.length} missing (${allVideos.length - missing.length} cached)…`
+  )
 
   const concurrency = pLimit(4)
   let done = 0
-  await Promise.all(missing.map(({ username, filename, videoPath }) =>
-    concurrency(async () => {
-      const userThumbDir = path.join(THUMB_DIR, username)
-      fs.mkdirSync(userThumbDir, { recursive: true })
-      const thumbPath = path.join(userThumbDir, path.basename(filename, path.extname(filename)) + '.jpg')
-      await generateThumbnail(videoPath, thumbPath)
-      done++
-      if (done % 20 === 0 || done === missing.length) {
-        process.stdout.write(`\r  Thumbs:    ${done}/${missing.length} done`)
-      }
-    })
-  ))
+  await Promise.all(
+    missing.map(({ username, filename, videoPath }) =>
+      concurrency(async () => {
+        const userThumbDir = path.join(THUMB_DIR, username)
+        fs.mkdirSync(userThumbDir, { recursive: true })
+        const thumbPath = path.join(
+          userThumbDir,
+          path.basename(filename, path.extname(filename)) + '.jpg'
+        )
+        await generateThumbnail(videoPath, thumbPath)
+        done++
+        if (done % 20 === 0 || done === missing.length) {
+          process.stdout.write(`\r  Thumbs:    ${done}/${missing.length} done`)
+        }
+      })
+    )
+  )
 
   console.log(`\r  Thumbs:    ${missing.length} generated ✓          `)
 }
@@ -336,7 +429,9 @@ async function start() {
     console.log(`  Thumbs:    ${THUMB_DIR}`)
   })
   // Pre-generate all missing thumbnails in the background
-  prewarmThumbnails().catch((err) => console.warn('  Thumb prewarm error:', err.message))
+  prewarmThumbnails().catch((err) =>
+    console.warn('  Thumb prewarm error:', err.message)
+  )
 }
 
 start()

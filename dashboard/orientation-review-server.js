@@ -13,7 +13,8 @@ const APPDATA =
   process.env.APPDATA ||
   path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
 const slopvaultRoot = path.join(APPDATA, '.slopvault')
-const datasetDir = process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+const datasetDir =
+  process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
 const statePath = path.join(
   __dirname,
   '..',
@@ -56,44 +57,54 @@ async function main() {
     res.json({ ok: true, ...payload })
   })
 
-  app.post('/api/models/:model/records/:recordId/advance', authorize, async (req, res) => {
-    const model = String(req.params.model || '')
-    const recordId = String(req.params.recordId || '')
-    const mode = normalizeMode(req.body?.mode)
-    const payload = await saveProgress({
-      model,
-      recordId,
-      mode,
-      advance: true,
-    })
-    res.json({ ok: true, ...payload })
-  })
-
-  app.post('/api/models/:model/records/:recordId/rotate', authorize, async (req, res) => {
-    const model = String(req.params.model || '')
-    const recordId = String(req.params.recordId || '')
-    const direction = req.body?.direction === 'ccw' ? 'ccw' : 'cw'
-    const mode = normalizeMode(req.body?.mode)
-    const advance = Boolean(req.body?.advance)
-
-    const records = await loadModelRecords(model)
-    const record = records.find((item) => item.id === recordId)
-    if (!record) {
-      return res.status(404).json({ ok: false, error: `Unknown record: ${recordId}` })
+  app.post(
+    '/api/models/:model/records/:recordId/advance',
+    authorize,
+    async (req, res) => {
+      const model = String(req.params.model || '')
+      const recordId = String(req.params.recordId || '')
+      const mode = normalizeMode(req.body?.mode)
+      const payload = await saveProgress({
+        model,
+        recordId,
+        mode,
+        advance: true,
+      })
+      res.json({ ok: true, ...payload })
     }
+  )
 
-    await rotateImage(record.filePath, direction)
-    recordCache.delete(model)
+  app.post(
+    '/api/models/:model/records/:recordId/rotate',
+    authorize,
+    async (req, res) => {
+      const model = String(req.params.model || '')
+      const recordId = String(req.params.recordId || '')
+      const direction = req.body?.direction === 'ccw' ? 'ccw' : 'cw'
+      const mode = normalizeMode(req.body?.mode)
+      const advance = Boolean(req.body?.advance)
 
-    const payload = await saveProgress({
-      model,
-      recordId,
-      mode,
-      advance,
-      rotation: direction,
-    })
-    res.json({ ok: true, ...payload })
-  })
+      const records = await loadModelRecords(model)
+      const record = records.find((item) => item.id === recordId)
+      if (!record) {
+        return res
+          .status(404)
+          .json({ ok: false, error: `Unknown record: ${recordId}` })
+      }
+
+      await rotateImage(record.filePath, direction)
+      recordCache.delete(model)
+
+      const payload = await saveProgress({
+        model,
+        recordId,
+        mode,
+        advance,
+        rotation: direction,
+      })
+      res.json({ ok: true, ...payload })
+    }
+  )
 
   app.listen(PORT, '127.0.0.1', () => {
     const url = `http://127.0.0.1:${PORT}/?token=${reviewToken}`
@@ -105,7 +116,9 @@ async function main() {
 function authorize(req, res, next) {
   const token = req.headers['x-slopvault-token'] || req.query.token
   if (token && token !== reviewToken) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized review token.' })
+    return res
+      .status(401)
+      .json({ ok: false, error: 'Unauthorized review token.' })
   }
   next()
 }
@@ -125,7 +138,8 @@ function loadState() {
     return {
       version: 1,
       updatedAt: parsed.updatedAt || null,
-      models: parsed.models && typeof parsed.models === 'object' ? parsed.models : {},
+      models:
+        parsed.models && typeof parsed.models === 'object' ? parsed.models : {},
     }
   } catch {
     return { version: 1, updatedAt: null, models: {} }
@@ -181,11 +195,14 @@ async function buildStatePayload({ requestedModel, mode, targetRecordId }) {
   const visibleRecords = filterRecords(records, mode)
   const reviewSet = new Set(modelState.reviewedIds || [])
   const currentRecordId =
-    targetRecordId && visibleRecords.some((record) => record.id === targetRecordId)
+    targetRecordId &&
+    visibleRecords.some((record) => record.id === targetRecordId)
       ? targetRecordId
       : resolveCurrentRecordId(visibleRecords, modelState, mode, reviewSet)
 
-  const currentIndex = visibleRecords.findIndex((record) => record.id === currentRecordId)
+  const currentIndex = visibleRecords.findIndex(
+    (record) => record.id === currentRecordId
+  )
   const currentRecord =
     currentIndex >= 0
       ? decorateRecord(
@@ -202,10 +219,12 @@ async function buildStatePayload({ requestedModel, mode, targetRecordId }) {
     mode,
     summary: {
       total: visibleRecords.length,
-      reviewed: visibleRecords.filter((record) => reviewSet.has(record.id)).length,
+      reviewed: visibleRecords.filter((record) => reviewSet.has(record.id))
+        .length,
       percent: visibleRecords.length
         ? Math.round(
-            (visibleRecords.filter((record) => reviewSet.has(record.id)).length /
+            (visibleRecords.filter((record) => reviewSet.has(record.id))
+              .length /
               visibleRecords.length) *
               1000
           ) / 10
@@ -214,7 +233,8 @@ async function buildStatePayload({ requestedModel, mode, targetRecordId }) {
     currentRecord,
     hasPrevious: currentIndex > 0,
     hasNext: currentIndex >= 0 && currentIndex < visibleRecords.length - 1,
-    previousRecordId: currentIndex > 0 ? visibleRecords[currentIndex - 1].id : null,
+    previousRecordId:
+      currentIndex > 0 ? visibleRecords[currentIndex - 1].id : null,
     nextRecordId:
       currentIndex >= 0 && currentIndex < visibleRecords.length - 1
         ? visibleRecords[currentIndex + 1].id
@@ -232,7 +252,9 @@ function summarizeModel(model, records, modelState) {
       all: records.length,
       suspects: suspectRecords.length,
       reviewedAll: records.filter((record) => reviewSet.has(record.id)).length,
-      reviewedSuspects: suspectRecords.filter((record) => reviewSet.has(record.id)).length,
+      reviewedSuspects: suspectRecords.filter((record) =>
+        reviewSet.has(record.id)
+      ).length,
     },
   }
 }
@@ -266,7 +288,9 @@ async function saveProgress({ model, recordId, mode, advance, rotation }) {
   const modelState = getModelState(state, model)
   const records = await loadModelRecords(model)
   const visibleRecords = filterRecords(records, mode)
-  const currentIndex = visibleRecords.findIndex((record) => record.id === recordId)
+  const currentIndex = visibleRecords.findIndex(
+    (record) => record.id === recordId
+  )
 
   if (currentIndex < 0) {
     throw new Error(`Unknown record for ${model}: ${recordId}`)
@@ -277,7 +301,9 @@ async function saveProgress({ model, recordId, mode, advance, rotation }) {
   modelState.reviewedIds = Array.from(reviewSet)
 
   if (rotation) {
-    modelState.rotations = Array.isArray(modelState.rotations) ? modelState.rotations : []
+    modelState.rotations = Array.isArray(modelState.rotations)
+      ? modelState.rotations
+      : []
     modelState.rotations.push({
       recordId,
       direction: rotation,
@@ -287,7 +313,9 @@ async function saveProgress({ model, recordId, mode, advance, rotation }) {
   }
 
   const nextRecord = advance
-    ? visibleRecords.slice(currentIndex + 1).find((record) => !reviewSet.has(record.id)) ||
+    ? visibleRecords
+        .slice(currentIndex + 1)
+        .find((record) => !reviewSet.has(record.id)) ||
       visibleRecords[currentIndex + 1] ||
       null
     : visibleRecords[currentIndex]
@@ -387,14 +415,20 @@ async function rotateImage(filePath, direction) {
 function safeSubPath(base, ...parts) {
   const resolved = path.resolve(path.join(base, ...parts))
   const baseResolved = path.resolve(base)
-  if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) return null
+  if (
+    resolved !== baseResolved &&
+    !resolved.startsWith(baseResolved + path.sep)
+  )
+    return null
   return resolved
 }
 
 function sendMedia(res, filePath) {
   const resolved = path.resolve(String(filePath || ''))
   if (!resolved || !fs.existsSync(resolved)) {
-    return res.status(404).json({ ok: false, error: `Missing media: ${resolved}` })
+    return res
+      .status(404)
+      .json({ ok: false, error: `Missing media: ${resolved}` })
   }
 
   const stat = fs.statSync(resolved)

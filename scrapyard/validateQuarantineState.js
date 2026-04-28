@@ -30,7 +30,9 @@ const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
 const targetModel = argv.model ? String(argv.model) : null
 
 main().catch((err) => {
-  console.error(`Fatal quarantine validation error: ${err.stack || err.message}`)
+  console.error(
+    `Fatal quarantine validation error: ${err.stack || err.message}`
+  )
   process.exitCode = 1
 })
 
@@ -79,7 +81,9 @@ async function main() {
       const record = getBitwiseHashRecord(item.contentHash.value)
       const refs = Array.isArray(record?.refs) ? record.refs : []
       const hasActiveRef = refs.some((ref) =>
-        fs.existsSync(path.join(datasetRoot, String(ref).replace(/\//g, path.sep)))
+        fs.existsSync(
+          path.join(datasetRoot, String(ref).replace(/\//g, path.sep))
+        )
       )
 
       if (!hasActiveRef && state.repairState === 'repaired') {
@@ -103,7 +107,10 @@ async function main() {
 function getCurrentState(item) {
   const activeDatasetPath =
     item?.sourceType === 'dataset' && item?.relativePath
-      ? path.join(datasetRoot, String(item.relativePath).replace(/\//g, path.sep))
+      ? path.join(
+          datasetRoot,
+          String(item.relativePath).replace(/\//g, path.sep)
+        )
       : null
   const activeDatasetExists = activeDatasetPath
     ? fs.existsSync(activeDatasetPath)

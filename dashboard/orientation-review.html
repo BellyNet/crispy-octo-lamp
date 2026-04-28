@@ -1,870 +1,947 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orientation Review</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orientation Review</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-    :root {
-      --bg: #0e1117;
-      --panel: #171c25;
-      --panel-2: #1f2633;
-      --line: #2a3445;
-      --text: #eff3fb;
-      --muted: #94a0b8;
-      --accent: #70b8ff;
-      --danger: #ff9f80;
-      --sidebar: 280px;
-    }
+      :root {
+        --bg: #0e1117;
+        --panel: #171c25;
+        --panel-2: #1f2633;
+        --line: #2a3445;
+        --text: #eff3fb;
+        --muted: #94a0b8;
+        --accent: #70b8ff;
+        --danger: #ff9f80;
+        --sidebar: 280px;
+      }
 
-    html, body { height: 100%; overflow: hidden; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(112,184,255,0.14), transparent 22%),
-        linear-gradient(180deg, #10141c 0%, #0b0f15 100%);
-      color: var(--text);
-    }
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(112, 184, 255, 0.14),
+            transparent 22%
+          ),
+          linear-gradient(180deg, #10141c 0%, #0b0f15 100%);
+        color: var(--text);
+      }
 
-    .app {
-      height: 100vh;
-      display: grid;
-      grid-template-columns: var(--sidebar) 1fr;
-    }
+      .app {
+        height: 100vh;
+        display: grid;
+        grid-template-columns: var(--sidebar) 1fr;
+      }
 
-    .sidebar {
-      border-right: 1px solid var(--line);
-      background: rgba(15, 19, 27, 0.95);
-      display: grid;
-      grid-template-rows: auto auto 1fr auto;
-      min-height: 0;
-    }
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: rgba(15, 19, 27, 0.95);
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        min-height: 0;
+      }
 
-    .sidebar-block {
-      padding: 16px 16px 12px;
-      border-bottom: 1px solid var(--line);
-    }
+      .sidebar-block {
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--line);
+      }
 
-    .sidebar h1 {
-      font-size: 18px;
-      font-weight: 700;
-    }
+      .sidebar h1 {
+        font-size: 18px;
+        font-weight: 700;
+      }
 
-    .sidebar p {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
-    }
+      .sidebar p {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
 
-    .search {
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: #0f141c;
-      color: var(--text);
-      outline: none;
-    }
+      .search {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: #0f141c;
+        color: var(--text);
+        outline: none;
+      }
 
-    .model-list {
-      min-height: 0;
-      overflow: auto;
-      padding: 10px;
-      display: grid;
-      gap: 8px;
-    }
+      .model-list {
+        min-height: 0;
+        overflow: auto;
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+      }
 
-    .model-card {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 14px;
-      padding: 10px 12px;
-      cursor: pointer;
-    }
+      .model-card {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 14px;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
 
-    .model-card.active {
-      border-color: var(--accent);
-      background: #1c2735;
-    }
+      .model-card.active {
+        border-color: var(--accent);
+        background: #1c2735;
+      }
 
-    .model-card strong {
-      display: block;
-      font-size: 14px;
-    }
+      .model-card strong {
+        display: block;
+        font-size: 14px;
+      }
 
-    .model-meta {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
+      .model-meta {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
 
-    .hotkeys {
-      padding: 14px 16px 18px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.65;
-    }
+      .hotkeys {
+        padding: 14px 16px 18px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.65;
+      }
 
-    .hotkeys code {
-      color: var(--text);
-      background: #0e141d;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 2px 6px;
-    }
+      .hotkeys code {
+        color: var(--text);
+        background: #0e141d;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 2px 6px;
+      }
 
-    .main {
-      min-height: 0;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-    }
+      .main {
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
 
-    .topbar {
-      border-bottom: 1px solid var(--line);
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      background: rgba(16, 20, 28, 0.9);
-    }
+      .topbar {
+        border-bottom: 1px solid var(--line);
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        background: rgba(16, 20, 28, 0.9);
+      }
 
-    .topbar h2 {
-      font-size: 18px;
-      font-weight: 700;
-    }
+      .topbar h2 {
+        font-size: 18px;
+        font-weight: 700;
+      }
 
-    .topbar p {
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 13px;
-    }
+      .topbar p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
 
-    .status {
-      color: var(--muted);
-      font-size: 13px;
-      text-align: right;
-    }
+      .status {
+        color: var(--muted);
+        font-size: 13px;
+        text-align: right;
+      }
 
-    .workspace {
-      min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(0, 1.1fr) 360px;
-      gap: 18px;
-      padding: 18px;
-    }
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) 360px;
+        gap: 18px;
+        padding: 18px;
+      }
 
-    .panel {
-      min-height: 0;
-      border: 1px solid var(--line);
-      background: rgba(23, 28, 37, 0.95);
-      border-radius: 22px;
-      overflow: hidden;
-    }
+      .panel {
+        min-height: 0;
+        border: 1px solid var(--line);
+        background: rgba(23, 28, 37, 0.95);
+        border-radius: 22px;
+        overflow: hidden;
+      }
 
-    .preview-panel {
-      display: grid;
-      grid-template-rows: 1fr auto;
-    }
+      .preview-panel {
+        display: grid;
+        grid-template-rows: 1fr auto;
+      }
 
-    .preview-wrap {
-      min-height: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: #0c1017;
-    }
+      .preview-wrap {
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: #0c1017;
+      }
 
-    .preview-wrap img {
-      max-width: 100%;
-      max-height: 68vh;
-      object-fit: contain;
-      border-radius: 18px;
-      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
-      background: #111722;
-    }
+      .preview-wrap img {
+        max-width: 100%;
+        max-height: 68vh;
+        object-fit: contain;
+        border-radius: 18px;
+        box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
+        background: #111722;
+      }
 
-    .preview-meta {
-      border-top: 1px solid var(--line);
-      padding: 14px 18px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.5;
-    }
+      .preview-meta {
+        border-top: 1px solid var(--line);
+        padding: 14px 18px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
 
-    .preview-meta strong,
-    .side-panel strong {
-      color: var(--text);
-    }
+      .preview-meta strong,
+      .side-panel strong {
+        color: var(--text);
+      }
 
-    .side-panel {
-      display: grid;
-      grid-template-rows: auto auto auto 1fr;
-    }
+      .side-panel {
+        display: grid;
+        grid-template-rows: auto auto auto 1fr;
+      }
 
-    .side-section {
-      padding: 18px;
-      border-bottom: 1px solid var(--line);
-    }
+      .side-section {
+        padding: 18px;
+        border-bottom: 1px solid var(--line);
+      }
 
-    .side-section h3 {
-      font-size: 14px;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
+      .side-section h3 {
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
 
-    .side-section p {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.5;
-    }
+      .side-section p {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
 
-    .action-stack {
-      display: grid;
-      gap: 10px;
-    }
+      .action-stack {
+        display: grid;
+        gap: 10px;
+      }
 
-    .action-btn {
-      width: 100%;
-      border: 1px solid var(--line);
-      background: var(--panel-2);
-      color: var(--text);
-      border-radius: 16px;
-      padding: 12px 14px;
-      text-align: left;
-      cursor: pointer;
-      font: inherit;
-    }
+      .action-btn {
+        width: 100%;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 16px;
+        padding: 12px 14px;
+        text-align: left;
+        cursor: pointer;
+        font: inherit;
+      }
 
-    .action-btn.primary {
-      background: linear-gradient(135deg, #5eaaf0 0%, #7bc2ff 100%);
-      color: #07111d;
-      border-color: #7bc2ff;
-      font-weight: 700;
-    }
+      .action-btn.primary {
+        background: linear-gradient(135deg, #5eaaf0 0%, #7bc2ff 100%);
+        color: #07111d;
+        border-color: #7bc2ff;
+        font-weight: 700;
+      }
 
-    .action-btn.warn {
-      border-color: rgba(255,159,128,0.4);
-      color: #ffd2c3;
-    }
+      .action-btn.warn {
+        border-color: rgba(255, 159, 128, 0.4);
+        color: #ffd2c3;
+      }
 
-    .achievement-list {
-      display: grid;
-      gap: 8px;
-      margin-top: 10px;
-    }
+      .achievement-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
 
-    .achievement-card {
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.03);
-      border-radius: 14px;
-      padding: 10px 12px;
-    }
+      .achievement-card {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 14px;
+        padding: 10px 12px;
+      }
 
-    .achievement-card.unlocked {
-      border-color: rgba(112,184,255,0.45);
-      background: linear-gradient(180deg, rgba(112,184,255,0.12) 0%, rgba(255,255,255,0.04) 100%);
-    }
+      .achievement-card.unlocked {
+        border-color: rgba(112, 184, 255, 0.45);
+        background: linear-gradient(
+          180deg,
+          rgba(112, 184, 255, 0.12) 0%,
+          rgba(255, 255, 255, 0.04) 100%
+        );
+      }
 
-    .achievement-card strong {
-      display: block;
-      font-size: 13px;
-      margin-bottom: 4px;
-    }
+      .achievement-card strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 4px;
+      }
 
-    .achievement-card span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
+      .achievement-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
 
-    .score-row {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 10px;
-    }
+      .score-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
 
-    .score-chip {
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.03);
-      border-radius: 14px;
-      padding: 10px 12px;
-    }
+      .score-chip {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 14px;
+        padding: 10px 12px;
+      }
 
-    .score-chip strong {
-      display: block;
-      font-size: 18px;
-      margin-bottom: 2px;
-    }
+      .score-chip strong {
+        display: block;
+        font-size: 18px;
+        margin-bottom: 2px;
+      }
 
-    .score-chip span {
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
+      .score-chip span {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
 
-    .done {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      text-align: center;
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.6;
-    }
+      .done {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.6;
+      }
 
-    .footer {
-      border-top: 1px solid var(--line);
-      padding: 10px 18px 14px;
-      background: rgba(15, 18, 26, 0.9);
-    }
+      .footer {
+        border-top: 1px solid var(--line);
+        padding: 10px 18px 14px;
+        background: rgba(15, 18, 26, 0.9);
+      }
 
-    .progress-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 12px;
-      margin-bottom: 8px;
-    }
+      .progress-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
 
-    .progress {
-      height: 10px;
-      border-radius: 999px;
-      background: #101722;
-      border: 1px solid var(--line);
-      overflow: hidden;
-    }
+      .progress {
+        height: 10px;
+        border-radius: 999px;
+        background: #101722;
+        border: 1px solid var(--line);
+        overflow: hidden;
+      }
 
-    .progress-bar {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #6faeff 0%, #97f3cd 100%);
-      transition: width 0.18s ease;
-    }
+      .progress-bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #6faeff 0%, #97f3cd 100%);
+        transition: width 0.18s ease;
+      }
 
-    .toast-stack {
-      position: fixed;
-      right: 18px;
-      bottom: 22px;
-      display: grid;
-      gap: 10px;
-      z-index: 30;
-      pointer-events: none;
-    }
+      .toast-stack {
+        position: fixed;
+        right: 18px;
+        bottom: 22px;
+        display: grid;
+        gap: 10px;
+        z-index: 30;
+        pointer-events: none;
+      }
 
-    .toast {
-      width: min(360px, calc(100vw - 36px));
-      border: 1px solid rgba(112,184,255,0.42);
-      background: linear-gradient(135deg, rgba(31,38,51,0.98) 0%, rgba(21,30,43,0.98) 100%);
-      border-radius: 18px;
-      padding: 14px 16px;
-      box-shadow: 0 20px 42px rgba(0, 0, 0, 0.28);
-    }
+      .toast {
+        width: min(360px, calc(100vw - 36px));
+        border: 1px solid rgba(112, 184, 255, 0.42);
+        background: linear-gradient(
+          135deg,
+          rgba(31, 38, 51, 0.98) 0%,
+          rgba(21, 30, 43, 0.98) 100%
+        );
+        border-radius: 18px;
+        padding: 14px 16px;
+        box-shadow: 0 20px 42px rgba(0, 0, 0, 0.28);
+      }
 
-    .toast strong {
-      display: block;
-      font-size: 14px;
-      margin-bottom: 4px;
-    }
+      .toast strong {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 4px;
+      }
 
-    .toast span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-  </style>
-</head>
-<body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="sidebar-block">
-        <h1>Orientation Review</h1>
-        <p>One model at a time, keyboard first, immediate rotate-and-save.</p>
-      </div>
-      <div class="sidebar-block">
-        <input id="search" class="search" type="text" placeholder="Filter models">
-      </div>
-      <div id="model-list" class="model-list"></div>
-      <div class="hotkeys">
-        <div><code>Space</code> accept + next</div>
-        <div><code>R</code> rotate right and stay</div>
-        <div><code>L</code> rotate left and stay</div>
-        <div><code>Right</code> next</div>
-        <div><code>Left</code> previous</div>
-      </div>
-    </aside>
-
-    <main class="main">
-      <div class="topbar">
-        <div>
-          <h2 id="title">Loading...</h2>
-          <p id="subtitle"></p>
+      .toast span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-block">
+          <h1>Orientation Review</h1>
+          <p>One model at a time, keyboard first, immediate rotate-and-save.</p>
         </div>
-        <div id="save-status" class="status">Starting review...</div>
-      </div>
+        <div class="sidebar-block">
+          <input
+            id="search"
+            class="search"
+            type="text"
+            placeholder="Filter models"
+          />
+        </div>
+        <div id="model-list" class="model-list"></div>
+        <div class="hotkeys">
+          <div><code>Space</code> accept + next</div>
+          <div><code>R</code> rotate right and stay</div>
+          <div><code>L</code> rotate left and stay</div>
+          <div><code>Right</code> next</div>
+          <div><code>Left</code> previous</div>
+        </div>
+      </aside>
 
-      <div class="workspace">
-        <section class="panel preview-panel">
-          <div id="preview-wrap" class="preview-wrap"></div>
-          <div id="preview-meta" class="preview-meta"></div>
-        </section>
-
-        <aside class="panel side-panel">
-          <div class="side-section">
-            <h3>Quick Actions</h3>
-            <div class="action-stack">
-              <button id="accept-btn" class="action-btn primary">Accept And Next</button>
-              <button id="rotate-cw-btn" class="action-btn">Rotate Right And Save</button>
-              <button id="rotate-ccw-btn" class="action-btn warn">Rotate Left And Save</button>
-              <button id="prev-btn" class="action-btn">Previous</button>
-            </div>
+      <main class="main">
+        <div class="topbar">
+          <div>
+            <h2 id="title">Loading...</h2>
+            <p id="subtitle"></p>
           </div>
-          <div class="side-section">
-            <h3>Review Mode</h3>
-            <p id="suspect-note">All still images in the selected model are included in this pass.</p>
-            <div class="score-row">
-              <div class="score-chip">
-                <strong id="score-reviewed">0</strong>
-                <span>Total Reviewed</span>
+          <div id="save-status" class="status">Starting review...</div>
+        </div>
+
+        <div class="workspace">
+          <section class="panel preview-panel">
+            <div id="preview-wrap" class="preview-wrap"></div>
+            <div id="preview-meta" class="preview-meta"></div>
+          </section>
+
+          <aside class="panel side-panel">
+            <div class="side-section">
+              <h3>Quick Actions</h3>
+              <div class="action-stack">
+                <button id="accept-btn" class="action-btn primary">
+                  Accept And Next
+                </button>
+                <button id="rotate-cw-btn" class="action-btn">
+                  Rotate Right And Save
+                </button>
+                <button id="rotate-ccw-btn" class="action-btn warn">
+                  Rotate Left And Save
+                </button>
+                <button id="prev-btn" class="action-btn">Previous</button>
               </div>
-              <div class="score-chip">
-                <strong id="score-streak">0</strong>
-                <span>Current Streak</span>
+            </div>
+            <div class="side-section">
+              <h3>Review Mode</h3>
+              <p id="suspect-note">
+                All still images in the selected model are included in this
+                pass.
+              </p>
+              <div class="score-row">
+                <div class="score-chip">
+                  <strong id="score-reviewed">0</strong>
+                  <span>Total Reviewed</span>
+                </div>
+                <div class="score-chip">
+                  <strong id="score-streak">0</strong>
+                  <span>Current Streak</span>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="side-section">
-            <h3>Current File</h3>
-            <p id="current-file-meta"></p>
-          </div>
-          <div class="side-section">
-            <h3>BBW Achievements</h3>
-            <div id="achievement-list" class="achievement-list"></div>
-          </div>
-          <div id="done-panel" class="done" style="display:none;">
-            This model is done. Pick another model when you want to keep going.
-          </div>
-        </aside>
-      </div>
-
-      <footer class="footer">
-        <div class="progress-row">
-          <span id="progress-label">0 / 0 reviewed</span>
-          <span id="progress-percent">100%</span>
+            <div class="side-section">
+              <h3>Current File</h3>
+              <p id="current-file-meta"></p>
+            </div>
+            <div class="side-section">
+              <h3>BBW Achievements</h3>
+              <div id="achievement-list" class="achievement-list"></div>
+            </div>
+            <div id="done-panel" class="done" style="display: none">
+              This model is done. Pick another model when you want to keep
+              going.
+            </div>
+          </aside>
         </div>
-        <div class="progress">
-          <div id="progress-bar" class="progress-bar"></div>
-        </div>
-      </footer>
-    </main>
-  </div>
-  <div id="toast-stack" class="toast-stack"></div>
 
-  <script>
-    const STORAGE_KEY = 'slopvault-orientation-achievements-v1'
-    const ACHIEVEMENTS = [
-      {
-        id: 'first-bite',
-        title: 'First Bite',
-        description: 'Review your first image.',
-        check: (stats) => stats.totalReviewed >= 1,
-      },
-      {
-        id: 'snack-run',
-        title: 'Snack Run',
-        description: 'Clear 10 images in total.',
-        check: (stats) => stats.totalReviewed >= 10,
-      },
-      {
-        id: 'buffet-lap',
-        title: 'Buffet Lap',
-        description: 'Clear 50 images in total.',
-        check: (stats) => stats.totalReviewed >= 50,
-      },
-      {
-        id: 'belly-boost',
-        title: 'Belly Boost',
-        description: 'Rotate 5 sideways keepers.',
-        check: (stats) => stats.totalRotations >= 5,
-      },
-      {
-        id: 'plush-patience',
-        title: 'Plush Patience',
-        description: 'Hit a 25-image streak without stopping.',
-        check: (stats) => stats.currentStreak >= 25,
-      },
-      {
-        id: 'soft-focus',
-        title: 'Soft Focus',
-        description: 'Finish one full model.',
-        check: (stats) => stats.modelsCleared >= 1,
-      },
-      {
-        id: 'queen-size',
-        title: 'Queen Size',
-        description: 'Finish three full models.',
-        check: (stats) => stats.modelsCleared >= 3,
-      },
-      {
-        id: 'heavy-lifter',
-        title: 'Heavy Lifter',
-        description: 'Review 250 images in total.',
-        check: (stats) => stats.totalReviewed >= 250,
-      },
-    ]
+        <footer class="footer">
+          <div class="progress-row">
+            <span id="progress-label">0 / 0 reviewed</span>
+            <span id="progress-percent">100%</span>
+          </div>
+          <div class="progress">
+            <div id="progress-bar" class="progress-bar"></div>
+          </div>
+        </footer>
+      </main>
+    </div>
+    <div id="toast-stack" class="toast-stack"></div>
 
-    const state = {
-      token: new URLSearchParams(window.location.search).get('token') || '',
-      mode: 'all',
-      model: '',
-      recordId: '',
-      payload: null,
-      saveBusy: false,
-      search: '',
-      lastModelProgress: null,
-      achievements: loadAchievementState(),
-    }
+    <script>
+      const STORAGE_KEY = 'slopvault-orientation-achievements-v1'
+      const ACHIEVEMENTS = [
+        {
+          id: 'first-bite',
+          title: 'First Bite',
+          description: 'Review your first image.',
+          check: (stats) => stats.totalReviewed >= 1,
+        },
+        {
+          id: 'snack-run',
+          title: 'Snack Run',
+          description: 'Clear 10 images in total.',
+          check: (stats) => stats.totalReviewed >= 10,
+        },
+        {
+          id: 'buffet-lap',
+          title: 'Buffet Lap',
+          description: 'Clear 50 images in total.',
+          check: (stats) => stats.totalReviewed >= 50,
+        },
+        {
+          id: 'belly-boost',
+          title: 'Belly Boost',
+          description: 'Rotate 5 sideways keepers.',
+          check: (stats) => stats.totalRotations >= 5,
+        },
+        {
+          id: 'plush-patience',
+          title: 'Plush Patience',
+          description: 'Hit a 25-image streak without stopping.',
+          check: (stats) => stats.currentStreak >= 25,
+        },
+        {
+          id: 'soft-focus',
+          title: 'Soft Focus',
+          description: 'Finish one full model.',
+          check: (stats) => stats.modelsCleared >= 1,
+        },
+        {
+          id: 'queen-size',
+          title: 'Queen Size',
+          description: 'Finish three full models.',
+          check: (stats) => stats.modelsCleared >= 3,
+        },
+        {
+          id: 'heavy-lifter',
+          title: 'Heavy Lifter',
+          description: 'Review 250 images in total.',
+          check: (stats) => stats.totalReviewed >= 250,
+        },
+      ]
 
-    const els = {
-      modelList: document.getElementById('model-list'),
-      search: document.getElementById('search'),
-      title: document.getElementById('title'),
-      subtitle: document.getElementById('subtitle'),
-      saveStatus: document.getElementById('save-status'),
-      previewWrap: document.getElementById('preview-wrap'),
-      previewMeta: document.getElementById('preview-meta'),
-      suspectNote: document.getElementById('suspect-note'),
-      currentFileMeta: document.getElementById('current-file-meta'),
-      progressLabel: document.getElementById('progress-label'),
-      progressPercent: document.getElementById('progress-percent'),
-      progressBar: document.getElementById('progress-bar'),
-      donePanel: document.getElementById('done-panel'),
-      acceptBtn: document.getElementById('accept-btn'),
-      rotateCwBtn: document.getElementById('rotate-cw-btn'),
-      rotateCcwBtn: document.getElementById('rotate-ccw-btn'),
-      prevBtn: document.getElementById('prev-btn'),
-      scoreReviewed: document.getElementById('score-reviewed'),
-      scoreStreak: document.getElementById('score-streak'),
-      achievementList: document.getElementById('achievement-list'),
-      toastStack: document.getElementById('toast-stack'),
-    }
+      const state = {
+        token: new URLSearchParams(window.location.search).get('token') || '',
+        mode: 'all',
+        model: '',
+        recordId: '',
+        payload: null,
+        saveBusy: false,
+        search: '',
+        lastModelProgress: null,
+        achievements: loadAchievementState(),
+      }
 
-    function loadAchievementState() {
-      try {
-        const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
-        return {
-          totalReviewed: Number(raw.totalReviewed || 0),
-          totalRotations: Number(raw.totalRotations || 0),
-          currentStreak: Number(raw.currentStreak || 0),
-          modelsCleared: Number(raw.modelsCleared || 0),
-          unlockedIds: Array.isArray(raw.unlockedIds) ? raw.unlockedIds : [],
-          clearedModels: Array.isArray(raw.clearedModels) ? raw.clearedModels : [],
+      const els = {
+        modelList: document.getElementById('model-list'),
+        search: document.getElementById('search'),
+        title: document.getElementById('title'),
+        subtitle: document.getElementById('subtitle'),
+        saveStatus: document.getElementById('save-status'),
+        previewWrap: document.getElementById('preview-wrap'),
+        previewMeta: document.getElementById('preview-meta'),
+        suspectNote: document.getElementById('suspect-note'),
+        currentFileMeta: document.getElementById('current-file-meta'),
+        progressLabel: document.getElementById('progress-label'),
+        progressPercent: document.getElementById('progress-percent'),
+        progressBar: document.getElementById('progress-bar'),
+        donePanel: document.getElementById('done-panel'),
+        acceptBtn: document.getElementById('accept-btn'),
+        rotateCwBtn: document.getElementById('rotate-cw-btn'),
+        rotateCcwBtn: document.getElementById('rotate-ccw-btn'),
+        prevBtn: document.getElementById('prev-btn'),
+        scoreReviewed: document.getElementById('score-reviewed'),
+        scoreStreak: document.getElementById('score-streak'),
+        achievementList: document.getElementById('achievement-list'),
+        toastStack: document.getElementById('toast-stack'),
+      }
+
+      function loadAchievementState() {
+        try {
+          const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+          return {
+            totalReviewed: Number(raw.totalReviewed || 0),
+            totalRotations: Number(raw.totalRotations || 0),
+            currentStreak: Number(raw.currentStreak || 0),
+            modelsCleared: Number(raw.modelsCleared || 0),
+            unlockedIds: Array.isArray(raw.unlockedIds) ? raw.unlockedIds : [],
+            clearedModels: Array.isArray(raw.clearedModels)
+              ? raw.clearedModels
+              : [],
+          }
+        } catch {
+          return {
+            totalReviewed: 0,
+            totalRotations: 0,
+            currentStreak: 0,
+            modelsCleared: 0,
+            unlockedIds: [],
+            clearedModels: [],
+          }
         }
-      } catch {
-        return {
-          totalReviewed: 0,
-          totalRotations: 0,
-          currentStreak: 0,
-          modelsCleared: 0,
-          unlockedIds: [],
-          clearedModels: [],
+      }
+
+      function persistAchievementState() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.achievements))
+      }
+
+      async function api(path, options = {}) {
+        const headers = new Headers(options.headers || {})
+        if (state.token) headers.set('x-slopvault-token', state.token)
+        if (options.body && !headers.has('content-type')) {
+          headers.set('content-type', 'application/json')
+        }
+        const response = await fetch(path, { ...options, headers })
+        const json = await response.json()
+        if (!response.ok || json.ok === false) {
+          throw new Error(json.error || `Request failed: ${response.status}`)
+        }
+        return json
+      }
+
+      function formatBytes(value) {
+        const bytes = Number(value || 0)
+        if (!bytes) return '0 B'
+        const units = ['B', 'KB', 'MB', 'GB']
+        const index = Math.min(
+          Math.floor(Math.log(bytes) / Math.log(1024)),
+          units.length - 1
+        )
+        const scaled = bytes / Math.pow(1024, index)
+        return `${scaled.toFixed(scaled >= 100 || index === 0 ? 0 : 1)} ${units[index]}`
+      }
+
+      function updateUrl() {
+        const params = new URLSearchParams()
+        if (state.token) params.set('token', state.token)
+        if (state.model) params.set('model', state.model)
+        params.set('mode', 'all')
+        history.replaceState(
+          null,
+          '',
+          `${location.pathname}?${params.toString()}`
+        )
+      }
+
+      async function loadState() {
+        const params = new URLSearchParams()
+        if (state.token) params.set('token', state.token)
+        if (state.model) params.set('model', state.model)
+        if (state.recordId) params.set('recordId', state.recordId)
+        params.set('mode', 'all')
+        const payload = await api(`/api/state?${params.toString()}`)
+        state.payload = payload
+        state.model = payload.currentModel || state.model
+        state.recordId = payload.currentRecord?.id || ''
+        snapshotModelProgress(payload)
+        updateUrl()
+        render()
+      }
+
+      function snapshotModelProgress(payload) {
+        if (!payload || !state.model) return
+        state.lastModelProgress = {
+          model: state.model,
+          reviewed: Number(payload.summary?.reviewed || 0),
+          total: Number(payload.summary?.total || 0),
         }
       }
-    }
 
-    function persistAchievementState() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.achievements))
-    }
+      function renderModels() {
+        const models = (state.payload?.models || []).filter(
+          (item) =>
+            !state.search ||
+            item.model.toLowerCase().includes(state.search.toLowerCase())
+        )
 
-    async function api(path, options = {}) {
-      const headers = new Headers(options.headers || {})
-      if (state.token) headers.set('x-slopvault-token', state.token)
-      if (options.body && !headers.has('content-type')) {
-        headers.set('content-type', 'application/json')
-      }
-      const response = await fetch(path, { ...options, headers })
-      const json = await response.json()
-      if (!response.ok || json.ok === false) {
-        throw new Error(json.error || `Request failed: ${response.status}`)
-      }
-      return json
-    }
-
-    function formatBytes(value) {
-      const bytes = Number(value || 0)
-      if (!bytes) return '0 B'
-      const units = ['B', 'KB', 'MB', 'GB']
-      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-      const scaled = bytes / Math.pow(1024, index)
-      return `${scaled.toFixed(scaled >= 100 || index === 0 ? 0 : 1)} ${units[index]}`
-    }
-
-    function updateUrl() {
-      const params = new URLSearchParams()
-      if (state.token) params.set('token', state.token)
-      if (state.model) params.set('model', state.model)
-      params.set('mode', 'all')
-      history.replaceState(null, '', `${location.pathname}?${params.toString()}`)
-    }
-
-    async function loadState() {
-      const params = new URLSearchParams()
-      if (state.token) params.set('token', state.token)
-      if (state.model) params.set('model', state.model)
-      if (state.recordId) params.set('recordId', state.recordId)
-      params.set('mode', 'all')
-      const payload = await api(`/api/state?${params.toString()}`)
-      state.payload = payload
-      state.model = payload.currentModel || state.model
-      state.recordId = payload.currentRecord?.id || ''
-      snapshotModelProgress(payload)
-      updateUrl()
-      render()
-    }
-
-    function snapshotModelProgress(payload) {
-      if (!payload || !state.model) return
-      state.lastModelProgress = {
-        model: state.model,
-        reviewed: Number(payload.summary?.reviewed || 0),
-        total: Number(payload.summary?.total || 0),
-      }
-    }
-
-    function renderModels() {
-      const models = (state.payload?.models || []).filter((item) =>
-        !state.search || item.model.toLowerCase().includes(state.search.toLowerCase())
-      )
-
-      els.modelList.innerHTML = models.map((item) => {
-        const counts = `${item.counts.reviewedAll}/${item.counts.all} reviewed`
-        const active = item.model === state.model ? 'active' : ''
-        return `
+        els.modelList.innerHTML = models
+          .map((item) => {
+            const counts = `${item.counts.reviewedAll}/${item.counts.all} reviewed`
+            const active = item.model === state.model ? 'active' : ''
+            return `
           <button class="model-card ${active}" data-model="${escapeHtml(item.model)}">
             <strong>${escapeHtml(item.model)}</strong>
             <div class="model-meta">${counts}<br>${item.counts.all} images</div>
           </button>
         `
-      }).join('')
+          })
+          .join('')
 
-      els.modelList.querySelectorAll('[data-model]').forEach((button) => {
-        button.addEventListener('click', async () => {
-          state.model = button.dataset.model
-          state.recordId = ''
-          await loadState()
+        els.modelList.querySelectorAll('[data-model]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            state.model = button.dataset.model
+            state.recordId = ''
+            await loadState()
+          })
         })
-      })
-    }
-
-    function renderCurrent() {
-      const payload = state.payload
-      const record = payload?.currentRecord
-      const summary = payload?.summary || { total: 0, reviewed: 0, percent: 100 }
-
-      els.title.textContent = state.model || 'No models found'
-      els.subtitle.textContent = 'Reviewing all still images in this model.'
-      renderAchievementPanel()
-
-      els.progressLabel.textContent = `${summary.reviewed} / ${summary.total} reviewed`
-      els.progressPercent.textContent = `${summary.percent}%`
-      els.progressBar.style.width = `${summary.percent}%`
-
-      if (!record) {
-        els.previewWrap.innerHTML = '<div class="done">Nothing left in this model.</div>'
-        els.previewMeta.innerHTML = ''
-        els.currentFileMeta.innerHTML = ''
-        els.donePanel.style.display = 'flex'
-        els.acceptBtn.disabled = true
-        els.rotateCwBtn.disabled = true
-        els.rotateCcwBtn.disabled = true
-        els.prevBtn.disabled = !payload?.hasPrevious
-        els.suspectNote.textContent = 'All images in this model have been reviewed.'
-        return
       }
 
-      els.donePanel.style.display = 'none'
-      els.acceptBtn.disabled = false
-      els.rotateCwBtn.disabled = false
-      els.rotateCcwBtn.disabled = false
-      els.prevBtn.disabled = !payload?.hasPrevious
+      function renderCurrent() {
+        const payload = state.payload
+        const record = payload?.currentRecord
+        const summary = payload?.summary || {
+          total: 0,
+          reviewed: 0,
+          percent: 100,
+        }
 
-      const mediaUrl = `${record.mediaUrl}${state.token ? `&token=${encodeURIComponent(state.token)}` : ''}`
-      els.previewWrap.innerHTML = `<img src="${mediaUrl}" alt="${escapeHtml(record.filename)}">`
-      els.previewMeta.innerHTML = `
+        els.title.textContent = state.model || 'No models found'
+        els.subtitle.textContent = 'Reviewing all still images in this model.'
+        renderAchievementPanel()
+
+        els.progressLabel.textContent = `${summary.reviewed} / ${summary.total} reviewed`
+        els.progressPercent.textContent = `${summary.percent}%`
+        els.progressBar.style.width = `${summary.percent}%`
+
+        if (!record) {
+          els.previewWrap.innerHTML =
+            '<div class="done">Nothing left in this model.</div>'
+          els.previewMeta.innerHTML = ''
+          els.currentFileMeta.innerHTML = ''
+          els.donePanel.style.display = 'flex'
+          els.acceptBtn.disabled = true
+          els.rotateCwBtn.disabled = true
+          els.rotateCcwBtn.disabled = true
+          els.prevBtn.disabled = !payload?.hasPrevious
+          els.suspectNote.textContent =
+            'All images in this model have been reviewed.'
+          return
+        }
+
+        els.donePanel.style.display = 'none'
+        els.acceptBtn.disabled = false
+        els.rotateCwBtn.disabled = false
+        els.rotateCcwBtn.disabled = false
+        els.prevBtn.disabled = !payload?.hasPrevious
+
+        const mediaUrl = `${record.mediaUrl}${state.token ? `&token=${encodeURIComponent(state.token)}` : ''}`
+        els.previewWrap.innerHTML = `<img src="${mediaUrl}" alt="${escapeHtml(record.filename)}">`
+        els.previewMeta.innerHTML = `
         <strong>${escapeHtml(record.filename)}</strong><br>
         ${record.width} x ${record.height} · ${formatBytes(record.sizeBytes)}<br>
         ${escapeHtml(record.relativePath)}
       `
-      els.currentFileMeta.innerHTML = `
+        els.currentFileMeta.innerHTML = `
         <strong>File:</strong> ${escapeHtml(record.filename)}<br>
         <strong>Position:</strong> ${record.index + 1} of ${record.total}<br>
         <strong>Modified:</strong> ${new Date(record.modifiedAt).toLocaleString()}
       `
-      els.suspectNote.textContent = 'All images are shown in filename order. Rotate only when the image is actually sideways.'
-    }
+        els.suspectNote.textContent =
+          'All images are shown in filename order. Rotate only when the image is actually sideways.'
+      }
 
-    function render() {
-      renderModels()
-      renderCurrent()
-    }
+      function render() {
+        renderModels()
+        renderCurrent()
+      }
 
-    function renderAchievementPanel() {
-      els.scoreReviewed.textContent = state.achievements.totalReviewed
-      els.scoreStreak.textContent = state.achievements.currentStreak
+      function renderAchievementPanel() {
+        els.scoreReviewed.textContent = state.achievements.totalReviewed
+        els.scoreStreak.textContent = state.achievements.currentStreak
 
-      const unlocked = new Set(state.achievements.unlockedIds)
-      els.achievementList.innerHTML = ACHIEVEMENTS.map((item) => `
+        const unlocked = new Set(state.achievements.unlockedIds)
+        els.achievementList.innerHTML = ACHIEVEMENTS.map(
+          (item) => `
         <div class="achievement-card ${unlocked.has(item.id) ? 'unlocked' : ''}">
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.description)}</span>
         </div>
-      `).join('')
-    }
-
-    function applyAchievements(actionType, payload) {
-      const previous = state.lastModelProgress
-      const nextReviewed = Number(payload.summary?.reviewed || 0)
-      const deltaReviewed = previous && previous.model === state.model
-        ? Math.max(0, nextReviewed - previous.reviewed)
-        : 0
-
-      if (deltaReviewed > 0) {
-        state.achievements.totalReviewed += deltaReviewed
-        state.achievements.currentStreak += deltaReviewed
+      `
+        ).join('')
       }
 
-      if (actionType === 'cw' || actionType === 'ccw') {
-        state.achievements.totalRotations += 1
-      }
+      function applyAchievements(actionType, payload) {
+        const previous = state.lastModelProgress
+        const nextReviewed = Number(payload.summary?.reviewed || 0)
+        const deltaReviewed =
+          previous && previous.model === state.model
+            ? Math.max(0, nextReviewed - previous.reviewed)
+            : 0
 
-      const modelDone = payload.summary?.total > 0 && payload.summary?.reviewed >= payload.summary?.total
-      if (modelDone && !state.achievements.clearedModels.includes(state.model)) {
-        state.achievements.clearedModels.push(state.model)
-        state.achievements.modelsCleared = state.achievements.clearedModels.length
-      }
-
-      const unlockedSet = new Set(state.achievements.unlockedIds)
-      for (const achievement of ACHIEVEMENTS) {
-        if (!unlockedSet.has(achievement.id) && achievement.check(state.achievements)) {
-          unlockedSet.add(achievement.id)
-          showAchievementToast(achievement)
+        if (deltaReviewed > 0) {
+          state.achievements.totalReviewed += deltaReviewed
+          state.achievements.currentStreak += deltaReviewed
         }
-      }
-      state.achievements.unlockedIds = Array.from(unlockedSet)
-      persistAchievementState()
-      snapshotModelProgress(payload)
-    }
 
-    function showAchievementToast(achievement) {
-      const toast = document.createElement('div')
-      toast.className = 'toast'
-      toast.innerHTML = `
+        if (actionType === 'cw' || actionType === 'ccw') {
+          state.achievements.totalRotations += 1
+        }
+
+        const modelDone =
+          payload.summary?.total > 0 &&
+          payload.summary?.reviewed >= payload.summary?.total
+        if (
+          modelDone &&
+          !state.achievements.clearedModels.includes(state.model)
+        ) {
+          state.achievements.clearedModels.push(state.model)
+          state.achievements.modelsCleared =
+            state.achievements.clearedModels.length
+        }
+
+        const unlockedSet = new Set(state.achievements.unlockedIds)
+        for (const achievement of ACHIEVEMENTS) {
+          if (
+            !unlockedSet.has(achievement.id) &&
+            achievement.check(state.achievements)
+          ) {
+            unlockedSet.add(achievement.id)
+            showAchievementToast(achievement)
+          }
+        }
+        state.achievements.unlockedIds = Array.from(unlockedSet)
+        persistAchievementState()
+        snapshotModelProgress(payload)
+      }
+
+      function showAchievementToast(achievement) {
+        const toast = document.createElement('div')
+        toast.className = 'toast'
+        toast.innerHTML = `
         <strong>Achievement Unlocked: ${escapeHtml(achievement.title)}</strong>
         <span>${escapeHtml(achievement.description)}</span>
       `
-      els.toastStack.appendChild(toast)
-      window.setTimeout(() => {
-        toast.remove()
-      }, 4200)
-    }
-
-    async function performAction(type) {
-      if (state.saveBusy || !state.model || !state.recordId) return
-      state.saveBusy = true
-      els.saveStatus.textContent = type === 'advance' ? 'Saving progress...' : 'Rotating and saving...'
-
-      try {
-        const path = type === 'advance'
-          ? `/api/models/${encodeURIComponent(state.model)}/records/${encodeURIComponent(state.recordId)}/advance`
-          : `/api/models/${encodeURIComponent(state.model)}/records/${encodeURIComponent(state.recordId)}/rotate`
-
-        const body = type === 'advance'
-          ? { mode: 'all' }
-          : { mode: 'all', direction: type, advance: false }
-
-        const payload = await api(path, {
-          method: 'POST',
-          body: JSON.stringify(body),
-        })
-
-        state.payload = payload
-        state.model = payload.currentModel || state.model
-        state.recordId = payload.currentRecord?.id || ''
-        applyAchievements(type, payload)
-        els.saveStatus.textContent = type === 'advance' ? 'Accepted and saved.' : 'Rotation saved.'
-        updateUrl()
-        render()
-      } catch (error) {
-        els.saveStatus.textContent = error.message
-      } finally {
-        state.saveBusy = false
+        els.toastStack.appendChild(toast)
+        window.setTimeout(() => {
+          toast.remove()
+        }, 4200)
       }
-    }
 
-    async function goPrevious() {
-      const previousRecordId = state.payload?.previousRecordId
-      if (!previousRecordId) return
-      state.recordId = previousRecordId
-      await loadState()
-    }
+      async function performAction(type) {
+        if (state.saveBusy || !state.model || !state.recordId) return
+        state.saveBusy = true
+        els.saveStatus.textContent =
+          type === 'advance' ? 'Saving progress...' : 'Rotating and saving...'
 
-    function escapeHtml(value) {
-      return String(value || '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-    }
+        try {
+          const path =
+            type === 'advance'
+              ? `/api/models/${encodeURIComponent(state.model)}/records/${encodeURIComponent(state.recordId)}/advance`
+              : `/api/models/${encodeURIComponent(state.model)}/records/${encodeURIComponent(state.recordId)}/rotate`
 
-    els.search.addEventListener('input', () => {
-      state.search = els.search.value.trim()
-      renderModels()
-    })
+          const body =
+            type === 'advance'
+              ? { mode: 'all' }
+              : { mode: 'all', direction: type, advance: false }
 
-    els.acceptBtn.addEventListener('click', () => performAction('advance'))
-    els.rotateCwBtn.addEventListener('click', () => performAction('cw'))
-    els.rotateCcwBtn.addEventListener('click', () => performAction('ccw'))
-    els.prevBtn.addEventListener('click', () => goPrevious())
+          const payload = await api(path, {
+            method: 'POST',
+            body: JSON.stringify(body),
+          })
 
-    window.addEventListener('keydown', (event) => {
-      if (event.target && ['INPUT', 'TEXTAREA'].includes(event.target.tagName)) return
-      if (state.saveBusy) return
-
-      if (event.key === ' ' || event.key === 'ArrowRight') {
-        event.preventDefault()
-        performAction('advance')
-      } else if (event.key === 'r' || event.key === 'R') {
-        event.preventDefault()
-        performAction('cw')
-      } else if (event.key === 'l' || event.key === 'L') {
-        event.preventDefault()
-        performAction('ccw')
-      } else if (event.key === 'ArrowLeft') {
-        event.preventDefault()
-        goPrevious()
+          state.payload = payload
+          state.model = payload.currentModel || state.model
+          state.recordId = payload.currentRecord?.id || ''
+          applyAchievements(type, payload)
+          els.saveStatus.textContent =
+            type === 'advance' ? 'Accepted and saved.' : 'Rotation saved.'
+          updateUrl()
+          render()
+        } catch (error) {
+          els.saveStatus.textContent = error.message
+        } finally {
+          state.saveBusy = false
+        }
       }
-    })
 
-    const initialParams = new URLSearchParams(window.location.search)
-    state.model = initialParams.get('model') || ''
-    state.mode = 'all'
+      async function goPrevious() {
+        const previousRecordId = state.payload?.previousRecordId
+        if (!previousRecordId) return
+        state.recordId = previousRecordId
+        await loadState()
+      }
 
-    loadState().catch((error) => {
-      els.title.textContent = 'Could not load orientation review'
-      els.subtitle.textContent = error.message
-      els.saveStatus.textContent = 'Load failed'
-    })
-  </script>
-</body>
+      function escapeHtml(value) {
+        return String(value || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+      }
+
+      els.search.addEventListener('input', () => {
+        state.search = els.search.value.trim()
+        renderModels()
+      })
+
+      els.acceptBtn.addEventListener('click', () => performAction('advance'))
+      els.rotateCwBtn.addEventListener('click', () => performAction('cw'))
+      els.rotateCcwBtn.addEventListener('click', () => performAction('ccw'))
+      els.prevBtn.addEventListener('click', () => goPrevious())
+
+      window.addEventListener('keydown', (event) => {
+        if (
+          event.target &&
+          ['INPUT', 'TEXTAREA'].includes(event.target.tagName)
+        )
+          return
+        if (state.saveBusy) return
+
+        if (event.key === ' ' || event.key === 'ArrowRight') {
+          event.preventDefault()
+          performAction('advance')
+        } else if (event.key === 'r' || event.key === 'R') {
+          event.preventDefault()
+          performAction('cw')
+        } else if (event.key === 'l' || event.key === 'L') {
+          event.preventDefault()
+          performAction('ccw')
+        } else if (event.key === 'ArrowLeft') {
+          event.preventDefault()
+          goPrevious()
+        }
+      })
+
+      const initialParams = new URLSearchParams(window.location.search)
+      state.model = initialParams.get('model') || ''
+      state.mode = 'all'
+
+      loadState().catch((error) => {
+        els.title.textContent = 'Could not load orientation review'
+        els.subtitle.textContent = error.message
+        els.saveStatus.textContent = 'Load failed'
+      })
+    </script>
+  </body>
 </html>

@@ -16,9 +16,9 @@
  *   --delay=300 Milliseconds between API requests (default: 300)
  */
 
-const fs       = require('fs')
-const https    = require('https')
-const path     = require('path')
+const fs = require('fs')
+const https = require('https')
+const path = require('path')
 const readline = require('readline')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
@@ -29,33 +29,54 @@ const {
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
 
-const argv    = minimist(process.argv.slice(2))
-const FORCE   = !!argv.force
-const DELAY   = parseInt(argv.delay ?? 300, 10)
+const argv = minimist(process.argv.slice(2))
+const FORCE = !!argv.force
+const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
-const COOMER_HOST  = 'coomer.st'
-const SERVICES     = ['onlyfans', 'fansly', 'patreon', 'candfans', 'subscribestar', 'gumroad', 'afdian', 'boosty']
+const COOMER_HOST = 'coomer.st'
+const SERVICES = [
+  'onlyfans',
+  'fansly',
+  'patreon',
+  'candfans',
+  'subscribestar',
+  'gumroad',
+  'afdian',
+  'boosty',
+]
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/css',
-        'Referer': `https://${COOMER_HOST}/`,
+    const req = https.get(
+      url,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Accept: 'text/css',
+          Referer: `https://${COOMER_HOST}/`,
+        },
       },
-    }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return httpsGet(res.headers.location).then(resolve).catch(reject)
+      (res) => {
+        if (
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          return httpsGet(res.headers.location).then(resolve).catch(reject)
+        }
+        let body = ''
+        res.on('data', (c) => (body += c))
+        res.on('end', () => resolve({ status: res.statusCode, body }))
       }
-      let body = ''
-      res.on('data', (c) => (body += c))
-      res.on('end', () => resolve({ status: res.statusCode, body }))
-    })
+    )
     req.on('error', reject)
-    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
+    req.setTimeout(8000, () => {
+      req.destroy()
+      reject(new Error('timeout'))
+    })
   })
 }
 
@@ -65,7 +86,11 @@ async function lookupCreator(service, username) {
   const apiUrl = `https://${COOMER_HOST}/api/v1/${service}/user/${encodeURIComponent(username)}/profile`
   const { status, body } = await httpsGet(apiUrl)
   if (status === 200) {
-    try { return JSON.parse(body) } catch { return { id: username, service } }
+    try {
+      return JSON.parse(body)
+    } catch {
+      return { id: username, service }
+    }
   }
   if (status === 404) return null
   throw new Error(`HTTP ${status}`)
@@ -99,8 +124,12 @@ async function probeUsername(username) {
  * Try all sanitized aliases for a model. Returns all hits found.
  */
 async function autoProbeModel(canonicalName, entry) {
-  const aliases = Array.isArray(entry?.aliases) ? entry.aliases : [canonicalName]
-  const usernames = [...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean))]
+  const aliases = Array.isArray(entry?.aliases)
+    ? entry.aliases
+    : [canonicalName]
+  const usernames = [
+    ...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean)),
+  ]
   const allHits = []
   for (const username of usernames) {
     const hits = await probeUsername(username)
@@ -115,12 +144,18 @@ async function autoProbeModel(canonicalName, entry) {
 function parseCoomerUrl(input) {
   const str = String(input || '').trim()
   // https://coomer.st/{service}/user/{username}[/...]
-  const m = str.match(/^https?:\/\/(?:www\.)?coomer\.(?:st|party)\/([^/]+)\/user\/([^/?#\s]+)/i)
+  const m = str.match(
+    /^https?:\/\/(?:www\.)?coomer\.(?:st|party)\/([^/]+)\/user\/([^/?#\s]+)/i
+  )
   if (!m) return null
-  const service  = m[1].toLowerCase()
+  const service = m[1].toLowerCase()
   const username = m[2]
   if (!SERVICES.includes(service)) return null
-  return { service, username, url: `https://${COOMER_HOST}/${service}/user/${username}` }
+  return {
+    service,
+    username,
+    url: `https://${COOMER_HOST}/${service}/user/${username}`,
+  }
 }
 
 // ─── BROWSER ──────────────────────────────────────────────────────────────────
@@ -140,13 +175,17 @@ function getYandexPath() {
 function openInBrowser(url) {
   const browserPath = getYandexPath()
   execFile(browserPath, [url], (err) => {
-    if (err) console.log(`  ⚠️  Could not open browser: ${err.message}\n  URL: ${url}`)
+    if (err)
+      console.log(`  ⚠️  Could not open browser: ${err.message}\n  URL: ${url}`)
   })
 }
 
 // ─── PROMPT ───────────────────────────────────────────────────────────────────
 function createRl() {
-  return readline.createInterface({ input: process.stdin, output: process.stdout })
+  return readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
 }
 
 function ask(rl, q) {
@@ -179,7 +218,9 @@ async function run() {
   try {
     for (let i = 0; i < toProcess.length; i++) {
       const [canonicalName, entry] = toProcess[i]
-      const aliases = Array.isArray(entry?.aliases) ? entry.aliases : [canonicalName]
+      const aliases = Array.isArray(entry?.aliases)
+        ? entry.aliases
+        : [canonicalName]
 
       console.log('='.repeat(70))
       console.log(`[${i + 1}/${toProcess.length}] ${canonicalName}`)
@@ -193,11 +234,17 @@ async function run() {
       let saved = false
 
       for (const hit of autoHits) {
-        console.log(`\n  ✅ Found: ${hit.url}  (${hit.service}, id="${hit.name}")`)
+        console.log(
+          `\n  ✅ Found: ${hit.url}  (${hit.service}, id="${hit.name}")`
+        )
         openInBrowser(hit.url)
 
         while (true) {
-          const ans = (await ask(rl, '  Accept this hit? [y=yes / s=skip / q=quit]: ')).trim().toLowerCase()
+          const ans = (
+            await ask(rl, '  Accept this hit? [y=yes / s=skip / q=quit]: ')
+          )
+            .trim()
+            .toLowerCase()
           if (ans === 'y') {
             resolveAndTrackModel(registryPath, canonicalName, 'coomer', hit.url)
             console.log(`  💾 Saved.`)
@@ -250,7 +297,10 @@ async function run() {
         }
 
         if (lower === 'o') {
-          if (!currentUrl) { console.log('  No current URL to open.'); continue }
+          if (!currentUrl) {
+            console.log('  No current URL to open.')
+            continue
+          }
           openInBrowser(currentUrl)
           continue
         }
@@ -268,9 +318,21 @@ async function run() {
               process.stdout.write(` found (id="${displayName}")\n`)
               currentUrl = parsed.url
               openInBrowser(currentUrl)
-              const confirm = (await ask(rl, `  Save ${parsed.url} for ${canonicalName}? [y/n]: `)).trim().toLowerCase()
+              const confirm = (
+                await ask(
+                  rl,
+                  `  Save ${parsed.url} for ${canonicalName}? [y/n]: `
+                )
+              )
+                .trim()
+                .toLowerCase()
               if (confirm === 'y') {
-                resolveAndTrackModel(registryPath, canonicalName, 'coomer', parsed.url)
+                resolveAndTrackModel(
+                  registryPath,
+                  canonicalName,
+                  'coomer',
+                  parsed.url
+                )
                 console.log(`  💾 Saved.`)
                 saved = true
                 break
@@ -296,9 +358,18 @@ async function run() {
           currentUrl = hit.url
 
           while (true) {
-            const ans = (await ask(rl, '  Accept this hit? [y=yes / s=skip / q=quit]: ')).trim().toLowerCase()
+            const ans = (
+              await ask(rl, '  Accept this hit? [y=yes / s=skip / q=quit]: ')
+            )
+              .trim()
+              .toLowerCase()
             if (ans === 'y') {
-              resolveAndTrackModel(registryPath, canonicalName, 'coomer', hit.url)
+              resolveAndTrackModel(
+                registryPath,
+                canonicalName,
+                'coomer',
+                hit.url
+              )
               console.log(`  💾 Saved.`)
               saved = true
               break

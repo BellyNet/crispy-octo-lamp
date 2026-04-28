@@ -19,7 +19,13 @@ const slopvaultRoot = path.join(
 const datasetRoot = path.join(slopvaultRoot, 'dataset')
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
-const auditLogPath = path.join(__dirname, '..', 'audit', 'logs', 'audit-slopvault-latest.json')
+const auditLogPath = path.join(
+  __dirname,
+  '..',
+  'audit',
+  'logs',
+  'audit-slopvault-latest.json'
+)
 const mediaExts = new Set([
   '.jpg',
   '.jpeg',
@@ -33,7 +39,9 @@ const mediaExts = new Set([
 ])
 
 main().catch((err) => {
-  console.error(`Fatal quarantine manifest backfill error: ${err.stack || err.message}`)
+  console.error(
+    `Fatal quarantine manifest backfill error: ${err.stack || err.message}`
+  )
   process.exitCode = 1
 })
 
@@ -64,7 +72,9 @@ async function main() {
     const isDataset = filePath.startsWith(path.join(quarantineRoot, 'dataset'))
     const relativePath = normalizePath(
       path.relative(
-        isDataset ? path.join(quarantineRoot, 'dataset') : path.join(quarantineRoot, 'incomplete'),
+        isDataset
+          ? path.join(quarantineRoot, 'dataset')
+          : path.join(quarantineRoot, 'incomplete'),
         filePath
       )
     )
@@ -72,7 +82,12 @@ async function main() {
     const stat = fs.statSync(filePath)
     const auditFinding = lookupByQuarantinePath.get(filePath)
     const contentHash = await hashFile(filePath)
-    const hashLinkage = await buildHashLinkage(filePath, sourceType, relativePath, contentHash)
+    const hashLinkage = await buildHashLinkage(
+      filePath,
+      sourceType,
+      relativePath,
+      contentHash
+    )
     const entry = {
       id: `${sourceType}:${relativePath}`,
       sourceType,
@@ -82,7 +97,12 @@ async function main() {
       sourcePathAtAudit:
         sourceType === 'dataset'
           ? path.join(datasetRoot, relativePath.replace(/\//g, path.sep))
-          : path.join(__dirname, '..', 'incomplete', relativePath.replace(/\//g, path.sep)),
+          : path.join(
+              __dirname,
+              '..',
+              'incomplete',
+              relativePath.replace(/\//g, path.sep)
+            ),
       quarantinePath: filePath,
       reasons:
         Array.isArray(auditFinding?.reasons) && auditFinding.reasons.length
@@ -105,7 +125,8 @@ async function main() {
     }
 
     const index = manifest.items.findIndex(
-      (item) => item.id === entry.id || item.quarantinePath === entry.quarantinePath
+      (item) =>
+        item.id === entry.id || item.quarantinePath === entry.quarantinePath
     )
 
     if (index >= 0) {
@@ -200,14 +221,20 @@ function getRecordRefs(record) {
 }
 
 function summarizeRecordRefs(refs) {
-  const normalizedRefs = [...new Set(refs.map((ref) => normalizePath(ref)).filter(Boolean))]
+  const normalizedRefs = [
+    ...new Set(refs.map((ref) => normalizePath(ref)).filter(Boolean)),
+  ]
   let activeCount = 0
   let quarantineCount = 0
   let missingCount = 0
 
   for (const ref of normalizedRefs) {
     const activePath = path.join(datasetRoot, ref.replace(/\//g, path.sep))
-    const quarantinePath = path.join(quarantineRoot, 'dataset', ref.replace(/\//g, path.sep))
+    const quarantinePath = path.join(
+      quarantineRoot,
+      'dataset',
+      ref.replace(/\//g, path.sep)
+    )
     if (fs.existsSync(activePath)) activeCount += 1
     else if (fs.existsSync(quarantinePath)) quarantineCount += 1
     else missingCount += 1
@@ -222,18 +249,32 @@ function summarizeRecordRefs(refs) {
   }
 }
 
-async function buildHashLinkage(filePath, sourceType, relativePath, contentHash) {
+async function buildHashLinkage(
+  filePath,
+  sourceType,
+  relativePath,
+  contentHash
+) {
   const linkage = { bitwise: null, visual: null }
   const bitwiseRecord = getBitwiseHashRecord(contentHash)
   linkage.bitwise = {
     hash: contentHash,
     ...(bitwiseRecord
       ? summarizeRecordRefs(getRecordRefs(bitwiseRecord))
-      : { refCount: 0, activeCount: 0, quarantineCount: 0, missingCount: 0, refs: [] }),
+      : {
+          refCount: 0,
+          activeCount: 0,
+          quarantineCount: 0,
+          missingCount: 0,
+          refs: [],
+        }),
   }
 
   const ext = path.extname(filePath).toLowerCase()
-  if (sourceType === 'dataset' && ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) {
+  if (
+    sourceType === 'dataset' &&
+    ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)
+  ) {
     try {
       const buffer = fs.readFileSync(filePath)
       const visualHash = await getVisualHashFromBuffer(buffer)
@@ -243,7 +284,13 @@ async function buildHashLinkage(filePath, sourceType, relativePath, contentHash)
           hash: visualHash,
           ...(visualRecord
             ? summarizeRecordRefs(getRecordRefs(visualRecord))
-            : { refCount: 0, activeCount: 0, quarantineCount: 0, missingCount: 0, refs: [] }),
+            : {
+                refCount: 0,
+                activeCount: 0,
+                quarantineCount: 0,
+                missingCount: 0,
+                refs: [],
+              }),
         }
       }
     } catch (err) {

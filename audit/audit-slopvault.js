@@ -337,7 +337,9 @@ function loadQuarantineManifest() {
   }
 
   try {
-    const raw = fs.readFileSync(quarantineManifestPath, 'utf-8').replace(/^\uFEFF/, '')
+    const raw = fs
+      .readFileSync(quarantineManifestPath, 'utf-8')
+      .replace(/^\uFEFF/, '')
     const parsed = raw.trim() ? JSON.parse(raw) : {}
     return {
       version: parsed?.version || 1,
@@ -462,14 +464,18 @@ function getHashRecordRefs(record) {
   return Array.isArray(record?.refs)
     ? record.refs
         .map((ref) =>
-          typeof ref === 'string' ? normalizePath(ref) : normalizePath(ref?.relativePath)
+          typeof ref === 'string'
+            ? normalizePath(ref)
+            : normalizePath(ref?.relativePath)
         )
         .filter(Boolean)
     : []
 }
 
 function summarizeRecordRefs(refs) {
-  const normalizedRefs = [...new Set(refs.map((ref) => normalizePath(ref)).filter(Boolean))]
+  const normalizedRefs = [
+    ...new Set(refs.map((ref) => normalizePath(ref)).filter(Boolean)),
+  ]
   let activeCount = 0
   let quarantineCount = 0
   let missingCount = 0
@@ -525,7 +531,10 @@ async function attachHashLinkage(finding) {
     }
   }
 
-  if (finding.sourceType === 'dataset' && ['image', 'gif'].includes(finding.mediaType)) {
+  if (
+    finding.sourceType === 'dataset' &&
+    ['image', 'gif'].includes(finding.mediaType)
+  ) {
     try {
       const buffer = fs.readFileSync(finding.sourcePath)
       const visualHash = await getVisualHashFromBuffer(buffer)
@@ -598,7 +607,9 @@ function collectDecisionBackedFindings() {
         id: String(item.id),
         sourcePath,
         sourceType: String(item.sourceType || 'dataset'),
-        mediaType: String(item.mediaType || inferMediaTypeFromFilePath(sourcePath)),
+        mediaType: String(
+          item.mediaType || inferMediaTypeFromFilePath(sourcePath)
+        ),
         relativePath,
         quarantinePath,
         sizeBytes: stat.size,

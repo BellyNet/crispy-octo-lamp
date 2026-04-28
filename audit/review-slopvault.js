@@ -57,12 +57,16 @@ const slopvaultRoot = path.resolve(
   String(
     argv['slopvault-root'] ||
       path.join(
-        process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
+        process.env.APPDATA ||
+          path.join(process.env.HOME, 'AppData', 'Roaming'),
         '.slopvault'
       )
   )
 )
-const permanentSkipFile = path.join(slopvaultRoot, 'milkmaid-permanent-skips.json')
+const permanentSkipFile = path.join(
+  slopvaultRoot,
+  'milkmaid-permanent-skips.json'
+)
 
 main().catch((err) => {
   console.error(`Fatal review error: ${err.stack || err.message}`)
@@ -88,8 +92,14 @@ async function main() {
   }
 
   const shouldReuseManifest = Boolean(argv['reuse-manifest'])
-  const latestManifestPath = path.join(manifestDir, 'slopvault-manifest-latest.json')
-  const latestDashboardPath = path.join(dashboardDir, 'slopvault-dashboard.html')
+  const latestManifestPath = path.join(
+    manifestDir,
+    'slopvault-manifest-latest.json'
+  )
+  const latestDashboardPath = path.join(
+    dashboardDir,
+    'slopvault-dashboard.html'
+  )
 
   if (
     shouldReuseManifest &&
@@ -320,7 +330,9 @@ function applyPermanentSkipDecisions(decisions) {
       sourceUrl: normalizeSkipUrl(decision.mediaUrl),
       mediaPageUrl: normalizeSkipUrl(decision.mediaPageUrl),
       filename: String(decision.filename || '').trim(),
-      reason: String(decision.error || decision.reason || 'review_permanent_skip'),
+      reason: String(
+        decision.error || decision.reason || 'review_permanent_skip'
+      ),
       note: 'Marked permanent-skip from Slopvault review dashboard.',
       addedAt: new Date().toISOString(),
     }
@@ -328,8 +340,10 @@ function applyPermanentSkipDecisions(decisions) {
     if (
       entries.some(
         (existing) =>
-          (entry.relativePath && existing.relativePath === entry.relativePath) ||
-          (entry.sourceUrl && normalizeSkipUrl(existing.sourceUrl) === entry.sourceUrl) ||
+          (entry.relativePath &&
+            existing.relativePath === entry.relativePath) ||
+          (entry.sourceUrl &&
+            normalizeSkipUrl(existing.sourceUrl) === entry.sourceUrl) ||
           (entry.mediaPageUrl &&
             normalizeSkipUrl(existing.mediaPageUrl) === entry.mediaPageUrl)
       )
@@ -362,11 +376,15 @@ function loadPermanentSkipEntries() {
 }
 
 function normalizeSkipUrl(url) {
-  return String(url || '').trim().replace(/&acs=[^&]+/gi, '')
+  return String(url || '')
+    .trim()
+    .replace(/&acs=[^&]+/gi, '')
 }
 
 function normalizeRelativePath(value) {
-  return String(value || '').trim().replace(/\\/g, '/')
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
 }
 
 function readJsonBody(req) {

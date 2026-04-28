@@ -53,7 +53,12 @@ const scrapeStart = Date.now()
 // ─── PATHS ────────────────────────────────────────────────────────────────────
 const rootDir = path.join(__dirname, '..')
 const datasetDir = path.join(
-  process.env.APPDATA || path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming'),
+  process.env.APPDATA ||
+    path.join(
+      process.env.HOME || process.env.USERPROFILE,
+      'AppData',
+      'Roaming'
+    ),
   '.slopvault',
   'dataset'
 )
@@ -100,19 +105,41 @@ function startRunLog(modelName, inputUrl, logDir) {
   fs.mkdirSync(logDir, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const logPath = path.join(logDir, `hoghaul-run-${stamp}.jsonl`)
-  const modelSummaryPath = path.join(datasetDir, modelName, 'hoghaul-last-run.json')
+  const modelSummaryPath = path.join(
+    datasetDir,
+    modelName,
+    'hoghaul-last-run.json'
+  )
 
   currentRunLog = {
-    stamp, logPath, modelName, inputUrl,
+    stamp,
+    logPath,
+    modelName,
+    inputUrl,
     startedAt: new Date().toISOString(),
-    counters: { saved: 0, duplicates: 0, queuedVideos: 0, convertedGifs: 0, failures: 0 },
+    counters: {
+      saved: 0,
+      duplicates: 0,
+      queuedVideos: 0,
+      convertedGifs: 0,
+      failures: 0,
+    },
     errors: [],
   }
 
   try {
     fs.writeFileSync(
       modelSummaryPath,
-      JSON.stringify({ startedAt: currentRunLog.startedAt, modelName, inputUrl, status: 'running' }, null, 2) + '\n'
+      JSON.stringify(
+        {
+          startedAt: currentRunLog.startedAt,
+          modelName,
+          inputUrl,
+          status: 'running',
+        },
+        null,
+        2
+      ) + '\n'
     )
   } catch {}
 
@@ -131,7 +158,11 @@ function appendRunEvent(type, payload = {}) {
 
 function recordRunError(category, details = {}) {
   if (!currentRunLog) return
-  currentRunLog.errors.push({ at: new Date().toISOString(), category, ...details })
+  currentRunLog.errors.push({
+    at: new Date().toISOString(),
+    category,
+    ...details,
+  })
 }
 
 function finalizeRunLog(extra = {}) {
@@ -146,17 +177,36 @@ function finalizeRunLog(extra = {}) {
     errors: currentRunLog.errors,
     ...extra,
   }
-  const summaryPath = path.join(path.dirname(currentRunLog.logPath), 'hoghaul-run-latest-summary.json')
-  const modelSummaryPath = path.join(datasetDir, currentRunLog.modelName, 'hoghaul-last-run.json')
-  try { fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2) + '\n') } catch {}
-  try { fs.writeFileSync(modelSummaryPath, JSON.stringify(summary, null, 2) + '\n') } catch {}
+  const summaryPath = path.join(
+    path.dirname(currentRunLog.logPath),
+    'hoghaul-run-latest-summary.json'
+  )
+  const modelSummaryPath = path.join(
+    datasetDir,
+    currentRunLog.modelName,
+    'hoghaul-last-run.json'
+  )
+  try {
+    fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2) + '\n')
+  } catch {}
+  try {
+    fs.writeFileSync(modelSummaryPath, JSON.stringify(summary, null, 2) + '\n')
+  } catch {}
   appendRunEvent('run_finished', summary)
   currentRunLog = null
 }
 
 // ─── HASH METADATA ────────────────────────────────────────────────────────────
-function buildHashMetadata(modelName, absolutePath, mediaType, sizeBytes, uploadedDate) {
-  const relativePath = path.relative(datasetDir, absolutePath).replace(/\\/g, '/')
+function buildHashMetadata(
+  modelName,
+  absolutePath,
+  mediaType,
+  sizeBytes,
+  uploadedDate
+) {
+  const relativePath = path
+    .relative(datasetDir, absolutePath)
+    .replace(/\\/g, '/')
   const parts = relativePath.split('/').filter(Boolean)
   return {
     root: 'dataset',
@@ -179,7 +229,9 @@ async function findFfTools() {
   const found = await mediaDates.findFfprobe()
   if (found) {
     ffprobePath = found
-    const guess = found.replace(/ffprobe(\.exe)?$/i, (m) => m.replace('ffprobe', 'ffmpeg'))
+    const guess = found.replace(/ffprobe(\.exe)?$/i, (m) =>
+      m.replace('ffprobe', 'ffmpeg')
+    )
     try {
       await execFileAsync(guess, ['-version'], { timeout: 3000 })
       ffmpegPath = guess
@@ -194,36 +246,64 @@ async function findFfTools() {
       } catch {}
     }
   }
-  console.log(ffprobePath ? `  ffprobe: ${ffprobePath}` : '  ffprobe: not found')
-  console.log(ffmpegPath  ? `  ffmpeg:  ${ffmpegPath}`  : '  ffmpeg:  not found')
+  console.log(
+    ffprobePath ? `  ffprobe: ${ffprobePath}` : '  ffprobe: not found'
+  )
+  console.log(ffmpegPath ? `  ffmpeg:  ${ffmpegPath}` : '  ffmpeg:  not found')
 }
 
 function convertGifToMp4(inputPath, outputPath) {
   if (!ffmpegPath) return Promise.reject(new Error('ffmpeg not found'))
-  return execFileAsync(ffmpegPath, [
-    '-y', '-i', inputPath,
-    '-movflags', 'faststart',
-    '-pix_fmt', 'yuv420p',
-    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-    outputPath,
-  ], { timeout: 120000 })
+  return execFileAsync(
+    ffmpegPath,
+    [
+      '-y',
+      '-i',
+      inputPath,
+      '-movflags',
+      'faststart',
+      '-pix_fmt',
+      'yuv420p',
+      '-vf',
+      'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+      outputPath,
+    ],
+    { timeout: 120000 }
+  )
 }
 
 function convertShortMp4ToGif(inputPath, outputPath) {
   if (!ffmpegPath) return Promise.reject(new Error('ffmpeg not found'))
-  return execFileAsync(ffmpegPath, [
-    '-y', '-i', inputPath,
-    '-vf', 'fps=15,scale=480:-1:flags=lanczos',
-    outputPath,
-  ], { timeout: 60000 })
+  return execFileAsync(
+    ffmpegPath,
+    [
+      '-y',
+      '-i',
+      inputPath,
+      '-vf',
+      'fps=15,scale=480:-1:flags=lanczos',
+      outputPath,
+    ],
+    { timeout: 60000 }
+  )
 }
 
 async function getVideoDuration(filePath) {
   if (!ffprobePath) return 9999
   try {
-    const { stdout } = await execFileAsync(ffprobePath, [
-      '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath,
-    ], { timeout: 10000 })
+    const { stdout } = await execFileAsync(
+      ffprobePath,
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'csv=p=0',
+        filePath,
+      ],
+      { timeout: 10000 }
+    )
     const d = parseFloat(stdout.trim())
     return isNaN(d) ? 9999 : d
   } catch {
@@ -233,43 +313,86 @@ async function getVideoDuration(filePath) {
 
 async function getGifFrameCount(buffer) {
   const probe = ffprobePath || 'ffprobe'
-  const tmp = path.join(tmpDir, `__framecheck_${Date.now()}_${Math.random().toString(36).slice(2)}.gif`)
+  const tmp = path.join(
+    tmpDir,
+    `__framecheck_${Date.now()}_${Math.random().toString(36).slice(2)}.gif`
+  )
   fs.writeFileSync(tmp, buffer)
   try {
-    const { stdout } = await execFileAsync(probe, [
-      '-v', 'error', '-count_frames', '-select_streams', 'v:0',
-      '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', tmp,
-    ], { timeout: 15000 })
+    const { stdout } = await execFileAsync(
+      probe,
+      [
+        '-v',
+        'error',
+        '-count_frames',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=nb_read_frames',
+        '-of',
+        'csv=p=0',
+        tmp,
+      ],
+      { timeout: 15000 }
+    )
     const n = parseInt(stdout.trim(), 10)
     return isNaN(n) ? 1 : n
   } catch {
     return 1
   } finally {
-    try { fs.unlinkSync(tmp) } catch {}
+    try {
+      fs.unlinkSync(tmp)
+    } catch {}
   }
 }
 
 async function getVideoIntegrityReport(filePath) {
-  if (!ffprobePath || !ffmpegPath) return { ok: false, reason: 'fftools_missing' }
+  if (!ffprobePath || !ffmpegPath)
+    return { ok: false, reason: 'fftools_missing' }
   try {
-    const { stdout } = await execFileAsync(ffprobePath, [
-      '-v', 'error', '-show_entries', 'format=duration,size',
-      '-show_streams', '-of', 'json', filePath,
-    ], { timeout: 15000 })
+    const { stdout } = await execFileAsync(
+      ffprobePath,
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration,size',
+        '-show_streams',
+        '-of',
+        'json',
+        filePath,
+      ],
+      { timeout: 15000 }
+    )
     const parsed = JSON.parse(stdout)
     const duration = parseFloat(parsed?.format?.duration)
     const size = parseInt(parsed?.format?.size, 10)
-    const streamCount = Array.isArray(parsed?.streams) ? parsed.streams.length : 0
+    const streamCount = Array.isArray(parsed?.streams)
+      ? parsed.streams.length
+      : 0
 
     if (!Number.isFinite(duration) || duration <= 0 || streamCount === 0) {
       return { ok: false, duration, size, streamCount, reason: 'invalid_probe' }
     }
 
     // Tail-decode the last 3 seconds — catches truncated downloads
-    await execFileAsync(ffmpegPath, [
-      '-v', 'error', '-sseof', '-3', '-i', filePath,
-      '-frames:v', '1', '-f', 'null', '-',
-    ], { timeout: 20000 })
+    await execFileAsync(
+      ffmpegPath,
+      [
+        '-v',
+        'error',
+        '-sseof',
+        '-3',
+        '-i',
+        filePath,
+        '-frames:v',
+        '1',
+        '-f',
+        'null',
+        '-',
+      ],
+      { timeout: 20000 }
+    )
 
     return { ok: true, duration, size, streamCount }
   } catch (err) {
@@ -290,8 +413,8 @@ function createModelFolders(modelName) {
   return {
     base,
     images: path.join(base, 'images'),
-    webm:   path.join(base, 'webm'),
-    gif:    path.join(base, 'gif'),
+    webm: path.join(base, 'webm'),
+    gif: path.join(base, 'gif'),
     logDir: path.join(base, 'logs'),
   }
 }
@@ -313,13 +436,20 @@ function downloadBufferWithProgress(url, onProgress, timeoutMs = 15000) {
         chunks.push(chunk)
         if (onProgress && totalBytes > 0) {
           const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
-          const speed = (downloadedBytes / 1024 / ((Date.now() - start) / 1000)).toFixed(1)
+          const speed = (
+            downloadedBytes /
+            1024 /
+            ((Date.now() - start) / 1000)
+          ).toFixed(1)
           onProgress(percent, speed, chunk)
         }
       })
       res.on('end', () => resolve(Buffer.concat(chunks)))
     })
-    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Download timed out')) })
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      reject(new Error('Download timed out'))
+    })
     req.on('error', reject)
   })
 }
@@ -339,7 +469,9 @@ fs.readdirSync(datasetDir).forEach((model) => {
   if (!fs.lstatSync(modelPath).isDirectory()) return
   for (const sub of ['images', 'webm', 'gif']) {
     const subPath = path.join(modelPath, sub)
-    try { fs.readdirSync(subPath).forEach((f) => knownFilenames.add(f)) } catch {}
+    try {
+      fs.readdirSync(subPath).forEach((f) => knownFilenames.add(f))
+    } catch {}
   }
 })
 
@@ -357,18 +489,27 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   try {
     await findFfTools()
 
-    const page = await createScraperPage(browser, { site: 'coomer', interceptMedia: true })
+    const page = await createScraperPage(browser, {
+      site: 'coomer',
+      interceptMedia: true,
+    })
 
     const urlParts = new URL(userUrl).pathname.split('/')
     const username = urlParts[urlParts.indexOf('user') + 1]
-    if (!username) throw new Error('Failed to extract username from Coomer URL.')
+    if (!username)
+      throw new Error('Failed to extract username from Coomer URL.')
 
     const rawName = sanitize(username)
 
     // ── Unified model registry (shared with milkmaid) ─────────────────────────
     // resolveAndTrackModel finds/creates the canonical name, records the alias,
     // and upserts the Coomer URL under sources.coomer — all in model_aliases.json
-    const modelName = resolveAndTrackModel(aliasMapPath, rawName, 'coomer', userUrl)
+    const modelName = resolveAndTrackModel(
+      aliasMapPath,
+      rawName,
+      'coomer',
+      userUrl
+    )
 
     const folders = createModelFolders(modelName)
     startRunLog(modelName, userUrl, folders.logDir)
@@ -401,13 +542,17 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
         break
       }
 
-      const links = await page.$$eval('article.post-card a.fancy-link', (els) => els.map((el) => el.href))
+      const links = await page.$$eval('article.post-card a.fancy-link', (els) =>
+        els.map((el) => el.href)
+      )
       if (!links.length) break
 
       if (pageNum === startPage) process.stdout.write('\n')
       logProgress(completedTotal, totalExpectedPosts)
 
-      const pageLabel = totalPages ? `${pageNum - startPage + 1}/${totalPages}` : `${pageNum - startPage + 1}`
+      const pageLabel = totalPages
+        ? `${pageNum - startPage + 1}/${totalPages}`
+        : `${pageNum - startPage + 1}`
       logAndProgress(`📦 Page ${pageLabel}`)
 
       await Promise.all(
@@ -415,10 +560,18 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
           limit(() => {
             taskCompleted = false
             return processPost(
-              link, browser, folders, modelName,
-              knownFilenames, gifsToConvert, lazyVideoQueue,
+              link,
+              browser,
+              folders,
+              modelName,
+              knownFilenames,
+              gifsToConvert,
+              lazyVideoQueue,
               (updatedDate) => {
-                if (!newestDateSeen || (updatedDate && updatedDate > newestDateSeen)) {
+                if (
+                  !newestDateSeen ||
+                  (updatedDate && updatedDate > newestDateSeen)
+                ) {
                   newestDateSeen = updatedDate
                 }
               }
@@ -432,15 +585,29 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
     // ── GIF conversion ────────────────────────────────────────────────────────
     // Pick up any gifs left in the incomplete dir from interrupted runs
-    for (const f of fs.readdirSync(incompleteGifDir).filter((f) => f.endsWith('.gif'))) {
+    for (const f of fs
+      .readdirSync(incompleteGifDir)
+      .filter((f) => f.endsWith('.gif'))) {
       const tmpPath = path.join(incompleteGifDir, f)
       const mp4Path = path.join(folders.webm, f.replace(/\.gif$/, '.mp4'))
       if (!gifsToConvert.find((g) => g.tmpPath === tmpPath)) {
-        gifsToConvert.push({ tmpPath, mp4Path, filename: f, uploadedDate: null, visualHash: null })
+        gifsToConvert.push({
+          tmpPath,
+          mp4Path,
+          filename: f,
+          uploadedDate: null,
+          visualHash: null,
+        })
       }
     }
 
-    for (const { tmpPath, mp4Path, filename, uploadedDate, visualHash: gifVisualHash } of gifsToConvert) {
+    for (const {
+      tmpPath,
+      mp4Path,
+      filename,
+      uploadedDate,
+      visualHash: gifVisualHash,
+    } of gifsToConvert) {
       try {
         if (fs.existsSync(mp4Path)) {
           if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
@@ -457,31 +624,67 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
         const mp4Name = path.basename(mp4Path)
         await mediaDates.recordVideoDates(
-          path.join(datasetDir, modelName), 'webm', mp4Name, mp4Path, uploadedDate
+          path.join(datasetDir, modelName),
+          'webm',
+          mp4Name,
+          mp4Path,
+          uploadedDate
         )
 
         const mp4Stat = fs.statSync(mp4Path)
-        const mp4Hash = createHash('md5').update(fs.readFileSync(mp4Path)).digest('hex')
+        const mp4Hash = createHash('md5')
+          .update(fs.readFileSync(mp4Path))
+          .digest('hex')
         if (!isBitwiseDupe(mp4Hash)) {
-          addBitwiseHash(mp4Hash, buildHashMetadata(modelName, mp4Path, 'video', mp4Stat.size, uploadedDate))
+          addBitwiseHash(
+            mp4Hash,
+            buildHashMetadata(
+              modelName,
+              mp4Path,
+              'video',
+              mp4Stat.size,
+              uploadedDate
+            )
+          )
           saveBitwiseHashCache()
         }
 
         if (gifVisualHash && !isVisualDupe(gifVisualHash)) {
-          addVisualHash(gifVisualHash, buildHashMetadata(modelName, mp4Path, 'video', mp4Stat.size, uploadedDate))
+          addVisualHash(
+            gifVisualHash,
+            buildHashMetadata(
+              modelName,
+              mp4Path,
+              'video',
+              mp4Stat.size,
+              uploadedDate
+            )
+          )
           saveVisualHashCache()
         }
 
         knownFilenames.add(mp4Name)
         currentRunLog && currentRunLog.counters.convertedGifs++
-        appendRunEvent('converted_gif_to_mp4', { modelName, filename, mp4: path.relative(datasetDir, mp4Path).replace(/\\/g, '/') })
+        appendRunEvent('converted_gif_to_mp4', {
+          modelName,
+          filename,
+          mp4: path.relative(datasetDir, mp4Path).replace(/\\/g, '/'),
+        })
 
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
         logAndProgress(`🎞️ Converted: ${filename}`)
       } catch (err) {
         currentRunLog && currentRunLog.counters.failures++
-        recordRunError('gif_conversion_error', { modelName, filename, error: err.message })
-        appendRunEvent('gif_conversion_error', { modelName, filename, error: err.message })
+        recordRunError('gif_conversion_error', {
+          modelName,
+          filename,
+          error: err.message,
+        })
+        appendRunEvent('gif_conversion_error', {
+          modelName,
+          filename,
+          error: err.message,
+        })
         logAndProgress(`❌ Conversion failed for ${filename}: ${err.message}`)
       }
     }
@@ -490,7 +693,13 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     await Promise.all(
       lazyVideoQueue.map((entry, i) =>
         lazyLimit(async () => {
-          const { url, path: finalPath, filename, uploadedDate, isImage = false } = entry
+          const {
+            url,
+            path: finalPath,
+            filename,
+            uploadedDate,
+            isImage = false,
+          } = entry
 
           if (knownFilenames.has(filename) || fs.existsSync(finalPath)) {
             currentRunLog && currentRunLog.counters.duplicates++
@@ -502,11 +711,17 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
           let hash = null
           try {
-            const buffer = await downloadBufferWithProgress(url, (percent, speed, chunk) => {
-              lazyBytesDownloaded += chunk.length
-              const now = Date.now()
-              if (now - lastLazyDraw > 250) { logLazyProgress(lazyVideoQueue.length); lastLazyDraw = now }
-            })
+            const buffer = await downloadBufferWithProgress(
+              url,
+              (percent, speed, chunk) => {
+                lazyBytesDownloaded += chunk.length
+                const now = Date.now()
+                if (now - lastLazyDraw > 250) {
+                  logLazyProgress(lazyVideoQueue.length)
+                  lastLazyDraw = now
+                }
+              }
+            )
 
             hash = createHash('md5').update(buffer).digest('hex')
             if (isBitwiseDupe(hash)) {
@@ -521,14 +736,35 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
                 fs.utimesSync(finalPath, ts, ts)
               }
               await mediaDates.recordImageDates(
-                path.join(datasetDir, modelName), 'images', filename, uploadedDate
+                path.join(datasetDir, modelName),
+                'images',
+                filename,
+                uploadedDate
               )
               const stat = fs.statSync(finalPath)
-              addBitwiseHash(hash, buildHashMetadata(modelName, finalPath, 'image', stat.size, uploadedDate))
+              addBitwiseHash(
+                hash,
+                buildHashMetadata(
+                  modelName,
+                  finalPath,
+                  'image',
+                  stat.size,
+                  uploadedDate
+                )
+              )
               saveBitwiseHashCache()
               const visualHash = await getVisualHashFromBuffer(buffer)
               if (visualHash && !isVisualDupe(visualHash)) {
-                addVisualHash(visualHash, buildHashMetadata(modelName, finalPath, 'image', stat.size, uploadedDate))
+                addVisualHash(
+                  visualHash,
+                  buildHashMetadata(
+                    modelName,
+                    finalPath,
+                    'image',
+                    stat.size,
+                    uploadedDate
+                  )
+                )
                 saveVisualHashCache()
               }
               knownFilenames.add(filename)
@@ -546,7 +782,9 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
             const integrity = await getVideoIntegrityReport(tmpVideoPath)
             if (!integrity.ok) {
-              try { fs.unlinkSync(tmpVideoPath) } catch {}
+              try {
+                fs.unlinkSync(tmpVideoPath)
+              } catch {}
               throw new Error(`Integrity check failed: ${integrity.reason}`)
             }
 
@@ -558,11 +796,24 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
             fs.renameSync(tmpVideoPath, finalPath)
 
             await mediaDates.recordVideoDates(
-              path.join(datasetDir, modelName), 'webm', filename, finalPath, uploadedDate
+              path.join(datasetDir, modelName),
+              'webm',
+              filename,
+              finalPath,
+              uploadedDate
             )
 
             const finalStat = fs.statSync(finalPath)
-            addBitwiseHash(hash, buildHashMetadata(modelName, finalPath, 'video', finalStat.size, uploadedDate))
+            addBitwiseHash(
+              hash,
+              buildHashMetadata(
+                modelName,
+                finalPath,
+                'video',
+                finalStat.size,
+                uploadedDate
+              )
+            )
             saveBitwiseHashCache()
 
             // Short video → also produce a GIF preview
@@ -577,13 +828,18 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
                     fs.utimesSync(gifPath, ts, ts)
                   }
                   await mediaDates.recordImageDates(
-                    path.join(datasetDir, modelName), 'gif', gifName, uploadedDate
+                    path.join(datasetDir, modelName),
+                    'gif',
+                    gifName,
+                    uploadedDate
                   )
                   logAndProgress(`🎁 Converted to gif: ${gifName}`)
                 }
               }
             } catch (err) {
-              console.warn(`⚠️ Couldn't convert ${filename} to gif: ${err.message}`)
+              console.warn(
+                `⚠️ Couldn't convert ${filename} to gif: ${err.message}`
+              )
             }
 
             knownFilenames.add(filename)
@@ -594,12 +850,23 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
             logAndProgress(`✅ Saved lazy video: ${filename}`)
           } catch (err) {
             currentRunLog && currentRunLog.counters.failures++
-            recordRunError('lazy_video_error', { modelName, filename, error: err.message })
-            appendRunEvent('lazy_video_error', { modelName, filename, error: err.message })
+            recordRunError('lazy_video_error', {
+              modelName,
+              filename,
+              error: err.message,
+            })
+            appendRunEvent('lazy_video_error', {
+              modelName,
+              filename,
+              error: err.message,
+            })
             logAndProgress(`❌ Lazy failed: ${filename} — ${err.message}`)
             knownFilenames.delete(filename)
             const tmpVideoPath = path.join(incompleteVideoDir, filename)
-            if (fs.existsSync(tmpVideoPath)) try { fs.unlinkSync(tmpVideoPath) } catch {}
+            if (fs.existsSync(tmpVideoPath))
+              try {
+                fs.unlinkSync(tmpVideoPath)
+              } catch {}
           }
         })
       )
@@ -608,14 +875,17 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
     saveBitwiseHashCache()
     saveVisualHashCache()
 
-    const { counters } = currentRunLog || { counters: { saved: 0, duplicates: 0, failures: 0 } }
+    const { counters } = currentRunLog || {
+      counters: { saved: 0, duplicates: 0, failures: 0 },
+    }
     const durationMs = Date.now() - scrapeStart
     const mins = Math.floor(durationMs / 60000)
     const secs = Math.floor((durationMs % 60000) / 1000)
     console.log(`\n⏱️  Total scrape time: ${mins}m ${secs}s`)
-    console.log(`🎉 Done: ${counters.saved} saved, ${counters.duplicates} dupes, ${counters.failures} errors`)
+    console.log(
+      `🎉 Done: ${counters.saved} saved, ${counters.duplicates} dupes, ${counters.failures} errors`
+    )
     console.log('\n' + getCompletionLine())
-
   } catch (err) {
     recordRunError('run_error', { error: err.message })
     appendRunEvent('run_error', { error: err.message })
@@ -639,8 +909,13 @@ async function safeDownload(url) {
 }
 
 async function processPost(
-  link, browser, folders, modelName,
-  knownFilenames, gifsToConvert, lazyVideoQueue,
+  link,
+  browser,
+  folders,
+  modelName,
+  knownFilenames,
+  gifsToConvert,
+  lazyVideoQueue,
   updateNewestDate
 ) {
   const page = await createScraperPage(browser, { site: 'coomer' })
@@ -651,7 +926,9 @@ async function processPost(
     let uploadedDate = null
     try {
       await page.waitForSelector('time.timestamp', { timeout: 10000 })
-      const timeText = await page.$eval('time.timestamp', (el) => el.getAttribute('datetime'))
+      const timeText = await page.$eval('time.timestamp', (el) =>
+        el.getAttribute('datetime')
+      )
       uploadedDate = timeText ? new Date(timeText) : null
     } catch {
       logAndProgress(`⏳ No timestamp for: ${link}`)
@@ -661,9 +938,15 @@ async function processPost(
     const mediaUrls = await page.evaluate(() => {
       const urls = []
       document
-        .querySelectorAll('a.fileThumb.image-link, video source[src], a.post__attachment-link[href]')
+        .querySelectorAll(
+          'a.fileThumb.image-link, video source[src], a.post__attachment-link[href]'
+        )
         .forEach((el) => {
-          const u = el.href || el.src || el.getAttribute('src') || el.getAttribute('href')
+          const u =
+            el.href ||
+            el.src ||
+            el.getAttribute('src') ||
+            el.getAttribute('href')
           if (u && u.startsWith('http')) urls.push(u)
         })
       return urls
@@ -680,7 +963,9 @@ async function processPost(
 
       let filename
       try {
-        filename = decodeURIComponent(path.basename(new URL(url).pathname).split('?')[0])
+        filename = decodeURIComponent(
+          path.basename(new URL(url).pathname).split('?')[0]
+        )
         if (/avatar|profile/i.test(filename)) continue
       } catch {
         continue
@@ -698,7 +983,12 @@ async function processPost(
       // Queue videos for lazy download
       if (['.mp4', '.webm', '.m4v'].includes(ext)) {
         logAndProgress(`🐌 Queued lazy video: ${filename}`)
-        lazyVideoQueue.push({ url, path: path.join(folders.webm, filename), filename, uploadedDate })
+        lazyVideoQueue.push({
+          url,
+          path: path.join(folders.webm, filename),
+          filename,
+          uploadedDate,
+        })
         currentRunLog && currentRunLog.counters.queuedVideos++
         appendRunEvent('queued_lazy_video', { modelName, filename })
         continue
@@ -716,7 +1006,11 @@ async function processPost(
             const src = img?.src || img?.getAttribute('src') || ''
             return src.includes(filenameGuess.slice(0, 10))
           })
-          return match?.src?.startsWith('http') ? match.src : match?.src ? `https:${match.src}` : null
+          return match?.src?.startsWith('http')
+            ? match.src
+            : match?.src
+              ? `https:${match.src}`
+              : null
         }, filename)
 
         if (fallbackUrl) {
@@ -726,7 +1020,10 @@ async function processPost(
             fs.writeFileSync(fallbackPath, fallbackBuffer)
             if (timestamp) fs.utimesSync(fallbackPath, timestamp, timestamp)
             await mediaDates.recordImageDates(
-              path.join(datasetDir, modelName), 'images', filename, uploadedDate
+              path.join(datasetDir, modelName),
+              'images',
+              filename,
+              uploadedDate
             )
             knownFilenames.add(filename)
             currentRunLog && currentRunLog.counters.saved++
@@ -734,13 +1031,23 @@ async function processPost(
             logAndProgress(`🧷 Saved fallback image: ${filename}`)
           } catch (e) {
             currentRunLog && currentRunLog.counters.failures++
-            appendRunEvent('media_error', { modelName, filename, url, error: e.message })
+            appendRunEvent('media_error', {
+              modelName,
+              filename,
+              url,
+              error: e.message,
+            })
             fs.appendFileSync(skippedImagesLog, `${url}\n`)
             logAndProgress(`❌ Fallback image failed: ${e.message}`)
           }
         } else {
           currentRunLog && currentRunLog.counters.failures++
-          appendRunEvent('media_error', { modelName, filename, url, error: err.message })
+          appendRunEvent('media_error', {
+            modelName,
+            filename,
+            url,
+            error: err.message,
+          })
           fs.appendFileSync(skippedImagesLog, `${url}\n`)
           logAndProgress(`❌ No fallback found in DOM for ${filename}`)
         }
@@ -750,7 +1057,13 @@ async function processPost(
       // Defer large images to the lazy queue
       if (buffer.length > 5 * 1024 * 1024) {
         logAndProgress(`🍖 Deferring large image to lazy queue: ${filename}`)
-        lazyVideoQueue.push({ url, path: path.join(folders.images, filename), filename, uploadedDate, isImage: true })
+        lazyVideoQueue.push({
+          url,
+          path: path.join(folders.images, filename),
+          filename,
+          uploadedDate,
+          isImage: true,
+        })
         appendRunEvent('queued_large_image', { modelName, filename })
         continue
       }
@@ -768,14 +1081,21 @@ async function processPost(
           const visualHash = await getVisualHashFromBuffer(buffer)
 
           await mediaDates.recordImageDates(
-            path.join(datasetDir, modelName), 'gif', filename, uploadedDate
+            path.join(datasetDir, modelName),
+            'gif',
+            filename,
+            uploadedDate
           )
           gifsToConvert.push({
             tmpPath: gifPath,
-            mp4Path: path.join(folders.webm, filename.replace(/\.gif$/, '.mp4')),
+            mp4Path: path.join(
+              folders.webm,
+              filename.replace(/\.gif$/, '.mp4')
+            ),
             filename,
             uploadedDate,
-            visualHash: (visualHash && !isVisualDupe(visualHash)) ? visualHash : null,
+            visualHash:
+              visualHash && !isVisualDupe(visualHash) ? visualHash : null,
           })
           appendRunEvent('queued_gif_conversion', { modelName, filename })
         } else {
@@ -787,16 +1107,37 @@ async function processPost(
           const hash = createHash('md5').update(buffer).digest('hex')
           const stat = fs.statSync(stillPath)
           if (!isBitwiseDupe(hash)) {
-            addBitwiseHash(hash, buildHashMetadata(modelName, stillPath, 'image', stat.size, uploadedDate))
+            addBitwiseHash(
+              hash,
+              buildHashMetadata(
+                modelName,
+                stillPath,
+                'image',
+                stat.size,
+                uploadedDate
+              )
+            )
             saveBitwiseHashCache()
           }
           const visualHash = await getVisualHashFromBuffer(buffer)
           if (visualHash && !isVisualDupe(visualHash)) {
-            addVisualHash(visualHash, buildHashMetadata(modelName, stillPath, 'image', stat.size, uploadedDate))
+            addVisualHash(
+              visualHash,
+              buildHashMetadata(
+                modelName,
+                stillPath,
+                'image',
+                stat.size,
+                uploadedDate
+              )
+            )
             saveVisualHashCache()
           }
           await mediaDates.recordImageDates(
-            path.join(datasetDir, modelName), 'images', filename, uploadedDate
+            path.join(datasetDir, modelName),
+            'images',
+            filename,
+            uploadedDate
           )
           knownFilenames.add(filename)
           currentRunLog && currentRunLog.counters.saved++
@@ -825,14 +1166,29 @@ async function processPost(
       if (timestamp) fs.utimesSync(outPath, timestamp, timestamp)
 
       await mediaDates.recordImageDates(
-        path.join(datasetDir, modelName), 'images', filename, uploadedDate
+        path.join(datasetDir, modelName),
+        'images',
+        filename,
+        uploadedDate
       )
 
       const stat = fs.statSync(outPath)
-      addBitwiseHash(hash, buildHashMetadata(modelName, outPath, 'image', stat.size, uploadedDate))
+      addBitwiseHash(
+        hash,
+        buildHashMetadata(modelName, outPath, 'image', stat.size, uploadedDate)
+      )
       saveBitwiseHashCache()
       if (visualHash) {
-        addVisualHash(visualHash, buildHashMetadata(modelName, outPath, 'image', stat.size, uploadedDate))
+        addVisualHash(
+          visualHash,
+          buildHashMetadata(
+            modelName,
+            outPath,
+            'image',
+            stat.size,
+            uploadedDate
+          )
+        )
         saveVisualHashCache()
       }
 
@@ -858,7 +1214,8 @@ const target = argv.find((arg) => arg.includes('coomer.'))
 let startPage = 0
 let endPage = null
 
-let pageArgRaw = process.env.npm_config_pages || argv.find((a) => a.startsWith('--pages='))
+let pageArgRaw =
+  process.env.npm_config_pages || argv.find((a) => a.startsWith('--pages='))
 if (pageArgRaw) {
   pageArgRaw = pageArgRaw.replace('--pages=', '')
   if (pageArgRaw.includes('-')) {

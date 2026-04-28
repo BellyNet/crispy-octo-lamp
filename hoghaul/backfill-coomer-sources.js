@@ -17,7 +17,7 @@
  */
 
 const https = require('https')
-const path  = require('path')
+const path = require('path')
 const minimist = require('minimist')
 
 const {
@@ -26,36 +26,57 @@ const {
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
 
-const argv    = minimist(process.argv.slice(2))
+const argv = minimist(process.argv.slice(2))
 const DRY_RUN = !!argv['dry-run']
-const FORCE   = !!argv.force
-const DELAY   = parseInt(argv.delay ?? 300, 10)
+const FORCE = !!argv.force
+const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
-const COOMER_HOST  = 'coomer.st'
+const COOMER_HOST = 'coomer.st'
 
 // All services Coomer aggregates from
-const SERVICES = ['onlyfans', 'fansly', 'patreon', 'candfans', 'subscribestar', 'gumroad', 'afdian', 'boosty']
+const SERVICES = [
+  'onlyfans',
+  'fansly',
+  'patreon',
+  'candfans',
+  'subscribestar',
+  'gumroad',
+  'afdian',
+  'boosty',
+]
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/css',   // required by Coomer to bypass DDG caching (see their 403 body)
-        'Referer': `https://${COOMER_HOST}/`,
+    const req = https.get(
+      url,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Accept: 'text/css', // required by Coomer to bypass DDG caching (see their 403 body)
+          Referer: `https://${COOMER_HOST}/`,
+        },
       },
-    }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return httpsGet(res.headers.location).then(resolve).catch(reject)
+      (res) => {
+        if (
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          return httpsGet(res.headers.location).then(resolve).catch(reject)
+        }
+        let body = ''
+        res.on('data', (c) => (body += c))
+        res.on('end', () => resolve({ status: res.statusCode, body }))
       }
-      let body = ''
-      res.on('data', (c) => (body += c))
-      res.on('end', () => resolve({ status: res.statusCode, body }))
-    })
+    )
     req.on('error', reject)
-    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
+    req.setTimeout(8000, () => {
+      req.destroy()
+      reject(new Error('timeout'))
+    })
   })
 }
 
@@ -70,7 +91,11 @@ async function lookupCreator(service, username) {
   const apiUrl = `https://${COOMER_HOST}/api/v1/${service}/user/${encodeURIComponent(username)}/profile`
   const { status, body } = await httpsGet(apiUrl)
   if (status === 200) {
-    try { return JSON.parse(body) } catch { return { id: username, service } }
+    try {
+      return JSON.parse(body)
+    } catch {
+      return { id: username, service }
+    }
   }
   if (status === 404) return null
   throw new Error(`HTTP ${status}`)
@@ -82,10 +107,10 @@ async function run() {
   console.log(`Registry:  ${registryPath}`)
   console.log(`Services:  ${SERVICES.join(', ')}`)
   if (DRY_RUN) console.log('Mode: --dry-run (no writes)')
-  if (FORCE)   console.log('Mode: --force (re-checking all models)')
+  if (FORCE) console.log('Mode: --force (re-checking all models)')
   console.log(`Delay: ${DELAY}ms between requests\n`)
 
-  const registry   = loadModelRegistry(registryPath)
+  const registry = loadModelRegistry(registryPath)
   const modelNames = Object.keys(registry)
   console.log(`Models in registry: ${modelNames.length}`)
 
@@ -103,15 +128,19 @@ async function run() {
 
   let matched = 0
   let skipped = 0
-  let errors  = 0
+  let errors = 0
 
   for (let i = 0; i < toCheck.length; i++) {
     const canonicalName = toCheck[i]
-    const entry  = registry[canonicalName]
-    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : [canonicalName]
+    const entry = registry[canonicalName]
+    const aliases = Array.isArray(entry?.aliases)
+      ? entry.aliases
+      : [canonicalName]
 
     // Deduplicated sanitized names to try as usernames
-    const usernames = [...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean))]
+    const usernames = [
+      ...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean)),
+    ]
 
     process.stdout.write(`  [${i + 1}/${toCheck.length}] ${canonicalName}...`)
 
@@ -123,7 +152,12 @@ async function run() {
           const creator = await lookupCreator(service, username)
           if (creator) {
             const url = `https://${COOMER_HOST}/${service}/user/${username}`
-            hits.push({ service, username, url, name: creator.name || username })
+            hits.push({
+              service,
+              username,
+              url,
+              name: creator.name || username,
+            })
           }
           await sleep(DELAY)
         } catch (err) {

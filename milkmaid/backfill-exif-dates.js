@@ -67,7 +67,11 @@ async function processUser(username) {
     for (const filename of entries) {
       const ext = path.extname(filename).toLowerCase()
       if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext)) continue
-      files.push({ folder, filename, filePath: path.join(folderPath, filename) })
+      files.push({
+        folder,
+        filename,
+        filePath: path.join(folderPath, filename),
+      })
     }
   }
 
@@ -92,12 +96,18 @@ async function processUser(username) {
 
         // Use the shared recordXxxDates helpers which handle skip-if-exists internally
         if (!FORCE) {
-          const existing = mediaDates.resolveDateFromSidecar(userDir, file.folder, file.filename)
+          const existing = mediaDates.resolveDateFromSidecar(
+            userDir,
+            file.folder,
+            file.filename
+          )
           if (existing !== null) {
             tally.skipped++
             done++
             if (done % 50 === 0 || done === files.length) {
-              process.stdout.write(`  ${username}: ${bar(done, files.length)}\r`)
+              process.stdout.write(
+                `  ${username}: ${bar(done, files.length)}\r`
+              )
             }
             return
           }
@@ -113,17 +123,32 @@ async function processUser(username) {
         } catch {}
 
         if (isVideo) {
-          await mediaDates.recordVideoDates(userDir, file.folder, file.filename, file.filePath, uploadedDate)
+          await mediaDates.recordVideoDates(
+            userDir,
+            file.folder,
+            file.filename,
+            file.filePath,
+            uploadedDate
+          )
         } else {
-          await mediaDates.recordImageDates(userDir, file.folder, file.filename, uploadedDate)
+          await mediaDates.recordImageDates(
+            userDir,
+            file.folder,
+            file.filename,
+            uploadedDate
+          )
         }
 
         // Tally the best source
-        const resolved = mediaDates.resolveDateFromSidecar(userDir, file.folder, file.filename)
-        if (resolved?.source === 'mp4')      tally.video++
+        const resolved = mediaDates.resolveDateFromSidecar(
+          userDir,
+          file.folder,
+          file.filename
+        )
+        if (resolved?.source === 'mp4') tally.video++
         else if (resolved?.source === 'filename') tally.filename++
-        else if (resolved?.date)             tally.uploaded++
-        else                                 tally.none++
+        else if (resolved?.date) tally.uploaded++
+        else tally.none++
 
         done++
         if (done % 50 === 0 || done === files.length) {
@@ -138,9 +163,11 @@ async function processUser(username) {
   const newlyProcessed = files.length - tally.skipped
   log(
     `  ${username}: done  ` +
-    `video=${tally.video} filename=${tally.filename} ` +
-    `upload=${tally.uploaded} none=${tally.none} skipped=${tally.skipped}` +
-    (newlyProcessed !== files.length ? ` (${tally.skipped} already cached)` : '')
+      `video=${tally.video} filename=${tally.filename} ` +
+      `upload=${tally.uploaded} none=${tally.none} skipped=${tally.skipped}` +
+      (newlyProcessed !== files.length
+        ? ` (${tally.skipped} already cached)`
+        : '')
   )
 
   return tally
@@ -154,7 +181,11 @@ async function run() {
 
   // Find ffprobe once at startup
   const probe = await mediaDates.findFfprobe()
-  log(probe ? `ffprobe: ${probe}` : 'ffprobe: not found — video container dates skipped')
+  log(
+    probe
+      ? `ffprobe: ${probe}`
+      : 'ffprobe: not found — video container dates skipped'
+  )
   log('')
 
   let users
@@ -193,7 +224,9 @@ async function run() {
   log(`  Upload date only:      ${totals.uploaded}`)
   log(`  No date found:         ${totals.none}`)
   log(`  Already cached:        ${totals.skipped}`)
-  log(`  Total files:           ${Object.values(totals).reduce((a, b) => a + b, 0)}`)
+  log(
+    `  Total files:           ${Object.values(totals).reduce((a, b) => a + b, 0)}`
+  )
   log('')
 }
 

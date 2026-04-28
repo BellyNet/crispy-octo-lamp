@@ -75,7 +75,15 @@ async function extractVideoDateFromFile(filePath) {
   try {
     const { stdout } = await execFileAsync(
       probe,
-      ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath],
+      [
+        '-v',
+        'quiet',
+        '-print_format',
+        'json',
+        '-show_format',
+        '-show_streams',
+        filePath,
+      ],
       { timeout: 15000 }
     )
     const info = JSON.parse(stdout)
@@ -83,11 +91,13 @@ async function extractVideoDateFromFile(filePath) {
 
     const ft = info?.format?.tags || {}
     if (ft.creation_time) candidates.push(ft.creation_time)
-    if (ft['com.apple.quicktime.creationdate']) candidates.push(ft['com.apple.quicktime.creationdate'])
+    if (ft['com.apple.quicktime.creationdate'])
+      candidates.push(ft['com.apple.quicktime.creationdate'])
     if (ft.date) candidates.push(ft.date)
 
     for (const stream of info?.streams || []) {
-      if (stream?.tags?.creation_time) candidates.push(stream.tags.creation_time)
+      if (stream?.tags?.creation_time)
+        candidates.push(stream.tags.creation_time)
     }
 
     for (const raw of candidates) {
@@ -106,7 +116,7 @@ function extractFilenameDate(filename) {
   if (!m) return null
   const d = m[1]
   const date = new Date(
-    `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${d.slice(8,10)}:${d.slice(10,12)}:${d.slice(12,14)}`
+    `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T${d.slice(8, 10)}:${d.slice(10, 12)}:${d.slice(12, 14)}`
   )
   return isSane(date) ? toISO(date) : null
 }
@@ -123,7 +133,8 @@ function loadSidecar(userDir) {
   let data = { __version: SIDECAR_VERSION }
   try {
     const raw = JSON.parse(fs.readFileSync(sidecarPath(userDir), 'utf8'))
-    data = raw.__version === SIDECAR_VERSION ? raw : { __version: SIDECAR_VERSION }
+    data =
+      raw.__version === SIDECAR_VERSION ? raw : { __version: SIDECAR_VERSION }
   } catch {}
   const entry = { data, dirty: false, flushTimer: null }
   _sidecars.set(userDir, entry)
@@ -160,7 +171,13 @@ async function recordImageDates(userDir, folder, filename, uploadedDate) {
   scheduleSidecarFlush(userDir)
 }
 
-async function recordVideoDates(userDir, folder, filename, filePath, uploadedDate) {
+async function recordVideoDates(
+  userDir,
+  folder,
+  filename,
+  filePath,
+  uploadedDate
+) {
   const entry = loadSidecar(userDir)
   const key = `${folder}/${filename}`
   if (entry.data[key]) return
@@ -183,7 +200,7 @@ function resolveDateFromSidecar(userDir, folder, filename) {
   const record = entry.data[`${folder}/${filename}`]
   if (!record) return null
 
-  if (record.video)    return { date: record.video,    source: 'mp4' }
+  if (record.video) return { date: record.video, source: 'mp4' }
   if (record.filename) return { date: record.filename, source: 'filename' }
   if (record.uploaded) return { date: record.uploaded, source: 'uploaded' }
   return { date: null, source: null }

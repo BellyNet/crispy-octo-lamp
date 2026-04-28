@@ -17,10 +17,7 @@ main().catch((err) => {
 })
 
 async function main() {
-  const sourceModel = await askModelName(
-    'Source model to fix',
-    'unknown_cow'
-  )
+  const sourceModel = await askModelName('Source model to fix', 'unknown_cow')
   const targetModel = await askModelName('Correct target model')
 
   if (!sourceModel || !targetModel) {
@@ -84,7 +81,9 @@ async function main() {
   const bitwiseStats = rewriteHashRefs(bitwiseV2Path, movedPaths)
   const visualStats = rewriteHashRefs(visualV2Path, movedPaths)
 
-  console.log(`\nMoved ${movedPaths.length} files from ${sourceModel} to ${targetModel}.`)
+  console.log(
+    `\nMoved ${movedPaths.length} files from ${sourceModel} to ${targetModel}.`
+  )
   console.log(
     `Bitwise hash refs updated: ${bitwiseStats.updatedRefs} across ${bitwiseStats.updatedEntries} entries.`
   )
@@ -99,7 +98,9 @@ async function main() {
       : `Source folder removed: ${sourceRoot}`
   )
   console.log(`Target folder ready: ${targetRoot}`)
-  console.log('\nNext step: rerun Milkmaid and confirm the correct model when prompted.')
+  console.log(
+    '\nNext step: rerun Milkmaid and confirm the correct model when prompted.'
+  )
 }
 
 function normalizePath(value) {
@@ -108,7 +109,17 @@ function normalizePath(value) {
 
 function isMediaFile(filePath) {
   const ext = path.extname(filePath).toLowerCase()
-  return ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm', '.m4v', '.mov'].includes(ext)
+  return [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.gif',
+    '.mp4',
+    '.webm',
+    '.m4v',
+    '.mov',
+  ].includes(ext)
 }
 
 function collectFiles(root) {

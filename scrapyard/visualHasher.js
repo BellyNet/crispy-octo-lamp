@@ -106,9 +106,14 @@ function buildVideoFrameTimestamps(durationSeconds) {
   const base = [0.2, 0.5, 0.8]
   if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
     return base
-      .map((ratio) => Math.max(0, Math.min(durationSeconds - 0.1, durationSeconds * ratio)))
+      .map((ratio) =>
+        Math.max(0, Math.min(durationSeconds - 0.1, durationSeconds * ratio))
+      )
       .concat([1, 0, 3])
-      .filter((value, index, list) => Number.isFinite(value) && value >= 0 && list.indexOf(value) === index)
+      .filter(
+        (value, index, list) =>
+          Number.isFinite(value) && value >= 0 && list.indexOf(value) === index
+      )
   }
 
   return [1, 0, 3]

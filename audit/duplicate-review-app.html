@@ -1,660 +1,768 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Duplicate Review</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #0f1117;
-      --panel: #171a22;
-      --panel-2: #1d2130;
-      --line: #2c3347;
-      --text: #edf2ff;
-      --muted: #95a0be;
-      --accent: #5da8ff;
-      --accent-2: #7ef0c5;
-      --danger: #ff8a8a;
-      --keep-bg: #163628;
-      --keep-line: #2f8f63;
-      --shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-    }
-
-    html, body { height: 100%; overflow: hidden; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(93,168,255,0.16), transparent 24%),
-        linear-gradient(180deg, #10131b 0%, #0b0e14 100%);
-      color: var(--text);
-    }
-
-    .app {
-      height: 100vh;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-    }
-
-    .topbar {
-      border-bottom: 1px solid var(--line);
-      background: rgba(15, 17, 23, 0.92);
-      backdrop-filter: blur(10px);
-      padding: 14px 18px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .title-block h1 {
-      font-size: 18px;
-      font-weight: 650;
-    }
-
-    .title-block p {
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .top-actions {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    button {
-      border: 1px solid var(--line);
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 9px 14px;
-      border-radius: 999px;
-      font: inherit;
-      cursor: pointer;
-      transition: transform 0.08s ease, border-color 0.12s ease, background 0.12s ease;
-    }
-
-    button:hover:not(:disabled) {
-      border-color: var(--accent);
-      transform: translateY(-1px);
-    }
-
-    button.primary {
-      background: linear-gradient(135deg, #478fe0 0%, #72b3ff 100%);
-      color: #05101e;
-      border-color: #72b3ff;
-      font-weight: 700;
-    }
-
-    button:disabled {
-      opacity: 0.5;
-      cursor: default;
-      transform: none;
-    }
-
-    .workspace {
-      min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1.05fr);
-      gap: 18px;
-      padding: 18px;
-    }
-
-    .panel {
-      min-height: 0;
-      border: 1px solid var(--line);
-      background: rgba(23, 26, 34, 0.94);
-      border-radius: 22px;
-      box-shadow: var(--shadow);
-    }
-
-    .preview-panel {
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      overflow: hidden;
-    }
-
-    .preview-header,
-    .choices-header {
-      padding: 16px 18px 12px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .preview-header h2,
-    .choices-header h2 {
-      font-size: 15px;
-      font-weight: 650;
-    }
-
-    .preview-header p,
-    .choices-header p {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
-    }
-
-    .preview-frame {
-      min-height: 0;
-      padding: 14px 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #10131b;
-    }
-
-    .preview-frame img,
-    .preview-frame video {
-      max-width: 100%;
-      max-height: 52vh;
-      object-fit: contain;
-      border-radius: 16px;
-      background: #0b0f16;
-    }
-
-    .preview-meta {
-      padding: 12px 18px 16px;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
-    }
-
-    .preview-meta code {
-      color: var(--text);
-      word-break: break-word;
-    }
-
-    .choices-panel {
-      display: grid;
-      grid-template-rows: auto 1fr;
-      overflow: hidden;
-    }
-
-    .choices-list {
-      min-height: 0;
-      overflow: auto;
-      padding: 12px 14px 18px;
-      display: grid;
-      gap: 10px;
-    }
-
-    .choice-card {
-      border: 1px solid var(--line);
-      background: var(--panel-2);
-      border-radius: 16px;
-      padding: 12px 14px;
-      display: grid;
-      gap: 10px;
-      cursor: pointer;
-    }
-
-    .choice-card.focused {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(93, 168, 255, 0.14);
-    }
-
-    .choice-card.kept {
-      border-color: var(--keep-line);
-      background: linear-gradient(180deg, rgba(22,54,40,0.96) 0%, rgba(27,44,36,0.96) 100%);
-    }
-
-    .choice-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: flex-start;
-    }
-
-    .choice-main {
-      min-width: 0;
-    }
-
-    .choice-main strong {
-      display: block;
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .choice-main .path {
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.4;
-      word-break: break-word;
-    }
-
-    .choice-badges {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.05);
-      color: var(--muted);
-      border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 11px;
-      line-height: 1.4;
-      white-space: nowrap;
-    }
-
-    .badge.keep {
-      color: var(--accent-2);
-      border-color: rgba(126,240,197,0.35);
-    }
-
-    .badge.suggested {
-      color: var(--accent);
-      border-color: rgba(93,168,255,0.35);
-    }
-
-    .choice-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .choice-actions label {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      user-select: none;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 600;
-    }
-
-    .choice-actions input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
-      accent-color: #72b3ff;
-    }
-
-    .choice-actions .preview-btn {
-      padding: 7px 11px;
-      font-size: 12px;
-    }
-
-    .empty {
-      padding: 28px;
-      color: var(--muted);
-      text-align: center;
-    }
-
-    .progress-shell {
-      border-top: 1px solid var(--line);
-      background: rgba(15, 17, 23, 0.96);
-      padding: 12px 18px 16px;
-      display: grid;
-      gap: 8px;
-    }
-
-    .progress-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: center;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 12px;
-      background: #151925;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      overflow: hidden;
-    }
-
-    .progress-bar > div {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #5da8ff 0%, #7ef0c5 100%);
-      transition: width 0.18s ease;
-    }
-
-    @media (max-width: 980px) {
-      html, body { overflow: auto; }
-      .app { height: auto; min-height: 100vh; }
-      .workspace {
-        grid-template-columns: 1fr;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Duplicate Review</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
       }
+
+      :root {
+        --bg: #0f1117;
+        --panel: #171a22;
+        --panel-2: #1d2130;
+        --line: #2c3347;
+        --text: #edf2ff;
+        --muted: #95a0be;
+        --accent: #5da8ff;
+        --accent-2: #7ef0c5;
+        --danger: #ff8a8a;
+        --keep-bg: #163628;
+        --keep-line: #2f8f63;
+        --shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(93, 168, 255, 0.16),
+            transparent 24%
+          ),
+          linear-gradient(180deg, #10131b 0%, #0b0e14 100%);
+        color: var(--text);
+      }
+
+      .app {
+        height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      .topbar {
+        border-bottom: 1px solid var(--line);
+        background: rgba(15, 17, 23, 0.92);
+        backdrop-filter: blur(10px);
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .title-block h1 {
+        font-size: 18px;
+        font-weight: 650;
+      }
+
+      .title-block p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .top-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 9px 14px;
+        border-radius: 999px;
+        font: inherit;
+        cursor: pointer;
+        transition:
+          transform 0.08s ease,
+          border-color 0.12s ease,
+          background 0.12s ease;
+      }
+
+      button:hover:not(:disabled) {
+        border-color: var(--accent);
+        transform: translateY(-1px);
+      }
+
+      button.primary {
+        background: linear-gradient(135deg, #478fe0 0%, #72b3ff 100%);
+        color: #05101e;
+        border-color: #72b3ff;
+        font-weight: 700;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+        transform: none;
+      }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1.05fr);
+        gap: 18px;
+        padding: 18px;
+      }
+
+      .panel {
+        min-height: 0;
+        border: 1px solid var(--line);
+        background: rgba(23, 26, 34, 0.94);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+      }
+
+      .preview-panel {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        overflow: hidden;
+      }
+
+      .preview-header,
+      .choices-header {
+        padding: 16px 18px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .preview-header h2,
+      .choices-header h2 {
+        font-size: 15px;
+        font-weight: 650;
+      }
+
+      .preview-header p,
+      .choices-header p {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .preview-frame {
+        min-height: 0;
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #10131b;
+      }
+
       .preview-frame img,
       .preview-frame video {
-        max-height: 40vh;
+        max-width: 100%;
+        max-height: 52vh;
+        object-fit: contain;
+        border-radius: 16px;
+        background: #0b0f16;
       }
+
+      .preview-meta {
+        padding: 12px 18px 16px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .preview-meta code {
+        color: var(--text);
+        word-break: break-word;
+      }
+
+      .choices-panel {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        overflow: hidden;
+      }
+
       .choices-list {
-        overflow: visible;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px 14px 18px;
+        display: grid;
+        gap: 10px;
       }
-      .choices-panel,
-      .preview-panel,
-      .panel {
-        min-height: auto;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="app">
-    <header class="topbar">
-      <div class="title-block">
-        <h1>Duplicate Review</h1>
-        <p id="statusText">Loading duplicate groups...</p>
-      </div>
-      <div class="top-actions">
-        <button id="prevBtn">Previous</button>
-        <button id="nextBtn">Next</button>
-        <button id="applyBtn" class="primary">Apply Quarantines</button>
-      </div>
-    </header>
 
-    <main class="workspace">
-      <section class="panel preview-panel">
-        <div class="preview-header">
-          <h2 id="previewTitle">Reference preview</h2>
-          <p id="previewSubtitle">Choose which folders should keep this duplicate.</p>
+      .choice-card {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        border-radius: 16px;
+        padding: 12px 14px;
+        display: grid;
+        gap: 10px;
+        cursor: pointer;
+      }
+
+      .choice-card.focused {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(93, 168, 255, 0.14);
+      }
+
+      .choice-card.kept {
+        border-color: var(--keep-line);
+        background: linear-gradient(
+          180deg,
+          rgba(22, 54, 40, 0.96) 0%,
+          rgba(27, 44, 36, 0.96) 100%
+        );
+      }
+
+      .choice-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .choice-main {
+        min-width: 0;
+      }
+
+      .choice-main strong {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .choice-main .path {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+        word-break: break-word;
+      }
+
+      .choice-badges {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: nowrap;
+      }
+
+      .badge.keep {
+        color: var(--accent-2);
+        border-color: rgba(126, 240, 197, 0.35);
+      }
+
+      .badge.suggested {
+        color: var(--accent);
+        border-color: rgba(93, 168, 255, 0.35);
+      }
+
+      .choice-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .choice-actions label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .choice-actions input[type='checkbox'] {
+        width: 18px;
+        height: 18px;
+        accent-color: #72b3ff;
+      }
+
+      .choice-actions .preview-btn {
+        padding: 7px 11px;
+        font-size: 12px;
+      }
+
+      .empty {
+        padding: 28px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .progress-shell {
+        border-top: 1px solid var(--line);
+        background: rgba(15, 17, 23, 0.96);
+        padding: 12px 18px 16px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .progress-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 12px;
+        background: #151925;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .progress-bar > div {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #5da8ff 0%, #7ef0c5 100%);
+        transition: width 0.18s ease;
+      }
+
+      @media (max-width: 980px) {
+        html,
+        body {
+          overflow: auto;
+        }
+        .app {
+          height: auto;
+          min-height: 100vh;
+        }
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+        .preview-frame img,
+        .preview-frame video {
+          max-height: 40vh;
+        }
+        .choices-list {
+          overflow: visible;
+        }
+        .choices-panel,
+        .preview-panel,
+        .panel {
+          min-height: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="title-block">
+          <h1>Duplicate Review</h1>
+          <p id="statusText">Loading duplicate groups...</p>
         </div>
-        <div id="previewFrame" class="preview-frame">
-          <div class="empty">Loading preview...</div>
+        <div class="top-actions">
+          <button id="prevBtn">Previous</button>
+          <button id="nextBtn">Next</button>
+          <button id="applyBtn" class="primary">Apply Quarantines</button>
         </div>
-        <div id="previewMeta" class="preview-meta"></div>
-      </section>
+      </header>
 
-      <section class="panel choices-panel">
-        <div class="choices-header">
-          <h2 id="choicesTitle">Keep locations</h2>
-          <p id="choicesSubtitle">Every checkbox autosaves immediately. Leave only the folders that should retain the file.</p>
+      <main class="workspace">
+        <section class="panel preview-panel">
+          <div class="preview-header">
+            <h2 id="previewTitle">Reference preview</h2>
+            <p id="previewSubtitle">
+              Choose which folders should keep this duplicate.
+            </p>
+          </div>
+          <div id="previewFrame" class="preview-frame">
+            <div class="empty">Loading preview...</div>
+          </div>
+          <div id="previewMeta" class="preview-meta"></div>
+        </section>
+
+        <section class="panel choices-panel">
+          <div class="choices-header">
+            <h2 id="choicesTitle">Keep locations</h2>
+            <p id="choicesSubtitle">
+              Every checkbox autosaves immediately. Leave only the folders that
+              should retain the file.
+            </p>
+          </div>
+          <div id="choicesList" class="choices-list">
+            <div class="empty">Loading choices...</div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="progress-shell">
+        <div class="progress-meta">
+          <span id="progressLabel">0 / 0 reviewed</span>
+          <span id="progressHint">Autosaved after every change</span>
         </div>
-        <div id="choicesList" class="choices-list">
-          <div class="empty">Loading choices...</div>
-        </div>
-      </section>
-    </main>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+      </footer>
+    </div>
 
-    <footer class="progress-shell">
-      <div class="progress-meta">
-        <span id="progressLabel">0 / 0 reviewed</span>
-        <span id="progressHint">Autosaved after every change</span>
-      </div>
-      <div class="progress-bar"><div id="progressFill"></div></div>
-    </footer>
-  </div>
-
-  <script>
-    const reviewToken = new URLSearchParams(window.location.search).get('token') || '';
-    const els = {
-      statusText: document.getElementById('statusText'),
-      previewTitle: document.getElementById('previewTitle'),
-      previewSubtitle: document.getElementById('previewSubtitle'),
-      previewFrame: document.getElementById('previewFrame'),
-      previewMeta: document.getElementById('previewMeta'),
-      choicesTitle: document.getElementById('choicesTitle'),
-      choicesSubtitle: document.getElementById('choicesSubtitle'),
-      choicesList: document.getElementById('choicesList'),
-      progressLabel: document.getElementById('progressLabel'),
-      progressHint: document.getElementById('progressHint'),
-      progressFill: document.getElementById('progressFill'),
-      prevBtn: document.getElementById('prevBtn'),
-      nextBtn: document.getElementById('nextBtn'),
-      applyBtn: document.getElementById('applyBtn'),
-    };
-
-    let state = null;
-    let activeGroup = null;
-    let focusedRecordId = null;
-    let inFlight = false;
-
-    els.prevBtn.addEventListener('click', () => loadGroupByOffset(-1));
-    els.nextBtn.addEventListener('click', () => acceptAndAdvance());
-    els.applyBtn.addEventListener('click', applyDecisions);
-
-    boot();
-
-    async function boot() {
-      await refreshState();
-    }
-
-    async function refreshState(targetGroupId = '') {
-      const url = targetGroupId ? '/api/state?groupId=' + encodeURIComponent(targetGroupId) : '/api/state';
-      const payload = await api(url);
-      state = payload;
-      activeGroup = payload.currentGroup || null;
-      focusedRecordId =
-        activeGroup?.focusedRecordId ||
-        activeGroup?.suggestedKeepId ||
-        activeGroup?.records?.[0]?.id ||
-        null;
-      render();
-    }
-
-    function render() {
-      const summary = state?.summary || { reviewedGroups: 0, totalGroups: 0, percentReviewed: 0 };
-      els.progressLabel.textContent =
-        summary.reviewedGroups + ' / ' + summary.totalGroups + ' reviewed';
-      els.progressFill.style.width = Math.max(0, Math.min(100, summary.percentReviewed || 0)) + '%';
-      els.prevBtn.disabled = inFlight || !state?.hasPrevious;
-      els.nextBtn.disabled = inFlight || !state?.hasNext;
-      els.applyBtn.disabled = inFlight || !state?.summary?.reviewedGroups;
-
-      if (!activeGroup) {
-        els.statusText.textContent = 'All duplicate groups are reviewed.';
-        els.previewTitle.textContent = 'Done';
-        els.previewSubtitle.textContent = 'No more duplicate groups need review.';
-        els.previewFrame.innerHTML = '<div class="empty">Everything is reviewed.</div>';
-        els.previewMeta.textContent = 'You can apply quarantines whenever you are ready.';
-        els.choicesTitle.textContent = 'No pending choices';
-        els.choicesSubtitle.textContent = 'There are no remaining duplicate groups in the current queue.';
-        els.choicesList.innerHTML = '<div class="empty">Nothing left to review.</div>';
-        return;
+    <script>
+      const reviewToken =
+        new URLSearchParams(window.location.search).get('token') || ''
+      const els = {
+        statusText: document.getElementById('statusText'),
+        previewTitle: document.getElementById('previewTitle'),
+        previewSubtitle: document.getElementById('previewSubtitle'),
+        previewFrame: document.getElementById('previewFrame'),
+        previewMeta: document.getElementById('previewMeta'),
+        choicesTitle: document.getElementById('choicesTitle'),
+        choicesSubtitle: document.getElementById('choicesSubtitle'),
+        choicesList: document.getElementById('choicesList'),
+        progressLabel: document.getElementById('progressLabel'),
+        progressHint: document.getElementById('progressHint'),
+        progressFill: document.getElementById('progressFill'),
+        prevBtn: document.getElementById('prevBtn'),
+        nextBtn: document.getElementById('nextBtn'),
+        applyBtn: document.getElementById('applyBtn'),
       }
 
-      const focusedRecord = getFocusedRecord();
-      const keptCount = activeGroup.keptRecordIds.length;
+      let state = null
+      let activeGroup = null
+      let focusedRecordId = null
+      let inFlight = false
 
-      els.statusText.textContent =
-        'Reviewing group ' + (state.currentIndex + 1) + ' of ' + summary.totalGroups +
-        (activeGroup.crossModel ? ' · cross-model duplicate' : '');
-      els.previewTitle.textContent = focusedRecord ? (focusedRecord.model || 'unknown model') : 'Reference preview';
-      els.previewSubtitle.textContent =
-        'Suggested keep: ' + activeGroup.suggestedKeepPath + ' · keeping ' + keptCount + ' of ' + activeGroup.records.length + ' copies';
-      els.previewFrame.innerHTML = focusedRecord ? renderMedia(focusedRecord) : '<div class="empty">No preview available</div>';
-      els.previewMeta.innerHTML = focusedRecord
-        ? '<div><strong>Path:</strong> <code>' + escapeHtml(focusedRecord.relativePath) + '</code></div>' +
-          '<div><strong>Filename:</strong> ' + escapeHtml(focusedRecord.filename || 'unknown') + '</div>' +
-          '<div><strong>Seen at:</strong> ' + escapeHtml(focusedRecord.occurrenceAt || focusedRecord.modifiedAt || 'unknown') + '</div>'
-        : '';
+      els.prevBtn.addEventListener('click', () => loadGroupByOffset(-1))
+      els.nextBtn.addEventListener('click', () => acceptAndAdvance())
+      els.applyBtn.addEventListener('click', applyDecisions)
 
-      els.choicesTitle.textContent =
-        activeGroup.records.length + ' duplicate copies across ' + activeGroup.models.length + ' model' + (activeGroup.models.length === 1 ? '' : 's');
-      els.choicesSubtitle.textContent =
-        'Check every folder that should keep the file. Click Preview to inspect any copy on the left.';
-      els.choicesList.innerHTML = activeGroup.records.map(renderChoice).join('');
+      boot()
 
-      for (const button of els.choicesList.querySelectorAll('[data-preview-id]')) {
-        button.addEventListener('click', () => {
-          focusedRecordId = button.dataset.previewId;
-          render();
-        });
+      async function boot() {
+        await refreshState()
       }
 
-      for (const card of els.choicesList.querySelectorAll('.choice-card')) {
-        card.addEventListener('click', (event) => {
-          if (event.target.closest('[data-preview-id]')) return;
-          if (event.target.closest('input[type="checkbox"]')) return;
-
-          const checkbox = card.querySelector('[data-keep-id]');
-          if (!checkbox) return;
-          checkbox.checked = !checkbox.checked;
-          checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-      }
-
-      for (const checkbox of els.choicesList.querySelectorAll('[data-keep-id]')) {
-        checkbox.addEventListener('change', async () => {
-          const keepIds = new Set(activeGroup.keptRecordIds);
-          if (checkbox.checked) {
-            keepIds.add(checkbox.dataset.keepId);
-          } else {
-            if (keepIds.size === 1) {
-              checkbox.checked = true;
-              return;
-            }
-            keepIds.delete(checkbox.dataset.keepId);
-          }
-
-          focusedRecordId = checkbox.dataset.keepId;
-          await saveCurrent(Array.from(keepIds), false);
-        });
-      }
-    }
-
-    function renderChoice(record) {
-      const kept = activeGroup.keptRecordIds.includes(record.id);
-      const focused = focusedRecordId === record.id;
-      const suggested = activeGroup.suggestedKeepId === record.id;
-
-      return '<article class="choice-card' + (kept ? ' kept' : '') + (focused ? ' focused' : '') + '">' +
-        '<div class="choice-top">' +
-          '<div class="choice-main">' +
-            '<strong>' + escapeHtml(record.model || 'unknown') + '</strong>' +
-            '<div class="path"><code>' + escapeHtml(record.relativePath) + '</code></div>' +
-          '</div>' +
-          '<div class="choice-badges">' +
-            (suggested ? '<span class="badge suggested">suggested</span>' : '') +
-            (kept ? '<span class="badge keep">keeping</span>' : '') +
-          '</div>' +
-        '</div>' +
-        '<div class="choice-actions">' +
-          '<label><input type="checkbox" data-keep-id="' + escapeAttr(record.id) + '"' + (kept ? ' checked' : '') + '> keep in this folder</label>' +
-          '<button class="preview-btn" data-preview-id="' + escapeAttr(record.id) + '">Preview</button>' +
-        '</div>' +
-      '</article>';
-    }
-
-    function renderMedia(record) {
-      const mediaUrl = getMediaUrl(record);
-      if (!mediaUrl) return '<div class="empty">No preview available</div>';
-      if (record.mediaType === 'video') {
-        return '<video src="' + mediaUrl + '" controls preload="metadata"></video>';
-      }
-      return '<img src="' + mediaUrl + '" alt="">';
-    }
-
-    function getMediaUrl(record) {
-      if (!record?.sourcePath) return '';
-      return '/media?path=' + encodeURIComponent(record.sourcePath) + '&token=' + encodeURIComponent(reviewToken);
-    }
-
-    function getFocusedRecord() {
-      return activeGroup?.records?.find((record) => record.id === focusedRecordId) ||
-        activeGroup?.records?.[0] ||
-        null;
-    }
-
-    async function saveCurrent(keptRecordIds, advance) {
-      if (!activeGroup) return;
-      inFlight = true;
-      els.progressHint.textContent = 'Saving...';
-      render();
-
-      try {
-        const payload = await api('/api/groups/' + encodeURIComponent(activeGroup.id), {
-          method: 'POST',
-          body: JSON.stringify({
-            keptRecordIds,
-            focusedRecordId,
-            advance,
-          }),
-        });
-
-        state = payload;
-        activeGroup = payload.currentGroup || null;
+      async function refreshState(targetGroupId = '') {
+        const url = targetGroupId
+          ? '/api/state?groupId=' + encodeURIComponent(targetGroupId)
+          : '/api/state'
+        const payload = await api(url)
+        state = payload
+        activeGroup = payload.currentGroup || null
         focusedRecordId =
           activeGroup?.focusedRecordId ||
           activeGroup?.suggestedKeepId ||
           activeGroup?.records?.[0]?.id ||
-          null;
-        els.progressHint.textContent = 'Saved';
-      } catch (err) {
-        els.progressHint.textContent = err.message;
-      } finally {
-        inFlight = false;
-        render();
+          null
+        render()
       }
-    }
 
-    async function loadGroupByOffset(offset) {
-      if (!state) return;
-      const targetIndex = state.currentIndex + offset;
-      if (targetIndex < 0 || targetIndex >= state.summary.totalGroups) return;
-      const target = state.groupOrder[targetIndex];
-      if (!target) return;
-      await refreshState(target);
-    }
+      function render() {
+        const summary = state?.summary || {
+          reviewedGroups: 0,
+          totalGroups: 0,
+          percentReviewed: 0,
+        }
+        els.progressLabel.textContent =
+          summary.reviewedGroups + ' / ' + summary.totalGroups + ' reviewed'
+        els.progressFill.style.width =
+          Math.max(0, Math.min(100, summary.percentReviewed || 0)) + '%'
+        els.prevBtn.disabled = inFlight || !state?.hasPrevious
+        els.nextBtn.disabled = inFlight || !state?.hasNext
+        els.applyBtn.disabled = inFlight || !state?.summary?.reviewedGroups
 
-    async function acceptAndAdvance() {
-      if (!activeGroup || inFlight) return;
-      await saveCurrent([...activeGroup.keptRecordIds], true);
-    }
+        if (!activeGroup) {
+          els.statusText.textContent = 'All duplicate groups are reviewed.'
+          els.previewTitle.textContent = 'Done'
+          els.previewSubtitle.textContent =
+            'No more duplicate groups need review.'
+          els.previewFrame.innerHTML =
+            '<div class="empty">Everything is reviewed.</div>'
+          els.previewMeta.textContent =
+            'You can apply quarantines whenever you are ready.'
+          els.choicesTitle.textContent = 'No pending choices'
+          els.choicesSubtitle.textContent =
+            'There are no remaining duplicate groups in the current queue.'
+          els.choicesList.innerHTML =
+            '<div class="empty">Nothing left to review.</div>'
+          return
+        }
 
-    async function applyDecisions() {
-      if (!confirm('Apply all reviewed duplicate quarantine decisions now?')) return;
-      inFlight = true;
-      els.progressHint.textContent = 'Applying quarantines...';
-      render();
+        const focusedRecord = getFocusedRecord()
+        const keptCount = activeGroup.keptRecordIds.length
 
-      try {
-        await api('/api/apply', { method: 'POST' });
-        els.progressHint.textContent = 'Applied. Reloading state...';
-        await refreshState();
-      } catch (err) {
-        els.progressHint.textContent = err.message;
-      } finally {
-        inFlight = false;
-        render();
+        els.statusText.textContent =
+          'Reviewing group ' +
+          (state.currentIndex + 1) +
+          ' of ' +
+          summary.totalGroups +
+          (activeGroup.crossModel ? ' · cross-model duplicate' : '')
+        els.previewTitle.textContent = focusedRecord
+          ? focusedRecord.model || 'unknown model'
+          : 'Reference preview'
+        els.previewSubtitle.textContent =
+          'Suggested keep: ' +
+          activeGroup.suggestedKeepPath +
+          ' · keeping ' +
+          keptCount +
+          ' of ' +
+          activeGroup.records.length +
+          ' copies'
+        els.previewFrame.innerHTML = focusedRecord
+          ? renderMedia(focusedRecord)
+          : '<div class="empty">No preview available</div>'
+        els.previewMeta.innerHTML = focusedRecord
+          ? '<div><strong>Path:</strong> <code>' +
+            escapeHtml(focusedRecord.relativePath) +
+            '</code></div>' +
+            '<div><strong>Filename:</strong> ' +
+            escapeHtml(focusedRecord.filename || 'unknown') +
+            '</div>' +
+            '<div><strong>Seen at:</strong> ' +
+            escapeHtml(
+              focusedRecord.occurrenceAt ||
+                focusedRecord.modifiedAt ||
+                'unknown'
+            ) +
+            '</div>'
+          : ''
+
+        els.choicesTitle.textContent =
+          activeGroup.records.length +
+          ' duplicate copies across ' +
+          activeGroup.models.length +
+          ' model' +
+          (activeGroup.models.length === 1 ? '' : 's')
+        els.choicesSubtitle.textContent =
+          'Check every folder that should keep the file. Click Preview to inspect any copy on the left.'
+        els.choicesList.innerHTML = activeGroup.records
+          .map(renderChoice)
+          .join('')
+
+        for (const button of els.choicesList.querySelectorAll(
+          '[data-preview-id]'
+        )) {
+          button.addEventListener('click', () => {
+            focusedRecordId = button.dataset.previewId
+            render()
+          })
+        }
+
+        for (const card of els.choicesList.querySelectorAll('.choice-card')) {
+          card.addEventListener('click', (event) => {
+            if (event.target.closest('[data-preview-id]')) return
+            if (event.target.closest('input[type="checkbox"]')) return
+
+            const checkbox = card.querySelector('[data-keep-id]')
+            if (!checkbox) return
+            checkbox.checked = !checkbox.checked
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+          })
+        }
+
+        for (const checkbox of els.choicesList.querySelectorAll(
+          '[data-keep-id]'
+        )) {
+          checkbox.addEventListener('change', async () => {
+            const keepIds = new Set(activeGroup.keptRecordIds)
+            if (checkbox.checked) {
+              keepIds.add(checkbox.dataset.keepId)
+            } else {
+              if (keepIds.size === 1) {
+                checkbox.checked = true
+                return
+              }
+              keepIds.delete(checkbox.dataset.keepId)
+            }
+
+            focusedRecordId = checkbox.dataset.keepId
+            await saveCurrent(Array.from(keepIds), false)
+          })
+        }
       }
-    }
 
-    async function api(url, options = {}) {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          'content-type': 'application/json',
-          'x-slopvault-token': reviewToken,
-          ...(options.headers || {}),
-        },
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || 'Request failed');
+      function renderChoice(record) {
+        const kept = activeGroup.keptRecordIds.includes(record.id)
+        const focused = focusedRecordId === record.id
+        const suggested = activeGroup.suggestedKeepId === record.id
+
+        return (
+          '<article class="choice-card' +
+          (kept ? ' kept' : '') +
+          (focused ? ' focused' : '') +
+          '">' +
+          '<div class="choice-top">' +
+          '<div class="choice-main">' +
+          '<strong>' +
+          escapeHtml(record.model || 'unknown') +
+          '</strong>' +
+          '<div class="path"><code>' +
+          escapeHtml(record.relativePath) +
+          '</code></div>' +
+          '</div>' +
+          '<div class="choice-badges">' +
+          (suggested ? '<span class="badge suggested">suggested</span>' : '') +
+          (kept ? '<span class="badge keep">keeping</span>' : '') +
+          '</div>' +
+          '</div>' +
+          '<div class="choice-actions">' +
+          '<label><input type="checkbox" data-keep-id="' +
+          escapeAttr(record.id) +
+          '"' +
+          (kept ? ' checked' : '') +
+          '> keep in this folder</label>' +
+          '<button class="preview-btn" data-preview-id="' +
+          escapeAttr(record.id) +
+          '">Preview</button>' +
+          '</div>' +
+          '</article>'
+        )
       }
-      return payload;
-    }
 
-    function escapeHtml(value) {
-      return String(value || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
+      function renderMedia(record) {
+        const mediaUrl = getMediaUrl(record)
+        if (!mediaUrl) return '<div class="empty">No preview available</div>'
+        if (record.mediaType === 'video') {
+          return (
+            '<video src="' + mediaUrl + '" controls preload="metadata"></video>'
+          )
+        }
+        return '<img src="' + mediaUrl + '" alt="">'
+      }
 
-    function escapeAttr(value) {
-      return escapeHtml(value);
-    }
-  </script>
-</body>
+      function getMediaUrl(record) {
+        if (!record?.sourcePath) return ''
+        return (
+          '/media?path=' +
+          encodeURIComponent(record.sourcePath) +
+          '&token=' +
+          encodeURIComponent(reviewToken)
+        )
+      }
+
+      function getFocusedRecord() {
+        return (
+          activeGroup?.records?.find(
+            (record) => record.id === focusedRecordId
+          ) ||
+          activeGroup?.records?.[0] ||
+          null
+        )
+      }
+
+      async function saveCurrent(keptRecordIds, advance) {
+        if (!activeGroup) return
+        inFlight = true
+        els.progressHint.textContent = 'Saving...'
+        render()
+
+        try {
+          const payload = await api(
+            '/api/groups/' + encodeURIComponent(activeGroup.id),
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                keptRecordIds,
+                focusedRecordId,
+                advance,
+              }),
+            }
+          )
+
+          state = payload
+          activeGroup = payload.currentGroup || null
+          focusedRecordId =
+            activeGroup?.focusedRecordId ||
+            activeGroup?.suggestedKeepId ||
+            activeGroup?.records?.[0]?.id ||
+            null
+          els.progressHint.textContent = 'Saved'
+        } catch (err) {
+          els.progressHint.textContent = err.message
+        } finally {
+          inFlight = false
+          render()
+        }
+      }
+
+      async function loadGroupByOffset(offset) {
+        if (!state) return
+        const targetIndex = state.currentIndex + offset
+        if (targetIndex < 0 || targetIndex >= state.summary.totalGroups) return
+        const target = state.groupOrder[targetIndex]
+        if (!target) return
+        await refreshState(target)
+      }
+
+      async function acceptAndAdvance() {
+        if (!activeGroup || inFlight) return
+        await saveCurrent([...activeGroup.keptRecordIds], true)
+      }
+
+      async function applyDecisions() {
+        if (!confirm('Apply all reviewed duplicate quarantine decisions now?'))
+          return
+        inFlight = true
+        els.progressHint.textContent = 'Applying quarantines...'
+        render()
+
+        try {
+          await api('/api/apply', { method: 'POST' })
+          els.progressHint.textContent = 'Applied. Reloading state...'
+          await refreshState()
+        } catch (err) {
+          els.progressHint.textContent = err.message
+        } finally {
+          inFlight = false
+          render()
+        }
+      }
+
+      async function api(url, options = {}) {
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'content-type': 'application/json',
+            'x-slopvault-token': reviewToken,
+            ...(options.headers || {}),
+          },
+        })
+        const payload = await response.json()
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Request failed')
+        }
+        return payload
+      }
+
+      function escapeHtml(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+      }
+
+      function escapeAttr(value) {
+        return escapeHtml(value)
+      }
+    </script>
+  </body>
 </html>

@@ -30,7 +30,10 @@ const sourceManifestPath = path.resolve(
 const decisionsPath = path.resolve(
   String(
     argv.decisions ||
-      path.join(outputDir, 'slopvault-duplicate-dashboard-decisions-latest.json')
+      path.join(
+        outputDir,
+        'slopvault-duplicate-dashboard-decisions-latest.json'
+      )
   )
 )
 const runStamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -38,8 +41,8 @@ const runStamp = new Date().toISOString().replace(/[:.]/g, '-')
 Promise.resolve()
   .then(main)
   .catch((err) => {
-  console.error(`Fatal duplicate manifest error: ${err.stack || err.message}`)
-  process.exitCode = 1
+    console.error(`Fatal duplicate manifest error: ${err.stack || err.message}`)
+    process.exitCode = 1
   })
 
 function main() {
@@ -128,7 +131,9 @@ function loadPersistedSelections(filePath) {
 
     return byGroupId
   } catch (err) {
-    console.warn(`Could not load duplicate decisions ${filePath}: ${err.message}`)
+    console.warn(
+      `Could not load duplicate decisions ${filePath}: ${err.message}`
+    )
     return new Map()
   }
 }
@@ -146,9 +151,8 @@ function buildDuplicateManifest(sourceManifest, persistedSelections) {
     : []) {
     if (!String(duplicateGroup?.key || '').startsWith('md5:')) continue
 
-    const activeRecords = (Array.isArray(duplicateGroup.records)
-      ? duplicateGroup.records
-      : []
+    const activeRecords = (
+      Array.isArray(duplicateGroup.records) ? duplicateGroup.records : []
     )
       .map((recordId) => recordsById.get(recordId))
       .filter(Boolean)
@@ -266,7 +270,9 @@ function chooseSuggestedKeep(records) {
 }
 
 function compareDuplicateRecords(left, right) {
-  const leftOccurrence = left.occurrenceAt ? Date.parse(left.occurrenceAt) : Infinity
+  const leftOccurrence = left.occurrenceAt
+    ? Date.parse(left.occurrenceAt)
+    : Infinity
   const rightOccurrence = right.occurrenceAt
     ? Date.parse(right.occurrenceAt)
     : Infinity
@@ -276,7 +282,9 @@ function compareDuplicateRecords(left, right) {
   }
 
   const leftModified = left.modifiedAt ? Date.parse(left.modifiedAt) : Infinity
-  const rightModified = right.modifiedAt ? Date.parse(right.modifiedAt) : Infinity
+  const rightModified = right.modifiedAt
+    ? Date.parse(right.modifiedAt)
+    : Infinity
   if (leftModified !== rightModified) {
     return leftModified - rightModified
   }
@@ -285,11 +293,16 @@ function compareDuplicateRecords(left, right) {
 }
 
 function createGroupId(value) {
-  return crypto.createHash('sha1').update(String(value || '')).digest('hex')
+  return crypto
+    .createHash('sha1')
+    .update(String(value || ''))
+    .digest('hex')
 }
 
 function normalizePath(value) {
-  return String(value || '').trim().replace(/\\/g, '/')
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
 }
 
 function ensureDir(dirPath) {

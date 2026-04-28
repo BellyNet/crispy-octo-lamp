@@ -31,7 +31,9 @@ function getFooterRowOffset(index) {
 }
 
 function fitPlainText(text, maxWidth = getTerminalWidth()) {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim()
+  const normalized = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (!normalized) return ''
   if (normalized.length <= maxWidth) return normalized
   if (maxWidth <= 3) return normalized.slice(0, maxWidth)
@@ -339,7 +341,12 @@ function logProgress(current, total, options = {}) {
   setPinnedFooter([`${leftText}${bar}`, chalk.gray(detailLine)])
 }
 
-function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {}) {
+function logLazyProgress(
+  percent,
+  downloadedBytes,
+  totalBytes = 0,
+  options = {}
+) {
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
   const ratio = safePercent / 100
   const leftText = `${chalk.cyan(`${safePercent.toFixed(1)}%`)} ${chalk.magentaBright('🐷')} ${chalk.gray('slow stuffing...')} `
@@ -355,7 +362,8 @@ function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {})
     totalBytes > 0 && Number.isFinite(options.etaSeconds)
       ? `ETA ${formatDuration(options.etaSeconds * 1000)}`
       : null,
-    Number.isFinite(options.completedCount) && Number.isFinite(options.totalCount)
+    Number.isFinite(options.completedCount) &&
+    Number.isFinite(options.totalCount)
       ? `${options.completedCount}/${options.totalCount} done`
       : null,
     Number.isFinite(options.activeCount) && options.activeCount > 0

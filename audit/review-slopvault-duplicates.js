@@ -32,7 +32,10 @@ const manifestDir = path.resolve(
 const dashboardDir = path.resolve(
   String(argv['dashboard-dir'] || path.join(auditDir, 'dashboard'))
 )
-const sourceManifestPath = path.join(manifestDir, 'slopvault-manifest-latest.json')
+const sourceManifestPath = path.join(
+  manifestDir,
+  'slopvault-manifest-latest.json'
+)
 const duplicateManifestPath = path.join(
   manifestDir,
   'slopvault-duplicate-manifest-latest.json'
@@ -118,7 +121,11 @@ function startServer() {
         )
 
         if (req.method === 'GET' && url.pathname === '/') {
-          return sendFile(res, duplicateDashboardPath, 'text/html; charset=utf-8')
+          return sendFile(
+            res,
+            duplicateDashboardPath,
+            'text/html; charset=utf-8'
+          )
         }
 
         if (req.method === 'GET' && url.pathname === '/media') {
@@ -174,7 +181,11 @@ async function applyDecisions(req, res) {
   const groups = Array.isArray(payload?.groups) ? payload.groups : []
 
   if (!decisions.length) {
-    return sendJson(res, { ok: false, error: 'No duplicate decisions were provided.' }, 400)
+    return sendJson(
+      res,
+      { ok: false, error: 'No duplicate decisions were provided.' },
+      400
+    )
   }
 
   fs.writeFileSync(
@@ -191,7 +202,11 @@ async function applyDecisions(req, res) {
     )
   )
 
-  await runNodeScript('audit-slopvault.js', ['--apply', '--decisions', duplicateDecisionsPath])
+  await runNodeScript('audit-slopvault.js', [
+    '--apply',
+    '--decisions',
+    duplicateDecisionsPath,
+  ])
   await runNodeScript('manifest-slopvault.js', ['--hash'])
   await runNodeScript('manifest-slopvault-duplicates.js', [])
 
@@ -207,10 +222,14 @@ function runNodeScript(scriptName, args) {
   return new Promise((resolve, reject) => {
     console.log(`> node audit/${scriptName} ${args.join(' ')}`.trim())
 
-    const child = spawn(process.execPath, [path.join(auditDir, scriptName), ...args], {
-      cwd: rootDir,
-      stdio: 'inherit',
-    })
+    const child = spawn(
+      process.execPath,
+      [path.join(auditDir, scriptName), ...args],
+      {
+        cwd: rootDir,
+        stdio: 'inherit',
+      }
+    )
 
     child.on('error', reject)
     child.on('exit', (code) => {
@@ -261,7 +280,11 @@ function sendMedia(req, res, filePath) {
 
   const resolved = path.resolve(filePath)
   if (!fs.existsSync(resolved)) {
-    return sendJson(res, { ok: false, error: `Missing media: ${resolved}` }, 404)
+    return sendJson(
+      res,
+      { ok: false, error: `Missing media: ${resolved}` },
+      404
+    )
   }
 
   const stat = fs.statSync(resolved)

@@ -1,962 +1,1166 @@
-﻿<!DOCTYPE html>
+﻿<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dataset Dashboard</title>
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --bg: #0d0d12;
-  --sidebar-bg: #13131a;
-  --card-bg: #1a1a24;
-  --card-hover: #21212e;
-  --border: #2a2a3a;
-  --accent: #7c6cfc;
-  --accent-dim: #5a4dcc;
-  --text: #e0e0f0;
-  --muted: #7070a0;
-  --tag-image: #2d6a4f;
-  --tag-gif: #7b4f9e;
-  --tag-video: #9e4f4f;
-  --sidebar-w: 240px;
-}
-
-html, body { height: 100%; overflow: hidden; }
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  display: flex;
-  font-size: 14px;
-}
-
-/* ─── SIDEBAR ─────────────────────────────────────────────── */
-#sidebar {
-  width: var(--sidebar-w);
-  min-width: var(--sidebar-w);
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.sidebar-header {
-  padding: 16px 12px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sidebar-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  text-transform: uppercase;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-#user-count {
-  background: var(--border);
-  color: var(--muted);
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 10px;
-}
-
-#user-search {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  padding: 6px 10px;
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s;
-}
-#user-search:focus { border-color: var(--accent); }
-#user-search::placeholder { color: var(--muted); }
-
-#user-list {
-  list-style: none;
-  overflow-y: auto;
-  flex: 1;
-  padding: 6px 0;
-}
-#user-list::-webkit-scrollbar { width: 4px; }
-#user-list::-webkit-scrollbar-track { background: transparent; }
-#user-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-.user-item {
-  padding: 7px 14px;
-  cursor: pointer;
-  border-left: 3px solid transparent;
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-  line-height: 1.4;
-}
-.user-item:hover { background: var(--card-bg); color: var(--text); }
-.user-item.active {
-  background: var(--card-bg);
-  color: var(--text);
-  border-left-color: var(--accent);
-  font-weight: 500;
-}
-
-/* ─── MAIN ────────────────────────────────────────────────── */
-#main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-}
-
-#main-header {
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-
-#header-left { flex: 1; min-width: 0; }
-
-#current-user-name {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#media-stats {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
-  display: block;
-}
-
-#filters {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.filter-btn {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 5px 12px;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.filter-btn:hover { border-color: var(--accent); color: var(--text); }
-.filter-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-/* ─── SORT BAR ────────────────────────────────────────────── */
-#sort-bar {
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.sort-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
-
-.sort-btn {
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  transition: all 0.1s;
-}
-.sort-btn:hover { background: var(--card-bg); color: var(--text); }
-.sort-btn.active { color: var(--accent); font-weight: 600; }
-
-#date-range { margin-left: auto; font-size: 11px; color: var(--muted); font-style: italic; }
-
-/* ─── SOURCE LINKS ───────────────────────────────────────────── */
-#source-links {
-  display: flex;
-  gap: 5px;
-  margin-top: 5px;
-  flex-wrap: wrap;
-}
-
-.src-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--muted);
-  text-decoration: none;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  padding: 2px 7px;
-  border-radius: 4px;
-  letter-spacing: 0.04em;
-  transition: color 0.12s, border-color 0.12s;
-  white-space: nowrap;
-}
-.src-link:hover { color: var(--accent); border-color: var(--accent); }
-.src-link svg { flex-shrink: 0; opacity: 0.7; }
-
-/* ─── (removed) WIKI PANEL ─── old styles gone ───────────────── */
-#wiki-inner {
-  display: flex;
-  gap: 0;
-  padding: 10px 20px;
-  align-items: flex-start;
-}
-
-
-/* ─── GRID ────────────────────────────────────────────────── */
-#grid-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-}
-#grid-container::-webkit-scrollbar { width: 6px; }
-#grid-container::-webkit-scrollbar-track { background: transparent; }
-#grid-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-#media-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 8px;
-}
-
-.media-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-  position: relative;
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
-  aspect-ratio: 1;
-  display: flex;
-  flex-direction: column;
-}
-.media-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--accent);
-  box-shadow: 0 4px 20px rgba(124, 108, 252, 0.2);
-}
-.media-card:hover .card-overlay { opacity: 1; }
-
-.card-thumb {
-  flex: 1;
-  overflow: hidden;
-  background: #0a0a10;
-  position: relative;
-  min-height: 0;
-}
-
-.card-thumb img,
-.card-thumb video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.card-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 50%);
-  opacity: 0;
-  transition: opacity 0.2s;
-  pointer-events: none;
-}
-
-.play-icon {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 40px;
-  height: 40px;
-  background: rgba(0,0,0,0.6);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-.play-icon svg { fill: white; width: 18px; height: 18px; margin-left: 2px; }
-
-.card-footer {
-  padding: 5px 7px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  background: var(--card-bg);
-  flex-shrink: 0;
-}
-
-.card-date {
-  font-size: 10px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.3;
-}
-
-.source-badge {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-.source-badge.filename  { background: #1a3a2a; color: #6ec89a; }
-.source-badge.exif      { background: #1a2a3a; color: #6aaee8; }
-.source-badge.mp4       { background: #2a1a3a; color: #b06ae8; }
-.source-badge.uploaded  { background: #2a2a1a; color: #c8b46e; }
-.source-badge.filesystem{ background: #2a1a1a; color: #e88a6a; }
-
-.type-badge {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 2px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  text-transform: uppercase;
-}
-.type-badge.image { background: var(--tag-image); color: #a8d5be; }
-.type-badge.gif   { background: var(--tag-gif);   color: #d4a8ef; }
-.type-badge.video { background: var(--tag-video); color: #efa8a8; }
-
-/* ─── EMPTY / LOADING STATE ──────────────────────────────── */
-#empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--muted);
-  gap: 12px;
-  padding: 40px;
-  text-align: center;
-}
-#empty-state svg { opacity: 0.3; }
-#empty-state p { font-size: 15px; }
-#empty-state small { font-size: 12px; }
-
-#loading-indicator {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  flex-direction: column;
-  gap: 14px;
-  color: var(--muted);
-}
-
-.spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ─── LIGHTBOX ────────────────────────────────────────────── */
-#lightbox {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.94);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-#lightbox.hidden { display: none; }
-
-#lb-media-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 0;
-  padding: 60px 80px 0;
-}
-
-#lb-media-wrap img,
-#lb-media-wrap video {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: 4px;
-  display: block;
-}
-
-#lb-info-bar {
-  width: 100%;
-  padding: 14px 80px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border-top: 1px solid var(--border);
-  margin-top: 12px;
-  flex-shrink: 0;
-}
-
-#lb-filename {
-  font-size: 13px;
-  color: var(--muted);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#lb-date { font-size: 13px; color: var(--text); font-weight: 500; flex-shrink: 0; }
-#lb-counter { font-size: 12px; color: var(--muted); flex-shrink: 0; }
-
-.lb-nav {
-  position: fixed;
-  top: 50%;
-  transform: translateY(-50%);
-  background: rgba(255,255,255,0.08);
-  border: none;
-  color: var(--text);
-  font-size: 28px;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-  z-index: 1001;
-}
-.lb-nav:hover { background: rgba(124,108,252,0.4); }
-#lb-prev { left: 16px; }
-#lb-next { right: 16px; }
-
-#lb-close {
-  position: fixed;
-  top: 16px;
-  right: 20px;
-  background: rgba(255,255,255,0.08);
-  border: none;
-  color: var(--text);
-  font-size: 20px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1001;
-  transition: background 0.15s;
-}
-#lb-close:hover { background: rgba(255,80,80,0.4); }
-
-#lb-type-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 3px 8px;
-  border-radius: 4px;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
-/* ─── NO-RESULTS ─────────────────────────────────────────── */
-#no-results {
-  display: none;
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 14px;
-}
-</style>
-</head>
-<body>
-
-<!-- SIDEBAR -->
-<aside id="sidebar">
-  <div class="sidebar-header">
-    <div class="sidebar-title">
-      Users <span id="user-count">0</span>
-    </div>
-    <input type="search" id="user-search" placeholder="Filter users…" autocomplete="off">
-  </div>
-  <ul id="user-list"></ul>
-</aside>
-
-<!-- MAIN CONTENT -->
-<div id="main">
-  <header id="main-header">
-    <div id="header-left">
-      <h1 id="current-user-name">Select a user</h1>
-      <div id="source-links"></div>
-      <span id="media-stats"></span>
-    </div>
-    <div id="filters">
-      <button class="filter-btn active" data-type="all">All</button>
-      <button class="filter-btn" data-type="image">Images</button>
-      <button class="filter-btn" data-type="gif">GIFs</button>
-      <button class="filter-btn" data-type="video">Videos</button>
-    </div>
-  </header>
-
-  <div id="sort-bar" style="display:none">
-    <span class="sort-label">Sort</span>
-    <button class="sort-btn active" data-sort="asc">Oldest first</button>
-    <button class="sort-btn" data-sort="desc">Newest first</button>
-    <span id="date-range"></span>
-  </div>
-
-  <div id="grid-container">
-    <div id="empty-state">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-        <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-        <polyline points="21 15 16 10 5 21"/>
-      </svg>
-      <p>Select a user from the sidebar</p>
-      <small>Media is sorted by creation date from filename metadata</small>
-    </div>
-
-    <div id="loading-indicator">
-      <div class="spinner"></div>
-      <span>Loading media…</span>
-    </div>
-
-    <div id="no-results">No media matches this filter.</div>
-
-    <div id="media-grid"></div>
-  </div>
-</div>
-
-<!-- LIGHTBOX -->
-<div id="lightbox" class="hidden">
-  <button id="lb-close" title="Close (Esc)">✕</button>
-  <button class="lb-nav" id="lb-prev" title="Previous (←)">‹</button>
-  <button class="lb-nav" id="lb-next" title="Next (→)">›</button>
-  <div id="lb-media-wrap"></div>
-  <div id="lb-info-bar">
-    <span id="lb-type-badge" class="type-badge"></span>
-    <span id="lb-date"></span>
-    <span id="lb-filename"></span>
-    <span id="lb-counter"></span>
-  </div>
-</div>
-
-<script>
-'use strict'
-
-// ─── STATE ────────────────────────────────────────────────────────────
-let allMedia = []      // full list for current user
-let filtered = []      // filtered + sorted list
-let activeType = 'all'
-let activeSort = 'asc'
-let lbIndex = 0        // lightbox current index into filtered[]
-
-// ─── DOM REFS ─────────────────────────────────────────────────────────
-const userListEl    = document.getElementById('user-list')
-const userSearchEl  = document.getElementById('user-search')
-const userCountEl   = document.getElementById('user-count')
-const currentNameEl = document.getElementById('current-user-name')
-const mediaStatsEl  = document.getElementById('media-stats')
-const filterBtns    = document.querySelectorAll('.filter-btn')
-const sortBtns      = document.querySelectorAll('.sort-btn')
-const sortBar       = document.getElementById('sort-bar')
-const dateRangeEl   = document.getElementById('date-range')
-const gridEl        = document.getElementById('media-grid')
-const emptyState    = document.getElementById('empty-state')
-const loadingEl     = document.getElementById('loading-indicator')
-const noResultsEl   = document.getElementById('no-results')
-const lightbox      = document.getElementById('lightbox')
-const lbMediaWrap   = document.getElementById('lb-media-wrap')
-const lbDate        = document.getElementById('lb-date')
-const lbFilename    = document.getElementById('lb-filename')
-const lbCounter     = document.getElementById('lb-counter')
-const lbTypeBadge   = document.getElementById('lb-type-badge')
-
-// ─── HELPERS ──────────────────────────────────────────────────────────
-function formatDate(iso) {
-  if (!iso) return 'Unknown date'
-  const d = new Date(iso)
-  return d.toLocaleString('en-US', {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true
-  })
-}
-
-function formatDateShort(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
-// ─── USERS ────────────────────────────────────────────────────────────
-let usersData = []  // [{ name, sources }]
-
-async function loadUsers() {
-  const res = await fetch('/api/users')
-  usersData = await res.json()
-  userCountEl.textContent = usersData.length
-  renderUserList(usersData)
-}
-
-function renderUserList(users) {
-  userListEl.innerHTML = ''
-  for (const u of users) {
-    const li = document.createElement('li')
-    li.className = 'user-item'
-    li.textContent = u.name
-    li.dataset.username = u.name
-    li.addEventListener('click', () => selectUser(u, li))
-    userListEl.appendChild(li)
-  }
-}
-
-userSearchEl.addEventListener('input', () => {
-  const q = userSearchEl.value.toLowerCase()
-  for (const li of userListEl.querySelectorAll('.user-item')) {
-    li.style.display = li.dataset.username.toLowerCase().includes(q) ? '' : 'none'
-  }
-})
-
-// ─── SOURCE LINKS ─────────────────────────────────────────────────────────────
-const sourceLinksEl = document.getElementById('source-links')
-
-const LINK_ICON = `<svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3H3a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V7"/><polyline points="8 1 11 1 11 4"/><line x1="5" y1="7" x2="11" y2="1"/></svg>`
-
-const SERVICE_LABELS = {
-  onlyfans: 'OnlyFans', fansly: 'Fansly', patreon: 'Patreon',
-  candfans: 'C&F', subscribestar: 'SubStar', gumroad: 'Gumroad',
-  afdian: 'Afdian', boosty: 'Boosty',
-}
-
-function renderSourceLinks(sources) {
-  sourceLinksEl.innerHTML = ''
-  if (!sources) return
-  for (const url of (sources.stufferdb || [])) {
-    const a = document.createElement('a')
-    a.className = 'src-link'
-    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'
-    a.innerHTML = `${LINK_ICON} StufferDB`
-    sourceLinksEl.appendChild(a)
-  }
-  for (const url of (sources.coomer || [])) {
-    const service = url.split('/')[3] || 'coomer'
-    const a = document.createElement('a')
-    a.className = 'src-link'
-    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'
-    a.innerHTML = `${LINK_ICON} ${SERVICE_LABELS[service] || service}`
-    sourceLinksEl.appendChild(a)
-  }
-}
-
-async function selectUser(userObj, liEl) {
-  const username = typeof userObj === 'string' ? userObj : userObj.name
-  const sources  = typeof userObj === 'object' ? userObj.sources : null
-
-  userListEl.querySelectorAll('.user-item').forEach(el => el.classList.remove('active'))
-  if (liEl) liEl.classList.add('active')
-
-  activeType = 'all'
-  activeSort = 'asc'
-  filterBtns.forEach(b => b.classList.toggle('active', b.dataset.type === 'all'))
-  sortBtns.forEach(b => b.classList.toggle('active', b.dataset.sort === 'asc'))
-
-  currentNameEl.textContent = username
-  renderSourceLinks(sources)
-  mediaStatsEl.textContent = ''
-  gridEl.innerHTML = ''
-  emptyState.style.display = 'none'
-  noResultsEl.style.display = 'none'
-  sortBar.style.display = 'none'
-  loadingEl.style.display = 'flex'
-
-  const mediaRes = await fetch(`/api/users/${encodeURIComponent(username)}/media`).catch(() => null)
-  allMedia = mediaRes?.ok ? await mediaRes.json() : []
-
-  loadingEl.style.display = 'none'
-  sortBar.style.display = allMedia.length ? 'flex' : 'none'
-  applyFilter()
-  updateStats()
-}
-
-// ─── FILTER + SORT ────────────────────────────────────────────────────
-function applyFilter() {
-  filtered = activeType === 'all'
-    ? [...allMedia]
-    : allMedia.filter(m => m.type === activeType)
-
-  if (activeSort === 'desc') filtered.reverse()
-
-  renderGrid()
-  updateDateRange()
-}
-
-filterBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    activeType = btn.dataset.type
-    filterBtns.forEach(b => b.classList.toggle('active', b === btn))
-    applyFilter()
-  })
-})
-
-sortBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    activeSort = btn.dataset.sort
-    sortBtns.forEach(b => b.classList.toggle('active', b === btn))
-    applyFilter()
-  })
-})
-
-function updateStats() {
-  if (!allMedia.length) { mediaStatsEl.textContent = 'No media found'; return }
-  const imgs  = allMedia.filter(m => m.type === 'image').length
-  const gifs  = allMedia.filter(m => m.type === 'gif').length
-  const vids  = allMedia.filter(m => m.type === 'video').length
-  const parts = []
-  if (imgs) parts.push(`${imgs} image${imgs !== 1 ? 's' : ''}`)
-  if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
-  if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
-  mediaStatsEl.textContent = parts.join(' · ')
-
-  // Update filter button labels with counts
-  document.querySelector('.filter-btn[data-type="all"]').textContent = `All (${allMedia.length})`
-  document.querySelector('.filter-btn[data-type="image"]').textContent = imgs ? `Images (${imgs})` : 'Images'
-  document.querySelector('.filter-btn[data-type="gif"]').textContent = gifs ? `GIFs (${gifs})` : 'GIFs'
-  document.querySelector('.filter-btn[data-type="video"]').textContent = vids ? `Videos (${vids})` : 'Videos'
-}
-
-function updateDateRange() {
-  if (!filtered.length) { dateRangeEl.textContent = ''; return }
-  const withDates = filtered.filter(m => m.date)
-  if (!withDates.length) { dateRangeEl.textContent = ''; return }
-  const earliest = withDates[activeSort === 'asc' ? 0 : withDates.length - 1]
-  const latest   = withDates[activeSort === 'asc' ? withDates.length - 1 : 0]
-  dateRangeEl.textContent = `${formatDateShort(earliest.date)} – ${formatDateShort(latest.date)}`
-}
-
-// ─── GRID RENDER ──────────────────────────────────────────────────────
-function renderGrid() {
-  gridEl.innerHTML = ''
-
-  if (!filtered.length) {
-    noResultsEl.style.display = 'block'
-    return
-  }
-  noResultsEl.style.display = 'none'
-
-  const frag = document.createDocumentFragment()
-
-  filtered.forEach((item, i) => {
-    const card = document.createElement('div')
-    card.className = 'media-card'
-    card.dataset.index = i
-
-    const thumb = document.createElement('div')
-    thumb.className = 'card-thumb'
-
-    if (item.type === 'video') {
-      // Video: real thumbnail with play icon overlay
-      const img = document.createElement('img')
-      img.loading = 'lazy'
-      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
-      if (item.thumbnailUrl) {
-        img.src = item.thumbnailUrl
-        img.onerror = () => {
-          // Fallback to plain play icon if thumbnail generation failed
-          img.remove()
-          const ph = document.createElement('div')
-          ph.style.cssText = 'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;'
-          thumb.insertBefore(ph, thumb.firstChild)
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dataset Dashboard</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0d0d12;
+        --sidebar-bg: #13131a;
+        --card-bg: #1a1a24;
+        --card-hover: #21212e;
+        --border: #2a2a3a;
+        --accent: #7c6cfc;
+        --accent-dim: #5a4dcc;
+        --text: #e0e0f0;
+        --muted: #7070a0;
+        --tag-image: #2d6a4f;
+        --tag-gif: #7b4f9e;
+        --tag-video: #9e4f4f;
+        --sidebar-w: 240px;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        font-size: 14px;
+      }
+
+      /* ─── SIDEBAR ─────────────────────────────────────────────── */
+      #sidebar {
+        width: var(--sidebar-w);
+        min-width: var(--sidebar-w);
+        background: var(--sidebar-bg);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+
+      .sidebar-header {
+        padding: 16px 12px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .sidebar-title {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      #user-count {
+        background: var(--border);
+        color: var(--muted);
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 10px;
+      }
+
+      #user-search {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 6px 10px;
+        font-size: 13px;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      #user-search:focus {
+        border-color: var(--accent);
+      }
+      #user-search::placeholder {
+        color: var(--muted);
+      }
+
+      #user-list {
+        list-style: none;
+        overflow-y: auto;
+        flex: 1;
+        padding: 6px 0;
+      }
+      #user-list::-webkit-scrollbar {
+        width: 4px;
+      }
+      #user-list::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #user-list::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+
+      .user-item {
+        padding: 7px 14px;
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        font-size: 13px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition:
+          background 0.1s,
+          color 0.1s,
+          border-color 0.1s;
+        line-height: 1.4;
+      }
+      .user-item:hover {
+        background: var(--card-bg);
+        color: var(--text);
+      }
+      .user-item.active {
+        background: var(--card-bg);
+        color: var(--text);
+        border-left-color: var(--accent);
+        font-weight: 500;
+      }
+
+      /* ─── MAIN ────────────────────────────────────────────────── */
+      #main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      #main-header {
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+      }
+
+      #header-left {
+        flex: 1;
+        min-width: 0;
+      }
+
+      #current-user-name {
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #media-stats {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+        display: block;
+      }
+
+      #filters {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .filter-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 5px 12px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .filter-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .filter-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      /* ─── SORT BAR ────────────────────────────────────────────── */
+      #sort-bar {
+        padding: 8px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+
+      .sort-label {
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: 10px;
+      }
+
+      .sort-btn {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        transition: all 0.1s;
+      }
+      .sort-btn:hover {
+        background: var(--card-bg);
+        color: var(--text);
+      }
+      .sort-btn.active {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      #date-range {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      /* ─── SOURCE LINKS ───────────────────────────────────────────── */
+      #source-links {
+        display: flex;
+        gap: 5px;
+        margin-top: 5px;
+        flex-wrap: wrap;
+      }
+
+      .src-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--muted);
+        text-decoration: none;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        padding: 2px 7px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+        transition:
+          color 0.12s,
+          border-color 0.12s;
+        white-space: nowrap;
+      }
+      .src-link:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .src-link svg {
+        flex-shrink: 0;
+        opacity: 0.7;
+      }
+
+      /* ─── (removed) WIKI PANEL ─── old styles gone ───────────────── */
+      #wiki-inner {
+        display: flex;
+        gap: 0;
+        padding: 10px 20px;
+        align-items: flex-start;
+      }
+
+      /* ─── GRID ────────────────────────────────────────────────── */
+      #grid-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 20px;
+      }
+      #grid-container::-webkit-scrollbar {
+        width: 6px;
+      }
+      #grid-container::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #grid-container::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 3px;
+      }
+
+      #media-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 8px;
+      }
+
+      .media-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        cursor: pointer;
+        position: relative;
+        transition:
+          transform 0.15s,
+          border-color 0.15s,
+          box-shadow 0.15s;
+        aspect-ratio: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .media-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+        box-shadow: 0 4px 20px rgba(124, 108, 252, 0.2);
+      }
+      .media-card:hover .card-overlay {
+        opacity: 1;
+      }
+
+      .card-thumb {
+        flex: 1;
+        overflow: hidden;
+        background: #0a0a10;
+        position: relative;
+        min-height: 0;
+      }
+
+      .card-thumb img,
+      .card-thumb video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .card-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          to top,
+          rgba(0, 0, 0, 0.8) 0%,
+          transparent 50%
+        );
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+      }
+
+      .play-icon {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.6);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+      .play-icon svg {
+        fill: white;
+        width: 18px;
+        height: 18px;
+        margin-left: 2px;
+      }
+
+      .card-footer {
+        padding: 5px 7px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        background: var(--card-bg);
+        flex-shrink: 0;
+      }
+
+      .card-date {
+        font-size: 10px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.3;
+      }
+
+      .source-badge {
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        padding: 1px 4px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        text-transform: uppercase;
+        opacity: 0.7;
+      }
+      .source-badge.filename {
+        background: #1a3a2a;
+        color: #6ec89a;
+      }
+      .source-badge.exif {
+        background: #1a2a3a;
+        color: #6aaee8;
+      }
+      .source-badge.mp4 {
+        background: #2a1a3a;
+        color: #b06ae8;
+      }
+      .source-badge.uploaded {
+        background: #2a2a1a;
+        color: #c8b46e;
+      }
+      .source-badge.filesystem {
+        background: #2a1a1a;
+        color: #e88a6a;
+      }
+
+      .type-badge {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        padding: 2px 5px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        text-transform: uppercase;
+      }
+      .type-badge.image {
+        background: var(--tag-image);
+        color: #a8d5be;
+      }
+      .type-badge.gif {
+        background: var(--tag-gif);
+        color: #d4a8ef;
+      }
+      .type-badge.video {
+        background: var(--tag-video);
+        color: #efa8a8;
+      }
+
+      /* ─── EMPTY / LOADING STATE ──────────────────────────────── */
+      #empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--muted);
+        gap: 12px;
+        padding: 40px;
+        text-align: center;
+      }
+      #empty-state svg {
+        opacity: 0.3;
+      }
+      #empty-state p {
+        font-size: 15px;
+      }
+      #empty-state small {
+        font-size: 12px;
+      }
+
+      #loading-indicator {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        flex-direction: column;
+        gap: 14px;
+        color: var(--muted);
+      }
+
+      .spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
         }
       }
-      thumb.appendChild(img)
-      const icon = document.createElement('div')
-      icon.className = 'play-icon'
-      icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
-      thumb.appendChild(icon)
-    } else {
-      // Image / GIF: lazy load
-      const img = document.createElement('img')
-      img.loading = 'lazy'
-      img.src = item.url
-      img.alt = item.filename
-      img.onerror = () => { img.style.opacity = '0.3'; img.alt = '⚠ load error' }
-      thumb.appendChild(img)
-    }
 
-    const overlay = document.createElement('div')
-    overlay.className = 'card-overlay'
-    thumb.appendChild(overlay)
-
-    const footer = document.createElement('div')
-    footer.className = 'card-footer'
-
-    const badge = document.createElement('span')
-    badge.className = `type-badge ${item.type}`
-    badge.textContent = item.type === 'image' ? 'img' : item.type
-
-    const dateWrap = document.createElement('span')
-    dateWrap.style.cssText = 'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
-
-    if (item.source && item.source !== 'filename') {
-      const srcBadge = document.createElement('span')
-      srcBadge.className = `source-badge ${item.source}`
-      const labels = { exif: 'exif', mp4: 'mp4', uploaded: 'upload', filesystem: 'local*' }
-      srcBadge.textContent = labels[item.source] || item.source
-      const tips = {
-        exif: 'Date from embedded EXIF metadata',
-        mp4: 'Date from video container metadata (ffprobe)',
-        uploaded: 'Platform upload date (set by milkmaid)',
-        filesystem: '* Local download date — least reliable',
+      /* ─── LIGHTBOX ────────────────────────────────────────────── */
+      #lightbox {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.94);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
       }
-      srcBadge.title = tips[item.source] || item.source
-      dateWrap.appendChild(srcBadge)
-    }
+      #lightbox.hidden {
+        display: none;
+      }
 
-    const dateEl = document.createElement('span')
-    dateEl.className = 'card-date'
-    dateEl.textContent = item.date
-      ? new Date(item.date).toLocaleDateString('en-US', { year: '2-digit', month: 'numeric', day: 'numeric' })
-      : '—'
-    dateEl.title = formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
-    dateWrap.appendChild(dateEl)
+      #lb-media-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 0;
+        padding: 60px 80px 0;
+      }
 
-    footer.appendChild(badge)
-    footer.appendChild(dateWrap)
-    card.appendChild(thumb)
-    card.appendChild(footer)
+      #lb-media-wrap img,
+      #lb-media-wrap video {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        border-radius: 4px;
+        display: block;
+      }
 
-    card.addEventListener('click', () => openLightbox(i))
-    frag.appendChild(card)
-  })
+      #lb-info-bar {
+        width: 100%;
+        padding: 14px 80px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        border-top: 1px solid var(--border);
+        margin-top: 12px;
+        flex-shrink: 0;
+      }
 
-  gridEl.appendChild(frag)
-}
+      #lb-filename {
+        font-size: 13px;
+        color: var(--muted);
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #lb-date {
+        font-size: 13px;
+        color: var(--text);
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+      #lb-counter {
+        font-size: 12px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
 
-// ─── LIGHTBOX ─────────────────────────────────────────────────────────
-function openLightbox(index) {
-  lbIndex = index
-  renderLightboxItem()
-  lightbox.classList.remove('hidden')
-  document.body.style.overflow = 'hidden'
-}
+      .lb-nav {
+        position: fixed;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(255, 255, 255, 0.08);
+        border: none;
+        color: var(--text);
+        font-size: 28px;
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s;
+        z-index: 1001;
+      }
+      .lb-nav:hover {
+        background: rgba(124, 108, 252, 0.4);
+      }
+      #lb-prev {
+        left: 16px;
+      }
+      #lb-next {
+        right: 16px;
+      }
 
-function closeLightbox() {
-  lightbox.classList.add('hidden')
-  document.body.style.overflow = ''
-  lbMediaWrap.innerHTML = ''
-}
+      #lb-close {
+        position: fixed;
+        top: 16px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.08);
+        border: none;
+        color: var(--text);
+        font-size: 20px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1001;
+        transition: background 0.15s;
+      }
+      #lb-close:hover {
+        background: rgba(255, 80, 80, 0.4);
+      }
 
-function renderLightboxItem() {
-  const item = filtered[lbIndex]
-  if (!item) return
+      #lb-type-badge {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        padding: 3px 8px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        flex-shrink: 0;
+      }
 
-  lbMediaWrap.innerHTML = ''
+      /* ─── NO-RESULTS ─────────────────────────────────────────── */
+      #no-results {
+        display: none;
+        padding: 60px 20px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">Users <span id="user-count">0</span></div>
+        <input
+          type="search"
+          id="user-search"
+          placeholder="Filter users…"
+          autocomplete="off"
+        />
+      </div>
+      <ul id="user-list"></ul>
+    </aside>
 
-  if (item.type === 'video') {
-    const video = document.createElement('video')
-    video.src = item.url
-    video.controls = true
-    video.autoplay = true
-    video.loop = true
-    lbMediaWrap.appendChild(video)
-  } else {
-    const img = document.createElement('img')
-    img.src = item.url
-    img.alt = item.filename
-    lbMediaWrap.appendChild(img)
-  }
+    <!-- MAIN CONTENT -->
+    <div id="main">
+      <header id="main-header">
+        <div id="header-left">
+          <h1 id="current-user-name">Select a user</h1>
+          <div id="source-links"></div>
+          <span id="media-stats"></span>
+        </div>
+        <div id="filters">
+          <button class="filter-btn active" data-type="all">All</button>
+          <button class="filter-btn" data-type="image">Images</button>
+          <button class="filter-btn" data-type="gif">GIFs</button>
+          <button class="filter-btn" data-type="video">Videos</button>
+        </div>
+      </header>
 
-  const sourceTips = {
-    filename: 'filename timestamp',
-    exif: 'EXIF metadata',
-    mp4: 'MP4 container (ffprobe)',
-    uploaded: 'platform upload date',
-    filesystem: 'local download date*',
-  }
-  const srcLabel = item.source ? ` [${sourceTips[item.source] || item.source}]` : ''
-  lbDate.textContent = formatDate(item.date) + srcLabel
-  lbFilename.textContent = item.filename
-  lbCounter.textContent = `${lbIndex + 1} / ${filtered.length}`
+      <div id="sort-bar" style="display: none">
+        <span class="sort-label">Sort</span>
+        <button class="sort-btn active" data-sort="asc">Oldest first</button>
+        <button class="sort-btn" data-sort="desc">Newest first</button>
+        <span id="date-range"></span>
+      </div>
 
-  lbTypeBadge.className = `type-badge ${item.type}`
-  lbTypeBadge.textContent = item.type === 'image' ? 'img' : item.type
-}
+      <div id="grid-container">
+        <div id="empty-state">
+          <svg
+            width="64"
+            height="64"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+          <p>Select a user from the sidebar</p>
+          <small>Media is sorted by creation date from filename metadata</small>
+        </div>
 
-function lbPrev() {
-  if (!filtered.length) return
-  lbIndex = (lbIndex - 1 + filtered.length) % filtered.length
-  renderLightboxItem()
-}
+        <div id="loading-indicator">
+          <div class="spinner"></div>
+          <span>Loading media…</span>
+        </div>
 
-function lbNext() {
-  if (!filtered.length) return
-  lbIndex = (lbIndex + 1) % filtered.length
-  renderLightboxItem()
-}
+        <div id="no-results">No media matches this filter.</div>
 
-document.getElementById('lb-close').addEventListener('click', closeLightbox)
-document.getElementById('lb-prev').addEventListener('click', lbPrev)
-document.getElementById('lb-next').addEventListener('click', lbNext)
+        <div id="media-grid"></div>
+      </div>
+    </div>
 
-lightbox.addEventListener('click', (e) => {
-  if (e.target === lightbox) closeLightbox()
-})
+    <!-- LIGHTBOX -->
+    <div id="lightbox" class="hidden">
+      <button id="lb-close" title="Close (Esc)">✕</button>
+      <button class="lb-nav" id="lb-prev" title="Previous (←)">‹</button>
+      <button class="lb-nav" id="lb-next" title="Next (→)">›</button>
+      <div id="lb-media-wrap"></div>
+      <div id="lb-info-bar">
+        <span id="lb-type-badge" class="type-badge"></span>
+        <span id="lb-date"></span>
+        <span id="lb-filename"></span>
+        <span id="lb-counter"></span>
+      </div>
+    </div>
 
-document.addEventListener('keydown', (e) => {
-  if (lightbox.classList.contains('hidden')) return
-  if (e.key === 'Escape') closeLightbox()
-  else if (e.key === 'ArrowLeft') lbPrev()
-  else if (e.key === 'ArrowRight') lbNext()
-})
+    <script>
+      'use strict'
 
-// ─── INIT ─────────────────────────────────────────────────────────────
-loadUsers()
-</script>
-</body>
+      // ─── STATE ────────────────────────────────────────────────────────────
+      let allMedia = [] // full list for current user
+      let filtered = [] // filtered + sorted list
+      let activeType = 'all'
+      let activeSort = 'asc'
+      let lbIndex = 0 // lightbox current index into filtered[]
+
+      // ─── DOM REFS ─────────────────────────────────────────────────────────
+      const userListEl = document.getElementById('user-list')
+      const userSearchEl = document.getElementById('user-search')
+      const userCountEl = document.getElementById('user-count')
+      const currentNameEl = document.getElementById('current-user-name')
+      const mediaStatsEl = document.getElementById('media-stats')
+      const filterBtns = document.querySelectorAll('.filter-btn')
+      const sortBtns = document.querySelectorAll('.sort-btn')
+      const sortBar = document.getElementById('sort-bar')
+      const dateRangeEl = document.getElementById('date-range')
+      const gridEl = document.getElementById('media-grid')
+      const emptyState = document.getElementById('empty-state')
+      const loadingEl = document.getElementById('loading-indicator')
+      const noResultsEl = document.getElementById('no-results')
+      const lightbox = document.getElementById('lightbox')
+      const lbMediaWrap = document.getElementById('lb-media-wrap')
+      const lbDate = document.getElementById('lb-date')
+      const lbFilename = document.getElementById('lb-filename')
+      const lbCounter = document.getElementById('lb-counter')
+      const lbTypeBadge = document.getElementById('lb-type-badge')
+
+      // ─── HELPERS ──────────────────────────────────────────────────────────
+      function formatDate(iso) {
+        if (!iso) return 'Unknown date'
+        const d = new Date(iso)
+        return d.toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        })
+      }
+
+      function formatDateShort(iso) {
+        if (!iso) return '—'
+        const d = new Date(iso)
+        return d.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        })
+      }
+
+      // ─── USERS ────────────────────────────────────────────────────────────
+      let usersData = [] // [{ name, sources }]
+
+      async function loadUsers() {
+        const res = await fetch('/api/users')
+        usersData = await res.json()
+        userCountEl.textContent = usersData.length
+        renderUserList(usersData)
+      }
+
+      function renderUserList(users) {
+        userListEl.innerHTML = ''
+        for (const u of users) {
+          const li = document.createElement('li')
+          li.className = 'user-item'
+          li.textContent = u.name
+          li.dataset.username = u.name
+          li.addEventListener('click', () => selectUser(u, li))
+          userListEl.appendChild(li)
+        }
+      }
+
+      userSearchEl.addEventListener('input', () => {
+        const q = userSearchEl.value.toLowerCase()
+        for (const li of userListEl.querySelectorAll('.user-item')) {
+          li.style.display = li.dataset.username.toLowerCase().includes(q)
+            ? ''
+            : 'none'
+        }
+      })
+
+      // ─── SOURCE LINKS ─────────────────────────────────────────────────────────────
+      const sourceLinksEl = document.getElementById('source-links')
+
+      const LINK_ICON = `<svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3H3a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V7"/><polyline points="8 1 11 1 11 4"/><line x1="5" y1="7" x2="11" y2="1"/></svg>`
+
+      const SERVICE_LABELS = {
+        onlyfans: 'OnlyFans',
+        fansly: 'Fansly',
+        patreon: 'Patreon',
+        candfans: 'C&F',
+        subscribestar: 'SubStar',
+        gumroad: 'Gumroad',
+        afdian: 'Afdian',
+        boosty: 'Boosty',
+      }
+
+      function renderSourceLinks(sources) {
+        sourceLinksEl.innerHTML = ''
+        if (!sources) return
+        for (const url of sources.stufferdb || []) {
+          const a = document.createElement('a')
+          a.className = 'src-link'
+          a.href = url
+          a.target = '_blank'
+          a.rel = 'noopener noreferrer'
+          a.innerHTML = `${LINK_ICON} StufferDB`
+          sourceLinksEl.appendChild(a)
+        }
+        for (const url of sources.coomer || []) {
+          const service = url.split('/')[3] || 'coomer'
+          const a = document.createElement('a')
+          a.className = 'src-link'
+          a.href = url
+          a.target = '_blank'
+          a.rel = 'noopener noreferrer'
+          a.innerHTML = `${LINK_ICON} ${SERVICE_LABELS[service] || service}`
+          sourceLinksEl.appendChild(a)
+        }
+      }
+
+      async function selectUser(userObj, liEl) {
+        const username = typeof userObj === 'string' ? userObj : userObj.name
+        const sources = typeof userObj === 'object' ? userObj.sources : null
+
+        userListEl
+          .querySelectorAll('.user-item')
+          .forEach((el) => el.classList.remove('active'))
+        if (liEl) liEl.classList.add('active')
+
+        activeType = 'all'
+        activeSort = 'asc'
+        filterBtns.forEach((b) =>
+          b.classList.toggle('active', b.dataset.type === 'all')
+        )
+        sortBtns.forEach((b) =>
+          b.classList.toggle('active', b.dataset.sort === 'asc')
+        )
+
+        currentNameEl.textContent = username
+        renderSourceLinks(sources)
+        mediaStatsEl.textContent = ''
+        gridEl.innerHTML = ''
+        emptyState.style.display = 'none'
+        noResultsEl.style.display = 'none'
+        sortBar.style.display = 'none'
+        loadingEl.style.display = 'flex'
+
+        const mediaRes = await fetch(
+          `/api/users/${encodeURIComponent(username)}/media`
+        ).catch(() => null)
+        allMedia = mediaRes?.ok ? await mediaRes.json() : []
+
+        loadingEl.style.display = 'none'
+        sortBar.style.display = allMedia.length ? 'flex' : 'none'
+        applyFilter()
+        updateStats()
+      }
+
+      // ─── FILTER + SORT ────────────────────────────────────────────────────
+      function applyFilter() {
+        filtered =
+          activeType === 'all'
+            ? [...allMedia]
+            : allMedia.filter((m) => m.type === activeType)
+
+        if (activeSort === 'desc') filtered.reverse()
+
+        renderGrid()
+        updateDateRange()
+      }
+
+      filterBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          activeType = btn.dataset.type
+          filterBtns.forEach((b) => b.classList.toggle('active', b === btn))
+          applyFilter()
+        })
+      })
+
+      sortBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          activeSort = btn.dataset.sort
+          sortBtns.forEach((b) => b.classList.toggle('active', b === btn))
+          applyFilter()
+        })
+      })
+
+      function updateStats() {
+        if (!allMedia.length) {
+          mediaStatsEl.textContent = 'No media found'
+          return
+        }
+        const imgs = allMedia.filter((m) => m.type === 'image').length
+        const gifs = allMedia.filter((m) => m.type === 'gif').length
+        const vids = allMedia.filter((m) => m.type === 'video').length
+        const parts = []
+        if (imgs) parts.push(`${imgs} image${imgs !== 1 ? 's' : ''}`)
+        if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
+        if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
+        mediaStatsEl.textContent = parts.join(' · ')
+
+        // Update filter button labels with counts
+        document.querySelector('.filter-btn[data-type="all"]').textContent =
+          `All (${allMedia.length})`
+        document.querySelector('.filter-btn[data-type="image"]').textContent =
+          imgs ? `Images (${imgs})` : 'Images'
+        document.querySelector('.filter-btn[data-type="gif"]').textContent =
+          gifs ? `GIFs (${gifs})` : 'GIFs'
+        document.querySelector('.filter-btn[data-type="video"]').textContent =
+          vids ? `Videos (${vids})` : 'Videos'
+      }
+
+      function updateDateRange() {
+        if (!filtered.length) {
+          dateRangeEl.textContent = ''
+          return
+        }
+        const withDates = filtered.filter((m) => m.date)
+        if (!withDates.length) {
+          dateRangeEl.textContent = ''
+          return
+        }
+        const earliest =
+          withDates[activeSort === 'asc' ? 0 : withDates.length - 1]
+        const latest =
+          withDates[activeSort === 'asc' ? withDates.length - 1 : 0]
+        dateRangeEl.textContent = `${formatDateShort(earliest.date)} – ${formatDateShort(latest.date)}`
+      }
+
+      // ─── GRID RENDER ──────────────────────────────────────────────────────
+      function renderGrid() {
+        gridEl.innerHTML = ''
+
+        if (!filtered.length) {
+          noResultsEl.style.display = 'block'
+          return
+        }
+        noResultsEl.style.display = 'none'
+
+        const frag = document.createDocumentFragment()
+
+        filtered.forEach((item, i) => {
+          const card = document.createElement('div')
+          card.className = 'media-card'
+          card.dataset.index = i
+
+          const thumb = document.createElement('div')
+          thumb.className = 'card-thumb'
+
+          if (item.type === 'video') {
+            // Video: real thumbnail with play icon overlay
+            const img = document.createElement('img')
+            img.loading = 'lazy'
+            img.style.cssText =
+              'width:100%;height:100%;object-fit:cover;display:block;'
+            if (item.thumbnailUrl) {
+              img.src = item.thumbnailUrl
+              img.onerror = () => {
+                // Fallback to plain play icon if thumbnail generation failed
+                img.remove()
+                const ph = document.createElement('div')
+                ph.style.cssText =
+                  'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;'
+                thumb.insertBefore(ph, thumb.firstChild)
+              }
+            }
+            thumb.appendChild(img)
+            const icon = document.createElement('div')
+            icon.className = 'play-icon'
+            icon.innerHTML =
+              '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+            thumb.appendChild(icon)
+          } else {
+            // Image / GIF: lazy load
+            const img = document.createElement('img')
+            img.loading = 'lazy'
+            img.src = item.url
+            img.alt = item.filename
+            img.onerror = () => {
+              img.style.opacity = '0.3'
+              img.alt = '⚠ load error'
+            }
+            thumb.appendChild(img)
+          }
+
+          const overlay = document.createElement('div')
+          overlay.className = 'card-overlay'
+          thumb.appendChild(overlay)
+
+          const footer = document.createElement('div')
+          footer.className = 'card-footer'
+
+          const badge = document.createElement('span')
+          badge.className = `type-badge ${item.type}`
+          badge.textContent = item.type === 'image' ? 'img' : item.type
+
+          const dateWrap = document.createElement('span')
+          dateWrap.style.cssText =
+            'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
+
+          if (item.source && item.source !== 'filename') {
+            const srcBadge = document.createElement('span')
+            srcBadge.className = `source-badge ${item.source}`
+            const labels = {
+              exif: 'exif',
+              mp4: 'mp4',
+              uploaded: 'upload',
+              filesystem: 'local*',
+            }
+            srcBadge.textContent = labels[item.source] || item.source
+            const tips = {
+              exif: 'Date from embedded EXIF metadata',
+              mp4: 'Date from video container metadata (ffprobe)',
+              uploaded: 'Platform upload date (set by milkmaid)',
+              filesystem: '* Local download date — least reliable',
+            }
+            srcBadge.title = tips[item.source] || item.source
+            dateWrap.appendChild(srcBadge)
+          }
+
+          const dateEl = document.createElement('span')
+          dateEl.className = 'card-date'
+          dateEl.textContent = item.date
+            ? new Date(item.date).toLocaleDateString('en-US', {
+                year: '2-digit',
+                month: 'numeric',
+                day: 'numeric',
+              })
+            : '—'
+          dateEl.title =
+            formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
+          dateWrap.appendChild(dateEl)
+
+          footer.appendChild(badge)
+          footer.appendChild(dateWrap)
+          card.appendChild(thumb)
+          card.appendChild(footer)
+
+          card.addEventListener('click', () => openLightbox(i))
+          frag.appendChild(card)
+        })
+
+        gridEl.appendChild(frag)
+      }
+
+      // ─── LIGHTBOX ─────────────────────────────────────────────────────────
+      function openLightbox(index) {
+        lbIndex = index
+        renderLightboxItem()
+        lightbox.classList.remove('hidden')
+        document.body.style.overflow = 'hidden'
+      }
+
+      function closeLightbox() {
+        lightbox.classList.add('hidden')
+        document.body.style.overflow = ''
+        lbMediaWrap.innerHTML = ''
+      }
+
+      function renderLightboxItem() {
+        const item = filtered[lbIndex]
+        if (!item) return
+
+        lbMediaWrap.innerHTML = ''
+
+        if (item.type === 'video') {
+          const video = document.createElement('video')
+          video.src = item.url
+          video.controls = true
+          video.autoplay = true
+          video.loop = true
+          lbMediaWrap.appendChild(video)
+        } else {
+          const img = document.createElement('img')
+          img.src = item.url
+          img.alt = item.filename
+          lbMediaWrap.appendChild(img)
+        }
+
+        const sourceTips = {
+          filename: 'filename timestamp',
+          exif: 'EXIF metadata',
+          mp4: 'MP4 container (ffprobe)',
+          uploaded: 'platform upload date',
+          filesystem: 'local download date*',
+        }
+        const srcLabel = item.source
+          ? ` [${sourceTips[item.source] || item.source}]`
+          : ''
+        lbDate.textContent = formatDate(item.date) + srcLabel
+        lbFilename.textContent = item.filename
+        lbCounter.textContent = `${lbIndex + 1} / ${filtered.length}`
+
+        lbTypeBadge.className = `type-badge ${item.type}`
+        lbTypeBadge.textContent = item.type === 'image' ? 'img' : item.type
+      }
+
+      function lbPrev() {
+        if (!filtered.length) return
+        lbIndex = (lbIndex - 1 + filtered.length) % filtered.length
+        renderLightboxItem()
+      }
+
+      function lbNext() {
+        if (!filtered.length) return
+        lbIndex = (lbIndex + 1) % filtered.length
+        renderLightboxItem()
+      }
+
+      document
+        .getElementById('lb-close')
+        .addEventListener('click', closeLightbox)
+      document.getElementById('lb-prev').addEventListener('click', lbPrev)
+      document.getElementById('lb-next').addEventListener('click', lbNext)
+
+      lightbox.addEventListener('click', (e) => {
+        if (e.target === lightbox) closeLightbox()
+      })
+
+      document.addEventListener('keydown', (e) => {
+        if (lightbox.classList.contains('hidden')) return
+        if (e.key === 'Escape') closeLightbox()
+        else if (e.key === 'ArrowLeft') lbPrev()
+        else if (e.key === 'ArrowRight') lbNext()
+      })
+
+      // ─── INIT ─────────────────────────────────────────────────────────────
+      loadUsers()
+    </script>
+  </body>
 </html>

@@ -13,7 +13,10 @@ const auditDir = __dirname
 const rootDir = path.join(auditDir, '..')
 const manifestDir = path.join(auditDir, 'manifests')
 const dashboardDir = path.join(auditDir, 'dashboard')
-const sourceManifestPath = path.join(manifestDir, 'slopvault-manifest-latest.json')
+const sourceManifestPath = path.join(
+  manifestDir,
+  'slopvault-manifest-latest.json'
+)
 const duplicateManifestPath = path.join(
   manifestDir,
   'slopvault-duplicate-manifest-latest.json'
@@ -26,7 +29,9 @@ const appHtmlPath = path.join(auditDir, 'duplicate-review-app.html')
 const reviewToken = crypto.randomBytes(16).toString('hex')
 
 main().catch((err) => {
-  console.error(`Fatal duplicate express review error: ${err.stack || err.message}`)
+  console.error(
+    `Fatal duplicate express review error: ${err.stack || err.message}`
+  )
   process.exitCode = 1
 })
 
@@ -61,7 +66,9 @@ async function main() {
     const manifest = loadDuplicateManifest()
     const group = manifest.groups.find((item) => item.id === groupId)
     if (!group) {
-      return res.status(404).json({ ok: false, error: `Unknown group: ${groupId}` })
+      return res
+        .status(404)
+        .json({ ok: false, error: `Unknown group: ${groupId}` })
     }
 
     const validKeepIds = group.records
@@ -75,9 +82,11 @@ async function main() {
     upsertDecisionGroup(store, {
       groupId,
       keptRecordIds: nextKeepIds,
-      focusedRecordId: focusedRecordId && group.records.some((record) => record.id === focusedRecordId)
-        ? focusedRecordId
-        : nextKeepIds[0],
+      focusedRecordId:
+        focusedRecordId &&
+        group.records.some((record) => record.id === focusedRecordId)
+          ? focusedRecordId
+          : nextKeepIds[0],
       reviewedAt: new Date().toISOString(),
     })
     saveDecisionStore(store)
@@ -96,9 +105,10 @@ async function main() {
 
     for (const group of manifest.groups) {
       const saved = store.groups.find((item) => item.groupId === group.id)
-      const keptIds = Array.isArray(saved?.keptRecordIds) && saved.keptRecordIds.length
-        ? saved.keptRecordIds
-        : [group.suggestedKeepId]
+      const keptIds =
+        Array.isArray(saved?.keptRecordIds) && saved.keptRecordIds.length
+          ? saved.keptRecordIds
+          : [group.suggestedKeepId]
 
       for (const record of group.records) {
         decisions.push({
@@ -134,7 +144,11 @@ async function main() {
       )
     )
 
-    await runNodeScript('audit-slopvault.js', ['--apply', '--decisions', decisionsPath])
+    await runNodeScript('audit-slopvault.js', [
+      '--apply',
+      '--decisions',
+      decisionsPath,
+    ])
     await runNodeScript('manifest-slopvault.js', ['--hash'])
     await runNodeScript('manifest-slopvault-duplicates.js', [])
 
@@ -166,7 +180,9 @@ async function ensureManifest() {
 function authorize(req, res, next) {
   const token = req.headers['x-slopvault-token'] || req.query.token
   if (token && token !== reviewToken) {
-    return res.status(401).json({ ok: false, error: 'Unauthorized review token.' })
+    return res
+      .status(401)
+      .json({ ok: false, error: 'Unauthorized review token.' })
   }
   next()
 }
@@ -198,7 +214,9 @@ function saveDecisionStore(store) {
 }
 
 function upsertDecisionGroup(store, nextGroup) {
-  const index = store.groups.findIndex((group) => group.groupId === nextGroup.groupId)
+  const index = store.groups.findIndex(
+    (group) => group.groupId === nextGroup.groupId
+  )
   if (index >= 0) {
     store.groups[index] = { ...store.groups[index], ...nextGroup }
   } else {
@@ -213,7 +231,10 @@ function buildStatePayload(targetGroupId) {
   const order = reviewGroups.map((group) => group.id)
   const reviewedSet = new Set(
     store.groups
-      .filter((group) => Array.isArray(group.keptRecordIds) && group.keptRecordIds.length)
+      .filter(
+        (group) =>
+          Array.isArray(group.keptRecordIds) && group.keptRecordIds.length
+      )
       .filter((group) => order.includes(group.groupId))
       .map((group) => group.groupId)
   )
@@ -252,11 +273,12 @@ function buildStatePayload(targetGroupId) {
 function materializeGroup(group, saved) {
   if (!group) return null
 
-  const keptRecordIds = Array.isArray(saved?.keptRecordIds) && saved.keptRecordIds.length
-    ? saved.keptRecordIds.filter((recordId) =>
-        group.records.some((record) => record.id === recordId)
-      )
-    : group.currentKeptIds
+  const keptRecordIds =
+    Array.isArray(saved?.keptRecordIds) && saved.keptRecordIds.length
+      ? saved.keptRecordIds.filter((recordId) =>
+          group.records.some((record) => record.id === recordId)
+        )
+      : group.currentKeptIds
 
   const focusedRecordId =
     saved?.focusedRecordId &&
@@ -282,20 +304,29 @@ function nextGroupId(manifest, currentGroupId) {
 function sendMedia(res, filePath) {
   const resolved = path.resolve(String(filePath || ''))
   if (!resolved || !fs.existsSync(resolved)) {
-    return res.status(404).json({ ok: false, error: `Missing media: ${resolved}` })
+    return res
+      .status(404)
+      .json({ ok: false, error: `Missing media: ${resolved}` })
   }
 
   const stat = fs.statSync(resolved)
   const ext = path.extname(resolved).toLowerCase()
   const contentType =
-    ext === '.gif' ? 'image/gif' :
-    ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
-    ext === '.png' ? 'image/png' :
-    ext === '.webp' ? 'image/webp' :
-    ext === '.webm' ? 'video/webm' :
-    ext === '.mp4' || ext === '.m4v' ? 'video/mp4' :
-    ext === '.mov' ? 'video/quicktime' :
-    'application/octet-stream'
+    ext === '.gif'
+      ? 'image/gif'
+      : ext === '.jpg' || ext === '.jpeg'
+        ? 'image/jpeg'
+        : ext === '.png'
+          ? 'image/png'
+          : ext === '.webp'
+            ? 'image/webp'
+            : ext === '.webm'
+              ? 'video/webm'
+              : ext === '.mp4' || ext === '.m4v'
+                ? 'video/mp4'
+                : ext === '.mov'
+                  ? 'video/quicktime'
+                  : 'application/octet-stream'
 
   res.writeHead(200, {
     'content-type': contentType,

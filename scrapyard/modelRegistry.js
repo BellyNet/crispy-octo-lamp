@@ -42,24 +42,31 @@ function loadModelRegistry(registryPath) {
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? parsed : {}
   } catch (err) {
-    console.warn(`⚠️ Could not parse model registry at ${registryPath}: ${err.message}`)
+    console.warn(
+      `⚠️ Could not parse model registry at ${registryPath}: ${err.message}`
+    )
     return {}
   }
 }
 
 function saveModelRegistry(registryPath, registry) {
-  fs.writeFileSync(registryPath, JSON.stringify(sortModelRegistry(registry), null, 2) + '\n')
+  fs.writeFileSync(
+    registryPath,
+    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
+  )
 }
 
 // ─── SORT ─────────────────────────────────────────────────────────────────────
 function sortStringValues(values) {
-  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  )
 }
 
 function sortPlatformSources(sources) {
   if (!Array.isArray(sources)) return []
   return [...sources].sort((a, b) => {
-    const left  = String(a?.discoveredAs || a?.url || '')
+    const left = String(a?.discoveredAs || a?.url || '')
     const right = String(b?.discoveredAs || b?.url || '')
     return left.localeCompare(right)
   })
@@ -91,7 +98,8 @@ function ensureModelEntryShape(entry, canonicalName) {
   if (canonicalName) aliasSet.add(canonicalName)
   return {
     aliases: Array.from(aliasSet),
-    sources: (entry?.sources && typeof entry.sources === 'object') ? entry.sources : {},
+    sources:
+      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {},
   }
 }
 
@@ -102,7 +110,8 @@ function findCanonicalModelName(registry, rawName) {
   for (const [canonicalName, entry] of Object.entries(registry)) {
     if (sanitize(canonicalName) === normalizedRaw) return canonicalName
     const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) return canonicalName
+    if (aliases.some((alias) => sanitize(alias) === normalizedRaw))
+      return canonicalName
   }
   return null
 }
@@ -119,7 +128,12 @@ function upsertStufferdbSource(entry, sourceUrl, rawName) {
   const idx = entry.sources.stufferdb.findIndex(
     (s) => s?.url === cleanedUrl || (categoryId && s?.categoryId === categoryId)
   )
-  const next = { url: cleanedUrl, categoryId, discoveredAs: rawName, lastCheckedAt: now }
+  const next = {
+    url: cleanedUrl,
+    categoryId,
+    discoveredAs: rawName,
+    lastCheckedAt: now,
+  }
 
   if (idx >= 0) {
     entry.sources.stufferdb[idx] = { ...entry.sources.stufferdb[idx], ...next }
@@ -189,7 +203,10 @@ function resolveAndTrackModel(
   const canonicalName =
     existingCanonical || cleanedCanonicalOverride || cleanedRawName
 
-  registry[canonicalName] = ensureModelEntryShape(registry[canonicalName], canonicalName)
+  registry[canonicalName] = ensureModelEntryShape(
+    registry[canonicalName],
+    canonicalName
+  )
 
   const aliases = registry[canonicalName].aliases
   if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
@@ -205,7 +222,12 @@ function resolveAndTrackModel(
     } else if (platform === 'coomer') {
       upsertCoomerSource(registry[canonicalName], sourceUrl, cleanedRawName)
     } else {
-      upsertGenericSource(registry[canonicalName], platform, sourceUrl, cleanedRawName)
+      upsertGenericSource(
+        registry[canonicalName],
+        platform,
+        sourceUrl,
+        cleanedRawName
+      )
     }
   }
 

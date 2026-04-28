@@ -447,7 +447,11 @@ function buildVideoDuplicateFindings(records, persistedDecisions) {
     )
 }
 
-function buildExactDuplicateFindings(records, duplicateGroups, persistedDecisions) {
+function buildExactDuplicateFindings(
+  records,
+  duplicateGroups,
+  persistedDecisions
+) {
   const recordsById = new Map(records.map((record) => [record.id, record]))
 
   return (Array.isArray(duplicateGroups) ? duplicateGroups : [])
@@ -476,8 +480,9 @@ function buildExactDuplicateFindings(records, duplicateGroups, persistedDecision
         const duplicateCandidates = groupRecords
           .filter((other) => other.id !== record.id)
           .map((other) => ({
-            relativePath:
-              normalizePath(other.datasetRelativePath || other.relativePath || ''),
+            relativePath: normalizePath(
+              other.datasetRelativePath || other.relativePath || ''
+            ),
             model: other.model || null,
             sourcePath: other.absolutePath || null,
             sourceFileUri: other.absolutePath
@@ -491,7 +496,11 @@ function buildExactDuplicateFindings(records, duplicateGroups, persistedDecision
           }))
 
         const reasons = ['exact_duplicate']
-        if (record.model && preferredRecord?.model && record.model !== preferredRecord.model) {
+        if (
+          record.model &&
+          preferredRecord?.model &&
+          record.model !== preferredRecord.model
+        ) {
           reasons.push('cross_model_duplicate')
         }
 
@@ -505,21 +514,26 @@ function buildExactDuplicateFindings(records, duplicateGroups, persistedDecision
           mediaType: record.mediaType || null,
           relativePath: normalizePath(record.relativePath || ''),
           sourcePath: record.absolutePath || null,
-          sourceFileUri: record.absolutePath ? pathToFileUri(record.absolutePath) : null,
+          sourceFileUri: record.absolutePath
+            ? pathToFileUri(record.absolutePath)
+            : null,
           quarantinePath: record.absolutePath
             ? getDuplicateQuarantinePath(record)
             : null,
           quarantineFileUri: null,
           reasons,
           quarantineEligible: true,
-          defaultAction: record.id === preferredRecord?.id ? 'keep' : 'quarantine',
+          defaultAction:
+            record.id === preferredRecord?.id ? 'keep' : 'quarantine',
           supportedActions: ['keep', 'quarantine'],
           matchedRecordId: record.id,
           sizeBytes: record.sizeBytes || null,
           contentHash: record.md5
             ? { algorithm: 'md5', value: record.md5 }
             : null,
-          savedPath: normalizePath(record.datasetRelativePath || record.relativePath || ''),
+          savedPath: normalizePath(
+            record.datasetRelativePath || record.relativePath || ''
+          ),
           duplicateGroupKey: group.key,
           duplicateGroupCount: groupRecords.length,
           duplicateCandidates,
@@ -693,27 +707,31 @@ function isResolvedDuplicateDecision(action) {
 }
 
 function choosePreferredDuplicateRecord(records) {
-  return [...records].sort((left, right) => {
-    const leftQuarantineRank = left.quarantined ? 1 : 0
-    const rightQuarantineRank = right.quarantined ? 1 : 0
-    if (leftQuarantineRank !== rightQuarantineRank) {
-      return leftQuarantineRank - rightQuarantineRank
-    }
+  return (
+    [...records].sort((left, right) => {
+      const leftQuarantineRank = left.quarantined ? 1 : 0
+      const rightQuarantineRank = right.quarantined ? 1 : 0
+      if (leftQuarantineRank !== rightQuarantineRank) {
+        return leftQuarantineRank - rightQuarantineRank
+      }
 
-    const leftDatasetRank = left.root === 'dataset' ? 0 : 1
-    const rightDatasetRank = right.root === 'dataset' ? 0 : 1
-    if (leftDatasetRank !== rightDatasetRank) {
-      return leftDatasetRank - rightDatasetRank
-    }
+      const leftDatasetRank = left.root === 'dataset' ? 0 : 1
+      const rightDatasetRank = right.root === 'dataset' ? 0 : 1
+      if (leftDatasetRank !== rightDatasetRank) {
+        return leftDatasetRank - rightDatasetRank
+      }
 
-    if ((left.sizeBytes || 0) !== (right.sizeBytes || 0)) {
-      return (right.sizeBytes || 0) - (left.sizeBytes || 0)
-    }
+      if ((left.sizeBytes || 0) !== (right.sizeBytes || 0)) {
+        return (right.sizeBytes || 0) - (left.sizeBytes || 0)
+      }
 
-    return normalizePath(left.datasetRelativePath || left.relativePath || '').localeCompare(
-      normalizePath(right.datasetRelativePath || right.relativePath || '')
-    )
-  })[0] || null
+      return normalizePath(
+        left.datasetRelativePath || left.relativePath || ''
+      ).localeCompare(
+        normalizePath(right.datasetRelativePath || right.relativePath || '')
+      )
+    })[0] || null
+  )
 }
 
 function getDuplicateQuarantinePath(record) {

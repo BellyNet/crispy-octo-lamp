@@ -127,7 +127,9 @@ async function main() {
         continue
       }
 
-      const candidateFrameHashes = await getVideoFrameHashesFromPath(candidate.filePath)
+      const candidateFrameHashes = await getVideoFrameHashesFromPath(
+        candidate.filePath
+      )
       frameHashComputations += 1
       const candidateDistinctHashes = [...new Set(candidateFrameHashes)]
 
@@ -224,7 +226,9 @@ function loadRunErrorTargets(filePath) {
 function hasTailDecodeReason(item) {
   if (String(item.errorDetails || '').includes('tail_decode_error')) return true
   return Array.isArray(item.reasons)
-    ? item.reasons.some((reason) => String(reason).includes('tail_decode_error'))
+    ? item.reasons.some((reason) =>
+        String(reason).includes('tail_decode_error')
+      )
     : false
 }
 
@@ -273,7 +277,8 @@ function loadMetadataCache(filePath) {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
     return {
       version: 1,
-      items: parsed?.items && typeof parsed.items === 'object' ? parsed.items : {},
+      items:
+        parsed?.items && typeof parsed.items === 'object' ? parsed.items : {},
     }
   } catch (err) {
     return { version: 1, items: {} }
@@ -334,7 +339,8 @@ function shortlistCandidates(target, targetMetadata, datasetVideos, cache) {
     if (!cached || !Number.isFinite(cached.durationSeconds)) return true
 
     return (
-      Math.abs(cached.durationSeconds - targetMetadata.durationSeconds) <= tolerance
+      Math.abs(cached.durationSeconds - targetMetadata.durationSeconds) <=
+      tolerance
     )
   })
 

@@ -4,7 +4,10 @@ const path = require('path')
 const rootDir = path.join(__dirname, '..')
 const reportDir = path.join(rootDir, 'tmp', 'repair-stufferdb')
 const inputPath = path.join(reportDir, 'repair-stufferdb-latest.json')
-const latestJsonPath = path.join(reportDir, 'repair-failure-summary-latest.json')
+const latestJsonPath = path.join(
+  reportDir,
+  'repair-failure-summary-latest.json'
+)
 const latestMdPath = path.join(reportDir, 'repair-failure-summary-latest.md')
 const BUCKET_LABELS = {
   page_timeout_concurrency: 'page concurrency / timeout issues',
@@ -92,7 +95,8 @@ function main() {
       }
 
       const bucket = classifyFailure(failure)
-      summary.bucketCounts[bucket.key] = (summary.bucketCounts[bucket.key] || 0) + 1
+      summary.bucketCounts[bucket.key] =
+        (summary.bucketCounts[bucket.key] || 0) + 1
       if (!summary.bucketModels[bucket.key]) {
         summary.bucketModels[bucket.key] = new Set()
       }
@@ -168,10 +172,7 @@ function renderMarkdown(summary) {
     lines.push('')
   }
 
-  lines.push(
-    '## Scrape Failures',
-    '',
-  )
+  lines.push('## Scrape Failures', '')
 
   if (!summary.scrapeFailures.length) {
     lines.push('None.', '')
@@ -205,9 +206,12 @@ function renderMarkdown(summary) {
     if (failure.bucketReason) parts.push(`reason=\`${failure.bucketReason}\``)
     if (failure.filename) parts.push(`file=\`${failure.filename}\``)
     if (failure.savedPath) parts.push(`saved=\`${failure.savedPath}\``)
-    if (failure.mediaPageUrl) parts.push(`page=${toMdLink('gallery', failure.mediaPageUrl)}`)
-    if (failure.mediaUrl) parts.push(`media=${toMdLink('source', failure.mediaUrl)}`)
-    else if (failure.inputUrl) parts.push(`category=${toMdLink('category', failure.inputUrl)}`)
+    if (failure.mediaPageUrl)
+      parts.push(`page=${toMdLink('gallery', failure.mediaPageUrl)}`)
+    if (failure.mediaUrl)
+      parts.push(`media=${toMdLink('source', failure.mediaUrl)}`)
+    else if (failure.inputUrl)
+      parts.push(`category=${toMdLink('category', failure.inputUrl)}`)
     lines.push(parts.join(' :: '))
   }
 
