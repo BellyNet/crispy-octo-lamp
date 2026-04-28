@@ -114,48 +114,67 @@ function httpsGet(url) {
 // Convert username → candidate wiki page titles to try
 function wikiTitleCandidates(username) {
   const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
-  const words = username.replace(/-/g, '_').split('_').filter(Boolean)
-  const titleCase = words.map(capitalize).join('_')
-  const firstOnly = capitalize(username.replace(/_/g, ''))
-  const raw = capitalize(username)
-  return [...new Set([titleCase, raw, firstOnly])]
+  const words = username.replace(/[-]/g, '_').split('_').filter(Boolean)
+  const titleCase  = words.map(capitalize).join('_')   // Kitty_Piggy
+  const capFirst   = capitalize(username)              // Kitty_piggy
+  const noUnder    = username.replace(/_/g, '')        // kittypiggy  (lowercase)
+  const capNoUnder = capitalize(noUnder)               // Kittypiggy
+  return [...new Set([titleCase, capFirst, noUnder, capNoUnder, username])]
+}
+
+// Strip MediaWiki markup from a field value:
+//   [[Wikilink|text]] → text (or Wikilink if no pipe)
+//   [https://url display text] → https://url
+//   [https://url] → https://url
+//   ''bold/italic'' → plain text
+function stripWikiMarkup(s) {
+  return String(s || '')
+    .replace(/\[\[(?:[^\]|]*\|)?([^\]]+)\]\]/g, '$1')  // [[link|text]] → text
+    .replace(/\[(\S+)\s[^\]]*\]/g, '$1')                // [url text] → url
+    .replace(/\[(\S+)\]/g, '$1')                        // [url] → url
+    .replace(/'{2,}/g, '')                               // '' / '''
+    .trim()
 }
 
 // Parse infobox template fields from MediaWiki wikitext
 function parseWikitext(wikitext) {
   const info = {}
 
-  // Extract template block {{Model ... }} or {{Infobox ... }}
+  // Extract template block {{TemplateName\n|field = value\n...}}
   const tmplMatch = wikitext.match(/\{\{[^\n]*?\n([\s\S]*?)\}\}/m)
   if (tmplMatch) {
     const lines = tmplMatch[1].split('\n')
     for (const line of lines) {
       const m = line.match(/^\s*\|\s*([^=]+?)\s*=\s*(.*)/)
-      if (m) info[m[1].toLowerCase().trim()] = m[2].replace(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g, '$1').trim()
+      if (!m) continue
+      const val = stripWikiMarkup(m[2])
+      if (val) info[m[1].toLowerCase().trim()] = val
     }
   }
 
-  // Pull lead paragraph (first real prose after the template)
+  // Pull lead paragraph (first real prose after the template block)
   const afterTemplate = wikitext.replace(/\{\{[\s\S]*?\}\}/g, '').replace(/==.*?==/g, '').trim()
   const prose = afterTemplate
     .split('\n')
-    .map((l) => l.replace(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g, '$1').replace(/'{2,}/g, '').trim())
+    .map((l) => stripWikiMarkup(l))
     .filter((l) => l.length > 40)
   if (prose.length) info._bio = prose[0]
 
   return info
 }
 
-// Field aliases across different wiki infobox templates
+// Field aliases across different wiki infobox templates.
+// The wiki uses snake_case field names (weight_class, body_type, etc.),
+// and some templates use 'size' or 'type' for weight class.
 const FIELD_MAP = {
   height:      ['height'],
-  weight:      ['weight', 'current weight'],
-  cup:         ['cup', 'cup size', 'bra size'],
+  weight:      ['weight', 'current weight', 'current_weight', 'peak_weight'],
+  cup:         ['cup', 'cup size', 'cup_size', 'bra size', 'bra_size'],
   birthdate:   ['birthdate', 'birth date', 'born', 'dob'],
   origin:      ['origin', 'nationality', 'country', 'location', 'from'],
-  weightclass: ['weightclass', 'weight class', 'type', 'classification'],
-  bodytype:    ['bodytype', 'body type', 'shape'],
-  status:      ['status', 'activity status'],
+  weightclass: ['weightclass', 'weight class', 'weight_class', 'type', 'size', 'classification'],
+  bodytype:    ['bodytype', 'body type', 'body_type', 'shape'],
+  status:      ['status', 'activity', 'activity status', 'activity_status'],
   onlyfans:    ['onlyfans', 'of'],
   instagram:   ['instagram', 'ig'],
   twitter:     ['twitter'],
