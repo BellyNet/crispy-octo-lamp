@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -204,16 +204,34 @@ body {
 
 #date-range { margin-left: auto; font-size: 11px; color: var(--muted); font-style: italic; }
 
-/* ─── WIKI PANEL ─────────────────────────────────────────────── */
-#wiki-panel {
-  border-bottom: 1px solid var(--border);
-  background: #11111a;
-  flex-shrink: 0;
-  overflow: hidden;
-  transition: max-height 0.2s ease;
+/* ─── SOURCE LINKS ───────────────────────────────────────────── */
+#source-links {
+  display: flex;
+  gap: 5px;
+  margin-top: 5px;
+  flex-wrap: wrap;
 }
-#wiki-panel.hidden { display: none; }
 
+.src-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.src-link:hover { color: var(--accent); border-color: var(--accent); }
+.src-link svg { flex-shrink: 0; opacity: 0.7; }
+
+/* ─── (removed) WIKI PANEL ─── old styles gone ───────────────── */
 #wiki-inner {
   display: flex;
   gap: 0;
@@ -221,67 +239,6 @@ body {
   align-items: flex-start;
 }
 
-#wiki-vitals {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  flex: 1;
-}
-
-.wiki-stat {
-  display: flex;
-  flex-direction: column;
-  min-width: 70px;
-}
-.wiki-stat-label {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-.wiki-stat-value {
-  font-size: 13px;
-  color: var(--text);
-  font-weight: 500;
-  margin-top: 1px;
-}
-
-#wiki-bio {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.5;
-  max-width: 480px;
-  border-left: 2px solid var(--border);
-  padding-left: 14px;
-  margin-left: 6px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-#wiki-links {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-left: 12px;
-  flex-shrink: 0;
-}
-.wiki-link {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--muted);
-  text-decoration: none;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  padding: 3px 8px;
-  border-radius: 4px;
-  transition: all 0.15s;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.wiki-link:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ─── GRID ────────────────────────────────────────────────── */
 #grid-container {
@@ -577,6 +534,7 @@ body {
   <header id="main-header">
     <div id="header-left">
       <h1 id="current-user-name">Select a user</h1>
+      <div id="source-links"></div>
       <span id="media-stats"></span>
     </div>
     <div id="filters">
@@ -586,15 +544,6 @@ body {
       <button class="filter-btn" data-type="video">Videos</button>
     </div>
   </header>
-
-  <!-- Wiki info strip, shown when a user with a wiki page is selected -->
-  <div id="wiki-panel" class="hidden">
-    <div id="wiki-inner">
-      <div id="wiki-vitals"></div>
-      <div id="wiki-bio"></div>
-      <div id="wiki-links"></div>
-    </div>
-  </div>
 
   <div id="sort-bar" style="display:none">
     <span class="sort-label">Sort</span>
@@ -686,11 +635,13 @@ function formatDateShort(iso) {
 }
 
 // ─── USERS ────────────────────────────────────────────────────────────
+let usersData = []  // [{ name, sources }]
+
 async function loadUsers() {
   const res = await fetch('/api/users')
-  const users = await res.json()
-  userCountEl.textContent = users.length
-  renderUserList(users)
+  usersData = await res.json()
+  userCountEl.textContent = usersData.length
+  renderUserList(usersData)
 }
 
 function renderUserList(users) {
@@ -698,8 +649,8 @@ function renderUserList(users) {
   for (const u of users) {
     const li = document.createElement('li')
     li.className = 'user-item'
-    li.textContent = u
-    li.dataset.username = u
+    li.textContent = u.name
+    li.dataset.username = u.name
     li.addEventListener('click', () => selectUser(u, li))
     userListEl.appendChild(li)
   }
@@ -712,99 +663,41 @@ userSearchEl.addEventListener('input', () => {
   }
 })
 
-// ─── SELECT USER ──────────────────────────────────────────────────────
-// ─── WIKI ─────────────────────────────────────────────────────────────────────
-const wikiPanel  = document.getElementById('wiki-panel')
-const wikiVitals = document.getElementById('wiki-vitals')
-const wikiBio    = document.getElementById('wiki-bio')
-const wikiLinks  = document.getElementById('wiki-links')
+// ─── SOURCE LINKS ─────────────────────────────────────────────────────────────
+const sourceLinksEl = document.getElementById('source-links')
 
-const WIKI_FIELDS = [
-  { key: 'weightclass', label: 'Class' },
-  { key: 'weight',      label: 'Weight' },
-  { key: 'height',      label: 'Height' },
-  { key: 'cup',         label: 'Cup' },
-  { key: 'bodytype',    label: 'Body type' },
-  { key: 'birthdate',   label: 'Born' },
-  { key: 'origin',      label: 'From' },
-  { key: 'status',      label: 'Status' },
-]
+const LINK_ICON = `<svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3H3a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V7"/><polyline points="8 1 11 1 11 4"/><line x1="5" y1="7" x2="11" y2="1"/></svg>`
 
-const WIKI_LINKS_DEF = [
-  { key: 'onlyfans',  label: 'OnlyFans',  base: 'https://onlyfans.com/' },
-  { key: 'instagram', label: 'Instagram', base: 'https://instagram.com/' },
-  { key: 'twitter',   label: 'Twitter',   base: 'https://twitter.com/' },
-  { key: 'curvage',   label: 'Curvage',   base: 'https://curvage.org/forum/index.php?members/' },
-  { key: 'youtube',   label: 'YouTube',   base: 'https://youtube.com/@' },
-]
-
-function renderWikiPanel(data) {
-  wikiVitals.innerHTML = ''
-  wikiBio.innerHTML = ''
-  wikiLinks.innerHTML = ''
-
-  if (!data || !data.found) {
-    wikiPanel.classList.add('hidden')
-    return
-  }
-
-  // Vitals
-  for (const { key, label } of WIKI_FIELDS) {
-    if (!data[key]) continue
-    const stat = document.createElement('div')
-    stat.className = 'wiki-stat'
-    stat.innerHTML = `<span class="wiki-stat-label">${label}</span><span class="wiki-stat-value">${data[key]}</span>`
-    wikiVitals.appendChild(stat)
-  }
-
-  // Bio
-  if (data.bio) {
-    wikiBio.textContent = data.bio
-    wikiBio.style.display = ''
-  } else {
-    wikiBio.style.display = 'none'
-  }
-
-  // Social links
-  for (const { key, label, base } of WIKI_LINKS_DEF) {
-    if (!data[key]) continue
-    const val = data[key].trim()
-    const href = val.startsWith('http') ? val : base + val
-    const a = document.createElement('a')
-    a.className = 'wiki-link'
-    a.href = href
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    a.textContent = label
-    wikiLinks.appendChild(a)
-  }
-
-  // Wiki page link
-  if (data.title) {
-    const a = document.createElement('a')
-    a.className = 'wiki-link'
-    a.href = `https://bbw.wiki/index.php?title=${encodeURIComponent(data.title)}`
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    a.textContent = 'Wiki'
-    wikiLinks.appendChild(a)
-  }
-
-  wikiPanel.classList.remove('hidden')
+const SERVICE_LABELS = {
+  onlyfans: 'OnlyFans', fansly: 'Fansly', patreon: 'Patreon',
+  candfans: 'C&F', subscribestar: 'SubStar', gumroad: 'Gumroad',
+  afdian: 'Afdian', boosty: 'Boosty',
 }
 
-async function loadWikiInfo(username) {
-  try {
-    const res = await fetch(`/api/wiki/${encodeURIComponent(username)}`)
-    const data = await res.json()
-    renderWikiPanel(data)
-  } catch {
-    renderWikiPanel(null)
+function renderSourceLinks(sources) {
+  sourceLinksEl.innerHTML = ''
+  if (!sources) return
+  for (const url of (sources.stufferdb || [])) {
+    const a = document.createElement('a')
+    a.className = 'src-link'
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'
+    a.innerHTML = `${LINK_ICON} StufferDB`
+    sourceLinksEl.appendChild(a)
+  }
+  for (const url of (sources.coomer || [])) {
+    const service = url.split('/')[3] || 'coomer'
+    const a = document.createElement('a')
+    a.className = 'src-link'
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'
+    a.innerHTML = `${LINK_ICON} ${SERVICE_LABELS[service] || service}`
+    sourceLinksEl.appendChild(a)
   }
 }
 
-// ─── SELECT USER ──────────────────────────────────────────────────────────────
-async function selectUser(username, liEl) {
+async function selectUser(userObj, liEl) {
+  const username = typeof userObj === 'string' ? userObj : userObj.name
+  const sources  = typeof userObj === 'object' ? userObj.sources : null
+
   userListEl.querySelectorAll('.user-item').forEach(el => el.classList.remove('active'))
   if (liEl) liEl.classList.add('active')
 
@@ -814,21 +707,16 @@ async function selectUser(username, liEl) {
   sortBtns.forEach(b => b.classList.toggle('active', b.dataset.sort === 'asc'))
 
   currentNameEl.textContent = username
+  renderSourceLinks(sources)
   mediaStatsEl.textContent = ''
   gridEl.innerHTML = ''
   emptyState.style.display = 'none'
   noResultsEl.style.display = 'none'
   sortBar.style.display = 'none'
-  wikiPanel.classList.add('hidden')
   loadingEl.style.display = 'flex'
 
-  // Fetch media + wiki in parallel
-  const [mediaResult] = await Promise.allSettled([
-    fetch(`/api/users/${encodeURIComponent(username)}/media`).then(r => r.json()),
-    loadWikiInfo(username),
-  ])
-
-  allMedia = mediaResult.status === 'fulfilled' ? mediaResult.value : []
+  const mediaRes = await fetch(`/api/users/${encodeURIComponent(username)}/media`).catch(() => null)
+  allMedia = mediaRes?.ok ? await mediaRes.json() : []
 
   loadingEl.style.display = 'none'
   sortBar.style.display = allMedia.length ? 'flex' : 'none'

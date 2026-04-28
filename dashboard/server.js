@@ -3,13 +3,15 @@
 const express = require('express')
 const path = require('path')
 const fs = require('fs')
-const https = require('https')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const pLimit = require('p-limit')
 
 const execFileAsync = promisify(execFile)
 const mediaDates = require('../milkmaid/media-dates.js')
+const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
+
+const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 
 const app = express()
 const PORT = process.env.DASHBOARD_PORT || 3420
@@ -96,128 +98,27 @@ async function generateThumbnail(videoPath, thumbPath) {
   return false
 }
 
-// ─── WIKI ─────────────────────────────────────────────────────────────────────
-// Uses the MediaWiki API (wikitext) to avoid parsing HTML.
-const wikiCache = new Map() // username → { data, fetchedAt }
-const WIKI_TTL_MS = 60 * 60 * 1000 // 1 hour
-
-function httpsGet(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'dashboard/1.0' } }, (res) => {
-      let body = ''
-      res.on('data', (c) => (body += c))
-      res.on('end', () => resolve({ status: res.statusCode, body }))
-    }).on('error', reject)
-  })
-}
-
-// Convert username → candidate wiki page titles to try
-function wikiTitleCandidates(username) {
-  const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
-  const words = username.replace(/[-]/g, '_').split('_').filter(Boolean)
-  const titleCase  = words.map(capitalize).join('_')   // Kitty_Piggy
-  const capFirst   = capitalize(username)              // Kitty_piggy
-  const noUnder    = username.replace(/_/g, '')        // kittypiggy  (lowercase)
-  const capNoUnder = capitalize(noUnder)               // Kittypiggy
-  return [...new Set([titleCase, capFirst, noUnder, capNoUnder, username])]
-}
-
-// Strip MediaWiki markup from a field value:
-//   [[Wikilink|text]] → text (or Wikilink if no pipe)
-//   [https://url display text] → https://url
-//   [https://url] → https://url
-//   ''bold/italic'' → plain text
-function stripWikiMarkup(s) {
-  return String(s || '')
-    .replace(/\[\[(?:[^\]|]*\|)?([^\]]+)\]\]/g, '$1')  // [[link|text]] → text
-    .replace(/\[(\S+)\s[^\]]*\]/g, '$1')                // [url text] → url
-    .replace(/\[(\S+)\]/g, '$1')                        // [url] → url
-    .replace(/'{2,}/g, '')                               // '' / '''
-    .trim()
-}
-
-// Parse infobox template fields from MediaWiki wikitext
-function parseWikitext(wikitext) {
-  const info = {}
-
-  // Extract template block {{TemplateName\n|field = value\n...}}
-  const tmplMatch = wikitext.match(/\{\{[^\n]*?\n([\s\S]*?)\}\}/m)
-  if (tmplMatch) {
-    const lines = tmplMatch[1].split('\n')
-    for (const line of lines) {
-      const m = line.match(/^\s*\|\s*([^=]+?)\s*=\s*(.*)/)
-      if (!m) continue
-      const val = stripWikiMarkup(m[2])
-      if (val) info[m[1].toLowerCase().trim()] = val
+// ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
+// Build a map of username → { coomer: [url, …], stufferdb: [url, …] }
+// from model_aliases.json so the /api/users route can include source links.
+function buildSourceMap() {
+  try {
+    const registry = loadModelRegistry(registryPath)
+    const map = {}
+    for (const [canonical, entry] of Object.entries(registry)) {
+      const names = [canonical, ...(entry.aliases || [])]
+      const coomer    = (entry.sources?.coomer    || []).map((s) => s.url).filter(Boolean)
+      const stufferdb = (entry.sources?.stufferdb || []).map((s) => s.url).filter(Boolean)
+      for (const name of names) {
+        if (!map[name]) map[name] = { coomer: [], stufferdb: [] }
+        for (const u of coomer)    if (!map[name].coomer.includes(u))    map[name].coomer.push(u)
+        for (const u of stufferdb) if (!map[name].stufferdb.includes(u)) map[name].stufferdb.push(u)
+      }
     }
-  }
-
-  // Pull lead paragraph (first real prose after the template block)
-  const afterTemplate = wikitext.replace(/\{\{[\s\S]*?\}\}/g, '').replace(/==.*?==/g, '').trim()
-  const prose = afterTemplate
-    .split('\n')
-    .map((l) => stripWikiMarkup(l))
-    .filter((l) => l.length > 40)
-  if (prose.length) info._bio = prose[0]
-
-  return info
+    return map
+  } catch { return {} }
 }
 
-// Field aliases across different wiki infobox templates.
-// The wiki uses snake_case field names (weight_class, body_type, etc.),
-// and some templates use 'size' or 'type' for weight class.
-const FIELD_MAP = {
-  height:      ['height'],
-  weight:      ['weight', 'current weight', 'current_weight', 'peak_weight'],
-  cup:         ['cup', 'cup size', 'cup_size', 'bra size', 'bra_size'],
-  birthdate:   ['birthdate', 'birth date', 'born', 'dob'],
-  origin:      ['origin', 'nationality', 'country', 'location', 'from'],
-  weightclass: ['weightclass', 'weight class', 'weight_class', 'type', 'size', 'classification'],
-  bodytype:    ['bodytype', 'body type', 'body_type', 'shape'],
-  status:      ['status', 'activity', 'activity status', 'activity_status'],
-  onlyfans:    ['onlyfans', 'of'],
-  instagram:   ['instagram', 'ig'],
-  twitter:     ['twitter'],
-  curvage:     ['curvage'],
-  youtube:     ['youtube'],
-}
-
-function normaliseWikiInfo(raw) {
-  const out = {}
-  for (const [key, aliases] of Object.entries(FIELD_MAP)) {
-    for (const alias of aliases) {
-      if (raw[alias] && raw[alias] !== '') { out[key] = raw[alias]; break }
-    }
-  }
-  if (raw._bio) out.bio = raw._bio
-  return out
-}
-
-async function fetchWikiInfo(username) {
-  const cached = wikiCache.get(username)
-  if (cached && Date.now() - cached.fetchedAt < WIKI_TTL_MS) return cached.data
-
-  const candidates = wikiTitleCandidates(username)
-  for (const title of candidates) {
-    const url = `https://bbw.wiki/api.php?action=parse&page=${encodeURIComponent(title)}&prop=wikitext&format=json&formatversion=2`
-    try {
-      const { status, body } = await httpsGet(url)
-      if (status !== 200) continue
-      const json = JSON.parse(body)
-      if (json.error) continue
-      const wikitext = json.parse?.wikitext
-      if (!wikitext) continue
-      const raw = parseWikitext(wikitext)
-      const data = { found: true, title, ...normaliseWikiInfo(raw) }
-      wikiCache.set(username, { data, fetchedAt: Date.now() })
-      return data
-    } catch {}
-  }
-
-  const data = { found: false }
-  wikiCache.set(username, { data, fetchedAt: Date.now() })
-  return data
-}
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -276,25 +177,16 @@ async function resolveDateForFile(userDir, folder, filename, filePath) {
 app.use(express.static(__dirname))
 app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 
-// Users list
+// Users list — returns [{ name, sources: { coomer: [], stufferdb: [] } }, ...]
 app.get('/api/users', async (_req, res) => {
   try {
     const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+    const sourceMap = buildSourceMap()
     const users = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .map((e) => ({ name: e.name, sources: sourceMap[e.name] || { coomer: [], stufferdb: [] } }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
     res.json(users)
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// Wiki info for a user
-app.get('/api/wiki/:username', async (req, res) => {
-  try {
-    const data = await fetchWikiInfo(req.params.username)
-    res.json(data)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -383,6 +275,57 @@ app.get('/media/:username/:folder/:filename', (req, res) => {
   })
 })
 
+// ─── THUMBNAIL PREWARM ────────────────────────────────────────────────────────
+// Walks all model webm folders and pre-generates any missing thumbnails.
+// Runs in the background after the server starts — doesn't block requests.
+async function prewarmThumbnails() {
+  if (!ffmpegPath) return
+
+  let dirs
+  try { dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true }) } catch { return }
+  const modelDirs = dirs.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+
+  const allVideos = []
+  for (const dir of modelDirs) {
+    const webmDir = path.join(datasetDir, dir.name, 'webm')
+    let files
+    try { files = await fs.promises.readdir(webmDir) } catch { continue }
+    for (const file of files) {
+      if (!['.mp4', '.webm'].includes(path.extname(file).toLowerCase())) continue
+      allVideos.push({ username: dir.name, filename: file, videoPath: path.join(webmDir, file) })
+    }
+  }
+
+  const missing = allVideos.filter(({ username, filename }) => {
+    const thumbPath = path.join(THUMB_DIR, username, path.basename(filename, path.extname(filename)) + '.jpg')
+    return !fs.existsSync(thumbPath)
+  })
+
+  if (missing.length === 0) {
+    console.log(`  Thumbs:    all ${allVideos.length} cached ✓`)
+    return
+  }
+
+  console.log(`  Thumbs:    generating ${missing.length} missing (${allVideos.length - missing.length} cached)…`)
+
+  const concurrency = pLimit(4)
+  let done = 0
+  await Promise.all(missing.map(({ username, filename, videoPath }) =>
+    concurrency(async () => {
+      const userThumbDir = path.join(THUMB_DIR, username)
+      fs.mkdirSync(userThumbDir, { recursive: true })
+      const thumbPath = path.join(userThumbDir, path.basename(filename, path.extname(filename)) + '.jpg')
+      await generateThumbnail(videoPath, thumbPath)
+      done++
+      if (done % 20 === 0 || done === missing.length) {
+        process.stdout.write(`\r  Thumbs:    ${done}/${missing.length} done`)
+      }
+    })
+  ))
+
+  console.log(`\r  Thumbs:    ${missing.length} generated ✓          `)
+}
+
 // ─── STARTUP ──────────────────────────────────────────────────────────────────
 
 async function start() {
@@ -390,8 +333,10 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`\n  Dataset Dashboard → http://localhost:${PORT}`)
     console.log(`  Dataset:   ${datasetDir}`)
-    console.log(`  Thumbs:    ${THUMB_DIR}\n`)
+    console.log(`  Thumbs:    ${THUMB_DIR}`)
   })
+  // Pre-generate all missing thumbnails in the background
+  prewarmThumbnails().catch((err) => console.warn('  Thumb prewarm error:', err.message))
 }
 
 start()
