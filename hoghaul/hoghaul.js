@@ -1,9 +1,7 @@
 'use strict'
 
 // ─── IMPORTS ──────────────────────────────────────────────────────────────────
-const puppeteer = require('puppeteer-extra')
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-puppeteer.use(StealthPlugin())
+const https = require('https')
 const path = require('path')
 const fs = require('fs')
 const readline = require('readline')
@@ -37,7 +35,6 @@ const {
 } = require('../scrapyard/bitwiseHasher')
 
 const mediaDates = require('../milkmaid/media-dates.js')
-const { createScraperPage } = require('../scrapyard/pageHelpers')
 const { bannerHoghaul } = require('../banners.js')
 const { resolveAndTrackModel } = require('../scrapyard/modelRegistry.js')
 
@@ -420,7 +417,7 @@ function createModelFolders(modelName) {
 }
 
 function downloadBufferWithProgress(url, onProgress, timeoutMs = 15000) {
-  const proto = url.startsWith('https') ? require('https') : require('http')
+  const proto = url.startsWith('https') ? https : require('http')
   return new Promise((resolve, reject) => {
     const req = proto.get(url, (res) => {
       if (res.statusCode !== 200) {
@@ -459,6 +456,73 @@ function normalizeUrl(url) {
   return url.startsWith('http') ? url : `https:${url}`
 }
 
+// ─── COOMER API ───────────────────────────────────────────────────────────────
+const COOMER_HOST = 'coomer.st'
+const COOMER_CDN = `https://${COOMER_HOST}`
+
+function coomerApiGet(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Accept: 'text/css',
+          Referer: `https://${COOMER_HOST}/`,
+        },
+      },
+      (res) => {
+        if (
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          return coomerApiGet(res.headers.location).then(resolve).catch(reject)
+        }
+        let body = ''
+        res.on('data', (c) => (body += c))
+        res.on('end', () => resolve({ status: res.statusCode, body }))
+      }
+    )
+    req.on('error', reject)
+    req.setTimeout(15000, () => {
+      req.destroy()
+      reject(new Error('API timeout'))
+    })
+  })
+}
+
+/**
+ * Fetch one page of posts from the Coomer API.
+ * Returns an array of post objects or [] on 404/empty.
+ */
+async function fetchPostsPage(service, username, offset) {
+  const url = `https://${COOMER_HOST}/api/v1/${service}/user/${encodeURIComponent(username)}/posts?limit=50&o=${offset}`
+  const { status, body } = await coomerApiGet(url)
+  if (status === 200) {
+    try {
+      return JSON.parse(body)
+    } catch {
+      return []
+    }
+  }
+  if (status === 404) return []
+  throw new Error(`Coomer API HTTP ${status} at offset ${offset}`)
+}
+
+/**
+ * Extract { service, username } from a Coomer user URL.
+ * e.g. https://coomer.st/onlyfans/user/someuser → { service: 'onlyfans', username: 'someuser' }
+ */
+function parseCoomerUrl(userUrl) {
+  const m = String(userUrl).match(
+    /coomer\.(?:st|party)\/([^/]+)\/user\/([^/?#]+)/i
+  )
+  if (!m) throw new Error(`Cannot parse Coomer URL: ${userUrl}`)
+  return { service: m[1].toLowerCase(), username: decodeURIComponent(m[2]) }
+}
+
 // ─── KNOWN FILENAMES ──────────────────────────────────────────────────────────
 const knownFilenames = new Set()
 const gifsToConvert = []
@@ -477,28 +541,13 @@ fs.readdirSync(datasetDir).forEach((model) => {
 
 // ─── MAIN SCRAPE ──────────────────────────────────────────────────────────────
 async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    defaultViewport: null,
-    args: ['--ignore-certificate-errors'],
-    ignoreHTTPSErrors: true,
-  })
-
   let newestDateSeen = null
 
   try {
     await findFfTools()
 
-    const page = await createScraperPage(browser, {
-      site: 'coomer',
-      interceptMedia: true,
-    })
-
-    const urlParts = new URL(userUrl).pathname.split('/')
-    const username = urlParts[urlParts.indexOf('user') + 1]
-    if (!username)
-      throw new Error('Failed to extract username from Coomer URL.')
-
+    // Extract service + username directly from the URL — no browser needed
+    const { service, username } = parseCoomerUrl(userUrl)
     const rawName = sanitize(username)
 
     // ── Unified model registry (shared with milkmaid) ─────────────────────────
@@ -521,31 +570,22 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
 
     let pageNum = startPage
 
-    // ── Page loop ─────────────────────────────────────────────────────────────
+    // ── Page loop (Coomer API — no browser) ───────────────────────────────────
     while (true) {
       if (endPage !== null && pageNum > endPage) {
         logAndProgress(`🧮 Reached end of page range (${startPage}–${endPage})`)
         break
       }
 
-      await new Promise((res) => setTimeout(res, 1500))
+      // Polite delay between API pages
+      if (pageNum > startPage) await new Promise((res) => setTimeout(res, 800))
 
-      const url = `${userUrl}?o=${pageNum * 50}`
-      await page.goto(url, { waitUntil: 'networkidle2' })
-      const hasPosts = await page
-        .waitForSelector('article.post-card a.fancy-link', { timeout: 10000 })
-        .then(() => true)
-        .catch(() => false)
+      const posts = await fetchPostsPage(service, username, pageNum * 50)
 
-      if (!hasPosts) {
-        logAndProgress(`📭 No posts found on page ${pageNum}, stopping.`)
+      if (!posts.length) {
+        logAndProgress(`📭 No posts on page ${pageNum}, stopping.`)
         break
       }
-
-      const links = await page.$$eval('article.post-card a.fancy-link', (els) =>
-        els.map((el) => el.href)
-      )
-      if (!links.length) break
 
       if (pageNum === startPage) process.stdout.write('\n')
       logProgress(completedTotal, totalExpectedPosts)
@@ -553,15 +593,14 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
       const pageLabel = totalPages
         ? `${pageNum - startPage + 1}/${totalPages}`
         : `${pageNum - startPage + 1}`
-      logAndProgress(`📦 Page ${pageLabel}`)
+      logAndProgress(`📦 Page ${pageLabel} (${posts.length} posts)`)
 
       await Promise.all(
-        links.map((link) =>
+        posts.map((post) =>
           limit(() => {
             taskCompleted = false
             return processPost(
-              link,
-              browser,
+              post,
               folders,
               modelName,
               knownFilenames,
@@ -893,7 +932,6 @@ async function scrapeCoomerUser(userUrl, startPage = 0, endPage = null) {
   } finally {
     finalizeRunLog()
     mediaDates.flushAllSidecars()
-    await browser.close().catch(() => {})
   }
 }
 
@@ -908,9 +946,13 @@ async function safeDownload(url) {
   }
 }
 
+/**
+ * Process a single post from the Coomer API.
+ * post = { id, published, file: { name, path }, attachments: [{ name, path }] }
+ * Media CDN URL = https://coomer.st/data{path}
+ */
 async function processPost(
-  link,
-  browser,
+  post,
   folders,
   modelName,
   knownFilenames,
@@ -918,58 +960,34 @@ async function processPost(
   lazyVideoQueue,
   updateNewestDate
 ) {
-  const page = await createScraperPage(browser, { site: 'coomer' })
-
   try {
-    await page.goto(link, { waitUntil: 'networkidle2', timeout: 10000 })
-
+    // ── Date from API field (reliable, no DOM needed) ──────────────────────
     let uploadedDate = null
-    try {
-      await page.waitForSelector('time.timestamp', { timeout: 10000 })
-      const timeText = await page.$eval('time.timestamp', (el) =>
-        el.getAttribute('datetime')
-      )
-      uploadedDate = timeText ? new Date(timeText) : null
-    } catch {
-      logAndProgress(`⏳ No timestamp for: ${link}`)
+    if (post.published) {
+      const d = new Date(post.published)
+      if (!isNaN(d.getTime())) uploadedDate = d
     }
     updateNewestDate(uploadedDate)
 
-    const mediaUrls = await page.evaluate(() => {
-      const urls = []
-      document
-        .querySelectorAll(
-          'a.fileThumb.image-link, video source[src], a.post__attachment-link[href]'
-        )
-        .forEach((el) => {
-          const u =
-            el.href ||
-            el.src ||
-            el.getAttribute('src') ||
-            el.getAttribute('href')
-          if (u && u.startsWith('http')) urls.push(u)
-        })
-      return urls
-    })
+    // ── Collect media items from file + attachments ────────────────────────
+    const mediaItems = []
+    if (post.file?.path) {
+      mediaItems.push({ name: post.file.name || null, cdnPath: post.file.path })
+    }
+    for (const att of post.attachments || []) {
+      if (att?.path)
+        mediaItems.push({ name: att.name || null, cdnPath: att.path })
+    }
 
-    for (const mediaUrl of mediaUrls) {
-      let url = normalizeUrl(mediaUrl)
-      if (!url || typeof url !== 'string') continue
+    for (const item of mediaItems) {
+      // CDN URL: https://coomer.st/data{/path/to/file.ext}
+      const url = `${COOMER_CDN}/data${item.cdnPath}`
 
-      // Strip Coomer proxy resize params
-      const parsed = new URL(url)
-      parsed.search = ''
-      url = parsed.toString()
+      // Prefer the original filename from the API; fall back to CDN path basename
+      const filename =
+        item.name || decodeURIComponent(path.basename(item.cdnPath))
 
-      let filename
-      try {
-        filename = decodeURIComponent(
-          path.basename(new URL(url).pathname).split('?')[0]
-        )
-        if (/avatar|profile/i.test(filename)) continue
-      } catch {
-        continue
-      }
+      if (!filename || /avatar|profile/i.test(filename)) continue
 
       const ext = path.extname(filename).toLowerCase()
       const timestamp = uploadedDate ? uploadedDate.getTime() / 1000 : null
@@ -998,59 +1016,18 @@ async function processPost(
       try {
         buffer = await safeDownload(url)
       } catch (err) {
-        logAndProgress(`🚨 Full-res failed after retries: ${filename}`)
-
-        const fallbackUrl = await page.evaluate((filenameGuess) => {
-          const imgs = Array.from(document.querySelectorAll('img'))
-          const match = imgs.find((img) => {
-            const src = img?.src || img?.getAttribute('src') || ''
-            return src.includes(filenameGuess.slice(0, 10))
-          })
-          return match?.src?.startsWith('http')
-            ? match.src
-            : match?.src
-              ? `https:${match.src}`
-              : null
-        }, filename)
-
-        if (fallbackUrl) {
-          try {
-            const fallbackBuffer = await downloadBufferWithProgress(fallbackUrl)
-            const fallbackPath = path.join(folders.images, filename)
-            fs.writeFileSync(fallbackPath, fallbackBuffer)
-            if (timestamp) fs.utimesSync(fallbackPath, timestamp, timestamp)
-            await mediaDates.recordImageDates(
-              path.join(datasetDir, modelName),
-              'images',
-              filename,
-              uploadedDate
-            )
-            knownFilenames.add(filename)
-            currentRunLog && currentRunLog.counters.saved++
-            appendRunEvent('saved_fallback_image', { modelName, filename })
-            logAndProgress(`🧷 Saved fallback image: ${filename}`)
-          } catch (e) {
-            currentRunLog && currentRunLog.counters.failures++
-            appendRunEvent('media_error', {
-              modelName,
-              filename,
-              url,
-              error: e.message,
-            })
-            fs.appendFileSync(skippedImagesLog, `${url}\n`)
-            logAndProgress(`❌ Fallback image failed: ${e.message}`)
-          }
-        } else {
-          currentRunLog && currentRunLog.counters.failures++
-          appendRunEvent('media_error', {
-            modelName,
-            filename,
-            url,
-            error: err.message,
-          })
-          fs.appendFileSync(skippedImagesLog, `${url}\n`)
-          logAndProgress(`❌ No fallback found in DOM for ${filename}`)
-        }
+        // With API-sourced CDN URLs there's no DOM fallback — log and skip
+        currentRunLog && currentRunLog.counters.failures++
+        appendRunEvent('media_error', {
+          modelName,
+          filename,
+          url,
+          error: err.message,
+        })
+        fs.appendFileSync(skippedImagesLog, `${url}\n`)
+        logAndProgress(
+          `❌ Download failed after retries: ${filename} — ${err.message}`
+        )
         continue
       }
 
@@ -1199,11 +1176,9 @@ async function processPost(
     }
   } catch (err) {
     currentRunLog && currentRunLog.counters.failures++
-    recordRunError('post_error', { link, error: err.message })
-    appendRunEvent('post_error', { link, error: err.message })
-    logAndProgress(`❌ Error scraping post ${link}: ${err.message}`)
-  } finally {
-    if (!page.isClosed()) await page.close()
+    recordRunError('post_error', { postId: post?.id, error: err.message })
+    appendRunEvent('post_error', { postId: post?.id, error: err.message })
+    logAndProgress(`❌ Error processing post ${post?.id}: ${err.message}`)
   }
 }
 

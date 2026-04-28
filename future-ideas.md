@@ -1,2 +1,11 @@
-- Make a dashboard and sort all models by date, based on photo / video / filename metadata instead of when it was downloaded
-- Check for dupes in model fodlers, as well as across all models
+#Features
+
+##Dashboard
+
+- Home button in top left takes you to overview of all models. Each model is a clickable card with a different thumbnail each time.
+- Improve media viewer in dashboard. Mouse wheel should zoom in on image when in lightbox, add a way to rotate images inside the dashboard itself?
+-
+
+To Do:
+
+- images in rotate dashboard
