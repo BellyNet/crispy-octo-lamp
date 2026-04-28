@@ -2,8 +2,3 @@ node_modules
 outputs
 *.webp
 *.safetensors
-
-# Data files — Prettier must not reformat these on save
-model_aliases.json
-*.slopvault-manifest*.json
-tmp/
