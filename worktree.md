@@ -16,14 +16,44 @@ We are currently back on `main`.
 
 ## Important Files
 
-- [F:\Dev\LoRA-Training\milkmaid\milkmaid.js](F:/Dev/LoRA-Training/milkmaid/milkmaid.js)
+### Scrapers
+- [F:\Dev\LoRA-Training\milkmaid\milkmaid.js](F:/Dev/LoRA-Training/milkmaid/milkmaid.js) — StufferDB scraper
+- [F:\Dev\LoRA-Training\hoghaul\hoghaul.js](F:/Dev/LoRA-Training/hoghaul/hoghaul.js) — Coomer.st scraper
+
+### Model Registry (single source of truth)
+- [F:\Dev\LoRA-Training\model_aliases.json](F:/Dev/LoRA-Training/model_aliases.json) — unified registry: all models, aliases, and per-platform sources
+- [F:\Dev\LoRA-Training\scrapyard\modelRegistry.js](F:/Dev/LoRA-Training/scrapyard/modelRegistry.js) — shared registry module used by all scrapers
+
+  Registry format:
+  ```json
+  {
+    "canonical_name": {
+      "aliases": ["alias1", "alias2"],
+      "sources": {
+        "stufferdb": [{ "url", "categoryId", "discoveredAs", "lastCheckedAt" }],
+        "coomer":    [{ "url", "service", "discoveredAs", "lastCheckedAt" }]
+      }
+    }
+  }
+  ```
+  All scrapers call `resolveAndTrackModel(registryPath, rawName, platform, sourceUrl)` — never write the registry directly.
+
+### Coomer backfill tools
+- [F:\Dev\LoRA-Training\hoghaul\backfill-coomer-sources.js](F:/Dev/LoRA-Training/hoghaul/backfill-coomer-sources.js) — auto-backfill: checks every alias against Coomer API, writes hits
+- [F:\Dev\LoRA-Training\hoghaul\backfill-coomer-sources-interactive.js](F:/Dev/LoRA-Training/hoghaul/backfill-coomer-sources-interactive.js) — interactive: for the 52 models not auto-matched; try username variants, paste URLs
+
+### Milkmaid repair / reporting
 - [F:\Dev\LoRA-Training\milkmaid\repair-stufferdb-models.js](F:/Dev/LoRA-Training/milkmaid/repair-stufferdb-models.js)
 - [F:\Dev\LoRA-Training\milkmaid\report-repair-failures.js](F:/Dev/LoRA-Training/milkmaid/report-repair-failures.js)
+
+### Audit
 - [F:\Dev\LoRA-Training\audit\audit-slopvault.js](F:/Dev/LoRA-Training/audit/audit-slopvault.js)
 - [F:\Dev\LoRA-Training\audit\manifest-slopvault.js](F:/Dev/LoRA-Training/audit/manifest-slopvault.js)
 - [F:\Dev\LoRA-Training\audit\review-slopvault.js](F:/Dev/LoRA-Training/audit/review-slopvault.js)
 - [F:\Dev\LoRA-Training\audit\salvage-tail-videos.js](F:/Dev/LoRA-Training/audit/salvage-tail-videos.js)
 - [F:\Dev\LoRA-Training\audit\salvage-quarantine-tail-videos.js](F:/Dev/LoRA-Training/audit/salvage-quarantine-tail-videos.js)
+
+### Hashing / scrapyard
 - [F:\Dev\LoRA-Training\scrapyard\hashStore.js](F:/Dev/LoRA-Training/scrapyard/hashStore.js)
 - [F:\Dev\LoRA-Training\scrapyard\bitwiseHasher.js](F:/Dev/LoRA-Training/scrapyard/bitwiseHasher.js)
 - [F:\Dev\LoRA-Training\scrapyard\visualHasher.js](F:/Dev/LoRA-Training/scrapyard/visualHasher.js)
@@ -58,6 +88,48 @@ Important runtime files:
   [C:\Users\jagsr\AppData\Roaming\.slopvault\quarantine\quarantine-manifest.json](C:/Users/jagsr/AppData/Roaming/.slopvault/quarantine/quarantine-manifest.json)
 
 ## What Has Been Done
+
+### Unified model registry + Coomer integration (latest session)
+
+`model_aliases.json` is now the **single source of truth** for all model names
+and sources across every scraper. Both milkmaid (StufferDB) and hoghaul (Coomer)
+write into it through the shared `scrapyard/modelRegistry.js` module.
+
+**`scrapyard/modelRegistry.js`** (new shared module)
+- `sanitize`, `loadModelRegistry`, `saveModelRegistry`, `sortModelRegistry`
+- `findCanonicalModelName`, `ensureModelEntryShape` — preserves all existing platform sources
+- `upsertStufferdbSource`, `upsertCoomerSource`, `upsertGenericSource`
+- `resolveAndTrackModel(registryPath, rawName, platform, sourceUrl)` — unified entry point; any future platform is one argument away
+
+**`milkmaid/milkmaid.js`** — refactored to import from `modelRegistry.js`
+- Removed ~160 lines of inline registry logic
+- Call site updated: `resolveAndTrackModel(aliasMapPath, rawName, 'stufferdb', inputUrl)`
+
+**`hoghaul/backfill-coomer-sources.js`** (new)
+- Iterates all 78 registry models, tries every alias × every Coomer service
+- Uses `/api/v1/{service}/user/{username}/profile` endpoint (`Accept: text/css` required)
+- Writes hits to `sources.coomer` via `resolveAndTrackModel`
+- Supports `--dry-run`, `--force`, `--delay=ms`
+- Result: **26 of 78 models** matched and written to registry; 0 errors
+
+**`hoghaul/backfill-coomer-sources-interactive.js`** (new)
+- For the 52 models the auto-backfill missed
+- Auto-probes all aliases first, then drops into a readline loop
+- Type a username → probed against all 8 services → open hits in Yandex for y/s
+- Paste a full `coomer.st` URL → validated via API → confirm to save
+- `s` = skip model, `q` = quit; saves immediately on each accept
+
+**EXIF removal** (completed earlier in session)
+- `milkmaid/backfill-exif-dates.js` — rewritten: all `exifr` calls removed, now uses `media-dates.js` sidecars only
+- `dashboard/server.js` — live EXIF fallback removed; only video date extraction remains
+- `package.json` — `exifr` dependency removed; script renamed `backfill:dates`
+
+**Coomer API notes for future agents**
+- Endpoint: `GET https://coomer.st/api/v1/{service}/user/{username}/profile`
+- Required header: `Accept: text/css` (without it you get HTTP 403)
+- Services: `onlyfans fansly patreon candfans subscribestar gumroad afdian boosty`
+- Stored URL format (browseable, not API): `https://coomer.st/{service}/user/{username}`
+- Search endpoint (`/api/v1/creators?q=...`) exists but ignores the `q` param — direct profile lookup is the only reliable method
 
 ### Milkmaid repair-awareness
 
@@ -179,6 +251,21 @@ These were the models still needing focused diagnosis after the full repair run:
 
 ## Useful Commands
 
+Auto-backfill Coomer sources for all registry models:
+
+```powershell
+npm run backfill:coomer
+# or with options:
+node hoghaul/backfill-coomer-sources.js --dry-run --delay=500
+node hoghaul/backfill-coomer-sources.js --force
+```
+
+Interactive Coomer backfill (for models the auto-pass missed):
+
+```powershell
+npm run backfill:coomer-interactive
+```
+
 Full repair batch:
 
 ```powershell
@@ -248,6 +335,9 @@ npm run salvage:tail-batch
    - quality ranking
    - keep/delete review
    - orientation/cleanup checks
+
+6. Run `npm run backfill:coomer-interactive` to manually resolve the 52 models
+   still missing a Coomer source — try spelling variations and paste confirmed URLs.
 
 ## Local Notes
 

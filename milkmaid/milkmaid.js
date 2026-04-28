@@ -47,8 +47,6 @@ const {
   logProgress,
   logLazyProgress,
   resetProgressBar,
-  logGifConversion,
-  logLazyDownload,
   getCompletionLine,
   getScrapeLine,
   getStatusHeader,
@@ -57,13 +55,170 @@ const {
   logScrollingMessage,
 } = require('../stuffinglogger')
 
-const {
-  sanitize,
-  loadModelRegistry,
-  findCanonicalModelName,
-  resolveAndTrackModel,
-} = require('../scrapyard/modelRegistry.js')
+function sanitize(name) {
+  return String(name || '')
+    .replace(/[^a-z0-9_\-]/gi, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+}
 
+function loadModelRegistry(registryPath) {
+  if (!fs.existsSync(registryPath)) {
+    const emptyRegistry = {}
+    fs.writeFileSync(registryPath, JSON.stringify(emptyRegistry, null, 2))
+    return emptyRegistry
+  }
+
+  try {
+    const raw = fs.readFileSync(registryPath, 'utf-8').trim()
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch (err) {
+    console.warn(
+      `⚠️ Could not parse model registry at ${registryPath}: ${err.message}`
+    )
+    return {}
+  }
+}
+
+function saveModelRegistry(registryPath, registry) {
+  fs.writeFileSync(
+    registryPath,
+    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
+  )
+}
+
+function sortStringValues(values) {
+  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  )
+}
+
+function sortStufferSources(sources) {
+  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
+    const left =
+      String(a?.discoveredAs || '') ||
+      String(a?.categoryId || '') ||
+      String(a?.url || '')
+    const right =
+      String(b?.discoveredAs || '') ||
+      String(b?.categoryId || '') ||
+      String(b?.url || '')
+    return left.localeCompare(right)
+  })
+}
+
+function sortModelRegistry(registry) {
+  return Object.fromEntries(
+    Object.entries(registry || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([canonicalName, entry]) => [
+        canonicalName,
+        {
+          aliases: sortStringValues(entry?.aliases),
+          sources: {
+            stufferdb: sortStufferSources(entry?.sources?.stufferdb),
+          },
+        },
+      ])
+  )
+}
+
+function ensureModelEntryShape(entry, canonicalName) {
+  const aliasSet = new Set(
+    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
+  )
+
+  if (canonicalName) aliasSet.add(canonicalName)
+
+  return {
+    aliases: Array.from(aliasSet),
+    sources: {
+      stufferdb: Array.isArray(entry?.sources?.stufferdb)
+        ? entry.sources.stufferdb
+        : [],
+    },
+  }
+}
+
+function findCanonicalModelName(registry, rawName) {
+  const normalizedRaw = sanitize(rawName)
+  if (!normalizedRaw) return null
+
+  for (const [canonicalName, entry] of Object.entries(registry)) {
+    if (sanitize(canonicalName) === normalizedRaw) return canonicalName
+
+    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
+    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) {
+      return canonicalName
+    }
+  }
+
+  return null
+}
+
+function upsertStufferSource(entry, sourceUrl, rawName) {
+  const cleanedUrl = String(sourceUrl || '').replace(/&acs=[^&]+/gi, '')
+  const categoryId = cleanedUrl.match(/category\/?(\d+)/)?.[1] || null
+  const now = new Date().toISOString()
+
+  if (!entry.sources) entry.sources = {}
+  if (!Array.isArray(entry.sources.stufferdb)) entry.sources.stufferdb = []
+
+  const sourceIndex = entry.sources.stufferdb.findIndex(
+    (source) =>
+      source?.url === cleanedUrl ||
+      (categoryId && source?.categoryId === categoryId)
+  )
+
+  const nextSource = {
+    url: cleanedUrl,
+    categoryId,
+    discoveredAs: rawName,
+    lastCheckedAt: now,
+  }
+
+  if (sourceIndex >= 0) {
+    entry.sources.stufferdb[sourceIndex] = {
+      ...entry.sources.stufferdb[sourceIndex],
+      ...nextSource,
+    }
+  } else {
+    entry.sources.stufferdb.push(nextSource)
+  }
+}
+
+function resolveAndTrackModel(registryPath, rawName, sourceUrl, canonicalOverride) {
+  const registry = loadModelRegistry(registryPath)
+  const cleanedRawName = sanitize(rawName) || 'unknown_cow'
+  const cleanedCanonicalOverride = sanitize(canonicalOverride)
+  const existingCanonical = cleanedCanonicalOverride
+    ? findCanonicalModelName(registry, cleanedCanonicalOverride)
+    : findCanonicalModelName(registry, cleanedRawName)
+  const canonicalName =
+    existingCanonical || cleanedCanonicalOverride || cleanedRawName
+
+  registry[canonicalName] = ensureModelEntryShape(
+    registry[canonicalName],
+    canonicalName
+  )
+
+  const aliases = registry[canonicalName].aliases
+  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
+    aliases.push(cleanedRawName)
+  }
+
+  registry[canonicalName].aliases = Array.from(
+    new Set(aliases.filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b))
+
+  upsertStufferSource(registry[canonicalName], sourceUrl, cleanedRawName)
+  saveModelRegistry(registryPath, registry)
+
+  return canonicalName
+}
 
 function extractModelNameFromBreadcrumb(anchors) {
   const genericFolderNames = new Set([
@@ -158,7 +313,9 @@ async function promptForModelSelection(registryPath, inferredRawName) {
     }
   }
 
-  const aliasAnswer = await askQuestion(`Page alias [${inferredName}]: `)
+  const aliasAnswer = await askQuestion(
+    `Page alias [${inferredName}]: `
+  )
   const canonicalAnswer = await askQuestion(
     `Save this alias under model [${inferredCanonical}]: `
   )
@@ -234,7 +391,6 @@ const knownFilenames = new Set()
 const skippedFilenames = new Set()
 const queuedVideos = new Set()
 
-const gifsToConvert = []
 const lazyVideoQueue = []
 let totalCount = 0,
   duplicateCount = 0,
@@ -243,6 +399,10 @@ let totalCount = 0,
   lastDraw = 0,
   totalLazyBytes = 0,
   lazyBytesDownloaded = 0
+let lazyDownloadStartedAt = 0,
+  lazyActiveDownloads = 0,
+  lazyCompletedDownloads = 0,
+  lazyCurrentLabel = ''
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.join(
@@ -271,6 +431,21 @@ let permanentSkipLookup = {
 }
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+
+function addRunSavedBytes(bytes) {
+  if (!currentRunLog) return
+  currentRunLog.transfer.savedBytes += Number(bytes) || 0
+}
+
+function setRunLazyExpectedBytes(bytes) {
+  if (!currentRunLog) return
+  currentRunLog.transfer.lazyExpectedBytes = Number(bytes) || 0
+}
+
+function setRunLazyTransferredBytes(bytes) {
+  if (!currentRunLog) return
+  currentRunLog.transfer.lazyTransferredBytes = Number(bytes) || 0
+}
 
 function getIncompleteDirs(modelName) {
   // Per-model scratch space so unfinished work never "bleeds" into the next run
@@ -518,6 +693,11 @@ function startRunLog(modelName, inputUrl, folders) {
       convertedGifs: 0,
       failures: 0,
     },
+    transfer: {
+      savedBytes: 0,
+      lazyExpectedBytes: 0,
+      lazyTransferredBytes: 0,
+    },
     errors: [],
   }
 
@@ -567,15 +747,23 @@ function recordRunError(category, details = {}) {
 function finalizeRunLog(extra = {}) {
   if (!currentRunLog) return
 
+  const { status = 'finished', ...rest } = extra
+  const finishedAt = new Date().toISOString()
+  const durationMs = Math.max(
+    new Date(finishedAt).getTime() - new Date(currentRunLog.startedAt).getTime(),
+    0
+  )
   const summary = {
     startedAt: currentRunLog.startedAt,
-    finishedAt: new Date().toISOString(),
+    finishedAt,
+    durationMs,
     modelName: currentRunLog.modelName,
     inputUrl: currentRunLog.inputUrl,
     logPath: currentRunLog.logPath,
     counters: currentRunLog.counters,
+    transfer: currentRunLog.transfer,
     errors: currentRunLog.errors,
-    ...extra,
+    ...rest,
   }
 
   fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
@@ -584,7 +772,7 @@ function finalizeRunLog(extra = {}) {
     JSON.stringify(
       {
         ...summary,
-        status: 'finished',
+        status,
       },
       null,
       2
@@ -825,29 +1013,6 @@ function hashFileFromPath(filePath) {
   })
 }
 
-function convertGifToMp4(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const cmd = `ffmpeg -y -i "${inputPath}" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outputPath}"`
-    logAndProgress(`🔥 Converting`)
-    exec(cmd, (err) => (err ? reject(err) : resolve()))
-  })
-}
-
-function getGifFrameCount(buffer) {
-  return new Promise((resolve) => {
-    const tmp = path.join(tmpDir, `__framecheck_${Date.now()}.gif`)
-    fs.writeFileSync(tmp, buffer)
-    exec(
-      `ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "${tmp}"`,
-      (err, stdout) => {
-        fs.unlinkSync(tmp)
-        const frameCount = parseInt(stdout.trim(), 10)
-        resolve(isNaN(frameCount) ? 1 : frameCount)
-      }
-    )
-  })
-}
-
 async function fetchStufferDBTotalCount(browser, url) {
   const tempPage = await createScraperPage(browser, {
     site: 'stufferdb',
@@ -1048,7 +1213,23 @@ function logAndProgress(message, increment = false) {
     const percent = totalLazyBytes
       ? (lazyBytesDownloaded / totalLazyBytes) * 100
       : 0
-    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes)
+    const elapsedSeconds = lazyDownloadStartedAt
+      ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
+      : 0
+    const speedBytesPerSecond = elapsedSeconds
+      ? lazyBytesDownloaded / elapsedSeconds
+      : 0
+    const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
+    const etaSeconds =
+      speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
+      speedBytesPerSecond,
+      etaSeconds,
+      activeCount: lazyActiveDownloads,
+      completedCount: lazyCompletedDownloads,
+      totalCount: lazyVideoQueue.length,
+      currentLabel: lazyCurrentLabel,
+    })
   } else {
     logProgress(completedTotal, global.totalSearchTotal || 1)
   }
@@ -1274,106 +1455,60 @@ async function scrapeGallery(browser, url, modelName, folders) {
             buffer = await downloadBufferWithProgress(mediaUrl)
             hash = createHash('md5').update(buffer).digest('hex')
 
-            const frameCount = await getGifFrameCount(buffer)
-            if (frameCount > 1) {
-              // Animated GIF → Save and queue conversion
-              const mp4Name = filename.replace(/\.gif$/, '.mp4')
-              const webmFolder = folders.createWebmFolder()
-              const mp4Path = path.join(webmFolder, mp4Name)
+            const gifFolder = folders.createGifFolder()
+            const gifPath = path.join(gifFolder, filename)
 
-              if (knownFilenames.has(mp4Name) || existsForRepair(mp4Path)) {
-                duplicateCount++
-                currentRunLog && currentRunLog.counters.duplicates++
-                appendRunEvent('skip_existing_conversion', {
-                  modelName,
-                  filename,
-                  targetPath: getDatasetRelativePath(mp4Path),
-                  quarantinedMirrorExists: isQuarantinedPath(mp4Path),
-                })
-                return logAndProgress(
-                  `♻️ Already converted gif > mp4: ${mp4Name}`,
-                  true
-                )
-              }
-
-              const tmpPath = path.join(folders.incompleteGifDir, filename)
-              fs.writeFileSync(tmpPath, buffer)
-
-              // Create gif folder only now
-              const gifFolder = folders.createGifFolder()
-              const gifSavePath = path.join(gifFolder, filename)
-              fs.writeFileSync(gifSavePath, buffer)
-
-              if (uploadedDate) {
-                const ts = uploadedDate.getTime() / 1000
-                fs.utimesSync(tmpPath, ts, ts)
-                fs.utimesSync(gifSavePath, ts, ts)
-              }
-
-              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'gif', filename, uploadedDate)
-
-              gifsToConvert.push({
-                tmpPath,
-                mp4Path,
-                filename,
-              })
-              currentRunLog && currentRunLog.counters.queuedVideos++
-              appendRunEvent('queued_gif_conversion', {
+            if (knownFilenames.has(filename) || existsForRepair(gifPath)) {
+              duplicateCount++
+              currentRunLog && currentRunLog.counters.duplicates++
+              appendRunEvent('skip_existing_gif', {
                 modelName,
                 filename,
-                gifPath: getDatasetRelativePath(gifSavePath),
-                mp4TargetPath: getDatasetRelativePath(mp4Path),
+                savedPath: getDatasetRelativePath(gifPath),
+                quarantinedMirrorExists: isQuarantinedPath(gifPath),
               })
-
-              return logAndProgress(logGifConversion(completedTotal), true)
-            } else {
-              // Static GIF → treat as image
-              const stillPath = path.join(folders.images, filename)
-              fs.writeFileSync(stillPath, buffer)
-              if (uploadedDate) {
-                const ts = uploadedDate.getTime() / 1000
-                fs.utimesSync(stillPath, ts, ts)
-              }
-              await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, uploadedDate)
-
-              knownFilenames.add(filename)
-              if (visualHash) {
-                addVisualHash(
-                  visualHash,
-                  buildHashMetadata(
-                    modelName,
-                    stillPath,
-                    'gif',
-                    buffer.length,
-                    uploadedDate
-                  )
-                )
-              }
-              if (!isBitwiseDupe(hash)) {
-                addBitwiseHash(
-                  hash,
-                  buildHashMetadata(
-                    modelName,
-                    stillPath,
-                    'gif',
-                    buffer.length,
-                    uploadedDate
-                  )
-                )
-                saveBitwiseHashCache()
-              }
-
-              successCount++
-              currentRunLog && currentRunLog.counters.saved++
-              appendRunEvent('saved_still_gif', {
-                modelName,
-                filename,
-                savedPath: getDatasetRelativePath(stillPath),
-                hash,
-                visualHash,
-              })
-              return logAndProgress(`🖼️ Saved still gif: ${filename}`, true)
+              return logAndProgress(`â™»ï¸ Skipped gif (exists): ${filename}`, true)
             }
+
+            fs.writeFileSync(gifPath, buffer)
+            if (uploadedDate) {
+              const ts = uploadedDate.getTime() / 1000
+              fs.utimesSync(gifPath, ts, ts)
+            }
+
+            await mediaDates.recordImageDates(
+              path.join(datasetDir, modelName),
+              'gif',
+              filename,
+              buffer,
+              uploadedDate
+            )
+
+            if (!isBitwiseDupe(hash)) {
+              addBitwiseHash(
+                hash,
+                buildHashMetadata(
+                  modelName,
+                  gifPath,
+                  'gif',
+                  buffer.length,
+                  uploadedDate
+                )
+              )
+              saveBitwiseHashCache()
+            }
+
+            knownFilenames.add(filename)
+            successCount++
+            currentRunLog && currentRunLog.counters.saved++
+            addRunSavedBytes(buffer.length)
+            appendRunEvent('saved_gif', {
+              modelName,
+              filename,
+              savedPath: getDatasetRelativePath(gifPath),
+              hash,
+            })
+            return logAndProgress(`Saved gif: ${filename}`, true)
           }
 
           if (['.mp4', '.webm'].includes(ext)) {
@@ -1444,7 +1579,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             fs.utimesSync(finalPath, ts, ts)
           }
 
-          await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, uploadedDate)
+          await mediaDates.recordImageDates(path.join(datasetDir, modelName), 'images', filename, buffer, uploadedDate)
 
           if (!isBitwiseDupe(hash)) {
             addBitwiseHash(
@@ -1475,6 +1610,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           knownFilenames.add(filename)
           successCount++
           currentRunLog && currentRunLog.counters.saved++
+          addRunSavedBytes(buffer.length)
           appendRunEvent('saved_image', {
             modelName,
             filename,
@@ -1552,7 +1688,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       inputUrl: initialInputUrl,
       modelOverride,
       reviewErrors,
-      skipNasSync,
+      skipNasSync
     } = parseCliArgs(process.argv.slice(2))
     let inputUrl = initialInputUrl
     if (!inputUrl || !inputUrl.includes('/category/'))
@@ -1598,14 +1734,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
       )
     } else {
       console.log(
-        `🏷️ Confirmed model: ${rawName} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
+        `🏷️ Confirmed alias: ${rawName} -> bucket: ${canonicalModelName} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
       )
     }
 
     modelName = resolveAndTrackModel(
       aliasMapPath,
       rawName,
-      'stufferdb',
       inputUrl,
       canonicalModelName
     )
@@ -1619,6 +1754,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       modelName,
       categoryUrls: categoryRunList,
       inferredRawName,
+      canonicalModelName,
       modelOverride: modelOverride || null,
     })
 
@@ -1656,150 +1792,17 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   logAndProgress('🧮 Scrape complete')
 
-  const leftoverGifs = fs
-    .readdirSync(folders.incompleteGifDir)
-    .filter((f) => f.endsWith('.gif'))
-  for (const gif of leftoverGifs) {
-    const tmpPath = path.join(folders.incompleteGifDir, gif)
-    const webmFolder = folders.createWebmFolder()
-    const mp4Path = path.join(webmFolder, gif.replace(/\.gif$/, '.mp4'))
-    gifsToConvert.push({ tmpPath, mp4Path, filename: gif })
-  }
-
-  logAndProgress(`🚜 Converting gifs: ${gifsToConvert.length}`)
-  const filteredGifs = gifsToConvert.filter(({ mp4Path }) => {
-    const mp4Name = path.basename(mp4Path)
-    const isKnown =
-      knownFilenames.has(mp4Name) ||
-      skippedFilenames.has(mp4Name) ||
-      existsForRepair(mp4Path)
-    if (isKnown) {
-      appendRunEvent('skip_gif_conversion_known', {
-        modelName,
-        filename: mp4Name,
-        savedPath: getDatasetRelativePath(mp4Path),
-        quarantinedMirrorExists: isQuarantinedPath(mp4Path),
-      })
-      logAndProgress(
-        `🚫 Skipping gif conversion (already known or failed): ${mp4Name}`
-      )
-    }
-    return !isKnown
-  })
-
-  for (const { tmpPath, mp4Path, filename } of filteredGifs) {
-    try {
-      if (existsForRepair(mp4Path)) {
-        appendRunEvent('skip_gif_conversion_existing', {
-          modelName,
-          filename,
-          savedPath: getDatasetRelativePath(mp4Path),
-          quarantinedMirrorExists: isQuarantinedPath(mp4Path),
-        })
-        logAndProgress(`♻️ Already exists: ${mp4Path}`)
-        continue
-      }
-
-      logAndProgress(`🔥 Converting GIF → MP4: ${filename}`)
-      await convertGifToMp4(tmpPath, mp4Path)
-
-      // Preserve timestamp if available
-      const uploadedDate = gifsToConvert.find(
-        (g) => g.filename === filename
-      )?.uploadedDate
-      if (uploadedDate) {
-        const ts = uploadedDate.getTime() / 1000
-        fs.utimesSync(mp4Path, ts, ts)
-      }
-
-      // mp4Name is the converted filename (.gif → .mp4)
-      const mp4Name = path.basename(mp4Path)
-      await mediaDates.recordVideoDates(path.join(datasetDir, modelName), 'webm', mp4Name, mp4Path, uploadedDate)
-
-      const mp4Stat = fs.statSync(mp4Path)
-      const mp4Hash = await hashFileFromPath(mp4Path)
-      addBitwiseHash(
-        mp4Hash,
-        buildHashMetadata(
-          modelName,
-          mp4Path,
-          'video',
-          mp4Stat.size,
-          uploadedDate
-        )
-      )
-      saveBitwiseHashCache()
-
-      const mp4VisualHash = await getVisualHashFromVideoPath(mp4Path)
-      if (mp4VisualHash) {
-        addVisualHash(
-          mp4VisualHash,
-          buildHashMetadata(
-            modelName,
-            mp4Path,
-            'video',
-            mp4Stat.size,
-            uploadedDate
-          )
-        )
-        saveVisualHashCache()
-      }
-
-      knownFilenames.add(path.basename(mp4Path))
-      currentRunLog && currentRunLog.counters.convertedGifs++
-      currentRunLog && currentRunLog.counters.saved++
-      appendRunEvent('converted_gif_to_mp4', {
-        modelName,
-        filename,
-        savedPath: getDatasetRelativePath(mp4Path),
-        hash: mp4Hash,
-        visualHash: mp4VisualHash,
-      })
-
-      const removedQuarantineMirror = removeQuarantineMirrorIfExists(mp4Path)
-      if (removedQuarantineMirror) {
-        const repairedManifestEntry = updateQuarantineManifestForRepair(mp4Path, {
-          hash: mp4Hash,
-          sizeBytes: mp4Stat.size,
-          sourceUrl: null,
-          mediaPageUrl: null,
-        })
-        appendRunEvent('repair_cleared_quarantine_copy', {
-          modelName,
-          filename: path.basename(mp4Path),
-          savedPath: getDatasetRelativePath(mp4Path),
-          manifestUpdated: repairedManifestEntry,
-        })
-      }
-
-      // Clean up the original GIF from tmp folder
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-
-      logAndProgress(`✅ Converted GIF to MP4: ${filename}`)
-    } catch (err) {
-      currentRunLog && currentRunLog.counters.failures++
-      recordRunError('gif_conversion_error', {
-        modelName,
-        filename,
-        tmpPath: path.relative(rootDir, tmpPath).replace(/\\/g, '/'),
-        mp4Path: getDatasetRelativePath(mp4Path),
-        error: err.message,
-      })
-      appendRunEvent('gif_conversion_error', {
-        modelName,
-        filename,
-        error: err.message,
-      })
-      logAndProgress(`❌ Conversion failed for ${filename}: ${err.message}`)
-      skippedFilenames.add(path.basename(mp4Path))
-    }
-  }
-
-  logAndProgress(`🐢 Lazy downloading videos: ${lazyVideoQueue.length}`)
+  logAndProgress(`Lazy downloading videos: ${lazyVideoQueue.length}`)
   resetProgressBar(null, 'lazy')
   lastDraw = 0
   totalLazyBytes = 0
   lazyBytesDownloaded = 0
+  lazyDownloadStartedAt = Date.now()
+  lazyActiveDownloads = 0
+  lazyCompletedDownloads = 0
+  lazyCurrentLabel = ''
+  setRunLazyExpectedBytes(0)
+  setRunLazyTransferredBytes(0)
   setProgressMode('lazy')
 
   // Pre-fetch expected file sizes (best-effort)
@@ -1811,6 +1814,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           .get(url, { method: 'HEAD' }, (res) => {
             const size = parseInt(res.headers['content-length']) || 0
             totalLazyBytes += size
+            setRunLazyExpectedBytes(totalLazyBytes)
             res.destroy()
             resolve()
           })
@@ -1823,9 +1827,27 @@ async function scrapeGallery(browser, url, modelName, folders) {
     const percent = totalLazyBytes
       ? (lazyBytesDownloaded / totalLazyBytes) * 100
       : 0
+    const elapsedSeconds = lazyDownloadStartedAt
+      ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
+      : 0
+    const speedBytesPerSecond = elapsedSeconds
+      ? lazyBytesDownloaded / elapsedSeconds
+      : 0
+    const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
+    const etaSeconds =
+      speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
 
-    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes)
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
+      speedBytesPerSecond,
+      etaSeconds,
+      activeCount: lazyActiveDownloads,
+      completedCount: lazyCompletedDownloads,
+      totalCount: lazyVideoQueue.length,
+      currentLabel: lazyCurrentLabel,
+    })
   }
+
+  drawLazyProgress()
 
   await Promise.all(
     lazyVideoQueue.map(
@@ -1847,6 +1869,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           knownFilenames.add(filename) // ✅ Mark as claimed early
+          lazyActiveDownloads++
+          lazyCurrentLabel = filename
+          drawLazyProgress()
           const quarantineMirrorPath = getQuarantineMirrorPath(finalPath)
           const traceLazyVideo = shouldTraceLazyVideo(filename, finalPath)
           const hadQuarantineMirror = fs.existsSync(quarantineMirrorPath)
@@ -1868,10 +1893,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
               removed,
             })
           }
-
-          logAndProgress(`🚀 STARTING lazy task #${i}: ${filename}`)
-          logAndProgress(logLazyDownload(i))
-          logAndProgress(`⏳ (${i + 1}/${lazyVideoQueue.length})`)
 
           fs.mkdirSync(path.dirname(tmpPath), { recursive: true })
           const stream = fs.createWriteStream(tmpPath)
@@ -1978,6 +1999,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                     resetIdleTimer()
                     stream.write(chunk)
                     lazyBytesDownloaded += chunk.length
+                    setRunLazyTransferredBytes(lazyBytesDownloaded)
                     bytesDownloadedForFile += chunk.length
 
                     const now = Date.now()
@@ -2113,6 +2135,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             successCount++
             currentRunLog && currentRunLog.counters.saved++
+            addRunSavedBytes(finalStat.size)
             appendRunEvent('saved_lazy_video', {
               modelName,
               filename,
@@ -2142,28 +2165,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
             logAndProgress(`✅ Saved lazy video: ${filename}`)
 
-            const isSmallFile = fs.statSync(finalPath).size < 5 * 1024 * 1024 // <5MB
-            if (duration <= 6 && isSmallFile) {
-              const gifFolder = folders.createGifFolder()
-              const gifName = filename.replace(/\.(mp4|m4v)$/i, '.gif')
-              const gifPath = path.join(gifFolder, gifName)
-
-              if (!fs.existsSync(gifPath)) {
-                await convertShortMp4ToGif(finalPath, gifPath)
-                if (uploadedDate) {
-                  const ts = uploadedDate.getTime() / 1000
-                  fs.utimesSync(gifPath, ts, ts)
-                }
-                currentRunLog && currentRunLog.counters.convertedGifs++
-                currentRunLog && currentRunLog.counters.saved++
-                appendRunEvent('converted_short_video_to_gif', {
-                  modelName,
-                  filename,
-                  gifPath: getDatasetRelativePath(gifPath),
-                })
-                logAndProgress(`🎁 Converted short mp4 to gif: ${gifName}`)
-              }
-            }
           } catch (err) {
             errorCount++
             currentRunLog && currentRunLog.counters.failures++
@@ -2211,6 +2212,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
             if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
             knownFilenames.delete(filename) // allow retry in future runs
+          } finally {
+            lazyActiveDownloads = Math.max(lazyActiveDownloads - 1, 0)
+            lazyCompletedDownloads++
+            if (lazyCurrentLabel === filename) {
+              lazyCurrentLabel = ''
+            }
+            setRunLazyTransferredBytes(lazyBytesDownloaded)
+            drawLazyProgress()
           }
         })
     )
@@ -2220,16 +2229,6 @@ async function scrapeGallery(browser, url, modelName, folders) {
     browser = null
 
     saveVisualHashCache()
-
-    if (currentRunLog) {
-      finalizeRunLog({
-        successCount,
-        duplicateCount,
-        errorCount,
-        categoryRunList,
-        combinedTotal,
-      })
-    }
 
     await maybePauseForErrorReview(modelName, errorCount, reviewErrors)
 

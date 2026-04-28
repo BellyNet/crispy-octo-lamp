@@ -217,7 +217,7 @@ async function run() {
       if (saved) continue
 
       // ── Manual loop ───────────────────────────────────────────────────────
-      const searchUrl = `https://${COOMER_HOST}/search?q=${encodeURIComponent(canonicalName)}`
+      const searchUrl = `https://${COOMER_HOST}/artists?q=${encodeURIComponent(canonicalName)}`
       console.log(`\n  Opening Coomer search: ${searchUrl}`)
       openInBrowser(searchUrl)
 
