@@ -27,6 +27,7 @@
         --tag-gif: #7b4f9e;
         --tag-video: #9e4f4f;
         --sidebar-w: 240px;
+        --card-min: 160px;
       }
 
       html,
@@ -261,6 +262,34 @@
         flex-shrink: 0;
       }
 
+      .size-btn {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 6px;
+        border-radius: 4px;
+        transition: all 0.1s;
+        letter-spacing: 0.04em;
+      }
+      .size-btn:hover {
+        background: var(--card-bg);
+        color: var(--text);
+      }
+      .size-btn.active {
+        color: var(--accent);
+      }
+
+      .card-added {
+        font-size: 9px;
+        color: var(--muted);
+        opacity: 0.6;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
       /* ─── SOURCE LINKS ───────────────────────────────────────────── */
       #source-links {
         display: flex;
@@ -323,7 +352,7 @@
 
       #media-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
         gap: 8px;
       }
 
@@ -578,6 +607,12 @@
         font-weight: 500;
         flex-shrink: 0;
       }
+      #lb-added-date {
+        font-size: 12px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+
       #lb-counter {
         font-size: 12px;
         color: var(--muted);
@@ -814,6 +849,11 @@
         <button class="sort-btn" data-sort="added-asc">Oldest</button>
         <button class="sort-btn" data-sort="added-desc">Newest</button>
         <span id="date-range"></span>
+        <div class="sort-sep"></div>
+        <span class="sort-label">Size</span>
+        <button class="size-btn active" data-size="small">S</button>
+        <button class="size-btn" data-size="medium">M</button>
+        <button class="size-btn" data-size="large">L</button>
       </div>
 
       <div id="grid-container">
@@ -855,6 +895,7 @@
         <span id="lb-type-badge" class="type-badge"></span>
         <span id="lb-date"></span>
         <span id="lb-filename"></span>
+        <span id="lb-added-date"></span>
         <span id="lb-counter"></span>
       </div>
     </div>
@@ -887,6 +928,7 @@
       const lbMediaWrap = document.getElementById('lb-media-wrap')
       const lbDate = document.getElementById('lb-date')
       const lbFilename = document.getElementById('lb-filename')
+      const lbAddedDate = document.getElementById('lb-added-date')
       const lbCounter = document.getElementById('lb-counter')
       const lbTypeBadge = document.getElementById('lb-type-badge')
 
@@ -1171,13 +1213,14 @@
           const footer = document.createElement('div')
           footer.className = 'card-footer'
 
+          // Left: type badge + optional source badge + media date
+          const left = document.createElement('div')
+          left.style.cssText = 'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
+
           const badge = document.createElement('span')
           badge.className = `type-badge ${item.type}`
           badge.textContent = item.type === 'image' ? 'img' : item.type
-
-          const dateWrap = document.createElement('span')
-          dateWrap.style.cssText =
-            'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
+          left.appendChild(badge)
 
           if (item.source && item.source !== 'filename') {
             const srcBadge = document.createElement('span')
@@ -1196,7 +1239,7 @@
               filesystem: '* Local download date — least reliable',
             }
             srcBadge.title = tips[item.source] || item.source
-            dateWrap.appendChild(srcBadge)
+            left.appendChild(srcBadge)
           }
 
           const dateEl = document.createElement('span')
@@ -1210,10 +1253,24 @@
             : '—'
           dateEl.title =
             formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
-          dateWrap.appendChild(dateEl)
+          left.appendChild(dateEl)
 
-          footer.appendChild(badge)
-          footer.appendChild(dateWrap)
+          // Right: date added to disk
+          const addedEl = document.createElement('span')
+          addedEl.className = 'card-added'
+          addedEl.textContent = item.addedMs
+            ? new Date(item.addedMs).toLocaleDateString('en-US', {
+                year: '2-digit',
+                month: 'numeric',
+                day: 'numeric',
+              })
+            : '—'
+          addedEl.title = item.addedMs
+            ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}`
+            : 'Added date unknown'
+
+          footer.appendChild(left)
+          footer.appendChild(addedEl)
           card.appendChild(thumb)
           card.appendChild(footer)
 
@@ -1270,6 +1327,9 @@
           : ''
         lbDate.textContent = formatDate(item.date) + srcLabel
         lbFilename.textContent = item.filename
+        lbAddedDate.textContent = item.addedMs
+          ? `Added ${formatDate(new Date(item.addedMs).toISOString())}`
+          : ''
         lbCounter.textContent = `${lbIndex + 1} / ${filtered.length}`
 
         lbTypeBadge.className = `type-badge ${item.type}`
@@ -1303,6 +1363,17 @@
         if (e.key === 'Escape') closeLightbox()
         else if (e.key === 'ArrowLeft') lbPrev()
         else if (e.key === 'ArrowRight') lbNext()
+      })
+
+      // ─── CARD SIZE ────────────────────────────────────────────────────────
+      const sizeBtns = document.querySelectorAll('.size-btn')
+      const CARD_SIZES = { small: '160px', medium: '220px', large: '300px' }
+
+      sizeBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          sizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
+          document.documentElement.style.setProperty('--card-min', CARD_SIZES[btn.dataset.size])
+        })
       })
 
       // ─── MOBILE SIDEBAR ───────────────────────────────────────────────────

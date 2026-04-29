@@ -1,44 +1,40 @@
 const chalk = require('chalk').default
 const stripAnsi = require('strip-ansi').default
 const readline = require('readline')
-const ansiEscapes = require('ansi-escapes')
 
 const scrapeEmojis = ['🐷', '🐽', '🍰', '🍕', '🧁', '🐄']
 const lazyEmojis = ['🥛', '🧈', '🍮', '🫃', '🍓', '💞']
 const gifEmojis = ['🧈', '🍑', '🍮', '🫃', '🐄', '🐷']
 
 let persistentEmoji = pickEmoji(scrapeEmojis)
-
 let pinnedTopLineText = ''
 let pinnedBottomLineText = ''
 let reservedProgressRows = false
-const PINNED_ROW_COUNT = 2
 
 function hasPinnedTerminalSupport() {
-  return Boolean(
-    process.stdout.isTTY &&
-      Number.isFinite(process.stdout.rows) &&
-      process.stdout.rows > PINNED_ROW_COUNT
-  )
+  return Boolean(process.stdout.isTTY)
 }
 
 function ensurePinnedRows() {
   if (reservedProgressRows) return
   if (!hasPinnedTerminalSupport()) return
-  process.stdout.write('\n'.repeat(PINNED_ROW_COUNT))
+  process.stdout.write('\n\n')
   reservedProgressRows = true
+}
+
+function rewriteManagedFooter(topText, bottomText) {
+  readline.moveCursor(process.stdout, 0, -2)
+  readline.cursorTo(process.stdout, 0)
+  readline.clearLine(process.stdout, 0)
+  process.stdout.write(`${topText}\n`)
+  readline.cursorTo(process.stdout, 0)
+  readline.clearLine(process.stdout, 0)
+  process.stdout.write(`${bottomText}\n`)
 }
 
 function redrawPinnedLines() {
   if (!reservedProgressRows || !hasPinnedTerminalSupport()) return
-
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT))
-  readline.clearLine(process.stdout, 0)
-  process.stdout.write(pinnedTopLineText)
-
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - 1))
-  readline.clearLine(process.stdout, 0)
-  process.stdout.write(pinnedBottomLineText)
+  rewriteManagedFooter(pinnedTopLineText, pinnedBottomLineText)
 }
 
 function setPinnedLines(topText = '', bottomText = '') {
@@ -62,12 +58,26 @@ function logScrollingMessage(message = '') {
   }
 
   ensurePinnedRows()
-
-  // Print the message above the reserved bottom rows, then redraw the pinned lines.
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT))
-  process.stdout.write(ansiEscapes.eraseDown)
-  process.stdout.write(`${message}\n`)
+  rewriteManagedFooter(message, pinnedTopLineText)
+  pinnedTopLineText = pinnedBottomLineText
   redrawPinnedLines()
+}
+
+function clearPinnedFooter() {
+  pinnedTopLineText = ''
+  pinnedBottomLineText = ''
+
+  if (!hasPinnedTerminalSupport()) return
+  if (!reservedProgressRows) return
+
+  readline.moveCursor(process.stdout, 0, -2)
+  readline.cursorTo(process.stdout, 0)
+  readline.clearLine(process.stdout, 0)
+  process.stdout.write('\n')
+  readline.cursorTo(process.stdout, 0)
+  readline.clearLine(process.stdout, 0)
+  process.stdout.write('\n')
+  reservedProgressRows = false
 }
 
 const scrapeLines = [
@@ -283,11 +293,7 @@ function buildEmojiBar(leftText, current, total, emoji = persistentEmoji) {
   const emojiCount = Math.floor(filledWidth / emojiWidth)
   const emptyCount = Math.max(innerWidth - emojiCount * emojiWidth, 0)
 
-  return `[${emoji.repeat(emojiCount)}${'—'.repeat(emptyCount)}]`
-}
-
-function drawPinnedLines(topText, bottomText = '') {
-  setPinnedLines(topText, bottomText)
+  return `[${emoji.repeat(emojiCount)}${'-'.repeat(emptyCount)}]`
 }
 
 function formatBytes(bytes) {
@@ -327,6 +333,20 @@ function formatEta(seconds) {
   return `${secs}s`
 }
 
+function formatDuration(durationMs) {
+  const safeDuration = Number(durationMs) || 0
+  if (safeDuration <= 0) return '0s'
+
+  const totalSeconds = Math.round(safeDuration / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
+}
+
 function truncateLabel(text, maxLength = 42) {
   const normalized = String(text || '').trim()
   if (!normalized) return null
@@ -334,7 +354,7 @@ function truncateLabel(text, maxLength = 42) {
   return `...${normalized.slice(-(maxLength - 3))}`
 }
 
-function logProgress(current, total) {
+function logProgress(current, total, options = {}) {
   const safeTotal = Math.max(total || 1, 1)
   const { overflow } = getProgressRatio(current, safeTotal)
   const progressStats = chalk.cyan(
@@ -344,18 +364,35 @@ function logProgress(current, total) {
   const phrase = chalk.gray(getMidPhrase(current, safeTotal))
   const leftText = `${progressStats} ${pig} ${phrase} `
   const bar = buildEmojiBar(leftText, current, safeTotal)
-  const bottomText = chalk.gray(
-    'File save / skip / fail updates should scroll above these pinned stats.'
-  )
+  const details = []
 
-  drawPinnedLines(`${leftText}${bar}`, bottomText)
+  if (Number.isFinite(options.savedCount)) {
+    details.push(`${options.savedCount} saved`)
+  }
+  if (Number.isFinite(options.duplicateCount)) {
+    details.push(`${options.duplicateCount} dupes`)
+  }
+  if (Number.isFinite(options.errorCount)) {
+    details.push(`${options.errorCount} errors`)
+  }
+
+  const transferredBytes = Number(options.totalTransferredBytes) || 0
+  if (transferredBytes > 0) {
+    details.unshift(`${formatBytes(transferredBytes)} downloaded`)
+  }
+
+  const bottomText =
+    details.length > 0
+      ? chalk.gray(`Run ${details.join(' | ')}`)
+      : chalk.gray('Run in progress')
+
+  setPinnedLines(`${leftText}${bar}`, bottomText)
 }
 
 function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {}) {
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
-  const lazyProgressValue = safePercent
   const leftText = `${chalk.cyan(`${safePercent.toFixed(1)}%`)} ${chalk.magentaBright('🐷')} ${chalk.gray('slow stuffing...')} `
-  const bar = buildEmojiBar(leftText, lazyProgressValue, 100)
+  const bar = buildEmojiBar(leftText, safePercent, 100)
   const details = [
     `${formatBytes(downloadedBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : '?'}`,
   ]
@@ -381,7 +418,7 @@ function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {})
   const currentLabel = truncateLabel(options.currentLabel)
   if (currentLabel) details.push(currentLabel)
 
-  drawPinnedLines(
+  setPinnedLines(
     `${leftText}${bar}`,
     chalk.gray(`(${details.join(' | ')})`)
   )
@@ -400,6 +437,9 @@ function getCompletionLine() {
 }
 
 module.exports = {
+  clearPinnedFooter,
+  formatBytes,
+  formatDuration,
   logProgress,
   logLazyProgress,
   resetProgressBar,

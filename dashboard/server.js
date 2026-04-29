@@ -220,7 +220,10 @@ function parseCookies(req) {
   const cookies = {}
   for (const part of (req.headers.cookie || '').split(';')) {
     const [k, ...v] = part.split('=')
-    if (k) cookies[k.trim()] = decodeURIComponent(v.join('=').trim())
+    if (k) {
+      const raw = v.join('=').trim()
+      try { cookies[k.trim()] = decodeURIComponent(raw) } catch { cookies[k.trim()] = raw }
+    }
   }
   return cookies
 }
@@ -315,7 +318,9 @@ app.get('/api/users/:username/media', async (req, res) => {
           date: meta.date,
           source: meta.source,
           dateMs: meta.date ? new Date(meta.date).getTime() : 0,
-          addedMs: stat ? stat.mtime.getTime() : 0,
+          addedMs: stat
+            ? (stat.birthtime.getTime() > 0 ? stat.birthtime.getTime() : stat.mtime.getTime())
+            : 0,
           thumbnailUrl: isVideo
             ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
             : null,

@@ -5,10 +5,7 @@ services:
     ports:
       - "3420:3420"
     volumes:
-      # Update the left side to match your NAS share path.
-      # On QNAP it's typically /share/<PoolName>/dataset
-      # e.g. /share/CACHEDEV1_DATA/dataset or /share/dataset
-      - /share/dataset:/data/dataset:ro
+      - /share/Vault69/dataset:/data/dataset:ro
       - dashboard-thumbs:/data/thumbs
     environment:
       DATASET_DIR: /data/dataset
