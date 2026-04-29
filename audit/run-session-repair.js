@@ -103,6 +103,7 @@ async function main() {
     return
   }
 
+  printLiveStart(summary)
   const salvageSummary = await runSalvageBatch()
   summary.salvageRun = salvageSummary
 
@@ -282,7 +283,9 @@ async function runSalvageBatch() {
   }
   args.push('--output-dir', reportDir)
 
-  await runNode(args)
+  console.log('')
+  console.log('Starting tail-decode salvage batch...')
+  await runNode(args, { streamOutput: true })
 
   const latestJsonPath = path.join(reportDir, 'salvage-tail-videos-latest.json')
   if (!fs.existsSync(latestJsonPath)) {
@@ -435,24 +438,26 @@ async function runModelMaintenance(modelName) {
   ensureDir(modelReportDir)
   const validateJsonPath = path.join(modelReportDir, `${modelName}-validate.json`)
 
+  console.log('')
+  console.log(`Refreshing hashes for ${modelName}...`)
   const prune = await runNode([
     path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'),
     '--model',
     modelName,
-  ])
+  ], { streamOutput: true })
   const backfill = await runNode([
     path.join(rootDir, 'scrapyard', 'backfillModelHashes.js'),
     '--model',
     modelName,
     '--include-video-visuals',
-  ])
+  ], { streamOutput: true })
   const validate = await runNode([
     path.join(rootDir, 'scrapyard', 'validateModelHashes.js'),
     '--model',
     modelName,
     '--json-out',
     validateJsonPath,
-  ])
+  ], { streamOutput: true })
 
   let validationReport = null
   if (fs.existsSync(validateJsonPath)) {
@@ -566,6 +571,14 @@ function printDryRunSummary(summary) {
   )
 }
 
+function printLiveStart(summary) {
+  console.log(`Session repair starting`)
+  console.log(`Selection mode: ${summary.selectionMode}`)
+  console.log(`Last completed run: ${summary.lastCompletedRunAt || 'none'}`)
+  console.log(`Candidates queued: ${summary.candidateCount}`)
+  console.log(`Report: ${latestSummaryPath}`)
+}
+
 function printLiveSummary(summary) {
   console.log(`Session repair complete`)
   console.log(`Selection mode: ${summary.selectionMode}`)
@@ -583,7 +596,7 @@ function printLiveSummary(summary) {
   console.log(`Summary: ${latestSummaryPath}`)
 }
 
-function runNode(args) {
+function runNode(args, options = {}) {
   return new Promise((resolve, reject) => {
     const command = [process.execPath, ...args].join(' ')
     const child = spawn(process.execPath, args, {
@@ -596,10 +609,14 @@ function runNode(args) {
     let stderr = ''
 
     child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString()
+      const text = chunk.toString()
+      stdout += text
+      if (options.streamOutput) process.stdout.write(text)
     })
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString()
+      const text = chunk.toString()
+      stderr += text
+      if (options.streamOutput) process.stderr.write(text)
     })
     child.on('error', reject)
     child.on('exit', (code) => {
