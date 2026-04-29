@@ -751,7 +751,7 @@ function writeErrorsToCheckSummary(summary) {
       items.length > 0
         ? `${items.length} session-repair follow-up item(s) still need attention.`
         : 'Latest session repair has no remaining follow-up items.',
-    commandHint: 'npm run repair',
+    commandHint: 'npm run repair:tail-decode',
     items,
   })
 }

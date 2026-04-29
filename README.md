@@ -24,18 +24,42 @@ Notes:
   - the canonical model bucket that alias belongs under
 - `milkmaid` writes into the local Slopvault dataset first.
 
-### 2. Repair a StufferDB batch
+### 2. Repair local model folders
+
+```powershell
+npm run repair
+```
+
+Use this when you want to check the local dataset model-by-model without doing a fresh scrape update first.
+
+What it does:
+- walks local model folders under `%APPDATA%\.slopvault\dataset`
+- runs prune/backfill/validate for each selected model
+- clears resolved `milkmaid-run-errors-*` artifacts when a model is now clean
+- syncs touched models to the NAS
+- writes a top-level `%APPDATA%\.slopvault\errors-to-check-latest.md`
+
+Useful variants:
+
+```powershell
+npm run repair -- --model=tianastummy
+npm run repair -- --models=tianastummy,udderly_adorable
+npm run repair -- --start-from=laurenlushh
+npm run repair -- --skip-nas-sync
+```
+
+### 3. Repair and scrape a StufferDB batch
 
 ```powershell
 npm run repair:stufferdb -- --model=tianastummy
 ```
 
-Use this when you want to rerun scraper/backfill/validate for one or more known models in the registry.
+Use this when you want the repair pass to also rerun `milkmaid` from StufferDB sources before local prune/backfill/validate.
 
-### 3. Run session repair for quarantined tail-decode videos
+### 4. Run session repair for quarantined tail-decode videos
 
 ```powershell
-npm run repair
+npm run repair:tail-decode
 ```
 
 What it does:
@@ -46,19 +70,19 @@ What it does:
 - writes reports under `tmp/session-repair`
 
 Important behavior:
-- `npm run repair` now keeps a persistent pending NAS sync queue in `tmp/session-repair/session-repair-state.json`
+- `npm run repair:tail-decode` keeps a persistent pending NAS sync queue in `tmp/session-repair/session-repair-state.json`
 - if a repair run fails after touching models but before sync finishes, the next repair run will retry NAS sync for those pending models
 
 Useful variants:
 
 ```powershell
-npm run repair -- --dry-run
-npm run repair -- --model=udderly_adorable
-npm run repair -- --all
-npm run repair -- --limit=20
+npm run repair:tail-decode -- --dry-run
+npm run repair:tail-decode -- --model=udderly_adorable
+npm run repair:tail-decode -- --all
+npm run repair:tail-decode -- --limit=20
 ```
 
-### 4. Review repair failures
+### 5. Review repair failures
 
 ```powershell
 npm run report:repair-failures
@@ -68,7 +92,7 @@ Outputs:
 - `tmp/repair-stufferdb/repair-failure-summary-latest.json`
 - `tmp/repair-stufferdb/repair-failure-summary-latest.md`
 
-### 5. Open the main model viewer
+### 6. Open the main model viewer
 
 ```powershell
 npm run dashboard
@@ -76,7 +100,7 @@ npm run dashboard
 
 Use this to browse a model’s media and metadata.
 
-### 6. Review duplicate files
+### 7. Review duplicate files
 
 ```powershell
 npm run review:slopvault-duplicates-express
@@ -91,7 +115,7 @@ npm run manifest:slopvault-duplicates
 npm run review:slopvault-duplicates
 ```
 
-### 7. Review image orientation manually
+### 8. Review image orientation manually
 
 ```powershell
 npm run review:orientation
@@ -105,7 +129,7 @@ Features:
 - `Space` or `Right Arrow` accept and move next
 - `Left Arrow` previous
 
-### 8. Audit the Slopvault dataset
+### 9. Audit the Slopvault dataset
 
 ```powershell
 npm run audit:slopvault
@@ -118,7 +142,7 @@ Use this for:
 - run-error review
 - duplicate and audit findings
 
-### 9. Rebuild or repair model hash data
+### 10. Rebuild or repair model hash data
 
 ```powershell
 npm run prune:model-hashes -- --model=model_name
@@ -128,7 +152,7 @@ npm run validate:model-hashes -- --model=model_name
 
 Use these when a model’s hash stores drift from the actual files on disk.
 
-### 10. Backfill support data
+### 11. Backfill support data
 
 ```powershell
 npm run backfill:sources
@@ -147,7 +171,7 @@ There are two ways to sync.
 
 ### Automatic
 
-`npm run repair` now attempts to sync all affected models to the NAS after maintenance. It also retries models left in the pending sync queue from earlier failed runs.
+`npm run repair` now attempts to sync all touched local models to the NAS after maintenance. It also clears resolved model error logs so the next run only surfaces active local issues.
 
 ### Manual push local -> NAS
 
@@ -193,12 +217,14 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
   - scrape Coomer-backed sources
 - `npm run update:stufferdb`
   - refresh/update StufferDB models from the registry
+- `npm run repair`
+  - local dataset repair pass across model folders, with prune/backfill/validate and NAS sync
 - `npm run repair:stufferdb`
-  - targeted rerun/repair flow for registered StufferDB models
+  - same repair pass, but with StufferDB scraping enabled first
 
 ### Repair and audit
 
-- `npm run repair`
+- `npm run repair:tail-decode`
   - session repair for quarantined tail-decode videos plus NAS sync
 - `npm run report:repair-failures`
   - bucket and summarize repair failures
@@ -258,7 +284,7 @@ If you are unsure what to run:
    - `.\update-local.ps1`
 2. Run the scrape or repair you need:
    - `npm run milkmaid -- "<url>"`
-   - or `npm run repair`
+  - or `npm run repair`
 3. Review anything suspicious:
    - `npm run review:slopvault`
    - `npm run review:slopvault-duplicates-express`

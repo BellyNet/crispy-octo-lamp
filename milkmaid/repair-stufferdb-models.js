@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const os = require('os')
 const minimist = require('minimist')
 const { spawn } = require('child_process')
 const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
@@ -9,11 +10,21 @@ const argv = minimist(process.argv.slice(2), {
     h: 'help',
     m: 'model',
   },
-  string: ['model', 'models', 'start-from', 'registry', 'log-dir'],
-  boolean: ['stop-on-error'],
+  string: [
+    'model',
+    'models',
+    'start-from',
+    'registry',
+    'log-dir',
+    'dataset-root',
+    'nas-dataset-root',
+  ],
+  boolean: ['stop-on-error', 'scrape', 'skip-nas-sync'],
   default: {
     limit: 0,
+    scrape: false,
     'stop-on-error': false,
+    'skip-nas-sync': false,
   },
 })
 
@@ -23,15 +34,23 @@ if (argv.help) {
 }
 
 const rootDir = path.join(__dirname, '..')
+const appDataRoot =
+  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
 const registryPath = path.resolve(
   String(argv.registry || path.join(rootDir, 'model_aliases.json'))
+)
+const datasetRoot = path.resolve(
+  String(argv['dataset-root'] || path.join(appDataRoot, '.slopvault', 'dataset'))
 )
 const logDir = path.resolve(
   String(argv['log-dir'] || path.join(rootDir, 'tmp', 'repair-stufferdb'))
 )
 const latestReportPath = path.join(logDir, 'repair-stufferdb-latest.json')
 const latestTextPath = path.join(logDir, 'repair-stufferdb-latest.txt')
-const runStamp = new Date().toISOString().replace(/[:.]/g, '-')
+const statePath = path.join(logDir, 'repair-stufferdb-state.json')
+const nasDatasetRoot = path.resolve(
+  String(argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+)
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
 const singleModel = argv.model ? String(argv.model).trim() : null
 const explicitModels = String(argv.models || '')
@@ -39,6 +58,8 @@ const explicitModels = String(argv.models || '')
   .map((value) => value.trim())
   .filter(Boolean)
 const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
+const shouldScrape = Boolean(argv.scrape)
+const skipNasSync = Boolean(argv['skip-nas-sync'])
 
 main().catch((err) => {
   console.error(`Fatal repair-runner error: ${err.stack || err.message}`)
@@ -47,44 +68,56 @@ main().catch((err) => {
 
 async function main() {
   ensureDir(logDir)
-  const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'))
+  const registry = loadRegistry()
   const queue = buildQueue(registry)
-
   const selectedQueue = applySelection(queue)
+  const state = loadState()
+
   const report = {
     generatedAt: new Date().toISOString(),
+    mode: shouldScrape ? 'update_and_repair' : 'local_dataset_repair',
     registryPath,
-    totalModelsInRegistry: queue.length,
+    datasetRoot,
+    nasDatasetRoot,
+    totalModelsInDataset: queue.length,
     selectedModels: selectedQueue.length,
+    scrapeEnabled: shouldScrape,
+    skipNasSync,
     stopOnError: Boolean(argv['stop-on-error']),
-    totals: {
-      filesSaved: 0,
-      sourceItemsHandled: 0,
-      duplicates: 0,
-      errors: 0,
-    },
+    pendingNasSyncModelsAtStart: [...state.pendingNasSyncModels].sort((a, b) =>
+      a.localeCompare(b)
+    ),
+    totals: buildEmptyTotals(),
     results: [],
+    nasSync: null,
   }
 
   console.log(
-    `Repair queue: ${selectedQueue.length} model(s) selected from ${queue.length} with StufferDB sources`
+    `Repair queue: ${selectedQueue.length} model(s) selected from ${queue.length} dataset folders`
+  )
+  console.log(
+    shouldScrape
+      ? 'Scrape refresh is enabled for models with StufferDB sources.'
+      : 'Scrape refresh is disabled; checking local dataset state only.'
   )
 
   for (let index = 0; index < selectedQueue.length; index += 1) {
     const item = selectedQueue[index]
     console.log('')
-    console.log(
-      `[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`
-    )
+    console.log(`[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`)
 
     const result = await runModelRepair(item)
     report.results.push(result)
     report.totals = calculateTotals(report.results)
     writeReport(report)
 
+    if (!skipNasSync) {
+      queuePendingNasSyncModel(state, item.model)
+    }
+
     if (
       argv['stop-on-error'] &&
-      (!result.scrape.ok ||
+      (result.scrape.status === 'failed' ||
         !result.hashPrune.ok ||
         !result.hashBackfill.ok ||
         !result.validation.ok)
@@ -93,6 +126,18 @@ async function main() {
       break
     }
   }
+
+  report.nasSync = skipNasSync
+    ? {
+        attempted: [],
+        synced: [],
+        failed: [],
+        pendingAfterRun: [...state.pendingNasSyncModels].sort((a, b) =>
+          a.localeCompare(b)
+        ),
+        skippedBecause: 'skip_nas_sync',
+      }
+    : await syncPendingModelsToNas(state)
 
   writeReport(report)
   console.log('')
@@ -103,32 +148,74 @@ function printHelp() {
   console.log(`Usage: node milkmaid/repair-stufferdb-models.js [options]
 
 Options:
-  --model <name>         Repair one model only.
-  --models <a,b,c>       Repair a comma-separated set of models.
-  --start-from <name>    Start from this canonical model name.
-  --limit <n>            Only process the first n selected models.
-  --registry <path>      Override model_aliases.json path.
-  --log-dir <path>       Override repair runner report directory.
-  --stop-on-error        Stop the batch when one model fails.
-  -h, --help             Show help.
+  --model <name>           Repair one model only.
+  --models <a,b,c>         Repair a comma-separated set of models.
+  --start-from <name>      Start from this model name.
+  --limit <n>              Only process the first n selected models.
+  --scrape                 Re-run milkmaid before local repair.
+  --skip-nas-sync          Skip NAS sync and leave models queued for a later run.
+  --dataset-root <path>    Override local dataset root.
+  --nas-dataset-root <p>   Override NAS dataset root.
+  --registry <path>        Override model_aliases.json path.
+  --log-dir <path>         Override repair runner report directory.
+  --stop-on-error          Stop the batch when one model fails.
+  -h, --help               Show help.
+
+Default behavior:
+  - walks local model folders under the dataset root
+  - prunes, backfills, and validates hashes for each model
+  - clears stale milkmaid error artifacts when a model is clean
+  - syncs repaired models to the NAS
+
+Add --scrape when you want this to also run StufferDB update scraping first.
 `)
+}
+
+function buildEmptyTotals() {
+  return {
+    filesSaved: 0,
+    sourceItemsHandled: 0,
+    duplicates: 0,
+    runErrors: 0,
+    modelsProcessed: 0,
+    modelsClean: 0,
+    modelsNeedingAttention: 0,
+  }
 }
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true })
 }
 
+function loadRegistry() {
+  if (!fs.existsSync(registryPath)) return {}
+  try {
+    return JSON.parse(fs.readFileSync(registryPath, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
 function buildQueue(registry) {
-  return Object.entries(registry || {})
-    .map(([model, entry]) => ({
-      model,
-      sources: Array.isArray(entry?.sources?.stufferdb)
-        ? entry.sources.stufferdb
+  if (!fs.existsSync(datasetRoot)) return []
+
+  return fs
+    .readdirSync(datasetRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const model = entry.name
+      const sources = Array.isArray(registry?.[model]?.sources?.stufferdb)
+        ? registry[model].sources.stufferdb
             .map((source) => String(source?.url || '').trim())
             .filter(Boolean)
-        : [],
-    }))
-    .filter((item) => item.sources.length > 0)
+        : []
+
+      return {
+        model,
+        modelPath: path.join(datasetRoot, model),
+        sources,
+      }
+    })
     .sort((left, right) => left.model.localeCompare(right.model))
 }
 
@@ -159,76 +246,62 @@ async function runModelRepair(item) {
   const startedAt = new Date().toISOString()
   const result = {
     model: item.model,
+    modelPath: item.modelPath,
     startedAt,
     sourceUrls: item.sources,
     scrapeRuns: [],
-    scrape: null,
+    scrape: buildSkippedScrapeSummary(
+      shouldScrape ? 'no_sources' : 'disabled',
+      item.sources
+    ),
     hashPrune: null,
     hashBackfill: null,
     validation: null,
     finishedAt: null,
-    lastRunSummaryPath: null,
+    lastRunSummaryPath: getLastRunSummaryPath(item.model),
     lastRunSummary: null,
+    localRunErrors: [],
+    errorArtifactsCleared: [],
   }
 
-  for (const sourceUrl of item.sources) {
-    const scrapeRun = await runCommand(
-      process.execPath,
-      [
-        path.join(rootDir, 'milkmaid', 'milkmaid.js'),
-        sourceUrl,
-        '--model',
-        item.model,
-        '--skip-nas-sync',
-      ],
-      { cwd: rootDir, label: `milkmaid:${item.model}` }
-    )
-    result.scrapeRuns.push(scrapeRun)
-    if (!scrapeRun.ok && argv['stop-on-error']) {
-      break
+  if (shouldScrape && item.sources.length > 0) {
+    for (const sourceUrl of item.sources) {
+      const scrapeRun = await runCommand(
+        process.execPath,
+        [
+          path.join(rootDir, 'milkmaid', 'milkmaid.js'),
+          sourceUrl,
+          '--model',
+          item.model,
+          '--skip-nas-sync',
+        ],
+        { cwd: rootDir, label: `milkmaid:${item.model}` }
+      )
+      result.scrapeRuns.push(scrapeRun)
+      if (!scrapeRun.ok && argv['stop-on-error']) {
+        break
+      }
     }
+
+    result.scrape = summarizeScrapeRuns(result.scrapeRuns)
   }
 
-  result.scrape = summarizeScrapeRuns(result.scrapeRuns)
+  result.hashPrune = await runCommand(
+    process.execPath,
+    [path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'), '--model', item.model],
+    { cwd: rootDir, label: `prune:${item.model}` }
+  )
 
-  if (result.scrape.ok) {
-    result.hashPrune = await runCommand(
-      process.execPath,
-      [
-        path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'),
-        '--model',
-        item.model,
-      ],
-      { cwd: rootDir, label: `prune:${item.model}` }
-    )
-  } else {
-    result.hashPrune = {
-      ok: false,
-      skipped: true,
-      code: null,
-      command: 'pruneModelHashes skipped because scrape failed',
-    }
-  }
-
-  if (result.scrape.ok) {
-    result.hashBackfill = await runCommand(
-      process.execPath,
-      [
-        path.join(rootDir, 'scrapyard', 'backfillModelHashes.js'),
-        '--model',
-        item.model,
-        '--include-video-visuals',
-      ],
-      { cwd: rootDir, label: `backfill:${item.model}` }
-    )
-  } else {
-    result.hashBackfill = {
-      ok: false,
-      skipped: true,
-      code: null,
-      command: 'backfillModelHashes skipped because scrape failed',
-    }
-  }
+  result.hashBackfill = await runCommand(
+    process.execPath,
+    [
+      path.join(rootDir, 'scrapyard', 'backfillModelHashes.js'),
+      '--model',
+      item.model,
+      '--include-video-visuals',
+    ],
+    { cwd: rootDir, label: `backfill:${item.model}` }
+  )
 
   const validationPath = path.join(logDir, `${item.model}.validate.json`)
   result.validation = await runCommand(
@@ -244,34 +317,39 @@ async function runModelRepair(item) {
   )
   result.validation = hydrateValidationResult(result.validation, validationPath)
 
-  const latestRunSummaryPath = path.join(
-    process.env.APPDATA || '',
-    '.slopvault',
-    'dataset',
-    item.model,
-    'milkmaid-last-run.json'
-  )
-  result.lastRunSummaryPath = latestRunSummaryPath
-  if (fs.existsSync(latestRunSummaryPath)) {
-    try {
-      result.lastRunSummary = JSON.parse(
-        fs.readFileSync(latestRunSummaryPath, 'utf8')
-      )
-    } catch (err) {
-      result.lastRunSummary = {
-        parseError: err.message,
-      }
-    }
+  result.lastRunSummary = readJsonIfExists(result.lastRunSummaryPath)
+  result.localRunErrors = readLocalRunErrors(item.model)
+
+  if (shouldClearErrorArtifacts(result)) {
+    result.errorArtifactsCleared = clearResolvedErrorArtifacts(item.model)
   }
 
   result.finishedAt = new Date().toISOString()
+  result.needsAttention = modelNeedsAttention(result)
   return result
+}
+
+function buildSkippedScrapeSummary(reason, sourceUrls) {
+  return {
+    ok: true,
+    skipped: true,
+    status: reason === 'disabled' ? 'skipped' : 'skipped_no_sources',
+    reason,
+    runs: 0,
+    failures: 0,
+    labels: [],
+    commands: [],
+    sourceCount: Array.isArray(sourceUrls) ? sourceUrls.length : 0,
+  }
 }
 
 function summarizeScrapeRuns(scrapeRuns) {
   const failures = scrapeRuns.filter((run) => !run.ok)
   return {
     ok: failures.length === 0,
+    skipped: false,
+    status: failures.length === 0 ? 'ok' : 'failed',
+    reason: null,
     runs: scrapeRuns.length,
     failures: failures.length,
     labels: scrapeRuns.map((run) => run.label),
@@ -310,11 +388,92 @@ function hydrateValidationResult(validationResult, validationPath) {
   return hydrated
 }
 
+function getLastRunSummaryPath(modelName) {
+  return path.join(datasetRoot, modelName, 'milkmaid-last-run.json')
+}
+
+function readJsonIfExists(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+  } catch (err) {
+    return { parseError: err.message }
+  }
+}
+
+function getModelLogDir(modelName) {
+  return path.join(datasetRoot, modelName, 'log')
+}
+
+function readLocalRunErrors(modelName) {
+  const logDirPath = getModelLogDir(modelName)
+  const latestJsonPath = path.join(logDirPath, 'milkmaid-run-errors-latest.json')
+  const latestHtmlPath = path.join(logDirPath, 'milkmaid-run-errors-latest.html')
+  const payload = readJsonIfExists(latestJsonPath)
+
+  return [
+    payload
+      ? {
+          kind: 'latest_json',
+          path: latestJsonPath,
+          errorCount: Number(payload?.errorCount || payload?.errors?.length || 0),
+        }
+      : null,
+    fs.existsSync(latestHtmlPath)
+      ? {
+          kind: 'latest_html',
+          path: latestHtmlPath,
+        }
+      : null,
+  ].filter(Boolean)
+}
+
+function shouldClearErrorArtifacts(result) {
+  const scrapeFailed = result.scrape.status === 'failed'
+  return Boolean(result.validation?.clean && !scrapeFailed)
+}
+
+function clearResolvedErrorArtifacts(modelName) {
+  const logDirPath = getModelLogDir(modelName)
+  if (!fs.existsSync(logDirPath)) return []
+
+  const cleared = []
+  for (const fileName of fs.readdirSync(logDirPath)) {
+    if (!fileName.startsWith('milkmaid-run-errors-')) continue
+    const filePath = path.join(logDirPath, fileName)
+    try {
+      fs.unlinkSync(filePath)
+      cleared.push(filePath)
+    } catch {
+      // Leave stubborn files alone; they will still be reported by localRunErrors.
+    }
+  }
+  return cleared
+}
+
+function modelNeedsAttention(result) {
+  const scrapeFailed = result.scrape.status === 'failed'
+  const validationFailed = !result.validation?.ok
+  const currentRunErrorCount = shouldScrape
+    ? getRunErrorCount(result.lastRunSummary)
+    : 0
+  const lingeringLogErrors =
+    !result.validation?.clean && result.localRunErrors.some((item) => item.kind === 'latest_json')
+
+  return scrapeFailed || validationFailed || currentRunErrorCount > 0 || lingeringLogErrors
+}
+
+function getRunErrorCount(summary) {
+  if (!summary || summary.parseError) return 0
+  return Number(summary.errorCount || 0)
+}
+
 function runCommand(command, args, { cwd, label }) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
+      windowsHide: true,
     })
 
     child.on('error', (err) => {
@@ -345,9 +504,10 @@ function writeReport(report) {
 
   const lines = [
     `Generated: ${report.generatedAt}`,
-    `Registry: ${report.registryPath}`,
+    `Mode: ${report.mode}`,
+    `Dataset: ${report.datasetRoot}`,
     `Selected models: ${report.selectedModels}`,
-    `Totals: saved=${report.totals.filesSaved} sourceItems=${report.totals.sourceItemsHandled} dupes=${report.totals.duplicates} errors=${report.totals.errors}`,
+    `Totals: saved=${report.totals.filesSaved} sourceItems=${report.totals.sourceItemsHandled} dupes=${report.totals.duplicates} runErrors=${report.totals.runErrors} clean=${report.totals.modelsClean} attention=${report.totals.modelsNeedingAttention}`,
     '',
   ]
 
@@ -355,26 +515,36 @@ function writeReport(report) {
     lines.push(
       [
         item.model,
-        `scrape=${item.scrape.ok ? 'ok' : 'fail'}`,
-        `sources=${item.scrape.runs || 0}`,
-        `prune=${item.hashPrune?.ok ? 'ok' : item.hashPrune?.skipped ? 'skipped' : 'fail'}`,
-        `backfill=${item.hashBackfill?.ok ? 'ok' : item.hashBackfill?.skipped ? 'skipped' : 'fail'}`,
+        `scrape=${item.scrape.status}`,
+        `prune=${item.hashPrune?.ok ? 'ok' : 'fail'}`,
+        `backfill=${item.hashBackfill?.ok ? 'ok' : 'fail'}`,
         `validate=${item.validation?.ok ? 'clean' : 'needs_attention'}`,
+        `attention=${item.needsAttention ? 'yes' : 'no'}`,
       ].join(' :: ')
     )
 
-    const summary = item.lastRunSummary
-    if (summary && !summary.parseError) {
+    if (shouldScrape && item.lastRunSummary && !item.lastRunSummary.parseError) {
       lines.push(
-        `  saved=${summary.successCount || 0} dupes=${summary.duplicateCount || 0} errors=${summary.errorCount || 0}`
+        `  scrape saved=${item.lastRunSummary.successCount || 0} dupes=${item.lastRunSummary.duplicateCount || 0} errors=${item.lastRunSummary.errorCount || 0}`
       )
     }
 
     if (item.validation?.summary && !item.validation.summary.parseError) {
       lines.push(
-        `  validation bitwiseMissing=${item.validation.summary.bitwiseMissing} visualMissing=${item.validation.summary.visualMissing} videoVisualMissing=${item.validation.summary.videoVisualMissing}`
+        `  validation bitwiseMissing=${item.validation.summary.bitwiseMissing} bitwiseExtra=${item.validation.summary.bitwiseExtra} visualMissing=${item.validation.summary.visualMissing} visualExtra=${item.validation.summary.visualExtra} videoVisualMissing=${item.validation.summary.videoVisualMissing} videoVisualExtra=${item.validation.summary.videoVisualExtra}`
       )
     }
+
+    if (item.errorArtifactsCleared.length > 0) {
+      lines.push(`  cleared error logs=${item.errorArtifactsCleared.length}`)
+    }
+  }
+
+  if (report.nasSync) {
+    lines.push('')
+    lines.push(
+      `NAS sync attempted=${report.nasSync.attempted.length} ok=${report.nasSync.synced.length} failed=${report.nasSync.failed.length} pending=${report.nasSync.pendingAfterRun.length}`
+    )
   }
 
   fs.writeFileSync(latestTextPath, lines.join('\n'))
@@ -384,65 +554,267 @@ function writeReport(report) {
 function calculateTotals(results) {
   return (Array.isArray(results) ? results : []).reduce(
     (totals, item) => {
-      const summary = item?.lastRunSummary
-      if (!summary || summary.parseError) return totals
+      totals.modelsProcessed += 1
+      if (item.needsAttention) {
+        totals.modelsNeedingAttention += 1
+      } else {
+        totals.modelsClean += 1
+      }
 
-      totals.filesSaved += Number(summary.successCount || 0)
-      totals.sourceItemsHandled += Number(summary.combinedTotal || 0)
-      totals.duplicates += Number(summary.duplicateCount || 0)
-      totals.errors += Number(summary.errorCount || 0)
+      if (shouldScrape) {
+        const summary = item?.lastRunSummary
+        if (summary && !summary.parseError) {
+          totals.filesSaved += Number(summary.successCount || 0)
+          totals.sourceItemsHandled += Number(summary.combinedTotal || 0)
+          totals.duplicates += Number(summary.duplicateCount || 0)
+          totals.runErrors += Number(summary.errorCount || 0)
+        }
+      }
+
       return totals
     },
-    {
-      filesSaved: 0,
-      sourceItemsHandled: 0,
-      duplicates: 0,
-      errors: 0,
-    }
+    buildEmptyTotals()
   )
+}
+
+function loadState() {
+  if (!fs.existsSync(statePath)) {
+    return {
+      pendingNasSyncModels: [],
+      lastSyncedAt: null,
+      lastSyncResults: [],
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(statePath, 'utf8').trim()
+    const parsed = raw ? JSON.parse(raw) : {}
+    return {
+      pendingNasSyncModels: Array.isArray(parsed?.pendingNasSyncModels)
+        ? parsed.pendingNasSyncModels
+        : [],
+      lastSyncedAt: parsed?.lastSyncedAt || null,
+      lastSyncResults: Array.isArray(parsed?.lastSyncResults)
+        ? parsed.lastSyncResults
+        : [],
+    }
+  } catch {
+    return {
+      pendingNasSyncModels: [],
+      lastSyncedAt: null,
+      lastSyncResults: [],
+    }
+  }
+}
+
+function saveState(state) {
+  fs.writeFileSync(
+    statePath,
+    JSON.stringify(
+      {
+        pendingNasSyncModels: Array.isArray(state?.pendingNasSyncModels)
+          ? [...state.pendingNasSyncModels].sort((a, b) => a.localeCompare(b))
+          : [],
+        lastSyncedAt: state?.lastSyncedAt || null,
+        lastSyncResults: Array.isArray(state?.lastSyncResults)
+          ? state.lastSyncResults
+          : [],
+      },
+      null,
+      2
+    )
+  )
+}
+
+function queuePendingNasSyncModel(state, modelName) {
+  if (!modelName) return
+  const pending = new Set(
+    Array.isArray(state?.pendingNasSyncModels) ? state.pendingNasSyncModels : []
+  )
+  pending.add(modelName)
+  state.pendingNasSyncModels = [...pending]
+  saveState(state)
+}
+
+async function syncPendingModelsToNas(state) {
+  const pendingModels = Array.isArray(state?.pendingNasSyncModels)
+    ? [...state.pendingNasSyncModels].sort((a, b) => a.localeCompare(b))
+    : []
+
+  if (!pendingModels.length) {
+    return {
+      attempted: [],
+      synced: [],
+      failed: [],
+      pendingAfterRun: [],
+    }
+  }
+
+  const synced = []
+  const failed = []
+  const pendingAfterRun = new Set(pendingModels)
+
+  for (const modelName of pendingModels) {
+    const sourcePath = path.join(datasetRoot, modelName)
+    const targetPath = path.join(nasDatasetRoot, modelName)
+
+    if (!fs.existsSync(sourcePath)) {
+      pendingAfterRun.delete(modelName)
+      continue
+    }
+
+    try {
+      const command = await runRobocopyModelSync(sourcePath, targetPath)
+      synced.push({ model: modelName, sourcePath, targetPath, command })
+      pendingAfterRun.delete(modelName)
+    } catch (err) {
+      failed.push({
+        model: modelName,
+        sourcePath,
+        targetPath,
+        error: err.message,
+      })
+    }
+  }
+
+  state.pendingNasSyncModels = [...pendingAfterRun]
+  state.lastSyncedAt = new Date().toISOString()
+  state.lastSyncResults = [...synced, ...failed]
+  saveState(state)
+
+  return {
+    attempted: pendingModels,
+    synced,
+    failed,
+    pendingAfterRun: state.pendingNasSyncModels,
+  }
+}
+
+function runRobocopyModelSync(sourcePath, targetPath) {
+  return new Promise((resolve, reject) => {
+    try {
+      ensureDir(targetPath)
+    } catch (err) {
+      return reject(
+        new Error(`Could not prepare NAS target ${targetPath}: ${err.message}`)
+      )
+    }
+
+    const args = [
+      sourcePath,
+      targetPath,
+      '/E',
+      '/XC',
+      '/XN',
+      '/XO',
+      '/R:2',
+      '/W:5',
+      '/NFL',
+      '/NDL',
+      '/NJH',
+      '/NJS',
+      '/NP',
+    ]
+    const command = ['robocopy', ...args].join(' ')
+    const child = spawn('robocopy', args, {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if ((code ?? 0) > 3) {
+        return reject(
+          new Error(
+            `robocopy failed (${code}): ${command}\n${stderr || stdout}`.trim()
+          )
+        )
+      }
+      resolve(command)
+    })
+  })
 }
 
 function writeErrorsToCheckSummary(report) {
   const items = []
 
   for (const item of Array.isArray(report?.results) ? report.results : []) {
-    const hasScrapeFailure = !item?.scrape?.ok
-    const hasValidationFailure = !item?.validation?.ok
-    const summary = item?.lastRunSummary
-    const errorCount =
-      summary && !summary.parseError ? Number(summary.errorCount || 0) : 0
-
-    if (!hasScrapeFailure && !hasValidationFailure && errorCount <= 0) continue
+    if (!item.needsAttention) continue
 
     const detailParts = []
-    if (hasScrapeFailure) {
-      detailParts.push(`scrape failed across ${item.scrape?.runs || 0} source run(s)`)
+    if (item.scrape.status === 'failed') {
+      detailParts.push(`scrape failed across ${item.scrape.runs || 0} source run(s)`)
     }
-    if (errorCount > 0) {
-      detailParts.push(`${errorCount} run error(s)`)
-    }
-    if (hasValidationFailure && item?.validation?.summary) {
+    if (item.validation?.summary) {
       const summaryBits = item.validation.summary
+      if (
+        !item.validation.clean &&
+        !summaryBits.parseError &&
+        Object.values(summaryBits).some((value) => Number(value || 0) > 0)
+      ) {
+        detailParts.push(
+          `validation missing bitwise=${summaryBits.bitwiseMissing || 0} visual=${summaryBits.visualMissing || 0} video=${summaryBits.videoVisualMissing || 0} extra bitwise=${summaryBits.bitwiseExtra || 0} visual=${summaryBits.visualExtra || 0} video=${summaryBits.videoVisualExtra || 0}`
+        )
+      }
+    }
+
+    if (shouldScrape) {
+      const runErrorCount = getRunErrorCount(item.lastRunSummary)
+      if (runErrorCount > 0) {
+        detailParts.push(`${runErrorCount} scrape run error(s)`)
+      }
+    }
+
+    if (!item.validation?.clean && item.localRunErrors.length > 0) {
       detailParts.push(
-        `validation missing bitwise=${summaryBits.bitwiseMissing || 0} visual=${summaryBits.visualMissing || 0} video=${summaryBits.videoVisualMissing || 0}`
+        `${item.localRunErrors.filter((entry) => entry.kind === 'latest_json').length} local error log file(s) still present`
       )
     }
 
     items.push({
       model: item.model,
-      status: hasScrapeFailure ? 'needs_repair' : 'needs_review',
-      count: errorCount,
-      details: detailParts.join('; '),
+      status: item.scrape.status === 'failed' ? 'needs_repair' : 'needs_review',
+      count: shouldScrape ? getRunErrorCount(item.lastRunSummary) : undefined,
+      details: detailParts.join('; ') || 'Model still needs local review.',
     })
   }
 
-  upsertErrorsSource('repair-stufferdb', {
-    title: 'Repair StufferDB',
+  for (const failed of report?.nasSync?.failed || []) {
+    items.push({
+      model: failed.model,
+      status: 'nas_sync_failed',
+      details: failed.error,
+    })
+  }
+
+  for (const pendingModel of report?.nasSync?.pendingAfterRun || []) {
+    if (report?.nasSync?.failed?.some((entry) => entry.model === pendingModel)) {
+      continue
+    }
+    items.push({
+      model: pendingModel,
+      status: 'nas_sync_pending',
+      details: 'Pending retry on next repair run.',
+    })
+  }
+
+  upsertErrorsSource('repair', {
+    title: 'Repair',
     summary:
       items.length > 0
-        ? `${items.length} model(s) still need attention from the latest repair:stufferdb batch.`
-        : 'Latest repair:stufferdb batch is clean.',
-    commandHint: 'npm run repair:stufferdb',
+        ? `${items.length} model-level repair follow-up item(s) still need attention.`
+        : 'Latest repair run is clean.',
+    commandHint: shouldScrape ? 'npm run repair -- --scrape' : 'npm run repair',
     items,
   })
 }
