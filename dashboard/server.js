@@ -22,7 +22,8 @@ const APPDATA =
 const slopvaultRoot = path.join(APPDATA, '.slopvault')
 const datasetDir =
   process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
-const THUMB_DIR = path.join(slopvaultRoot, '.dashboard-thumbs')
+const THUMB_DIR =
+  process.env.THUMB_DIR || path.join(slopvaultRoot, '.dashboard-thumbs')
 
 const MEDIA_FOLDERS = ['images', 'gif', 'webm']
 const MEDIA_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.webm'])
