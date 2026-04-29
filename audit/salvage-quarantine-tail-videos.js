@@ -183,7 +183,18 @@ function runSalvage(target) {
       stdout += chunk.toString()
     })
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString()
+      const text = chunk.toString()
+      stderr += text
+      process.stdout.write(
+        text
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map(
+            (line) =>
+              `    ${path.basename(String(target.relativePath || 'unknown'))}: ${line}\n`
+          )
+          .join('')
+      )
     })
     child.on('error', (err) => {
       resolve({

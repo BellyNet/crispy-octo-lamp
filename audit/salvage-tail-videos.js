@@ -51,11 +51,16 @@ main().catch((err) => {
   process.exitCode = 1
 })
 
+function logStatus(message) {
+  process.stderr.write(`${message}\n`)
+}
+
 async function main() {
   if (!fs.existsSync(inputPath)) {
     throw new Error(`Input video not found: ${inputPath}`)
   }
 
+  logStatus(`Inspecting ${inputPath}`)
   const probe = await probeVideo(inputPath)
   if (probe.error) {
     throw new Error(`ffprobe failed: ${probe.error}`)
@@ -63,9 +68,12 @@ async function main() {
   if (!Number.isFinite(probe.durationSeconds) || probe.durationSeconds <= 0) {
     throw new Error(`Video duration is invalid for ${inputPath}`)
   }
+  logStatus(`Probed duration ${probe.durationSeconds.toFixed(3)}s`)
 
+  logStatus('Checking tail decode...')
   const tailReport = await canDecodeUntil(inputPath, probe.durationSeconds)
   if (tailReport.ok) {
+    logStatus('Tail already decodes cleanly')
     console.log(
       'Video tail already decodes cleanly. No salvage output created.'
     )
@@ -73,13 +81,18 @@ async function main() {
     return
   }
 
+  logStatus('Searching for last good cut point...')
   const salvageDuration = await findLastGoodEndTime(
     inputPath,
     probe.durationSeconds
   )
   const trimGap = probe.durationSeconds - salvageDuration
+  logStatus(
+    `Found cut at ${salvageDuration.toFixed(3)}s, trimming ${trimGap.toFixed(3)}s`
+  )
 
   if (trimGap < minTrimGapSeconds) {
+    logStatus('Trim gap too small, skipping output')
     console.log(
       `Only ${trimGap.toFixed(
         3
@@ -94,8 +107,10 @@ async function main() {
   const outputPath = buildOutputPath(inputPath)
   ensureDir(path.dirname(outputPath))
 
+  logStatus(`Writing salvaged output to ${outputPath}`)
   await salvageVideo(inputPath, outputPath, salvageDuration)
 
+  logStatus('Verifying salvaged output...')
   const outputProbe = await probeVideo(outputPath)
   const outputTail = await canDecodeUntil(
     outputPath,
@@ -119,6 +134,11 @@ async function main() {
 
   const reportPath = `${outputPath}.json`
   fs.writeFileSync(reportPath, JSON.stringify(summary, null, 2))
+  logStatus(
+    outputTail.ok
+      ? 'Salvaged output tail verified cleanly'
+      : 'Salvaged output still has tail decode issues'
+  )
 
   console.log(JSON.stringify(summary, null, 2))
 }

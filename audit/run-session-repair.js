@@ -93,6 +93,7 @@ async function main() {
     promotions: [],
     affectedModels: [],
     modelMaintenance: [],
+    nasSync: [],
     unresolved: null,
   }
 
@@ -126,6 +127,11 @@ async function main() {
     summary.modelMaintenance.push(maintenance)
   }
 
+  for (const modelName of affectedModels) {
+    const syncResult = await syncModelToNas(modelName)
+    summary.nasSync.push(syncResult)
+  }
+
   summary.unresolved = buildUnresolvedSummary(manifest.items)
 
   writeSummary(summary)
@@ -150,7 +156,8 @@ What it does:
   2. Promotes successful salvages back into dataset paths.
   3. Clears resolved quarantine copies.
   4. Prunes, backfills, and validates hashes for affected models.
-  5. Writes a summary report with unresolved quarantine state.
+  5. Syncs repaired models to the NAS.
+  6. Writes a summary report with unresolved quarantine state.
 `)
 }
 
@@ -493,6 +500,31 @@ async function runModelMaintenance(modelName) {
   }
 }
 
+async function syncModelToNas(modelName) {
+  console.log('')
+  console.log(`Syncing ${modelName} to NAS...`)
+  const sourcePath = path.join(datasetRoot, modelName)
+  const targetPath = path.join('Z:\\dataset', modelName)
+  const robocopyCommand = `robocopy "${sourcePath}" "${targetPath}" /MIR /R:2 /W:5`
+  const sync = await runShellCommand(robocopyCommand)
+
+  if (!sync.ok && sync.code > 3) {
+    console.error(`NAS sync failed for ${modelName} with code ${sync.code}`)
+  } else {
+    console.log(`NAS sync complete for ${modelName}`)
+  }
+
+  return {
+    model: modelName,
+    command: robocopyCommand,
+    ok: sync.ok || sync.code <= 3,
+    code: sync.code,
+    stdout: sync.stdout,
+    stderr: sync.stderr,
+    error: sync.error,
+  }
+}
+
 function buildUnresolvedSummary(items) {
   const filtered = targetModel
     ? items.filter((item) =>
@@ -591,6 +623,11 @@ function printLiveSummary(summary) {
   )
   console.log(`Affected models: ${summary.affectedModels.length}`)
   console.log(
+    `NAS synced models: ${
+      summary.nasSync.filter((item) => item.ok).length
+    } / ${summary.nasSync.length}`
+  )
+  console.log(
     `Unresolved tail-decode quarantines: ${summary.unresolved.unresolvedTailDecodeCount}`
   )
   console.log(`Summary: ${latestSummaryPath}`)
@@ -631,6 +668,48 @@ function runNode(args, options = {}) {
         command,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
+      })
+    })
+  })
+}
+
+function runShellCommand(command) {
+  return new Promise((resolve) => {
+    const child = spawn('powershell', ['-Command', command], {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString()
+      stdout += text
+      process.stdout.write(text)
+    })
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString()
+      stderr += text
+      process.stderr.write(text)
+    })
+    child.on('error', (error) => {
+      resolve({
+        ok: false,
+        code: 1,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        error: error.message,
+      })
+    })
+    child.on('exit', (code) => {
+      resolve({
+        ok: code === 0,
+        code: code ?? 0,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        error: null,
       })
     })
   })
