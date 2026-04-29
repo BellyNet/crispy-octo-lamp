@@ -12,7 +12,15 @@
  *     "images/filename.jpg": {
  *       "video":    "ISO" | null,   // ffprobe container creation_time (videos only)
  *       "filename": "ISO" | null,   // 14-digit timestamp prefix in filename
- *       "uploaded": "ISO" | null    // mtime set by milkmaid = platform upload date
+ *       "uploaded": "ISO" | null,   // mtime set by milkmaid = platform upload date
+ *       "comments": [
+ *         {
+ *           "author": "string" | null,
+ *           "posted": "string" | null,
+ *           "text": "string"
+ *         }
+ *       ],
+ *       "commentCount": number | null
  *     }
  *   }
  *
@@ -133,12 +141,34 @@ function loadSidecar(userDir) {
   let data = { __version: SIDECAR_VERSION }
   try {
     const raw = JSON.parse(fs.readFileSync(sidecarPath(userDir), 'utf8'))
-    data =
-      raw.__version === SIDECAR_VERSION ? raw : { __version: SIDECAR_VERSION }
+    if (raw && typeof raw === 'object') {
+      data = raw
+      data.__version = SIDECAR_VERSION
+    }
   } catch {}
   const entry = { data, dirty: false, flushTimer: null }
   _sidecars.set(userDir, entry)
   return entry
+}
+
+function normalizeComments(comments) {
+  if (!Array.isArray(comments)) return []
+  return comments
+    .map((comment) => ({
+      author:
+        typeof comment?.author === 'string' && comment.author.trim()
+          ? comment.author.trim()
+          : null,
+      posted:
+        typeof comment?.posted === 'string' && comment.posted.trim()
+          ? comment.posted.trim()
+          : null,
+      text:
+        typeof comment?.text === 'string' && comment.text.trim()
+          ? comment.text.trim()
+          : null,
+    }))
+    .filter((comment) => comment.text)
 }
 
 function flushSidecar(userDir) {
@@ -158,15 +188,35 @@ function scheduleSidecarFlush(userDir) {
 
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
-async function recordImageDates(userDir, folder, filename, uploadedDate) {
+async function recordImageDates(
+  userDir,
+  folder,
+  filename,
+  buffer,
+  uploadedDate,
+  pageMeta = null
+) {
   const entry = loadSidecar(userDir)
   const key = `${folder}/${filename}`
-  if (entry.data[key]) return
+  const existingRecord =
+    entry.data[key] && typeof entry.data[key] === 'object'
+      ? entry.data[key]
+      : null
+  const comments = normalizeComments(pageMeta?.comments)
 
   entry.data[key] = {
-    video: null,
-    filename: extractFilenameDate(filename) || null,
-    uploaded: uploadedDate ? toISO(uploadedDate) : null,
+    ...(existingRecord || {}),
+    video: existingRecord?.video || null,
+    filename: existingRecord?.filename || extractFilenameDate(filename) || null,
+    uploaded:
+      existingRecord?.uploaded || (uploadedDate ? toISO(uploadedDate) : null),
+    comments: comments.length ? comments : existingRecord?.comments || [],
+    commentCount:
+      typeof pageMeta?.commentCount === 'number'
+        ? pageMeta.commentCount
+        : Array.isArray(existingRecord?.comments)
+          ? existingRecord.comments.length
+          : comments.length || null,
   }
   scheduleSidecarFlush(userDir)
 }
@@ -176,21 +226,35 @@ async function recordVideoDates(
   folder,
   filename,
   filePath,
-  uploadedDate
+  uploadedDate,
+  pageMeta = null
 ) {
   const entry = loadSidecar(userDir)
   const key = `${folder}/${filename}`
-  if (entry.data[key]) return
+  const existingRecord =
+    entry.data[key] && typeof entry.data[key] === 'object'
+      ? entry.data[key]
+      : null
 
   const [video, filenameDate] = await Promise.all([
     extractVideoDateFromFile(filePath),
     Promise.resolve(extractFilenameDate(filename)),
   ])
+  const comments = normalizeComments(pageMeta?.comments)
 
   entry.data[key] = {
-    video: video || null,
-    filename: filenameDate || null,
-    uploaded: uploadedDate ? toISO(uploadedDate) : null,
+    ...(existingRecord || {}),
+    video: existingRecord?.video || video || null,
+    filename: existingRecord?.filename || filenameDate || null,
+    uploaded:
+      existingRecord?.uploaded || (uploadedDate ? toISO(uploadedDate) : null),
+    comments: comments.length ? comments : existingRecord?.comments || [],
+    commentCount:
+      typeof pageMeta?.commentCount === 'number'
+        ? pageMeta.commentCount
+        : Array.isArray(existingRecord?.comments)
+          ? existingRecord.comments.length
+          : comments.length || null,
   }
   scheduleSidecarFlush(userDir)
 }

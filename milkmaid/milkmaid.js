@@ -267,7 +267,7 @@ function extractModelNameFromBreadcrumb(anchors) {
 function parseCliArgs(argv) {
   const args = minimist(argv, {
     string: ['model'],
-    boolean: ['review-errors', 'skip-nas-sync'],
+    boolean: ['review-errors', 'skip-nas-sync', 'keep-history'],
     alias: {
       m: 'model',
     },
@@ -278,6 +278,7 @@ function parseCliArgs(argv) {
     modelOverride: sanitize(args.model || ''),
     reviewErrors: Boolean(args['review-errors']),
     skipNasSync: Boolean(args['skip-nas-sync']),
+    keepHistory: Boolean(args['keep-history']),
   }
 }
 
@@ -494,6 +495,7 @@ let permanentSkipLookup = {
   mediaPageUrls: new Set(),
   filenames: new Set(),
 }
+let mediaSeenIndexCache = null
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
@@ -798,6 +800,7 @@ function startRunLog(modelName, inputUrl, folders) {
     ),
     modelName,
     inputUrl,
+    keepHistory: false,
     startedAt: new Date().toISOString(),
     counters: {
       saved: 0,
@@ -1242,6 +1245,11 @@ function finalizeRunLog(extra = {}) {
       2
     ) + '\n'
   )
+  const shouldKeepHistory =
+    currentRunLog.keepHistory || currentRunLog.errors.length > 0
+  if (!shouldKeepHistory) {
+    removeFileIfExists(currentRunLog.logPath)
+  }
   currentRunLog = null
   return summary
 }
@@ -1499,6 +1507,123 @@ function getPermanentSkipMatch({
   )
 }
 
+function getMediaSeenIndexPath(modelLogDir) {
+  return path.join(modelLogDir, 'milkmaid-seen-media-index.json')
+}
+
+function loadMediaSeenIndex(modelLogDir) {
+  const indexPath = getMediaSeenIndexPath(modelLogDir)
+  if (mediaSeenIndexCache?.indexPath === indexPath) {
+    return mediaSeenIndexCache.data
+  }
+
+  let parsed = {}
+  if (fs.existsSync(indexPath)) {
+    try {
+      parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+    } catch (err) {
+      console.warn(
+        `⚠️ Could not parse media seen index at ${indexPath}: ${err.message}`
+      )
+    }
+  }
+
+  const data = {
+    version: 1,
+    updatedAt: parsed?.updatedAt || null,
+    mediaPageUrls:
+      parsed?.mediaPageUrls && typeof parsed.mediaPageUrls === 'object'
+        ? parsed.mediaPageUrls
+        : {},
+    mediaUrls:
+      parsed?.mediaUrls && typeof parsed.mediaUrls === 'object'
+        ? parsed.mediaUrls
+        : {},
+  }
+
+  mediaSeenIndexCache = { indexPath, data }
+  return data
+}
+
+function saveMediaSeenIndex(modelLogDir, data) {
+  const indexPath = getMediaSeenIndexPath(modelLogDir)
+  data.updatedAt = new Date().toISOString()
+  fs.writeFileSync(indexPath, JSON.stringify(data, null, 2) + '\n')
+  mediaSeenIndexCache = { indexPath, data }
+}
+
+function getActiveMediaSeenRecord(modelLogDir, entry) {
+  if (!entry?.relativePath) return null
+  const absolutePath = path.join(
+    datasetDir,
+    String(entry.relativePath).replace(/\//g, path.sep)
+  )
+  if (!existsForRepair(absolutePath)) return null
+  return {
+    ...entry,
+    absolutePath,
+  }
+}
+
+function getSuccessfulSeenMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
+  const index = loadMediaSeenIndex(modelLogDir)
+  const normalizedMediaPageUrl = normalizeSkipUrl(mediaPageUrl)
+  const normalizedMediaUrl = normalizeSkipUrl(mediaUrl)
+
+  if (normalizedMediaPageUrl) {
+    const pageEntry = getActiveMediaSeenRecord(
+      modelLogDir,
+      index.mediaPageUrls[normalizedMediaPageUrl]
+    )
+    if (pageEntry) {
+      return {
+        matchType: 'media_page_url',
+        ...pageEntry,
+      }
+    }
+  }
+
+  if (normalizedMediaUrl) {
+    const mediaEntry = getActiveMediaSeenRecord(
+      modelLogDir,
+      index.mediaUrls[normalizedMediaUrl]
+    )
+    if (mediaEntry) {
+      return {
+        matchType: 'media_url',
+        ...mediaEntry,
+      }
+    }
+  }
+
+  return null
+}
+
+function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
+  const relativePath = String(details.relativePath || '').trim()
+  if (!relativePath) return
+
+  const index = loadMediaSeenIndex(modelLogDir)
+  const normalizedMediaPageUrl = normalizeSkipUrl(details.mediaPageUrl)
+  const normalizedMediaUrl = normalizeSkipUrl(details.mediaUrl)
+  const payload = {
+    relativePath,
+    filename: details.filename || path.basename(relativePath),
+    mediaUrl: normalizedMediaUrl || null,
+    mediaPageUrl: normalizedMediaPageUrl || null,
+    savedAt: new Date().toISOString(),
+  }
+
+  if (normalizedMediaPageUrl) {
+    index.mediaPageUrls[normalizedMediaPageUrl] = payload
+  }
+  if (normalizedMediaUrl) {
+    index.mediaUrls[normalizedMediaUrl] = payload
+  }
+
+  saveMediaSeenIndex(modelLogDir, index)
+}
+
 function buildHashMetadata(
   modelName,
   absolutePath,
@@ -1566,6 +1691,77 @@ function hashFileFromPath(filePath) {
     stream.on('data', (chunk) => hash.update(chunk))
     stream.on('end', () => resolve(hash.digest('hex')))
   })
+}
+
+async function extractStufferDbComments(page) {
+  const commentsHostFrame = page
+    .frames()
+    .find((frame) => frame.url().includes('cmts.stufferdb.com/app'))
+
+  if (!commentsHostFrame) {
+    return { comments: [], commentCount: 0 }
+  }
+
+  try {
+    await commentsHostFrame.waitForSelector(
+      '#comments_list, .comment, .allcomments',
+      {
+        timeout: 5000,
+      }
+    )
+  } catch {
+    return { comments: [], commentCount: 0 }
+  }
+
+  try {
+    return await commentsHostFrame.evaluate(() => {
+      const countText =
+        document.querySelector('.allcomments')?.textContent?.trim() || ''
+      const countMatch = countText.match(/(\d+)/)
+      const commentCount = countMatch ? Number.parseInt(countMatch[1], 10) : 0
+
+      const comments = Array.from(
+        document.querySelectorAll('#comments_list .comment')
+      )
+        .map((commentEl) => {
+          const author =
+            commentEl
+              .querySelector('.comment-top .user-guest, .comment-top .user')
+              ?.textContent?.trim() || null
+          const posted =
+            commentEl
+              .querySelector('.comment-top .date')
+              ?.textContent?.replace(/^•\s*/, '')
+              .trim() || null
+          const spoilerText =
+            commentEl.querySelector('.comment-spoiler-text')?.textContent?.trim() ||
+            ''
+          const mainText =
+            commentEl
+              .querySelector('.comment-text-p, .comment-text, .comment-body')
+              ?.textContent?.trim() || ''
+          const text = [spoilerText, mainText].filter(Boolean).join('\n').trim()
+
+          if (!text) return null
+
+          return {
+            author,
+            posted,
+            text,
+          }
+        })
+        .filter(Boolean)
+
+      return {
+        comments,
+        commentCount: Number.isFinite(commentCount)
+          ? commentCount
+          : comments.length,
+      }
+    })
+  } catch {
+    return { comments: [], commentCount: 0 }
+  }
 }
 
 async function fetchStufferDBTotalCount(browser, url) {
@@ -1775,6 +1971,12 @@ function resetProgressCounter(total = null) {
   }
 }
 
+function setProgressTotal(total = null) {
+  if (typeof total === 'number' && !Number.isNaN(total)) {
+    global.totalSearchTotal = Math.max(total, 1)
+  }
+}
+
 function drawCurrentProgressBar() {
   if (progressMode === 'lazy') {
     const percent = totalLazyBytes
@@ -1822,8 +2024,6 @@ function logAndProgress(message, increment = false) {
   drawCurrentProgressBar()
 }
 
-let grandCompleted = 0
-
 async function scrapeGallery(browser, url, modelName, folders) {
   const { base, images, webm } = folders
 
@@ -1833,8 +2033,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
   })
 
   process.stdout.write('\n') // Reserve one lines
-  grandCompleted++
-  logProgress(grandCompleted, global.totalSearchTotal, {
+  logProgress(completedTotal, global.totalSearchTotal || 1, {
     totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
     savedCount: successCount,
     duplicateCount,
@@ -1851,14 +2050,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
       const total = urls.length
 
-      // If prefetch failed or undercounted badly, trust the actual page we just loaded.
-      if (
-        !global.totalSearchTotal ||
-        global.totalSearchTotal <= 1 ||
-        total > global.totalSearchTotal
-      ) {
-        global.totalSearchTotal = total
-      }
+      setProgressTotal(
+        Math.max(global.totalSearchTotal || 1, completedTotal + total)
+      )
 
       const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
       logAndProgress(
@@ -1930,6 +2124,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           const uploadedDate = uploadedDateIso
             ? new Date(uploadedDateIso)
             : null
+          const pageMeta = await extractStufferDbComments(page)
 
           mediaUrl = await page.evaluate(() => {
             const video = document.querySelector('video.vjs-tech[src]')
@@ -1999,6 +2194,28 @@ async function scrapeGallery(browser, url, modelName, folders) {
               note: permanentSkipMatch.note || null,
             })
             return logAndProgress(`🛑 Permanent skip: ${filename}`, true)
+          }
+
+          const seenMediaMatch = getSuccessfulSeenMediaMatch(
+            folders.logDir,
+            mediaPageUrl,
+            mediaUrl
+          )
+          if (seenMediaMatch) {
+            duplicateCount++
+            currentRunLog && currentRunLog.counters.duplicates++
+            appendRunEvent('skip_seen_media', {
+              modelName,
+              filename,
+              mediaUrl,
+              mediaPageUrl,
+              matchType: seenMediaMatch.matchType,
+              savedPath: seenMediaMatch.relativePath,
+            })
+            return logAndProgress(
+              `⏩ Seen media skip (${seenMediaMatch.matchType}): ${filename}`,
+              true
+            )
           }
 
           let buffer = null
@@ -2092,7 +2309,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
               'gif',
               filename,
               buffer,
-              uploadedDate
+              uploadedDate,
+              pageMeta
             )
 
             if (!isBitwiseDupe(hash)) {
@@ -2113,6 +2331,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
             successCount++
             currentRunLog && currentRunLog.counters.saved++
             addRunSavedBytes(buffer.length)
+            recordSuccessfulSeenMedia(folders.logDir, {
+              relativePath: getDatasetRelativePath(gifPath),
+              filename,
+              mediaUrl,
+              mediaPageUrl,
+            })
             appendRunEvent('saved_gif', {
               modelName,
               filename,
@@ -2150,6 +2374,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
               filename,
               uploadedDate,
               mediaPageUrl,
+              pageMeta,
             })
             currentRunLog && currentRunLog.counters.queuedVideos++
             appendRunEvent('queued_lazy_video', {
@@ -2192,7 +2417,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
             'images',
             filename,
             buffer,
-            uploadedDate
+            uploadedDate,
+            pageMeta
           )
 
           if (!isBitwiseDupe(hash)) {
@@ -2225,6 +2451,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
           successCount++
           currentRunLog && currentRunLog.counters.saved++
           addRunSavedBytes(buffer.length)
+          recordSuccessfulSeenMedia(folders.logDir, {
+            relativePath: getDatasetRelativePath(finalPath),
+            filename,
+            mediaUrl,
+            mediaPageUrl,
+          })
           appendRunEvent('saved_image', {
             modelName,
             filename,
@@ -2303,6 +2535,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       modelOverride,
       reviewErrors,
       skipNasSync,
+      keepHistory,
     } = parseCliArgs(process.argv.slice(2))
     let inputUrl = initialInputUrl
     const sourceInfo = parseStufferDbSourceUrl(inputUrl)
@@ -2364,6 +2597,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     categoryRunList = await buildSourceRunList(browser, sourceInfo)
     startRunLog(modelName, inputUrl, folders)
+    if (currentRunLog) {
+      currentRunLog.keepHistory = keepHistory
+    }
     appendRunEvent('category_run_list_built', {
       modelName,
       sourceType: sourceInfo.sourceType,
@@ -2389,6 +2625,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
     combinedTotal =
       categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
 
+    resetProgressCounter(combinedTotal)
+
     console.log(`📊 Combined media total: ${combinedTotal}`)
     console.log(`💦 Starting scrape for ${modelName}`)
 
@@ -2396,7 +2634,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const categoryUrl = categoryRunList[i]
       const categoryTotal = categoryCounts[i] || 0
 
-      resetProgressCounter(categoryTotal)
+      setProgressTotal(Math.max(global.totalSearchTotal || 1, combinedTotal))
 
       logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
       logScrollingMessage(
@@ -2480,6 +2718,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             filename,
             uploadedDate,
             mediaPageUrl,
+            pageMeta,
           },
           i
         ) =>
@@ -2741,7 +2980,8 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 'webm',
                 filename,
                 finalPath,
-                uploadedDate
+                uploadedDate,
+                pageMeta
               )
 
               const finalStat = fs.statSync(finalPath)
@@ -2777,6 +3017,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
               successCount++
               currentRunLog && currentRunLog.counters.saved++
               addRunSavedBytes(finalStat.size)
+              recordSuccessfulSeenMedia(folders.logDir, {
+                relativePath: getDatasetRelativePath(finalPath),
+                filename,
+                mediaUrl: url,
+                mediaPageUrl,
+              })
               appendRunEvent('saved_lazy_video', {
                 modelName,
                 filename,
