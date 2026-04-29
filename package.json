@@ -47,6 +47,7 @@
     "backfill:coomer": "node hoghaul/backfill-coomer-sources.js",
     "backfill:coomer-interactive": "node hoghaul/backfill-coomer-sources-interactive.js",
     "backfill:sources-interactive": "node hoghaul/backfill-sources-interactive.js",
+    "ingest:kemonodownloader": "node hoghaul/ingest-kemonodownloader.js",
     "backfill:exif": "node milkmaid/backfill-exif-dates.js"
   },
   "dependencies": {
