@@ -253,6 +253,14 @@
         font-style: italic;
       }
 
+      .sort-sep {
+        width: 1px;
+        height: 16px;
+        background: var(--border);
+        margin: 0 4px;
+        flex-shrink: 0;
+      }
+
       /* ─── SOURCE LINKS ───────────────────────────────────────────── */
       #source-links {
         display: flex;
@@ -798,9 +806,13 @@
       </header>
 
       <div id="sort-bar" style="display: none">
-        <span class="sort-label">Sort</span>
-        <button class="sort-btn active" data-sort="asc">Oldest first</button>
-        <button class="sort-btn" data-sort="desc">Newest first</button>
+        <span class="sort-label">Media date</span>
+        <button class="sort-btn active" data-sort="asc">Oldest</button>
+        <button class="sort-btn" data-sort="desc">Newest</button>
+        <div class="sort-sep"></div>
+        <span class="sort-label">Added to disk</span>
+        <button class="sort-btn" data-sort="added-asc">Oldest</button>
+        <button class="sort-btn" data-sort="added-desc">Newest</button>
         <span id="date-range"></span>
       </div>
 
@@ -1020,6 +1032,8 @@
             : allMedia.filter((m) => m.type === activeType)
 
         if (activeSort === 'desc') filtered.reverse()
+        else if (activeSort === 'added-asc') filtered.sort((a, b) => a.addedMs - b.addedMs)
+        else if (activeSort === 'added-desc') filtered.sort((a, b) => b.addedMs - a.addedMs)
 
         renderGrid()
         updateDateRange()
@@ -1071,6 +1085,17 @@
           dateRangeEl.textContent = ''
           return
         }
+
+        if (activeSort === 'added-asc' || activeSort === 'added-desc') {
+          const withAdded = filtered.filter((m) => m.addedMs)
+          if (!withAdded.length) { dateRangeEl.textContent = ''; return }
+          const first = withAdded[activeSort === 'added-asc' ? 0 : withAdded.length - 1]
+          const last  = withAdded[activeSort === 'added-asc' ? withAdded.length - 1 : 0]
+          const toISO = (ms) => new Date(ms).toISOString()
+          dateRangeEl.textContent = `${formatDateShort(toISO(first.addedMs))} – ${formatDateShort(toISO(last.addedMs))}`
+          return
+        }
+
         const withDates = filtered.filter((m) => m.date)
         if (!withDates.length) {
           dateRangeEl.textContent = ''

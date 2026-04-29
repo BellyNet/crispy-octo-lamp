@@ -3,6 +3,7 @@
 const express = require('express')
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const pLimit = require('p-limit')
@@ -15,6 +16,9 @@ const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 
 const app = express()
 const PORT = process.env.DASHBOARD_PORT || 3420
+const PASSWORD = process.env.DASHBOARD_PASSWORD || 'gitgut'
+const AUTH_COOKIE = 'dashboard_auth'
+const AUTH_TOKEN = crypto.createHash('sha256').update(PASSWORD).digest('hex')
 
 const APPDATA =
   process.env.APPDATA ||
@@ -210,6 +214,36 @@ async function resolveDateForFile(userDir, folder, filename, filePath) {
   return result || { date: null, source: null }
 }
 
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+
+function parseCookies(req) {
+  const cookies = {}
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const [k, ...v] = part.split('=')
+    if (k) cookies[k.trim()] = decodeURIComponent(v.join('=').trim())
+  }
+  return cookies
+}
+
+app.use(express.urlencoded({ extended: false }))
+
+app.post('/auth', (req, res) => {
+  if (req.body.password === PASSWORD) {
+    res.setHeader(
+      'Set-Cookie',
+      `${AUTH_COOKIE}=${AUTH_TOKEN}; Path=/; HttpOnly; SameSite=Strict`
+    )
+    return res.redirect('/')
+  }
+  res.redirect('/login.html?error=1')
+})
+
+app.use((req, res, next) => {
+  if (parseCookies(req)[AUTH_COOKIE] === AUTH_TOKEN) return next()
+  if (req.path === '/login.html') return next()
+  res.redirect('/login.html')
+})
+
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
 app.use(express.static(__dirname))
@@ -268,12 +302,10 @@ app.get('/api/users/:username/media', async (req, res) => {
   const allMedia = await Promise.all(
     rawFiles.map((item) =>
       limit(async () => {
-        const meta = await resolveDateForFile(
-          userDir,
-          item.folder,
-          item.filename,
-          item.filePath
-        )
+        const [meta, stat] = await Promise.all([
+          resolveDateForFile(userDir, item.folder, item.filename, item.filePath),
+          fs.promises.stat(item.filePath).catch(() => null),
+        ])
         const isVideo = item.type === 'video'
         return {
           filename: item.filename,
@@ -283,6 +315,7 @@ app.get('/api/users/:username/media', async (req, res) => {
           date: meta.date,
           source: meta.source,
           dateMs: meta.date ? new Date(meta.date).getTime() : 0,
+          addedMs: stat ? stat.mtime.getTime() : 0,
           thumbnailUrl: isVideo
             ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
             : null,
