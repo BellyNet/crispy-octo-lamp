@@ -356,8 +356,8 @@ function logLazyProgress(
       ? `Run ${formatBytes(options.totalTransferredBytes)}`
       : null,
     `Lazy ${formatBytes(downloadedBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : '?'}`,
-    options.averageSpeedBytesPerSecond
-      ? `Avg ${formatSpeed(options.averageSpeedBytesPerSecond)}`
+    options.speedBytesPerSecond
+      ? `Now ${formatSpeed(options.speedBytesPerSecond)}`
       : null,
     totalBytes > 0 && Number.isFinite(options.etaSeconds)
       ? `ETA ${formatDuration(options.etaSeconds * 1000)}`

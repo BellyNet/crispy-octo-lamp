@@ -8,6 +8,7 @@ const https = require('https')
 const http = require('http')
 const minimist = require('minimist')
 const pLimit = require('p-limit')
+const { pathToFileURL } = require('url')
 const limit = pLimit(8)
 const lazyLimit = pLimit(4)
 const readline = require('readline')
@@ -18,6 +19,7 @@ const MEDIA_PAGE_TIMEOUT_MS = 20000
 const MEDIA_PAGE_RETRY_TIMEOUT_MS = 30000
 const LAZY_REQUEST_TIMEOUT_MS = 30000
 const LAZY_IDLE_TIMEOUT_MS = 30000
+const LAZY_SPEED_WINDOW_MS = 3000
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 const mediaDates = require('./media-dates.js')
@@ -343,12 +345,55 @@ async function getBreadcrumbInfo(page) {
       text: a.textContent?.trim() || '',
       href: a.href || '',
     }))
+    const quickSearchInput = document.querySelector('#qsearchInput')
+    const quickSearchValue = quickSearchInput?.value?.trim() || ''
 
     return {
       texts: anchors.map((a) => a.text).filter(Boolean),
       hrefs: anchors.map((a) => a.href).filter(Boolean),
+      searchQuery:
+        quickSearchValue && quickSearchValue.toLowerCase() !== 'quick search'
+          ? quickSearchValue
+          : null,
     }
   })
+}
+
+function inferModelNameFromPageInfo(pageInfo) {
+  const breadcrumbName = extractModelNameFromBreadcrumb(pageInfo?.texts || [])
+  if (breadcrumbName && breadcrumbName !== 'unknown_cow') {
+    return breadcrumbName
+  }
+
+  const searchAlias = sanitize(pageInfo?.searchQuery || '')
+  return searchAlias || breadcrumbName || 'unknown_cow'
+}
+
+function parseStufferDbSourceUrl(inputUrl) {
+  const normalizedUrl = String(inputUrl || '').replace(/&acs=[^&]+/gi, '').trim()
+  if (!normalizedUrl) return null
+
+  const categoryId = normalizedUrl.match(/\/category\/?(\d+)/i)?.[1]
+  if (categoryId) {
+    return {
+      sourceType: 'category',
+      sourceId: categoryId,
+      normalizedUrl,
+      canonicalUrl: `https://stufferdb.com/index?/category/${categoryId}`,
+    }
+  }
+
+  const searchId = normalizedUrl.match(/\/search\/?(\d+)/i)?.[1]
+  if (searchId) {
+    return {
+      sourceType: 'search',
+      sourceId: searchId,
+      normalizedUrl,
+      canonicalUrl: `https://stufferdb.com/index?/search/${searchId}`,
+    }
+  }
+
+  return null
 }
 
 async function collectChildCategoryUrls(browser, parentUrl) {
@@ -394,6 +439,14 @@ async function buildCategoryRunList(browser, inputUrl) {
   return [...new Set([normalizedInput, ...childUrls])]
 }
 
+async function buildSourceRunList(browser, sourceInfo) {
+  if (sourceInfo?.sourceType === 'category') {
+    return buildCategoryRunList(browser, sourceInfo.canonicalUrl)
+  }
+
+  return [sourceInfo.canonicalUrl]
+}
+
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 const randomDelay = () => sleep(Math.floor(Math.random() * 1200) + 300)
 
@@ -412,6 +465,9 @@ let totalCount = 0,
 let lazyDownloadStartedAt = 0,
   lazyActiveDownloads = 0,
   lazyCompletedDownloads = 0
+let lazyInstantSpeedBytesPerSecond = 0,
+  lazyLastChunkAt = 0
+let lazySpeedSamples = []
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.join(
@@ -459,6 +515,20 @@ function addRunTransferredBytes(bytes, phase = 'scrape') {
   } else {
     currentRunLog.transfer.scrapeTransferredBytes += safeBytes
   }
+}
+
+function recordLazySpeedSample(bytes, at = Date.now()) {
+  const safeBytes = Number(bytes) || 0
+  if (safeBytes <= 0) return
+
+  lazySpeedSamples.push({ at, bytes: safeBytes })
+  const cutoff = at - LAZY_SPEED_WINDOW_MS
+  lazySpeedSamples = lazySpeedSamples.filter((sample) => sample.at >= cutoff)
+
+  const totalBytes = lazySpeedSamples.reduce((sum, sample) => sum + sample.bytes, 0)
+  const oldestAt = lazySpeedSamples[0]?.at || at
+  const spanSeconds = Math.max((at - oldestAt) / 1000, 0.001)
+  lazyInstantSpeedBytesPerSecond = totalBytes / spanSeconds
 }
 
 function setRunLazyExpectedBytes(bytes) {
@@ -710,6 +780,22 @@ function startRunLog(modelName, inputUrl, folders) {
     logPath,
     summaryPath,
     modelSummaryPath,
+    errorReportJsonPath: path.join(
+      folders.logDir,
+      `milkmaid-run-errors-${stamp}.json`
+    ),
+    errorReportHtmlPath: path.join(
+      folders.logDir,
+      `milkmaid-run-errors-${stamp}.html`
+    ),
+    latestErrorReportJsonPath: path.join(
+      folders.logDir,
+      'milkmaid-run-errors-latest.json'
+    ),
+    latestErrorReportHtmlPath: path.join(
+      folders.logDir,
+      'milkmaid-run-errors-latest.html'
+    ),
     modelName,
     inputUrl,
     startedAt: new Date().toISOString(),
@@ -776,6 +862,306 @@ function recordRunError(category, details = {}) {
   })
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderErrorLink(url, label = 'open') {
+  if (!url) return ''
+  const safeUrl = escapeHtml(url)
+  const safeLabel = escapeHtml(label)
+  return `<a href="${safeUrl}" target="_blank" rel="noreferrer">${safeLabel}</a>`
+}
+
+function isTailDecodeErrorMessage(message) {
+  return String(message || '').includes('tail_decode_error')
+}
+
+function resolveRunErrorQuarantinePath(error) {
+  if (error?.quarantinePath) return error.quarantinePath
+  if (!error?.savedPath) return null
+  return path.join(
+    quarantineDatasetDir,
+    String(error.savedPath).replace(/\//g, path.sep)
+  )
+}
+
+function buildTailSalvageAction(error) {
+  if (error?.category !== 'lazy_video_error') return null
+  if (!isTailDecodeErrorMessage(error?.error)) return null
+
+  const quarantinePath = resolveRunErrorQuarantinePath(error)
+  if (!quarantinePath || !fs.existsSync(quarantinePath)) return null
+
+  return {
+    inputPath: quarantinePath,
+    command: `npm run salvage:tail-video -- --input ${quoteForShell(
+      quarantinePath
+    )}`,
+    fileUrl: pathToFileURL(quarantinePath).href,
+  }
+}
+
+function enrichRunErrorForSummary(error) {
+  const quarantinePath = resolveRunErrorQuarantinePath(error)
+  const tailSalvage = buildTailSalvageAction({
+    ...error,
+    quarantinePath,
+  })
+
+  return {
+    ...error,
+    quarantinePath: quarantinePath || null,
+    tailSalvage,
+  }
+}
+
+function renderCopyButton(value, label, className = 'copy-btn') {
+  if (!value) return ''
+  return `<button type="button" class="${escapeHtml(
+    className
+  )}" data-copy="${escapeHtml(value)}">${escapeHtml(label)}</button>`
+}
+
+function writeRunErrorArtifacts(summary) {
+  if (!currentRunLog || !summary) return null
+
+  const errorPayload = {
+    modelName: summary.modelName,
+    inputUrl: summary.inputUrl,
+    startedAt: summary.startedAt,
+    finishedAt: summary.finishedAt,
+    status: summary.status,
+    errorCount: summary.errorCount,
+    logPath: summary.logPath,
+    errors: summary.errors,
+  }
+
+  fs.writeFileSync(
+    currentRunLog.errorReportJsonPath,
+    JSON.stringify(errorPayload, null, 2) + '\n'
+  )
+  fs.writeFileSync(
+    currentRunLog.latestErrorReportJsonPath,
+    JSON.stringify(errorPayload, null, 2) + '\n'
+  )
+
+  const rows = summary.errors
+    .map((error, index) => {
+      const mediaPageLink = renderErrorLink(error.mediaPageUrl, 'media page')
+      const mediaUrlLink = renderErrorLink(error.mediaUrl, 'download url')
+      const savedPath = escapeHtml(error.savedPath || '')
+      const errorMessage = escapeHtml(error.error || '')
+      const filename = escapeHtml(error.filename || '')
+      const category = escapeHtml(error.category || '')
+      const bytesDownloaded = Number.isFinite(error.bytesDownloaded)
+        ? formatBytes(error.bytesDownloaded)
+        : ''
+      const actionMarkup = error.tailSalvage
+        ? `<div class="action-stack">
+            ${renderCopyButton(
+              error.tailSalvage.command,
+              'Copy tail chop cmd'
+            )}
+            ${renderErrorLink(error.tailSalvage.fileUrl, 'quarantine file')}
+          </div>`
+        : '<span class="muted">-</span>'
+
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${category}</td>
+          <td>${filename}</td>
+          <td>${errorMessage}</td>
+          <td>${bytesDownloaded}</td>
+          <td>${savedPath}</td>
+          <td>${mediaPageLink}</td>
+          <td>${mediaUrlLink}</td>
+          <td>${actionMarkup}</td>
+        </tr>
+      `
+    })
+    .join('\n')
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Milkmaid Run Errors - ${escapeHtml(summary.modelName)}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #120f0d;
+      --panel: #1d1814;
+      --line: #41352d;
+      --text: #f6efe8;
+      --muted: #c5b1a1;
+      --accent: #ffb36b;
+      --accent-2: #ffd4a7;
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: radial-gradient(circle at top, #2c211b, var(--bg) 60%);
+      color: var(--text);
+      font: 14px/1.45 Consolas, "Courier New", monospace;
+    }
+    .card {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+    }
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(255, 179, 107, 0.18), transparent 70%);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+    .meta {
+      color: var(--muted);
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--accent-2);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    tr:nth-child(even) td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    a {
+      color: var(--accent);
+    }
+    button {
+      cursor: pointer;
+      border: 1px solid rgba(255, 179, 107, 0.45);
+      background: rgba(255, 179, 107, 0.12);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font: inherit;
+    }
+    button:hover {
+      background: rgba(255, 179, 107, 0.2);
+    }
+    .action-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .empty {
+      padding: 28px 24px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>Milkmaid Run Errors</h1>
+      <div class="meta">
+        <span>Model: ${escapeHtml(summary.modelName)}</span>
+        <span>Errors: ${summary.errorCount}</span>
+        <span>Started: ${escapeHtml(summary.startedAt)}</span>
+        <span>Finished: ${escapeHtml(summary.finishedAt)}</span>
+      </div>
+    </header>
+    ${
+      summary.errors.length
+        ? `<table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Category</th>
+          <th>Filename</th>
+          <th>Error</th>
+          <th>Downloaded</th>
+          <th>Saved Path</th>
+          <th>Media Page</th>
+          <th>Source URL</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`
+        : '<div class="empty">No run errors recorded.</div>'
+    }
+  </div>
+  <script>
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-copy]')
+      if (!button) return
+
+      const originalLabel = button.textContent
+      const value = button.getAttribute('data-copy') || ''
+
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value)
+        } else {
+          const field = document.createElement('textarea')
+          field.value = value
+          field.setAttribute('readonly', '')
+          field.style.position = 'fixed'
+          field.style.top = '-9999px'
+          document.body.appendChild(field)
+          field.select()
+          document.execCommand('copy')
+          field.remove()
+        }
+        button.textContent = 'Copied tail chop cmd'
+      } catch (err) {
+        button.textContent = 'Copy failed'
+      }
+
+      window.setTimeout(() => {
+        button.textContent = originalLabel
+      }, 1800)
+    })
+  </script>
+</body>
+</html>`
+
+  fs.writeFileSync(currentRunLog.errorReportHtmlPath, html)
+  fs.writeFileSync(currentRunLog.latestErrorReportHtmlPath, html)
+
+  return {
+    jsonPath: currentRunLog.errorReportJsonPath,
+    htmlPath: currentRunLog.errorReportHtmlPath,
+    latestJsonPath: currentRunLog.latestErrorReportJsonPath,
+    latestHtmlPath: currentRunLog.latestErrorReportHtmlPath,
+  }
+}
+
 function buildRunSummary(extra = {}) {
   if (!currentRunLog) return null
 
@@ -798,6 +1184,15 @@ function buildRunSummary(extra = {}) {
     lazyDurationMs > 0
       ? currentRunLog.transfer.lazyTransferredBytes / (lazyDurationMs / 1000)
       : 0
+  const errorArtifacts =
+    currentRunLog.errors.length > 0
+      ? {
+          jsonPath: currentRunLog.errorReportJsonPath,
+          htmlPath: currentRunLog.errorReportHtmlPath,
+          latestJsonPath: currentRunLog.latestErrorReportJsonPath,
+          latestHtmlPath: currentRunLog.latestErrorReportHtmlPath,
+        }
+      : null
 
   return {
     startedAt: currentRunLog.startedAt,
@@ -813,7 +1208,8 @@ function buildRunSummary(extra = {}) {
       averageBytesPerSecond,
       lazyAverageBytesPerSecond,
     },
-    errors: currentRunLog.errors,
+    errors: currentRunLog.errors.map(enrichRunErrorForSummary),
+    errorArtifacts,
     status,
     ...rest,
   }
@@ -827,6 +1223,13 @@ function finalizeRunLog(extra = {}) {
     status,
     ...rest,
   })
+
+  if (summary?.errorCount > 0) {
+    writeRunErrorArtifacts(summary)
+  } else {
+    removeFileIfExists(currentRunLog.latestErrorReportJsonPath)
+    removeFileIfExists(currentRunLog.latestErrorReportHtmlPath)
+  }
 
   fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
   fs.writeFileSync(
@@ -1263,6 +1666,20 @@ function removeQuarantineMirrorIfExists(filePath) {
   return true
 }
 
+function preserveFailedTailDecodeVideo(filePath) {
+  const mirrorPath = getQuarantineMirrorPath(filePath)
+  if (!fs.existsSync(filePath)) {
+    return fs.existsSync(mirrorPath) ? mirrorPath : null
+  }
+  if (fs.existsSync(mirrorPath)) {
+    return mirrorPath
+  }
+
+  fs.mkdirSync(path.dirname(mirrorPath), { recursive: true })
+  fs.renameSync(filePath, mirrorPath)
+  return mirrorPath
+}
+
 function quoteForShell(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`
 }
@@ -1366,15 +1783,19 @@ function drawCurrentProgressBar() {
     const elapsedSeconds = lazyDownloadStartedAt
       ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
       : 0
-    const speedBytesPerSecond = elapsedSeconds
+    const averageSpeedBytesPerSecond = elapsedSeconds
       ? lazyBytesDownloaded / elapsedSeconds
       : 0
     const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
     const etaSeconds =
-      speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
+      lazyInstantSpeedBytesPerSecond > 0
+        ? remainingBytes / lazyInstantSpeedBytesPerSecond
+        : averageSpeedBytesPerSecond > 0
+          ? remainingBytes / averageSpeedBytesPerSecond
+          : null
 
     logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
-      averageSpeedBytesPerSecond: speedBytesPerSecond,
+      speedBytesPerSecond: lazyInstantSpeedBytesPerSecond,
       etaSeconds,
       activeCount: lazyActiveDownloads,
       completedCount: lazyCompletedDownloads,
@@ -1884,13 +2305,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
       skipNasSync,
     } = parseCliArgs(process.argv.slice(2))
     let inputUrl = initialInputUrl
-    if (!inputUrl || !inputUrl.includes('/category/'))
-      return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
+    const sourceInfo = parseStufferDbSourceUrl(inputUrl)
+    if (!sourceInfo) {
+      return logAndProgress(
+        '⚠️  Usage: node milkmaid.js <stufferdb-category-or-search-url>'
+      )
+    }
 
-    inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
-
-    const categoryId = inputUrl.match(/category\/?(\d+)/)?.[1]
-    if (!categoryId) return logAndProgress('❌ Invalid category URL')
+    inputUrl = sourceInfo.normalizedUrl
 
     browser = await puppeteer.launch({
       headless: 'new',
@@ -1910,7 +2332,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     loadPermanentSkips()
 
     const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
-    const inferredRawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
+    const inferredRawName = inferModelNameFromPageInfo(breadcrumbInfo)
     const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
     const modelSelection = modelOverride
       ? {
@@ -1940,20 +2362,21 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     const folders = createModelFolders(modelName)
 
-    const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
-    categoryRunList = await buildCategoryRunList(browser, plainUrl)
+    categoryRunList = await buildSourceRunList(browser, sourceInfo)
     startRunLog(modelName, inputUrl, folders)
     appendRunEvent('category_run_list_built', {
       modelName,
+      sourceType: sourceInfo.sourceType,
+      sourceId: sourceInfo.sourceId,
       categoryUrls: categoryRunList,
       inferredRawName,
       canonicalModelName,
       modelOverride: modelOverride || null,
     })
 
-    console.log(`🗂️ Category run list for ${modelName}:`)
-    for (const categoryUrl of categoryRunList) {
-      console.log(`   - ${categoryUrl}`)
+    console.log(`🗂️ Source run list for ${modelName}:`)
+    for (const sourceUrl of categoryRunList) {
+      console.log(`   - ${sourceUrl}`)
     }
 
     console.log('🔍 Prefetching total counts...')
@@ -1988,13 +2411,16 @@ async function scrapeGallery(browser, url, modelName, folders) {
     logAndProgress(`Lazy downloading videos: ${lazyVideoQueue.length}`)
     resetProgressBar(null, 'lazy')
     lastDraw = 0
-    totalLazyBytes = 0
-    lazyBytesDownloaded = 0
-    lazyDownloadStartedAt = Date.now()
-    lazyActiveDownloads = 0
-    lazyCompletedDownloads = 0
-    setRunLazyExpectedBytes(0)
-    setProgressMode('lazy')
+  totalLazyBytes = 0
+  lazyBytesDownloaded = 0
+  lazyDownloadStartedAt = Date.now()
+  lazyActiveDownloads = 0
+  lazyCompletedDownloads = 0
+  lazyInstantSpeedBytesPerSecond = 0
+  lazyLastChunkAt = 0
+  lazySpeedSamples = []
+  setRunLazyExpectedBytes(0)
+  setProgressMode('lazy')
 
     // Pre-fetch expected file sizes (best-effort)
     await Promise.all(
@@ -2018,21 +2444,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const percent = totalLazyBytes
         ? (lazyBytesDownloaded / totalLazyBytes) * 100
         : 0
-      const elapsedSeconds = lazyDownloadStartedAt
-        ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
-        : 0
-      const speedBytesPerSecond = elapsedSeconds
-        ? lazyBytesDownloaded / elapsedSeconds
-        : 0
-      const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
-      const etaSeconds =
-        speedBytesPerSecond > 0 ? remainingBytes / speedBytesPerSecond : null
+    const elapsedSeconds = lazyDownloadStartedAt
+      ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
+      : 0
+    const averageSpeedBytesPerSecond = elapsedSeconds
+      ? lazyBytesDownloaded / elapsedSeconds
+      : 0
+    const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
+    const etaSeconds =
+      lazyInstantSpeedBytesPerSecond > 0
+        ? remainingBytes / lazyInstantSpeedBytesPerSecond
+        : averageSpeedBytesPerSecond > 0
+          ? remainingBytes / averageSpeedBytesPerSecond
+          : null
 
-      logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
-        averageSpeedBytesPerSecond: speedBytesPerSecond,
-        etaSeconds,
-        activeCount: lazyActiveDownloads,
-        completedCount: lazyCompletedDownloads,
+    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
+      speedBytesPerSecond: lazyInstantSpeedBytesPerSecond,
+      etaSeconds,
+      activeCount: lazyActiveDownloads,
+      completedCount: lazyCompletedDownloads,
         totalCount: lazyVideoQueue.length,
         totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
       })
@@ -2198,11 +2628,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   res.on('data', (chunk) => {
                     resetIdleTimer()
                     stream.write(chunk)
+                    const now = Date.now()
+                    recordLazySpeedSample(chunk.length, now)
+                    lazyLastChunkAt = now
                     lazyBytesDownloaded += chunk.length
                     addRunTransferredBytes(chunk.length, 'lazy')
                     bytesDownloadedForFile += chunk.length
 
-                    const now = Date.now()
                     if (now - lastDraw > 250) {
                       drawLazyProgress()
                       lastDraw = now
@@ -2376,6 +2808,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
             } catch (err) {
               errorCount++
               currentRunLog && currentRunLog.counters.failures++
+              const quarantinePath = isTailDecodeErrorMessage(err.message)
+                ? preserveFailedTailDecodeVideo(finalPath)
+                : hadQuarantineMirror
+                  ? getQuarantineMirrorPath(finalPath)
+                  : null
               const manifestUpdated =
                 hadQuarantineMirror &&
                 updateQuarantineManifestForRepairAttempt(finalPath, {
@@ -2399,6 +2836,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 responseWasAborted,
                 responseCloseBeforeEnd,
                 hadQuarantineMirror,
+                quarantinePath,
                 manifestUpdated: Boolean(manifestUpdated),
               })
               appendRunEvent('lazy_video_error', {
@@ -2414,6 +2852,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 responseWasAborted,
                 responseCloseBeforeEnd,
                 hadQuarantineMirror,
+                quarantinePath,
                 manifestUpdated,
               })
               logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
@@ -2465,7 +2904,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
       categoryRunList,
       combinedTotal,
     })
+    if (liveSummary?.errorCount > 0) {
+      writeRunErrorArtifacts(liveSummary)
+    }
     logRunSummaryTable(liveSummary)
+    if (liveSummary?.errorArtifacts) {
+      console.log(`🧾 Run error report: ${liveSummary.errorArtifacts.latestJsonPath}`)
+      console.log(`🌐 Run error dashboard: ${liveSummary.errorArtifacts.latestHtmlPath}`)
+    }
 
     console.log(
       `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
