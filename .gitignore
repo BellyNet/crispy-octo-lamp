@@ -46,3 +46,8 @@ hoghaul/coomer_sources.json
 # Claude Code internals
 .claude/
 worktree.md
+
+slopvault-push.log
+slopvault-pull.log
+slopvault-diff.txt
+skipped_images.txt
