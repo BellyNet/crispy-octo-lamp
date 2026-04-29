@@ -58,8 +58,13 @@ const explicitModels = String(argv.models || '')
   .map((value) => value.trim())
   .filter(Boolean)
 const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
-const shouldScrape = Boolean(argv.scrape)
-const skipNasSync = Boolean(argv['skip-nas-sync'])
+const rawArgv = process.argv.slice(2)
+const shouldScrape =
+  rawArgv.includes('--scrape') ||
+  parseBooleanEnv(process.env.npm_config_scrape)
+const skipNasSync =
+  rawArgv.includes('--skip-nas-sync') ||
+  parseBooleanEnv(process.env.npm_config_skip_nas_sync)
 
 main().catch((err) => {
   console.error(`Fatal repair-runner error: ${err.stack || err.message}`)
@@ -181,6 +186,13 @@ function buildEmptyTotals() {
     modelsClean: 0,
     modelsNeedingAttention: 0,
   }
+}
+
+function parseBooleanEnv(envValue) {
+  if (typeof envValue === 'boolean') return envValue
+  if (envValue == null || envValue === '') return false
+  const normalized = String(envValue).trim().toLowerCase()
+  return !['0', 'false', 'no', 'off'].includes(normalized)
 }
 
 function ensureDir(dirPath) {
