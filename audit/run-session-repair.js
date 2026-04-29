@@ -3,6 +3,7 @@ const path = require('path')
 const os = require('os')
 const { spawn } = require('child_process')
 const minimist = require('minimist')
+const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -35,10 +36,7 @@ const slopvaultRoot = path.resolve(
 const datasetRoot = path.join(slopvaultRoot, 'dataset')
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const quarantineDatasetRoot = path.join(quarantineRoot, 'dataset')
-const quarantineManifestPath = path.join(
-  quarantineRoot,
-  'quarantine-manifest.json'
-)
+const quarantineManifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
 const salvageOutputRoot = path.join(quarantineRoot, 'salvaged')
 const targetModel = argv.model ? String(argv.model).trim().toLowerCase() : ''
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
@@ -50,6 +48,10 @@ const reportDir = path.resolve(
 const summaryPath = path.join(reportDir, `session-repair-${runStamp}.json`)
 const latestSummaryPath = path.join(reportDir, 'session-repair-latest.json')
 const checkpointPath = path.join(reportDir, 'session-repair-checkpoint.json')
+const statePath = path.join(reportDir, 'session-repair-state.json')
+const nasDatasetRoot = path.resolve(
+  String(argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+)
 
 main().catch((err) => {
   console.error(`Fatal session repair error: ${err.stack || err.message}`)
@@ -65,6 +67,7 @@ async function main() {
 
   const manifest = loadManifest()
   const checkpoint = loadCheckpoint()
+  const state = loadState()
   const candidates = selectTailDecodeCandidates(manifest.items, checkpoint)
   const selectedCandidates = limit > 0 ? candidates.slice(0, limit) : candidates
 
@@ -76,8 +79,10 @@ async function main() {
     quarantineManifestPath,
     reportDir,
     checkpointPath,
+    statePath,
     selectionMode: argv.all ? 'all' : 'touched_since_last_completed_run',
     lastCompletedRunAt: checkpoint?.completedAt || null,
+    nasDatasetRoot,
     targetModel: targetModel || null,
     limit: limit || null,
     candidateCount: selectedCandidates.length,
@@ -93,7 +98,10 @@ async function main() {
     promotions: [],
     affectedModels: [],
     modelMaintenance: [],
-    nasSync: [],
+    nasSync: null,
+    pendingNasSyncModelsAtStart: Array.isArray(state?.pendingNasSyncModels)
+      ? [...state.pendingNasSyncModels].sort((a, b) => a.localeCompare(b))
+      : [],
     unresolved: null,
   }
 
@@ -104,7 +112,6 @@ async function main() {
     return
   }
 
-  printLiveStart(summary)
   const salvageSummary = await runSalvageBatch()
   summary.salvageRun = salvageSummary
 
@@ -125,17 +132,16 @@ async function main() {
   for (const modelName of affectedModels) {
     const maintenance = await runModelMaintenance(modelName)
     summary.modelMaintenance.push(maintenance)
+    queuePendingNasSyncModel(state, modelName)
   }
 
-  for (const modelName of affectedModels) {
-    const syncResult = await syncModelToNas(modelName)
-    summary.nasSync.push(syncResult)
-  }
+  summary.nasSync = await syncPendingModelsToNas(state)
 
   summary.unresolved = buildUnresolvedSummary(manifest.items)
 
   writeSummary(summary)
   writeCheckpoint(summary)
+  writeErrorsToCheckSummary(summary)
   printLiveSummary(summary)
 }
 
@@ -148,6 +154,7 @@ Options:
   --limit <n>             Limit number of tail-decode candidates processed.
   --dry-run               Preview what would happen without writing changes.
   --report-dir <path>     Override report output directory.
+  --nas-dataset-root <p>  Override NAS dataset root for post-repair sync.
   --slopvault-root <path> Override Slopvault root.
   -h, --help              Show help.
 
@@ -156,7 +163,7 @@ What it does:
   2. Promotes successful salvages back into dataset paths.
   3. Clears resolved quarantine copies.
   4. Prunes, backfills, and validates hashes for affected models.
-  5. Syncs repaired models to the NAS.
+  5. Syncs any pending affected models to the NAS.
   6. Writes a summary report with unresolved quarantine state.
 `)
 }
@@ -189,6 +196,65 @@ function loadCheckpoint() {
   } catch (err) {
     return null
   }
+}
+
+function loadState() {
+  if (!fs.existsSync(statePath)) {
+    return {
+      pendingNasSyncModels: [],
+      lastSyncedAt: null,
+      lastSyncResults: [],
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(statePath, 'utf8').trim()
+    const parsed = raw ? JSON.parse(raw) : {}
+    return {
+      pendingNasSyncModels: Array.isArray(parsed?.pendingNasSyncModels)
+        ? parsed.pendingNasSyncModels
+        : [],
+      lastSyncedAt: parsed?.lastSyncedAt || null,
+      lastSyncResults: Array.isArray(parsed?.lastSyncResults)
+        ? parsed.lastSyncResults
+        : [],
+    }
+  } catch (err) {
+    return {
+      pendingNasSyncModels: [],
+      lastSyncedAt: null,
+      lastSyncResults: [],
+    }
+  }
+}
+
+function saveState(state) {
+  fs.writeFileSync(
+    statePath,
+    JSON.stringify(
+      {
+        pendingNasSyncModels: Array.isArray(state?.pendingNasSyncModels)
+          ? [...state.pendingNasSyncModels].sort((a, b) => a.localeCompare(b))
+          : [],
+        lastSyncedAt: state?.lastSyncedAt || null,
+        lastSyncResults: Array.isArray(state?.lastSyncResults)
+          ? state.lastSyncResults
+          : [],
+      },
+      null,
+      2
+    )
+  )
+}
+
+function queuePendingNasSyncModel(state, modelName) {
+  if (!modelName) return
+  const pending = new Set(
+    Array.isArray(state?.pendingNasSyncModels) ? state.pendingNasSyncModels : []
+  )
+  pending.add(modelName)
+  state.pendingNasSyncModels = [...pending]
+  saveState(state)
 }
 
 function selectTailDecodeCandidates(items, checkpoint) {
@@ -233,11 +299,7 @@ function buildSalvageOutputPath(quarantinePath) {
   }
 
   const parsed = path.parse(relative)
-  return path.join(outputRoot(), parsed.dir, `${parsed.name}.salvaged.mp4`)
-}
-
-function outputRoot() {
-  return salvageOutputRoot
+  return path.join(salvageOutputRoot, parsed.dir, `${parsed.name}.salvaged.mp4`)
 }
 
 function parseTimestamp(value) {
@@ -275,9 +337,7 @@ function filterCandidatesByTouchedModels(items, lastCompletedAt) {
   )
 
   if (touchedModels.size === 0) return []
-  return items.filter((item) =>
-    touchedModels.has(String(item.model || '').trim())
-  )
+  return items.filter((item) => touchedModels.has(String(item.model || '').trim()))
 }
 
 async function runSalvageBatch() {
@@ -290,9 +350,7 @@ async function runSalvageBatch() {
   }
   args.push('--output-dir', reportDir)
 
-  console.log('')
-  console.log('Starting tail-decode salvage batch...')
-  await runNode(args, { streamOutput: true })
+  await runNode(args)
 
   const latestJsonPath = path.join(reportDir, 'salvage-tail-videos-latest.json')
   if (!fs.existsSync(latestJsonPath)) {
@@ -308,35 +366,22 @@ function promoteSalvageResult(result, manifest) {
   const manifestItem = manifest.items.find(
     (item) =>
       normalizePath(item?.relativePath) === relativePath ||
-      normalizePath(item?.quarantinePath) ===
-        normalizePath(result.quarantinePath)
+      normalizePath(item?.quarantinePath) === normalizePath(result.quarantinePath)
   )
 
-  if (
-    result.status !== 'salvaged' ||
-    !result.outputTailDecodeOk ||
-    !result.outputPath
-  ) {
+  if (result.status !== 'salvaged' || !result.outputTailDecodeOk || !result.outputPath) {
     return {
       model: modelName,
       relativePath,
-      status:
-        result.status === 'failed'
-          ? 'salvage_failed'
-          : `skipped_${result.status}`,
+      status: result.status === 'failed' ? 'salvage_failed' : `skipped_${result.status}`,
       quarantinePath: result.quarantinePath || null,
       outputPath: result.outputPath || null,
     }
   }
 
-  const datasetPath = path.join(
-    datasetRoot,
-    relativePath.replace(/\//g, path.sep)
-  )
+  const datasetPath = path.join(datasetRoot, relativePath.replace(/\//g, path.sep))
   const quarantinePath =
-    result.quarantinePath ||
-    manifestItem?.quarantinePath ||
-    path.join(quarantineDatasetRoot, relativePath.replace(/\//g, path.sep))
+    result.quarantinePath || manifestItem?.quarantinePath || path.join(quarantineDatasetRoot, relativePath.replace(/\//g, path.sep))
   const outputPath = path.resolve(String(result.outputPath))
 
   if (!fs.existsSync(outputPath)) {
@@ -443,28 +488,29 @@ function cleanupEmptyParentDirs(startDir, stopDir) {
 async function runModelMaintenance(modelName) {
   const modelReportDir = path.join(reportDir, 'models')
   ensureDir(modelReportDir)
-  const validateJsonPath = path.join(modelReportDir, `${modelName}-validate.json`)
+  const validateJsonPath = path.join(
+    modelReportDir,
+    `${modelName}-validate.json`
+  )
 
-  console.log('')
-  console.log(`Refreshing hashes for ${modelName}...`)
   const prune = await runNode([
     path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'),
     '--model',
     modelName,
-  ], { streamOutput: true })
+  ])
   const backfill = await runNode([
     path.join(rootDir, 'scrapyard', 'backfillModelHashes.js'),
     '--model',
     modelName,
     '--include-video-visuals',
-  ], { streamOutput: true })
+  ])
   const validate = await runNode([
     path.join(rootDir, 'scrapyard', 'validateModelHashes.js'),
     '--model',
     modelName,
     '--json-out',
     validateJsonPath,
-  ], { streamOutput: true })
+  ])
 
   let validationReport = null
   if (fs.existsSync(validateJsonPath)) {
@@ -500,28 +546,73 @@ async function runModelMaintenance(modelName) {
   }
 }
 
-async function syncModelToNas(modelName) {
-  console.log('')
-  console.log(`Syncing ${modelName} to NAS...`)
-  const sourcePath = path.join(datasetRoot, modelName)
-  const targetPath = path.join('Z:\\dataset', modelName)
-  const robocopyCommand = `robocopy "${sourcePath}" "${targetPath}" /MIR /R:2 /W:5`
-  const sync = await runShellCommand(robocopyCommand)
+async function syncPendingModelsToNas(state) {
+  const pendingModels = Array.isArray(state?.pendingNasSyncModels)
+    ? [...state.pendingNasSyncModels].sort((a, b) => a.localeCompare(b))
+    : []
 
-  if (!sync.ok && sync.code > 3) {
-    console.error(`NAS sync failed for ${modelName} with code ${sync.code}`)
-  } else {
-    console.log(`NAS sync complete for ${modelName}`)
+  if (!pendingModels.length) {
+    return {
+      attempted: [],
+      synced: [],
+      failed: [],
+      skipped: [],
+      pendingAfterRun: [],
+      nasDatasetRoot,
+    }
   }
 
+  const synced = []
+  const failed = []
+  const skipped = []
+  const pendingAfterRun = new Set(pendingModels)
+
+  for (const modelName of pendingModels) {
+    const sourcePath = path.join(datasetRoot, modelName)
+    const targetPath = path.join(nasDatasetRoot, modelName)
+
+    if (!fs.existsSync(sourcePath)) {
+      skipped.push({
+        model: modelName,
+        reason: 'local_model_missing',
+        sourcePath,
+        targetPath,
+      })
+      pendingAfterRun.delete(modelName)
+      continue
+    }
+
+    try {
+      const command = await runRobocopyModelSync(sourcePath, targetPath)
+      synced.push({
+        model: modelName,
+        sourcePath,
+        targetPath,
+        command,
+      })
+      pendingAfterRun.delete(modelName)
+    } catch (err) {
+      failed.push({
+        model: modelName,
+        sourcePath,
+        targetPath,
+        error: err.message,
+      })
+    }
+  }
+
+  state.pendingNasSyncModels = [...pendingAfterRun]
+  state.lastSyncedAt = new Date().toISOString()
+  state.lastSyncResults = [...synced, ...failed, ...skipped]
+  saveState(state)
+
   return {
-    model: modelName,
-    command: robocopyCommand,
-    ok: sync.ok || sync.code <= 3,
-    code: sync.code,
-    stdout: sync.stdout,
-    stderr: sync.stderr,
-    error: sync.error,
+    attempted: pendingModels,
+    synced,
+    failed,
+    skipped,
+    pendingAfterRun: state.pendingNasSyncModels,
+    nasDatasetRoot,
   }
 }
 
@@ -603,37 +694,123 @@ function printDryRunSummary(summary) {
   )
 }
 
-function printLiveStart(summary) {
-  console.log(`Session repair starting`)
-  console.log(`Selection mode: ${summary.selectionMode}`)
-  console.log(`Last completed run: ${summary.lastCompletedRunAt || 'none'}`)
-  console.log(`Candidates queued: ${summary.candidateCount}`)
-  console.log(`Report: ${latestSummaryPath}`)
-}
-
 function printLiveSummary(summary) {
   console.log(`Session repair complete`)
   console.log(`Selection mode: ${summary.selectionMode}`)
   console.log(`Last completed run: ${summary.lastCompletedRunAt || 'none'}`)
   console.log(`Candidates scanned: ${summary.candidateCount}`)
   console.log(
-    `Promoted salvages: ${
-      summary.promotions.filter((item) => item.status === 'promoted').length
-    }`
+    `Promoted salvages: ${summary.promotions.filter((item) => item.status === 'promoted').length}`
   )
   console.log(`Affected models: ${summary.affectedModels.length}`)
-  console.log(
-    `NAS synced models: ${
-      summary.nasSync.filter((item) => item.ok).length
-    } / ${summary.nasSync.length}`
-  )
+  if (summary.nasSync) {
+    console.log(`NAS sync attempted: ${summary.nasSync.attempted.length}`)
+    console.log(`NAS sync ok: ${summary.nasSync.synced.length}`)
+    console.log(`NAS sync failed: ${summary.nasSync.failed.length}`)
+    console.log(`NAS sync still pending: ${summary.nasSync.pendingAfterRun.length}`)
+  }
   console.log(
     `Unresolved tail-decode quarantines: ${summary.unresolved.unresolvedTailDecodeCount}`
   )
   console.log(`Summary: ${latestSummaryPath}`)
 }
 
-function runNode(args, options = {}) {
+function writeErrorsToCheckSummary(summary) {
+  const items = []
+
+  for (const item of summary?.unresolved?.unresolvedTailDecodeSample || []) {
+    items.push({
+      model: item.model,
+      status: item.repairState || 'quarantined',
+      details: item.relativePath,
+    })
+  }
+
+  for (const failed of summary?.nasSync?.failed || []) {
+    items.push({
+      model: failed.model,
+      status: 'nas_sync_failed',
+      details: failed.error,
+    })
+  }
+
+  for (const pendingModel of summary?.nasSync?.pendingAfterRun || []) {
+    if (summary?.nasSync?.failed?.some((entry) => entry.model === pendingModel)) {
+      continue
+    }
+    items.push({
+      model: pendingModel,
+      status: 'nas_sync_pending',
+      details: 'Pending retry on next session repair run.',
+    })
+  }
+
+  upsertErrorsSource('session-repair', {
+    title: 'Session Repair',
+    summary:
+      items.length > 0
+        ? `${items.length} session-repair follow-up item(s) still need attention.`
+        : 'Latest session repair has no remaining follow-up items.',
+    commandHint: 'npm run repair',
+    items,
+  })
+}
+
+function runRobocopyModelSync(sourcePath, targetPath) {
+  return new Promise((resolve, reject) => {
+    try {
+      ensureDir(targetPath)
+    } catch (err) {
+      return reject(
+        new Error(`Could not prepare NAS target ${targetPath}: ${err.message}`)
+      )
+    }
+    const args = [
+      sourcePath,
+      targetPath,
+      '/E',
+      '/XC',
+      '/XN',
+      '/XO',
+      '/R:2',
+      '/W:5',
+      '/NFL',
+      '/NDL',
+      '/NJH',
+      '/NJS',
+      '/NP',
+    ]
+    const command = ['robocopy', ...args].join(' ')
+    const child = spawn('robocopy', args, {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if ((code ?? 0) > 3) {
+        return reject(
+          new Error(
+            `robocopy failed (${code}): ${command}\n${stderr || stdout}`.trim()
+          )
+        )
+      }
+      resolve(command)
+    })
+  })
+}
+
+function runNode(args) {
   return new Promise((resolve, reject) => {
     const command = [process.execPath, ...args].join(' ')
     const child = spawn(process.execPath, args, {
@@ -646,14 +823,10 @@ function runNode(args, options = {}) {
     let stderr = ''
 
     child.stdout.on('data', (chunk) => {
-      const text = chunk.toString()
-      stdout += text
-      if (options.streamOutput) process.stdout.write(text)
+      stdout += chunk.toString()
     })
     child.stderr.on('data', (chunk) => {
-      const text = chunk.toString()
-      stderr += text
-      if (options.streamOutput) process.stderr.write(text)
+      stderr += chunk.toString()
     })
     child.on('error', reject)
     child.on('exit', (code) => {
@@ -668,48 +841,6 @@ function runNode(args, options = {}) {
         command,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
-      })
-    })
-  })
-}
-
-function runShellCommand(command) {
-  return new Promise((resolve) => {
-    const child = spawn('powershell', ['-Command', command], {
-      cwd: rootDir,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-
-    let stdout = ''
-    let stderr = ''
-
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString()
-      stdout += text
-      process.stdout.write(text)
-    })
-    child.stderr.on('data', (chunk) => {
-      const text = chunk.toString()
-      stderr += text
-      process.stderr.write(text)
-    })
-    child.on('error', (error) => {
-      resolve({
-        ok: false,
-        code: 1,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        error: error.message,
-      })
-    })
-    child.on('exit', (code) => {
-      resolve({
-        ok: code === 0,
-        code: code ?? 0,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        error: null,
       })
     })
   })

@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const minimist = require('minimist')
 const { spawn } = require('child_process')
+const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -377,6 +378,7 @@ function writeReport(report) {
   }
 
   fs.writeFileSync(latestTextPath, lines.join('\n'))
+  writeErrorsToCheckSummary(report)
 }
 
 function calculateTotals(results) {
@@ -398,4 +400,49 @@ function calculateTotals(results) {
       errors: 0,
     }
   )
+}
+
+function writeErrorsToCheckSummary(report) {
+  const items = []
+
+  for (const item of Array.isArray(report?.results) ? report.results : []) {
+    const hasScrapeFailure = !item?.scrape?.ok
+    const hasValidationFailure = !item?.validation?.ok
+    const summary = item?.lastRunSummary
+    const errorCount =
+      summary && !summary.parseError ? Number(summary.errorCount || 0) : 0
+
+    if (!hasScrapeFailure && !hasValidationFailure && errorCount <= 0) continue
+
+    const detailParts = []
+    if (hasScrapeFailure) {
+      detailParts.push(`scrape failed across ${item.scrape?.runs || 0} source run(s)`)
+    }
+    if (errorCount > 0) {
+      detailParts.push(`${errorCount} run error(s)`)
+    }
+    if (hasValidationFailure && item?.validation?.summary) {
+      const summaryBits = item.validation.summary
+      detailParts.push(
+        `validation missing bitwise=${summaryBits.bitwiseMissing || 0} visual=${summaryBits.visualMissing || 0} video=${summaryBits.videoVisualMissing || 0}`
+      )
+    }
+
+    items.push({
+      model: item.model,
+      status: hasScrapeFailure ? 'needs_repair' : 'needs_review',
+      count: errorCount,
+      details: detailParts.join('; '),
+    })
+  }
+
+  upsertErrorsSource('repair-stufferdb', {
+    title: 'Repair StufferDB',
+    summary:
+      items.length > 0
+        ? `${items.length} model(s) still need attention from the latest repair:stufferdb batch.`
+        : 'Latest repair:stufferdb batch is clean.',
+    commandHint: 'npm run repair:stufferdb',
+    items,
+  })
 }
