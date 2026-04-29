@@ -46,6 +46,7 @@
     "backfill:dates": "node milkmaid/backfill-exif-dates.js",
     "backfill:coomer": "node hoghaul/backfill-coomer-sources.js",
     "backfill:coomer-interactive": "node hoghaul/backfill-coomer-sources-interactive.js",
+    "backfill:sources-interactive": "node hoghaul/backfill-sources-interactive.js",
     "backfill:exif": "node milkmaid/backfill-exif-dates.js"
   },
   "dependencies": {
