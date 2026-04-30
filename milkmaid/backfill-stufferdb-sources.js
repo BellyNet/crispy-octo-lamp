@@ -4,6 +4,7 @@ const https = require('https')
 const readline = require('readline')
 const { exec, execFile } = require('child_process')
 const puppeteer = require('puppeteer')
+const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 
@@ -44,7 +45,7 @@ function loadRegistry() {
 }
 
 function saveRegistry(registry) {
-  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2))
+  writeRepoJsonFileSync(registryPath, registry)
 }
 
 function ensureModelEntryShape(entry, canonicalName) {

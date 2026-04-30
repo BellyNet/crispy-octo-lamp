@@ -2,7 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { execSync } = require('child_process')
+const { writeRepoJsonFileSync } = require('./repoFileWriter')
 
 function sortStringValues(values) {
   return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
@@ -57,20 +57,8 @@ function main() {
   const registryPath = path.join(__dirname, '..', 'model_aliases.json')
   const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'))
   const sortedRegistry = sortModelRegistry(registry)
-
-  // Write with standard JSON indent first, then let Prettier normalise it
-  fs.writeFileSync(registryPath, JSON.stringify(sortedRegistry, null, 2) + '\n')
-
-  try {
-    execSync(`npx prettier --write "${registryPath}"`, {
-      cwd: path.join(__dirname, '..'),
-      stdio: 'pipe',
-    })
-    console.log(`Sorted and formatted model registry: ${registryPath}`)
-  } catch {
-    // Prettier not available — JSON.stringify output is still valid
-    console.log(`Sorted model registry: ${registryPath} (Prettier unavailable)`)
-  }
+  writeRepoJsonFileSync(registryPath, sortedRegistry)
+  console.log(`Sorted model registry: ${registryPath}`)
 }
 
 main()

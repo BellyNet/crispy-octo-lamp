@@ -20,6 +20,7 @@
  */
 
 const fs = require('fs')
+const { writeRepoJsonFileSync } = require('./repoFileWriter')
 
 // ─── SANITIZE ─────────────────────────────────────────────────────────────────
 function sanitize(name) {
@@ -33,7 +34,7 @@ function sanitize(name) {
 // ─── LOAD / SAVE ──────────────────────────────────────────────────────────────
 function loadModelRegistry(registryPath) {
   if (!fs.existsSync(registryPath)) {
-    fs.writeFileSync(registryPath, JSON.stringify({}, null, 2))
+    writeRepoJsonFileSync(registryPath, {})
     return {}
   }
   try {
@@ -50,10 +51,7 @@ function loadModelRegistry(registryPath) {
 }
 
 function saveModelRegistry(registryPath, registry) {
-  fs.writeFileSync(
-    registryPath,
-    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
-  )
+  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry))
 }
 
 // ─── SORT ─────────────────────────────────────────────────────────────────────

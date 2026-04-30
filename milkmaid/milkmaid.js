@@ -59,6 +59,7 @@ const {
   getMilestoneBucket,
   logScrollingMessage,
 } = require('../stuffinglogger')
+const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 
 function sanitize(name) {
   return String(name || '')
@@ -71,7 +72,7 @@ function sanitize(name) {
 function loadModelRegistry(registryPath) {
   if (!fs.existsSync(registryPath)) {
     const emptyRegistry = {}
-    fs.writeFileSync(registryPath, JSON.stringify(emptyRegistry, null, 2))
+    writeRepoJsonFileSync(registryPath, emptyRegistry)
     return emptyRegistry
   }
 
@@ -89,10 +90,7 @@ function loadModelRegistry(registryPath) {
 }
 
 function saveModelRegistry(registryPath, registry) {
-  fs.writeFileSync(
-    registryPath,
-    JSON.stringify(sortModelRegistry(registry), null, 2) + '\n'
-  )
+  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry))
 }
 
 function sortStringValues(values) {
