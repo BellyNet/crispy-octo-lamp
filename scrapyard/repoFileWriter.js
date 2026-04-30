@@ -6,7 +6,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 const rootDir = path.join(__dirname, '..')
 const MODEL_ALIASES_FILENAME = 'model_aliases.json'
 const NAS_MODEL_ALIASES_FILENAME = 'model-aliases.json'
-const DEFAULT_NAS_DATASET_DIR = 'Z:\\dataset'
+const DEFAULT_NAS_MODEL_ALIASES_PATH = `Z:\\${NAS_MODEL_ALIASES_FILENAME}`
 const PRETTIER_PARSERS = new Map([
   ['.cjs', 'babel'],
   ['.css', 'css'],
@@ -86,9 +86,13 @@ function isRootModelAliasesFile(filePath) {
 }
 
 function getNasModelAliasesPath() {
-  const nasDatasetRoot = path.resolve(
-    String(process.env.NAS_DATASET_DIR || DEFAULT_NAS_DATASET_DIR)
-  )
+  const configuredNasDatasetRoot = String(process.env.NAS_DATASET_DIR || '').trim()
+
+  if (!configuredNasDatasetRoot) {
+    return DEFAULT_NAS_MODEL_ALIASES_PATH
+  }
+
+  const nasDatasetRoot = path.resolve(configuredNasDatasetRoot)
   return path.join(path.dirname(nasDatasetRoot), NAS_MODEL_ALIASES_FILENAME)
 }
 
