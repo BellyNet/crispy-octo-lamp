@@ -35,6 +35,7 @@ COPY package.json ./
 COPY dashboard/ ./dashboard/
 COPY milkmaid/media-dates.js ./milkmaid/
 COPY scrapyard/modelRegistry.js ./scrapyard/
+COPY scrapyard/repoFileWriter.js ./scrapyard/
 COPY model_aliases.json ./
 
 ENV DATASET_DIR=/data/dataset
