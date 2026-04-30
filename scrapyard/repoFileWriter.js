@@ -1,8 +1,12 @@
 const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true })
 
 const rootDir = path.join(__dirname, '..')
+const MODEL_ALIASES_FILENAME = 'model_aliases.json'
+const NAS_MODEL_ALIASES_FILENAME = 'model-aliases.json'
+const DEFAULT_NAS_DATASET_DIR = 'Z:\\dataset'
 const PRETTIER_PARSERS = new Map([
   ['.cjs', 'babel'],
   ['.css', 'css'],
@@ -73,6 +77,30 @@ const prettier = require('prettier')
   }
 }
 
+function isRootModelAliasesFile(filePath) {
+  const resolvedPath = path.resolve(filePath)
+  return (
+    path.basename(resolvedPath).toLowerCase() === MODEL_ALIASES_FILENAME &&
+    path.dirname(resolvedPath) === rootDir
+  )
+}
+
+function getNasModelAliasesPath() {
+  const nasDatasetRoot = path.resolve(
+    String(process.env.NAS_DATASET_DIR || DEFAULT_NAS_DATASET_DIR)
+  )
+  return path.join(path.dirname(nasDatasetRoot), NAS_MODEL_ALIASES_FILENAME)
+}
+
+function syncModelAliasesToNas(filePath) {
+  if (!isRootModelAliasesFile(filePath)) return
+
+  const resolvedPath = path.resolve(filePath)
+  const nasModelAliasesPath = getNasModelAliasesPath()
+  fs.mkdirSync(path.dirname(nasModelAliasesPath), { recursive: true })
+  fs.copyFileSync(resolvedPath, nasModelAliasesPath)
+}
+
 function writeRepoFileSync(filePath, contents, options = {}) {
   const resolvedPath = path.resolve(filePath)
   const encoding = options.encoding || 'utf8'
@@ -83,6 +111,8 @@ function writeRepoFileSync(filePath, contents, options = {}) {
   if (shouldFormat(resolvedPath, formatWithPrettier)) {
     formatRepoFile(resolvedPath)
   }
+
+  syncModelAliasesToNas(resolvedPath)
 }
 
 function writeRepoJsonFileSync(filePath, value, options = {}) {
