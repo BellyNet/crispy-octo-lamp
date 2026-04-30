@@ -142,6 +142,19 @@
         font-weight: 500;
       }
 
+      #sidebar-footer {
+        padding: 8px 12px;
+        border-top: 1px solid var(--border);
+        font-size: 10px;
+        color: var(--muted);
+        line-height: 1.6;
+        flex-shrink: 0;
+      }
+      #sidebar-footer span {
+        display: block;
+        opacity: 0.7;
+      }
+
       /* ─── MAIN ────────────────────────────────────────────────── */
       #main {
         flex: 1;
@@ -720,6 +733,113 @@
         font-size: 14px;
       }
 
+      /* ─── HOME BUTTON ────────────────────────────────────────── */
+      #home-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 6px;
+        flex-shrink: 0;
+        transition: background 0.15s, color 0.15s;
+      }
+      #home-btn:hover,
+      #home-btn.active {
+        background: var(--card-bg);
+        color: var(--accent);
+      }
+
+      /* ─── HOME VIEW ──────────────────────────────────────────── */
+      #home-view {
+        display: none;
+        padding: 16px 20px;
+      }
+      #home-view.visible {
+        display: block;
+      }
+      #home-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+      }
+      .home-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      }
+      .home-card:hover {
+        transform: translateY(-3px);
+        border-color: var(--accent);
+        box-shadow: 0 6px 24px rgba(124, 108, 252, 0.2);
+      }
+      .home-card-thumb {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        display: block;
+        background: #0a0a10;
+      }
+      .home-card-body {
+        padding: 8px 10px;
+      }
+      .home-card-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 5px;
+      }
+      .home-card-sources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px;
+      }
+      .home-src-dot {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: var(--border);
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .home-src-dot.has-source {
+        background: #1e1e32;
+        color: var(--accent);
+        border: 1px solid var(--accent-dim);
+      }
+
+      /* ─── FILTER SELECT (mobile) ─────────────────────────────── */
+      #filter-select {
+        display: none;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 5px 8px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        /* custom arrow */
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237070a0'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        padding-right: 22px;
+      }
+
       /* ─── HAMBURGER ──────────────────────────────────────────── */
       #hamburger {
         display: none;
@@ -794,10 +914,14 @@
           width: 100%;
         }
 
+        /* filter pills → dropdown on mobile */
+        .filter-btn { display: none; }
+        #filter-select { display: block; }
+
         /* size buttons — show column-count labels on mobile */
         .size-btn[data-size='small']::after  { content: ' (4×)'; font-size: 9px; }
-        .size-btn[data-size='medium']::after { content: ' (3×)'; font-size: 9px; }
-        .size-btn[data-size='large']::after  { content: ' (2×)'; font-size: 9px; }
+        .size-btn[data-size='medium']::after { content: ' (2×)'; font-size: 9px; }
+        .size-btn[data-size='large']::after  { content: ' (1×)'; font-size: 9px; }
 
         #grid-container {
           padding: 10px 12px;
@@ -806,6 +930,14 @@
         #media-grid {
           grid-template-columns: repeat(var(--mobile-cols), 1fr);
           gap: 6px;
+        }
+        /* home grid: 2 cols on mobile */
+        #home-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+        }
+        #home-view {
+          padding: 10px 12px;
         }
 
         /* lightbox mobile tweaks */
@@ -867,6 +999,7 @@
         />
       </div>
       <ul id="user-list"></ul>
+      <div id="sidebar-footer"></div>
     </aside>
 
     <div id="sidebar-overlay"></div>
@@ -874,6 +1007,12 @@
     <!-- MAIN CONTENT -->
     <div id="main">
       <header id="main-header">
+        <button id="home-btn" title="All models">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+        </button>
         <button id="hamburger" aria-label="Toggle user list">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="3" y1="6" x2="21" y2="6"/>
@@ -891,6 +1030,12 @@
           <button class="filter-btn" data-type="image">Images</button>
           <button class="filter-btn" data-type="gif">GIFs</button>
           <button class="filter-btn" data-type="video">Videos</button>
+          <select id="filter-select" aria-label="Filter media type">
+            <option value="all">All</option>
+            <option value="image">Images</option>
+            <option value="gif">GIFs</option>
+            <option value="video">Videos</option>
+          </select>
         </div>
       </header>
 
@@ -911,6 +1056,11 @@
       </div>
 
       <div id="grid-container">
+        <!-- HOME VIEW: model card grid -->
+        <div id="home-view">
+          <div id="home-grid"></div>
+        </div>
+
         <div id="empty-state">
           <svg
             width="64"
@@ -964,6 +1114,7 @@
       let activeType = 'all'
       let activeSort = 'asc'
       let lbIndex = 0 // lightbox current index into filtered[]
+      let homeVisible = false
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
       const userListEl = document.getElementById('user-list')
@@ -972,6 +1123,7 @@
       const currentNameEl = document.getElementById('current-user-name')
       const mediaStatsEl = document.getElementById('media-stats')
       const filterBtns = document.querySelectorAll('.filter-btn')
+      const filterSelect = document.getElementById('filter-select')
       const sortBtns = document.querySelectorAll('.sort-btn')
       const sortBar = document.getElementById('sort-bar')
       const dateRangeEl = document.getElementById('date-range')
@@ -979,6 +1131,8 @@
       const emptyState = document.getElementById('empty-state')
       const loadingEl = document.getElementById('loading-indicator')
       const noResultsEl = document.getElementById('no-results')
+      const homeViewEl = document.getElementById('home-view')
+      const homeGridEl = document.getElementById('home-grid')
       const lightbox = document.getElementById('lightbox')
       const lbMediaWrap = document.getElementById('lb-media-wrap')
       const lbDate = document.getElementById('lb-date')
@@ -1019,6 +1173,71 @@
         usersData = await res.json()
         userCountEl.textContent = usersData.length
         renderUserList(usersData)
+        showHomeView() // start on the home grid
+      }
+
+      // ─── HOME VIEW ────────────────────────────────────────────────────────
+      function showHomeView() {
+        homeVisible = true
+        document.getElementById('home-btn').classList.add('active')
+        homeViewEl.classList.add('visible')
+        emptyState.style.display = 'none'
+        loadingEl.style.display = 'none'
+        noResultsEl.style.display = 'none'
+        gridEl.style.display = 'none'
+        sortBar.style.display = 'none'
+        currentNameEl.textContent = 'All Models'
+        mediaStatsEl.textContent = `${usersData.length} models`
+        sourceLinksEl.innerHTML = ''
+        renderHomeGrid()
+      }
+
+      function hideHomeView() {
+        homeVisible = false
+        document.getElementById('home-btn').classList.remove('active')
+        homeViewEl.classList.remove('visible')
+        gridEl.style.display = ''
+      }
+
+      function renderHomeGrid() {
+        homeGridEl.innerHTML = ''
+        for (const u of usersData) {
+          const card = document.createElement('div')
+          card.className = 'home-card'
+          card.addEventListener('click', () => selectUser(u))
+
+          const img = document.createElement('img')
+          img.className = 'home-card-thumb'
+          img.loading = 'lazy'
+          img.alt = u.name
+          img.src = `/api/users/${encodeURIComponent(u.name)}/cover`
+          img.onerror = () => {
+            img.style.background = 'var(--card-bg)'
+            img.style.opacity = '0'
+          }
+
+          const body = document.createElement('div')
+          body.className = 'home-card-body'
+
+          const name = document.createElement('div')
+          name.className = 'home-card-name'
+          name.textContent = u.name
+
+          const srcs = document.createElement('div')
+          srcs.className = 'home-card-sources'
+          for (const [key, label] of [['coomer','OF'],['kemono','K'],['stufferdb','S']]) {
+            const dot = document.createElement('span')
+            dot.className = 'home-src-dot' + ((u.sources?.[key]?.length) ? ' has-source' : '')
+            dot.textContent = label
+            srcs.appendChild(dot)
+          }
+
+          body.appendChild(name)
+          body.appendChild(srcs)
+          card.appendChild(img)
+          card.appendChild(body)
+          homeGridEl.appendChild(card)
+        }
       }
 
       function renderUserList(users) {
@@ -1102,17 +1321,17 @@
         const username = typeof userObj === 'string' ? userObj : userObj.name
         const sources = typeof userObj === 'object' ? userObj.sources : null
         closeSidebar()
+        hideHomeView()
 
         userListEl
           .querySelectorAll('.user-item')
           .forEach((el) => el.classList.remove('active'))
-        if (liEl) liEl.classList.add('active')
+        // find the li if not passed
+        const li = liEl || userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
+        if (li) li.classList.add('active')
 
-        activeType = 'all'
+        setActiveType('all')
         activeSort = 'asc'
-        filterBtns.forEach((b) =>
-          b.classList.toggle('active', b.dataset.type === 'all')
-        )
         sortBtns.forEach((b) =>
           b.classList.toggle('active', b.dataset.sort === 'asc')
         )
@@ -1152,12 +1371,23 @@
         updateDateRange()
       }
 
+      // Keep pills + select in sync
+      function setActiveType(type) {
+        activeType = type
+        filterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
+        filterSelect.value = type
+      }
+
       filterBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
-          activeType = btn.dataset.type
-          filterBtns.forEach((b) => b.classList.toggle('active', b === btn))
+          setActiveType(btn.dataset.type)
           applyFilter()
         })
+      })
+
+      filterSelect.addEventListener('change', () => {
+        setActiveType(filterSelect.value)
+        applyFilter()
       })
 
       sortBtns.forEach((btn) => {
@@ -1182,15 +1412,15 @@
         if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
         mediaStatsEl.textContent = parts.join(' · ')
 
-        // Update filter button labels with counts
-        document.querySelector('.filter-btn[data-type="all"]').textContent =
-          `All (${allMedia.length})`
-        document.querySelector('.filter-btn[data-type="image"]').textContent =
-          imgs ? `Images (${imgs})` : 'Images'
-        document.querySelector('.filter-btn[data-type="gif"]').textContent =
-          gifs ? `GIFs (${gifs})` : 'GIFs'
-        document.querySelector('.filter-btn[data-type="video"]').textContent =
-          vids ? `Videos (${vids})` : 'Videos'
+        // Update filter button + select labels with counts
+        const counts = { all: allMedia.length, image: imgs, gif: gifs, video: vids }
+        const labels = { all: `All (${allMedia.length})`, image: imgs ? `Images (${imgs})` : 'Images', gif: gifs ? `GIFs (${gifs})` : 'GIFs', video: vids ? `Videos (${vids})` : 'Videos' }
+        for (const [type, label] of Object.entries(labels)) {
+          const btn = document.querySelector(`.filter-btn[data-type="${type}"]`)
+          if (btn) btn.textContent = label
+          const opt = filterSelect.querySelector(`option[value="${type}"]`)
+          if (opt) opt.textContent = label
+        }
       }
 
       function updateDateRange() {
@@ -1463,8 +1693,8 @@
 
       // ─── CARD SIZE ────────────────────────────────────────────────────────
       const sizeBtns = document.querySelectorAll('.size-btn')
-      const CARD_SIZES   = { small: '160px', medium: '220px', large: '300px' }
-      const MOBILE_COLS  = { small: 4, medium: 3, large: 2 }
+      const CARD_SIZES   = { small: '160px', medium: '300px', large: '500px' }
+      const MOBILE_COLS  = { small: 4, medium: 2, large: 1 }
       const isMobile = () => window.matchMedia('(max-width: 640px)').matches
 
       sizeBtns.forEach((btn) => {
@@ -1480,6 +1710,13 @@
             )
           }
         })
+      })
+
+      // ─── HOME BUTTON ──────────────────────────────────────────────────────
+      document.getElementById('home-btn').addEventListener('click', () => {
+        if (homeVisible) return
+        showHomeView()
+        userListEl.querySelectorAll('.user-item').forEach((el) => el.classList.remove('active'))
       })
 
       // ─── MOBILE SIDEBAR ───────────────────────────────────────────────────
@@ -1568,6 +1805,13 @@
 
       // ─── INIT ─────────────────────────────────────────────────────────────
       loadUsers()
+
+      // Version / last-updated footer
+      fetch('/api/info').then(r => r.json()).then(info => {
+        const el = document.getElementById('sidebar-footer')
+        const fmtShort = (iso) => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '—'
+        el.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
+      }).catch(() => {})
     </script>
   </body>
 </html>

@@ -372,6 +372,30 @@ app.get('/thumbnail/:username/:filename', async (req, res) => {
   })
 })
 
+// Cover image — first available image for a model (used by home-view cards)
+app.get('/api/users/:username/cover', async (req, res) => {
+  const { username } = req.params
+  const userDir = safeSubPath(datasetDir, username)
+  if (!userDir) return res.status(403).send('Forbidden')
+
+  for (const folder of ['images', 'gif']) {
+    const folderPath = path.join(userDir, folder)
+    let files
+    try { files = await fs.promises.readdir(folderPath) } catch { continue }
+    const img = files.find((f) =>
+      ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(
+        path.extname(f).toLowerCase()
+      )
+    )
+    if (img) {
+      return res.redirect(
+        `/media/${encodeURIComponent(username)}/${folder}/${encodeURIComponent(img)}`
+      )
+    }
+  }
+  res.status(404).send('No cover image')
+})
+
 // Serve media files
 app.get('/media/:username/:folder/:filename', (req, res) => {
   const { username, folder, filename } = req.params
@@ -460,6 +484,20 @@ async function prewarmThumbnails() {
 
   console.log(`\r  Thumbs:    ${missing.length} generated ✓          `)
 }
+
+// ─── INFO ENDPOINT ───────────────────────────────────────────────────────────
+const SERVER_START = new Date().toISOString()
+
+app.get('/api/info', (_req, res) => {
+  let registryMtime = null
+  try {
+    registryMtime = fs.statSync(registryPath).mtime.toISOString()
+  } catch {}
+  res.json({
+    startedAt: SERVER_START,
+    registryUpdatedAt: registryMtime,
+  })
+})
 
 // ─── STARTUP ──────────────────────────────────────────────────────────────────
 
