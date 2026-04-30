@@ -3,11 +3,11 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "3420:3420"
+      - '3420:3420'
     volumes:
       - /share/Vault69/dataset:/data/dataset:ro
       # Live registry — updated by sync; picked up on next /api/users request, no rebuild needed
-      - /share/Vault69/model-aliases.json:/app/model_aliases.json:ro
+      - /share/Vault69/model_aliases.json:/app/model_aliases.json:ro
       - dashboard-thumbs:/data/thumbs
     environment:
       DATASET_DIR: /data/dataset
