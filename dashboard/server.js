@@ -124,26 +124,28 @@ async function generateThumbnail(videoPath, thumbPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer: [url, …], stufferdb: [url, …] }
+// Build a map of username → { coomer, kemono, stufferdb }
 // from model_aliases.json so the /api/users route can include source links.
+// Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
+// each time, so changes to the bind-mounted file are picked up immediately.
+const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb']
+
 function buildSourceMap() {
   try {
     const registry = loadModelRegistry(registryPath)
     const map = {}
     for (const [canonical, entry] of Object.entries(registry)) {
       const names = [canonical, ...(entry.aliases || [])]
-      const coomer = (entry.sources?.coomer || [])
-        .map((s) => s.url)
-        .filter(Boolean)
-      const stufferdb = (entry.sources?.stufferdb || [])
-        .map((s) => s.url)
-        .filter(Boolean)
+      const byPlatform = {}
+      for (const p of SOURCE_PLATFORMS) {
+        byPlatform[p] = (entry.sources?.[p] || []).map((s) => s.url).filter(Boolean)
+      }
       for (const name of names) {
-        if (!map[name]) map[name] = { coomer: [], stufferdb: [] }
-        for (const u of coomer)
-          if (!map[name].coomer.includes(u)) map[name].coomer.push(u)
-        for (const u of stufferdb)
-          if (!map[name].stufferdb.includes(u)) map[name].stufferdb.push(u)
+        if (!map[name]) map[name] = Object.fromEntries(SOURCE_PLATFORMS.map((p) => [p, []]))
+        for (const p of SOURCE_PLATFORMS) {
+          for (const u of byPlatform[p])
+            if (!map[name][p].includes(u)) map[name][p].push(u)
+        }
       }
     }
     return map
@@ -252,18 +254,19 @@ app.use((req, res, next) => {
 app.use(express.static(__dirname))
 app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 
-// Users list — returns [{ name, sources: { coomer: [], stufferdb: [] } }, ...]
+// Users list — returns [{ name, sources: { coomer: [], kemono: [], stufferdb: [] } }, ...]
 app.get('/api/users', async (_req, res) => {
   try {
     const entries = await fs.promises.readdir(datasetDir, {
       withFileTypes: true,
     })
     const sourceMap = buildSourceMap()
+    const empty = Object.fromEntries(SOURCE_PLATFORMS.map((p) => [p, []]))
     const users = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
       .map((e) => ({
         name: e.name,
-        sources: sourceMap[e.name] || { coomer: [], stufferdb: [] },
+        sources: sourceMap[e.name] || { ...empty },
       }))
       .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
@@ -460,17 +463,29 @@ async function prewarmThumbnails() {
 
 // ─── STARTUP ──────────────────────────────────────────────────────────────────
 
+const PREWARM_INTERVAL_MS = 30 * 60 * 1000 // 30 minutes
+
 async function start() {
   await findFfTools()
   app.listen(PORT, () => {
     console.log(`\n  Dataset Dashboard → http://localhost:${PORT}`)
     console.log(`  Dataset:   ${datasetDir}`)
     console.log(`  Thumbs:    ${THUMB_DIR}`)
+    console.log(`  Registry:  ${registryPath}`)
+    console.log(`  Prewarm:   every ${PREWARM_INTERVAL_MS / 60000} min\n`)
   })
-  // Pre-generate all missing thumbnails in the background
+
+  // Initial prewarm on startup
   prewarmThumbnails().catch((err) =>
     console.warn('  Thumb prewarm error:', err.message)
   )
+
+  // Periodic prewarm — picks up new videos synced to the NAS without restart
+  setInterval(() => {
+    prewarmThumbnails().catch((err) =>
+      console.warn('  Thumb prewarm (periodic) error:', err.message)
+    )
+  }, PREWARM_INTERVAL_MS)
 }
 
 start()

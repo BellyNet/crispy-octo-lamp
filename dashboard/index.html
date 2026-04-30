@@ -1051,16 +1051,28 @@
         onlyfans: 'OnlyFans',
         fansly: 'Fansly',
         patreon: 'Patreon',
+        fanbox: 'Fanbox',
         candfans: 'C&F',
         subscribestar: 'SubStar',
         gumroad: 'Gumroad',
         afdian: 'Afdian',
         boosty: 'Boosty',
+        discord: 'Discord',
+        fantia: 'Fantia',
+        dlsite: 'DLsite',
+      }
+
+      // platform → short display prefix shown before the service name
+      const PLATFORM_PREFIX = {
+        coomer: '',      // coomer URLs already carry the service name
+        kemono: 'K·',
+        stufferdb: '',
       }
 
       function renderSourceLinks(sources) {
         sourceLinksEl.innerHTML = ''
         if (!sources) return
+
         for (const url of sources.stufferdb || []) {
           const a = document.createElement('a')
           a.className = 'src-link'
@@ -1070,15 +1082,19 @@
           a.innerHTML = `${LINK_ICON} StufferDB`
           sourceLinksEl.appendChild(a)
         }
-        for (const url of sources.coomer || []) {
-          const service = url.split('/')[3] || 'coomer'
-          const a = document.createElement('a')
-          a.className = 'src-link'
-          a.href = url
-          a.target = '_blank'
-          a.rel = 'noopener noreferrer'
-          a.innerHTML = `${LINK_ICON} ${SERVICE_LABELS[service] || service}`
-          sourceLinksEl.appendChild(a)
+
+        for (const [platform, prefix] of [['coomer', ''], ['kemono', 'K·']]) {
+          for (const url of sources[platform] || []) {
+            const service = url.split('/')[3] || platform
+            const label = SERVICE_LABELS[service] || service
+            const a = document.createElement('a')
+            a.className = 'src-link'
+            a.href = url
+            a.target = '_blank'
+            a.rel = 'noopener noreferrer'
+            a.innerHTML = `${LINK_ICON} ${prefix}${label}`
+            sourceLinksEl.appendChild(a)
+          }
         }
       }
 
