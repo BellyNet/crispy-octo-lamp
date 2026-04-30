@@ -28,6 +28,7 @@
         --tag-video: #9e4f4f;
         --sidebar-w: 240px;
         --card-min: 160px;
+        --mobile-cols: 3;
       }
 
       html,
@@ -582,6 +583,14 @@
         display: block;
       }
 
+      /* pinch-zoom + double-tap zoom on image */
+      #lb-media-wrap img {
+        touch-action: pinch-zoom;
+        transform-origin: center center;
+        transition: transform 0.2s ease;
+        will-change: transform;
+      }
+
       #lb-info-bar {
         width: 100%;
         padding: 14px 80px;
@@ -667,6 +676,29 @@
       }
       #lb-close:hover {
         background: rgba(255, 80, 80, 0.4);
+      }
+
+      /* swipe-down handle — visible on mobile only */
+      #lb-drag-handle {
+        display: none;
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 36px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.25);
+        border-radius: 2px;
+        z-index: 1002;
+        pointer-events: none;
+      }
+
+      /* lightbox slide-away on swipe-down */
+      #lightbox {
+        transition: transform 0.22s ease, opacity 0.22s ease;
+      }
+      #lightbox.swiping-down {
+        transition: none;
       }
 
       #lb-type-badge {
@@ -762,16 +794,27 @@
           width: 100%;
         }
 
+        /* size buttons — show column-count labels on mobile */
+        .size-btn[data-size='small']::after  { content: ' (4×)'; font-size: 9px; }
+        .size-btn[data-size='medium']::after { content: ' (3×)'; font-size: 9px; }
+        .size-btn[data-size='large']::after  { content: ' (2×)'; font-size: 9px; }
+
         #grid-container {
           padding: 10px 12px;
         }
+        /* grid driven by --mobile-cols on touch devices */
         #media-grid {
-          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+          grid-template-columns: repeat(var(--mobile-cols), 1fr);
           gap: 6px;
         }
 
+        /* lightbox mobile tweaks */
+        #lb-drag-handle {
+          display: block;
+        }
         #lb-media-wrap {
-          padding: 48px 8px 0;
+          padding: 28px 4px 0;
+          overflow: hidden; /* contain zoomed images */
         }
         #lb-info-bar {
           padding: 10px 12px;
@@ -786,16 +829,27 @@
         #lb-date {
           font-size: 11px;
         }
+
+        /* bigger touch targets for nav + close */
         .lb-nav {
-          width: 44px;
-          height: 44px;
-          font-size: 22px;
+          width: 48px;
+          height: 48px;
+          font-size: 26px;
+          /* push inward so they don't eat into image area */
+          background: rgba(0, 0, 0, 0.35);
         }
         #lb-prev {
-          left: 4px;
+          left: 2px;
         }
         #lb-next {
-          right: 4px;
+          right: 2px;
+        }
+        #lb-close {
+          width: 48px;
+          height: 48px;
+          font-size: 22px;
+          top: 12px;
+          right: 12px;
         }
       }
     </style>
@@ -887,6 +941,7 @@
 
     <!-- LIGHTBOX -->
     <div id="lightbox" class="hidden">
+      <div id="lb-drag-handle"></div>
       <button id="lb-close" title="Close (Esc)">✕</button>
       <button class="lb-nav" id="lb-prev" title="Previous (←)">‹</button>
       <button class="lb-nav" id="lb-next" title="Next (→)">›</button>
@@ -1290,6 +1345,7 @@
       }
 
       function closeLightbox() {
+        resetZoom()
         lightbox.classList.add('hidden')
         document.body.style.overflow = ''
         lbMediaWrap.innerHTML = ''
@@ -1336,14 +1392,35 @@
         lbTypeBadge.textContent = item.type === 'image' ? 'img' : item.type
       }
 
+      // ─── LIGHTBOX ZOOM ────────────────────────────────────────────────────
+      let zoomActive = false
+      const ZOOM_SCALE = 2.5
+
+      function getLbImage() {
+        return lbMediaWrap.querySelector('img')
+      }
+
+      function setZoom(on) {
+        const img = getLbImage()
+        if (!img) return
+        zoomActive = on
+        img.style.transform = on ? `scale(${ZOOM_SCALE})` : 'scale(1)'
+      }
+
+      function resetZoom() {
+        setZoom(false)
+      }
+
       function lbPrev() {
         if (!filtered.length) return
+        resetZoom()
         lbIndex = (lbIndex - 1 + filtered.length) % filtered.length
         renderLightboxItem()
       }
 
       function lbNext() {
         if (!filtered.length) return
+        resetZoom()
         lbIndex = (lbIndex + 1) % filtered.length
         renderLightboxItem()
       }
@@ -1354,7 +1431,10 @@
       document.getElementById('lb-prev').addEventListener('click', lbPrev)
       document.getElementById('lb-next').addEventListener('click', lbNext)
 
+      // Desktop: tap backdrop to close
       lightbox.addEventListener('click', (e) => {
+        if (Date.now() - pinchEndMs < 400) return // suppress click after pinch
+        if (window.matchMedia('(pointer: coarse)').matches) return // mobile: use swipe-down
         if (e.target === lightbox) closeLightbox()
       })
 
@@ -1367,12 +1447,22 @@
 
       // ─── CARD SIZE ────────────────────────────────────────────────────────
       const sizeBtns = document.querySelectorAll('.size-btn')
-      const CARD_SIZES = { small: '160px', medium: '220px', large: '300px' }
+      const CARD_SIZES   = { small: '160px', medium: '220px', large: '300px' }
+      const MOBILE_COLS  = { small: 4, medium: 3, large: 2 }
+      const isMobile = () => window.matchMedia('(max-width: 640px)').matches
 
       sizeBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
           sizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
-          document.documentElement.style.setProperty('--card-min', CARD_SIZES[btn.dataset.size])
+          if (isMobile()) {
+            document.documentElement.style.setProperty(
+              '--mobile-cols', MOBILE_COLS[btn.dataset.size]
+            )
+          } else {
+            document.documentElement.style.setProperty(
+              '--card-min', CARD_SIZES[btn.dataset.size]
+            )
+          }
         })
       })
 
@@ -1398,21 +1488,65 @@
       )
       sidebarOverlay.addEventListener('click', closeSidebar)
 
-      // ─── TOUCH SWIPE (LIGHTBOX) ───────────────────────────────────────────
+      // ─── TOUCH GESTURES (LIGHTBOX) ────────────────────────────────────────
+      // Handles: swipe left/right (navigate), swipe down (close),
+      //          double-tap (zoom toggle), pinch detection (suppress close).
       let touchStartX = 0
       let touchStartY = 0
+      let isPinching  = false
+      let pinchEndMs  = 0
+      let lastTapMs   = 0
 
       lightbox.addEventListener('touchstart', (e) => {
-        touchStartX = e.touches[0].clientX
-        touchStartY = e.touches[0].clientY
+        if (e.touches.length >= 2) {
+          isPinching = true
+          return
+        }
+        // Only record start for single-touch (ignore mid-pinch single releases)
+        if (!isPinching) {
+          touchStartX = e.touches[0].clientX
+          touchStartY = e.touches[0].clientY
+        }
       }, { passive: true })
 
       lightbox.addEventListener('touchend', (e) => {
-        const dx = e.changedTouches[0].clientX - touchStartX
-        const dy = e.changedTouches[0].clientY - touchStartY
-        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+        // All fingers lifted after a pinch — mark cooldown and bail
+        if (isPinching) {
+          if (e.touches.length === 0) {
+            isPinching = false
+            pinchEndMs = Date.now()
+          }
+          return
+        }
+
+        const touch = e.changedTouches[0]
+        const dx = touch.clientX - touchStartX
+        const dy = touch.clientY - touchStartY
+        const absDx = Math.abs(dx)
+        const absDy = Math.abs(dy)
+
+        // Swipe down → close (prioritise over horizontal nav)
+        if (absDy > absDx && dy > 72) {
+          closeLightbox()
+          return
+        }
+
+        // Swipe left/right → navigate (only when not zoomed in)
+        if (!zoomActive && absDx > absDy && absDx > 40) {
           if (dx < 0) lbNext()
           else lbPrev()
+          return
+        }
+
+        // Small movement = tap — check for double-tap zoom (images only)
+        if (absDx < 12 && absDy < 12 && getLbImage()) {
+          const now = Date.now()
+          if (now - lastTapMs < 300) {
+            setZoom(!zoomActive)
+            lastTapMs = 0
+          } else {
+            lastTapMs = now
+          }
         }
       }, { passive: true })
 
