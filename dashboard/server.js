@@ -372,28 +372,38 @@ app.get('/thumbnail/:username/:filename', async (req, res) => {
   })
 })
 
-// Cover image — first available image for a model (used by home-view cards)
+// Cover image — random media pick for home-view cards; returns { type, url }
 app.get('/api/users/:username/cover', async (req, res) => {
   const { username } = req.params
   const userDir = safeSubPath(datasetDir, username)
   if (!userDir) return res.status(403).send('Forbidden')
 
-  for (const folder of ['images', 'gif']) {
+  const candidates = []
+  for (const [folder, exts] of [
+    ['images', ['.jpg', '.jpeg', '.png', '.webp']],
+    ['gif',    ['.gif']],
+    ['webm',   ['.mp4', '.webm']],
+  ]) {
     const folderPath = path.join(userDir, folder)
     let files
     try { files = await fs.promises.readdir(folderPath) } catch { continue }
-    const img = files.find((f) =>
-      ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(
-        path.extname(f).toLowerCase()
-      )
-    )
-    if (img) {
-      return res.redirect(
-        `/media/${encodeURIComponent(username)}/${folder}/${encodeURIComponent(img)}`
-      )
+    for (const f of files) {
+      if (exts.includes(path.extname(f).toLowerCase())) {
+        candidates.push({
+          type: folder === 'webm' ? 'video' : folder === 'gif' ? 'gif' : 'image',
+          folder,
+          filename: f,
+        })
+      }
     }
   }
-  res.status(404).send('No cover image')
+
+  if (!candidates.length) return res.status(404).json({ error: 'No media' })
+  const pick = candidates[Math.floor(Math.random() * candidates.length)]
+  res.json({
+    type: pick.type,
+    url: `/media/${encodeURIComponent(username)}/${pick.folder}/${encodeURIComponent(pick.filename)}`,
+  })
 })
 
 // Serve media files

@@ -29,6 +29,7 @@
         --sidebar-w: 240px;
         --card-min: 160px;
         --mobile-cols: 3;
+        --home-card-min: 180px;
       }
 
       html,
@@ -140,6 +141,63 @@
         color: var(--text);
         border-left-color: var(--accent);
         font-weight: 500;
+      }
+
+      /* ─── SIDEBAR MODEL PANEL ────────────────────────────────── */
+      #sidebar-model-panel {
+        border-top: 1px solid var(--border);
+        padding: 10px 12px;
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      #sidebar-model-panel.visible {
+        display: flex;
+      }
+      #smp-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #smp-stats {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .smp-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      #smp-filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .smp-filter-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 3px 9px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        transition: all 0.12s;
+        white-space: nowrap;
+      }
+      .smp-filter-btn:hover { border-color: var(--accent); color: var(--text); }
+      .smp-filter-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
       }
 
       #sidebar-footer {
@@ -761,9 +819,31 @@
       #home-view.visible {
         display: block;
       }
+      #home-sort-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 0 12px;
+        font-size: 12px;
+        color: var(--muted);
+        flex-wrap: wrap;
+      }
+      .home-size-btn {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 6px;
+        border-radius: 4px;
+        transition: all 0.1s;
+      }
+      .home-size-btn:hover { background: var(--card-bg); color: var(--text); }
+      .home-size-btn.active { color: var(--accent); }
       #home-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(var(--home-card-min), 1fr));
         gap: 12px;
       }
       .home-card {
@@ -842,7 +922,7 @@
 
       /* ─── HAMBURGER ──────────────────────────────────────────── */
       #hamburger {
-        display: none;
+        display: flex;
         background: none;
         border: none;
         color: var(--text);
@@ -858,6 +938,17 @@
         background: var(--card-bg);
       }
 
+      /* ─── DESKTOP SIDEBAR COLLAPSE ───────────────────────────── */
+      body.sidebar-collapsed #sidebar {
+        width: 0;
+        min-width: 0;
+        overflow: hidden;
+        border-right: none;
+      }
+      #sidebar {
+        transition: width 0.25s ease, min-width 0.25s ease;
+      }
+
       #sidebar-overlay {
         display: none;
         position: fixed;
@@ -868,10 +959,6 @@
 
       /* ─── MOBILE ─────────────────────────────────────────────── */
       @media (max-width: 640px) {
-        #hamburger {
-          display: flex;
-        }
-
         #sidebar {
           position: fixed;
           left: 0;
@@ -999,6 +1086,23 @@
         />
       </div>
       <ul id="user-list"></ul>
+
+      <!-- Model info panel — shown when a model is selected -->
+      <div id="sidebar-model-panel">
+        <div id="smp-name"></div>
+        <div id="smp-stats"></div>
+        <div id="source-links"></div>
+        <div>
+          <div class="smp-label">Type</div>
+          <div id="smp-filter-row">
+            <button class="smp-filter-btn active" data-type="all">All</button>
+            <button class="smp-filter-btn" data-type="image">Images</button>
+            <button class="smp-filter-btn" data-type="gif">GIFs</button>
+            <button class="smp-filter-btn" data-type="video">Videos</button>
+          </div>
+        </div>
+      </div>
+
       <div id="sidebar-footer"></div>
     </aside>
 
@@ -1009,11 +1113,11 @@
       <header id="main-header">
         <button id="home-btn" title="All models">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
           </svg>
         </button>
-        <button id="hamburger" aria-label="Toggle user list">
+        <button id="hamburger" aria-label="Toggle sidebar">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="3" y1="6" x2="21" y2="6"/>
             <line x1="3" y1="12" x2="21" y2="12"/>
@@ -1021,22 +1125,15 @@
           </svg>
         </button>
         <div id="header-left">
-          <h1 id="current-user-name">Select a user</h1>
-          <div id="source-links"></div>
-          <span id="media-stats"></span>
+          <h1 id="current-user-name">All Models</h1>
         </div>
-        <div id="filters">
-          <button class="filter-btn active" data-type="all">All</button>
-          <button class="filter-btn" data-type="image">Images</button>
-          <button class="filter-btn" data-type="gif">GIFs</button>
-          <button class="filter-btn" data-type="video">Videos</button>
-          <select id="filter-select" aria-label="Filter media type">
-            <option value="all">All</option>
-            <option value="image">Images</option>
-            <option value="gif">GIFs</option>
-            <option value="video">Videos</option>
-          </select>
-        </div>
+        <!-- filter select kept for mobile use (smp-filter-row is sidebar-only) -->
+        <select id="filter-select" aria-label="Filter media type" style="display:none">
+          <option value="all">All</option>
+          <option value="image">Images</option>
+          <option value="gif">GIFs</option>
+          <option value="video">Videos</option>
+        </select>
       </header>
 
       <div id="sort-bar" style="display: none">
@@ -1058,6 +1155,12 @@
       <div id="grid-container">
         <!-- HOME VIEW: model card grid -->
         <div id="home-view">
+          <div id="home-sort-bar">
+            <span class="sort-label">Size</span>
+            <button class="home-size-btn active" data-home-size="small">S</button>
+            <button class="home-size-btn" data-home-size="medium">M</button>
+            <button class="home-size-btn" data-home-size="large">L</button>
+          </div>
           <div id="home-grid"></div>
         </div>
 
@@ -1133,6 +1236,11 @@
       const noResultsEl = document.getElementById('no-results')
       const homeViewEl = document.getElementById('home-view')
       const homeGridEl = document.getElementById('home-grid')
+      const smpNameEl = document.getElementById('smp-name')
+      const smpStatsEl = document.getElementById('smp-stats')
+      const smpModelPanel = document.getElementById('sidebar-model-panel')
+      const smpFilterBtns = document.querySelectorAll('.smp-filter-btn')
+      const homeSizeBtns = document.querySelectorAll('.home-size-btn')
       const lightbox = document.getElementById('lightbox')
       const lbMediaWrap = document.getElementById('lb-media-wrap')
       const lbDate = document.getElementById('lb-date')
@@ -1187,8 +1295,8 @@
         gridEl.style.display = 'none'
         sortBar.style.display = 'none'
         currentNameEl.textContent = 'All Models'
-        mediaStatsEl.textContent = `${usersData.length} models`
-        sourceLinksEl.innerHTML = ''
+        smpModelPanel.classList.remove('visible')
+        filterSelect.style.display = 'none'
         renderHomeGrid()
       }
 
@@ -1206,15 +1314,35 @@
           card.className = 'home-card'
           card.addEventListener('click', () => selectUser(u))
 
-          const img = document.createElement('img')
-          img.className = 'home-card-thumb'
-          img.loading = 'lazy'
-          img.alt = u.name
-          img.src = `/api/users/${encodeURIComponent(u.name)}/cover`
-          img.onerror = () => {
-            img.style.background = 'var(--card-bg)'
-            img.style.opacity = '0'
-          }
+          // Placeholder while loading
+          const mediaEl = document.createElement('div')
+          mediaEl.className = 'home-card-thumb'
+          mediaEl.style.background = 'var(--card-bg)'
+          card.appendChild(mediaEl)
+
+          // Fetch random cover async, replace placeholder when ready
+          fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
+            .then((r) => r.ok ? r.json() : null)
+            .then((cover) => {
+              if (!cover) return
+              let el
+              if (cover.type === 'video') {
+                el = document.createElement('video')
+                el.src = cover.url
+                el.autoplay = true
+                el.muted = true
+                el.loop = true
+                el.playsInline = true
+              } else {
+                el = document.createElement('img')
+                el.src = cover.url
+                el.loading = 'lazy'
+                el.alt = u.name
+              }
+              el.className = 'home-card-thumb'
+              card.replaceChild(el, mediaEl)
+            })
+            .catch(() => {})
 
           const body = document.createElement('div')
           body.className = 'home-card-body'
@@ -1234,7 +1362,6 @@
 
           body.appendChild(name)
           body.appendChild(srcs)
-          card.appendChild(img)
           card.appendChild(body)
           homeGridEl.appendChild(card)
         }
@@ -1330,15 +1457,18 @@
         const li = liEl || userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
         if (li) li.classList.add('active')
 
-        setActiveType('all')
         activeSort = 'asc'
         sortBtns.forEach((b) =>
           b.classList.toggle('active', b.dataset.sort === 'asc')
         )
 
         currentNameEl.textContent = username
+        smpNameEl.textContent = username
         renderSourceLinks(sources)
-        mediaStatsEl.textContent = ''
+        smpStatsEl.textContent = ''
+        smpModelPanel.classList.add('visible')
+        setActiveType('all')
+        filterSelect.style.display = isMobile() ? 'block' : 'none'
         gridEl.innerHTML = ''
         emptyState.style.display = 'none'
         noResultsEl.style.display = 'none'
@@ -1375,6 +1505,7 @@
       function setActiveType(type) {
         activeType = type
         filterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
+        smpFilterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
         filterSelect.value = type
       }
 
@@ -1390,6 +1521,13 @@
         applyFilter()
       })
 
+      smpFilterBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          setActiveType(btn.dataset.type)
+          applyFilter()
+        })
+      })
+
       sortBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
           activeSort = btn.dataset.sort
@@ -1400,7 +1538,8 @@
 
       function updateStats() {
         if (!allMedia.length) {
-          mediaStatsEl.textContent = 'No media found'
+          if (mediaStatsEl) mediaStatsEl.textContent = 'No media found'
+          smpStatsEl.textContent = 'No media found'
           return
         }
         const imgs = allMedia.filter((m) => m.type === 'image').length
@@ -1410,7 +1549,8 @@
         if (imgs) parts.push(`${imgs} image${imgs !== 1 ? 's' : ''}`)
         if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
         if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
-        mediaStatsEl.textContent = parts.join(' · ')
+        if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
+        smpStatsEl.textContent = parts.join(' · ')
 
         // Update filter button + select labels with counts
         const counts = { all: allMedia.length, image: imgs, gif: gifs, video: vids }
@@ -1418,6 +1558,8 @@
         for (const [type, label] of Object.entries(labels)) {
           const btn = document.querySelector(`.filter-btn[data-type="${type}"]`)
           if (btn) btn.textContent = label
+          const smpBtn = document.querySelector(`.smp-filter-btn[data-type="${type}"]`)
+          if (smpBtn) smpBtn.textContent = label
           const opt = filterSelect.querySelector(`option[value="${type}"]`)
           if (opt) opt.textContent = label
         }
@@ -1712,6 +1854,21 @@
         })
       })
 
+      // ─── HOME GRID SIZE ───────────────────────────────────────────────────
+      const HOME_CARD_SIZES = { small: '140px', medium: '200px', large: '280px' }
+      const HOME_MOBILE_COLS = { small: 3, medium: 2, large: 1 }
+
+      homeSizeBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          homeSizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
+          if (isMobile()) {
+            document.documentElement.style.setProperty('--mobile-cols', HOME_MOBILE_COLS[btn.dataset.homeSize])
+          } else {
+            document.documentElement.style.setProperty('--home-card-min', HOME_CARD_SIZES[btn.dataset.homeSize])
+          }
+        })
+      })
+
       // ─── HOME BUTTON ──────────────────────────────────────────────────────
       document.getElementById('home-btn').addEventListener('click', () => {
         if (homeVisible) return
@@ -1736,9 +1893,13 @@
         document.body.style.overflow = ''
       }
 
-      hamburger.addEventListener('click', () =>
-        sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar()
-      )
+      hamburger.addEventListener('click', () => {
+        if (isMobile()) {
+          sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar()
+        } else {
+          document.body.classList.toggle('sidebar-collapsed')
+        }
+      })
       sidebarOverlay.addEventListener('click', closeSidebar)
 
       // ─── TOUCH GESTURES (LIGHTBOX) ────────────────────────────────────────
