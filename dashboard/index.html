@@ -1087,19 +1087,15 @@
       </div>
       <ul id="user-list"></ul>
 
-      <!-- Model info panel — shown when a model is selected -->
-      <div id="sidebar-model-panel">
+      <!-- Model info panel — hidden, kept for JS refs -->
+      <div id="sidebar-model-panel" style="display:none">
         <div id="smp-name"></div>
         <div id="smp-stats"></div>
-        <div id="source-links"></div>
-        <div>
-          <div class="smp-label">Type</div>
-          <div id="smp-filter-row">
-            <button class="smp-filter-btn active" data-type="all">All</button>
-            <button class="smp-filter-btn" data-type="image">Images</button>
-            <button class="smp-filter-btn" data-type="gif">GIFs</button>
-            <button class="smp-filter-btn" data-type="video">Videos</button>
-          </div>
+        <div id="smp-filter-row">
+          <button class="smp-filter-btn active" data-type="all">All</button>
+          <button class="smp-filter-btn" data-type="image">Images</button>
+          <button class="smp-filter-btn" data-type="gif">GIFs</button>
+          <button class="smp-filter-btn" data-type="video">Videos</button>
         </div>
       </div>
 
@@ -1126,8 +1122,9 @@
         </button>
         <div id="header-left">
           <h1 id="current-user-name">All Models</h1>
+          <span id="media-stats"></span>
+          <div id="source-links"></div>
         </div>
-        <!-- filter select kept for mobile use (smp-filter-row is sidebar-only) -->
         <select id="filter-select" aria-label="Filter media type" style="display:none">
           <option value="all">All</option>
           <option value="image">Images</option>
@@ -1297,6 +1294,8 @@
         currentNameEl.textContent = 'All Models'
         smpModelPanel.classList.remove('visible')
         filterSelect.style.display = 'none'
+        if (mediaStatsEl) mediaStatsEl.textContent = ''
+        sourceLinksEl.innerHTML = ''
         renderHomeGrid()
       }
 
@@ -1468,7 +1467,7 @@
         smpStatsEl.textContent = ''
         smpModelPanel.classList.add('visible')
         setActiveType('all')
-        filterSelect.style.display = isMobile() ? 'block' : 'none'
+        filterSelect.style.display = 'block'
         gridEl.innerHTML = ''
         emptyState.style.display = 'none'
         noResultsEl.style.display = 'none'
@@ -1614,28 +1613,29 @@
           thumb.className = 'card-thumb'
 
           if (item.type === 'video') {
-            // Video: real thumbnail with play icon overlay
-            const img = document.createElement('img')
-            img.loading = 'lazy'
-            img.style.cssText =
+            // Video: autoplay muted loop preview clamped to first 5 s, lazy-loaded
+            const vid = document.createElement('video')
+            vid.muted = true
+            vid.loop = true
+            vid.playsInline = true
+            vid.style.cssText =
               'width:100%;height:100%;object-fit:cover;display:block;'
-            if (item.thumbnailUrl) {
-              img.src = item.thumbnailUrl
-              img.onerror = () => {
-                // Fallback to plain play icon if thumbnail generation failed
-                img.remove()
-                const ph = document.createElement('div')
-                ph.style.cssText =
-                  'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;'
-                thumb.insertBefore(ph, thumb.firstChild)
-              }
-            }
-            thumb.appendChild(img)
-            const icon = document.createElement('div')
-            icon.className = 'play-icon'
-            icon.innerHTML =
-              '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
-            thumb.appendChild(icon)
+            vid.addEventListener('timeupdate', () => {
+              if (vid.currentTime > 5) vid.currentTime = 0
+            })
+            // Only load + play once the card scrolls into view
+            const observer = new IntersectionObserver(
+              (entries, obs) => {
+                if (entries[0].isIntersecting) {
+                  vid.src = item.url
+                  vid.play().catch(() => {})
+                  obs.disconnect()
+                }
+              },
+              { rootMargin: '200px' }
+            )
+            observer.observe(thumb)
+            thumb.appendChild(vid)
           } else {
             // Image / GIF: lazy load
             const img = document.createElement('img')

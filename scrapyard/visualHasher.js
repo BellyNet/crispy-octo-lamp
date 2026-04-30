@@ -66,7 +66,8 @@ async function getVisualHashFromBuffer(buffer) {
 async function getVideoFrameHashesFromPath(videoPath, options = {}) {
   const hash = createHash('md5').update(videoPath).digest('hex')
   const outputPrefix = path.join(tmpDir, `vh_video_${hash}`)
-  const duration = await probeVideoDuration(videoPath)
+  const streamInfo = await probePrimaryVideoStream(videoPath)
+  const duration = streamInfo?.durationSeconds ?? (await probeVideoDuration(videoPath))
   const timestamps = Array.isArray(options.timestamps)
     ? options.timestamps
     : buildVideoFrameTimestamps(duration)
@@ -82,6 +83,18 @@ async function getVideoFrameHashesFromPath(videoPath, options = {}) {
       frameHashes.push(visualHash)
     } catch (err) {
       if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
+      try {
+        const visualHash = await getVideoFrameHashFromRawYuv(
+          videoPath,
+          timestamp,
+          streamInfo,
+          outputPrefix,
+          index
+        )
+        if (visualHash) frameHashes.push(visualHash)
+      } catch {
+        // Leave this frame empty and keep trying other timestamps.
+      }
     }
   }
 
@@ -151,6 +164,55 @@ function probeVideoDuration(videoPath) {
   })
 }
 
+function probePrimaryVideoStream(videoPath) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=width,height,pix_fmt,duration',
+        '-of',
+        'json',
+        videoPath,
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }
+    )
+
+    let stdout = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+
+    child.on('error', () => resolve(null))
+    child.on('exit', (code) => {
+      if (code !== 0) return resolve(null)
+      try {
+        const parsed = JSON.parse(stdout || '{}')
+        const stream = Array.isArray(parsed?.streams) ? parsed.streams[0] : null
+        const width = Number(stream?.width)
+        const height = Number(stream?.height)
+        const durationSeconds = Number.parseFloat(String(stream?.duration || ''))
+        resolve({
+          width: Number.isFinite(width) ? width : null,
+          height: Number.isFinite(height) ? height : null,
+          pixelFormat: String(stream?.pix_fmt || '').trim() || null,
+          durationSeconds: Number.isFinite(durationSeconds)
+            ? durationSeconds
+            : null,
+        })
+      } catch {
+        resolve(null)
+      }
+    })
+  })
+}
+
 function extractVideoFrameWithFfmpeg(inputPath, outputPath, timestampSeconds) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -180,6 +242,51 @@ function extractVideoFrameWithFfmpeg(inputPath, outputPath, timestampSeconds) {
     child.on('error', reject)
     child.on('exit', (code) => {
       if (code === 0 && fs.existsSync(outputPath)) return resolve()
+      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
+    })
+  })
+}
+
+function extractVideoFrameRawYuv420p(inputPath, outputPath, timestampSeconds) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'ffmpeg',
+      [
+        '-y',
+        '-loglevel',
+        'error',
+        '-ss',
+        String(timestampSeconds),
+        '-i',
+        inputPath,
+        '-an',
+        '-sn',
+        '-dn',
+        '-map',
+        '0:v:0',
+        '-frames:v',
+        '1',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'yuv420p',
+        outputPath,
+      ],
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      }
+    )
+
+    let stderr = ''
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+        return resolve()
+      }
       reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
     })
   })
@@ -215,6 +322,92 @@ function normalizeImageWithFfmpeg(inputPath, outputPath) {
       reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
     })
   })
+}
+
+async function getVideoFrameHashFromRawYuv(
+  videoPath,
+  timestampSeconds,
+  streamInfo,
+  outputPrefix,
+  frameIndex
+) {
+  if (!streamInfo?.width || !streamInfo?.height) return null
+  if (streamInfo.pixelFormat && streamInfo.pixelFormat !== 'yuv420p') return null
+
+  const rawPath = `${outputPrefix}_${frameIndex}.yuv`
+  const pngPath = `${outputPrefix}_${frameIndex}_raw.png`
+
+  try {
+    await extractVideoFrameRawYuv420p(videoPath, rawPath, timestampSeconds)
+    const rawBuffer = fs.readFileSync(rawPath)
+    const rgbBuffer = yuv420pToRgb(rawBuffer, streamInfo.width, streamInfo.height)
+    await sharp(rgbBuffer, {
+      raw: {
+        width: streamInfo.width,
+        height: streamInfo.height,
+        channels: 3,
+      },
+    })
+      .png()
+      .toFile(pngPath)
+    return await imghash.hash(pngPath, 16, 'hex')
+  } finally {
+    if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath)
+    if (fs.existsSync(pngPath)) fs.unlinkSync(pngPath)
+  }
+}
+
+function yuv420pToRgb(buffer, width, height) {
+  const frameSize = width * height
+  const chromaWidth = Math.floor(width / 2)
+  const chromaHeight = Math.floor(height / 2)
+  const chromaSize = chromaWidth * chromaHeight
+  const expectedSize = frameSize + chromaSize * 2
+
+  if (buffer.length < expectedSize) {
+    throw new Error(
+      `Raw YUV buffer too small (${buffer.length} < ${expectedSize}) for ${width}x${height}`
+    )
+  }
+
+  const output = Buffer.allocUnsafe(frameSize * 3)
+  const yPlane = buffer.subarray(0, frameSize)
+  const uPlane = buffer.subarray(frameSize, frameSize + chromaSize)
+  const vPlane = buffer.subarray(frameSize + chromaSize, expectedSize)
+
+  for (let y = 0; y < height; y += 1) {
+    const uvRow = Math.floor(y / 2)
+    for (let x = 0; x < width; x += 1) {
+      const uvCol = Math.floor(x / 2)
+      const yIndex = y * width + x
+      const uvIndex = uvRow * chromaWidth + uvCol
+
+      const yy = yPlane[yIndex]
+      const uu = uPlane[uvIndex]
+      const vv = vPlane[uvIndex]
+
+      const c = yy - 16
+      const d = uu - 128
+      const e = vv - 128
+
+      const r = clampRgb((298 * c + 409 * e + 128) >> 8)
+      const g = clampRgb((298 * c - 100 * d - 208 * e + 128) >> 8)
+      const b = clampRgb((298 * c + 516 * d + 128) >> 8)
+
+      const outIndex = yIndex * 3
+      output[outIndex] = r
+      output[outIndex + 1] = g
+      output[outIndex + 2] = b
+    }
+  }
+
+  return output
+}
+
+function clampRgb(value) {
+  if (value < 0) return 0
+  if (value > 255) return 255
+  return value
 }
 
 function isVisualDupe(visualHash) {

@@ -44,6 +44,7 @@ Useful variants:
 ```powershell
 npm run repair -- --model=tianastummy
 npm run repair -- --models=tianastummy,udderly_adorable
+npm run repair -- --only-errors
 npm run repair -- --start-from=laurenlushh
 npm run repair -- --skip-nas-sync
 ```
@@ -55,6 +56,12 @@ npm run repair:stufferdb -- --model=tianastummy
 ```
 
 Use this when you want the repair pass to also rerun `milkmaid` from StufferDB sources before local prune/backfill/validate.
+
+If you only want to revisit models still listed in `%APPDATA%\.slopvault\errors-to-check-latest.md`, use:
+
+```powershell
+npm run repair -- --only-errors
+```
 
 ### 4. Run session repair for quarantined tail-decode videos
 

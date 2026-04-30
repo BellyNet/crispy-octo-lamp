@@ -3,7 +3,10 @@ const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
 const { spawn } = require('child_process')
-const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
+const {
+  upsertErrorsSource,
+  latestJsonPath: errorsToCheckLatestJsonPath,
+} = require('../scrapyard/errorsToCheck')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -18,13 +21,22 @@ const argv = minimist(process.argv.slice(2), {
     'log-dir',
     'dataset-root',
     'nas-dataset-root',
+    'errors-file',
   ],
-  boolean: ['stop-on-error', 'scrape', 'skip-nas-sync'],
+  boolean: [
+    'stop-on-error',
+    'scrape',
+    'skip-nas-sync',
+    'only-errors',
+    'sync-pending-only',
+  ],
   default: {
     limit: 0,
     scrape: false,
     'stop-on-error': false,
     'skip-nas-sync': false,
+    'only-errors': false,
+    'sync-pending-only': false,
   },
 })
 
@@ -51,6 +63,9 @@ const statePath = path.join(logDir, 'repair-stufferdb-state.json')
 const nasDatasetRoot = path.resolve(
   String(argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
 )
+const errorsFilePath = path.resolve(
+  String(argv['errors-file'] || errorsToCheckLatestJsonPath)
+)
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
 const singleModel = argv.model ? String(argv.model).trim() : null
 const explicitModels = String(argv.models || '')
@@ -65,6 +80,12 @@ const shouldScrape =
 const skipNasSync =
   rawArgv.includes('--skip-nas-sync') ||
   parseBooleanEnv(process.env.npm_config_skip_nas_sync)
+const onlyErrors =
+  rawArgv.includes('--only-errors') ||
+  parseBooleanEnv(process.env.npm_config_only_errors)
+const syncPendingOnly =
+  rawArgv.includes('--sync-pending-only') ||
+  parseBooleanEnv(process.env.npm_config_sync_pending_only)
 
 main().catch((err) => {
   console.error(`Fatal repair-runner error: ${err.stack || err.message}`)
@@ -80,7 +101,11 @@ async function main() {
 
   const report = {
     generatedAt: new Date().toISOString(),
-    mode: shouldScrape ? 'update_and_repair' : 'local_dataset_repair',
+    mode: syncPendingOnly
+      ? 'nas_sync_only'
+      : shouldScrape
+        ? 'update_and_repair'
+        : 'local_dataset_repair',
     registryPath,
     datasetRoot,
     nasDatasetRoot,
@@ -100,35 +125,47 @@ async function main() {
   console.log(
     `Repair queue: ${selectedQueue.length} model(s) selected from ${queue.length} dataset folders`
   )
+  if (onlyErrors) {
+    console.log(`Error-targeted mode is enabled via ${errorsFilePath}`)
+  }
+  if (syncPendingOnly) {
+    console.log(
+      `Sync-only mode is enabled for ${report.pendingNasSyncModelsAtStart.length} pending model(s).`
+    )
+  }
   console.log(
-    shouldScrape
+    syncPendingOnly
+      ? 'Local repair steps are disabled; only pending NAS sync work will run.'
+      : shouldScrape
       ? 'Scrape refresh is enabled for models with StufferDB sources.'
       : 'Scrape refresh is disabled; checking local dataset state only.'
   )
 
-  for (let index = 0; index < selectedQueue.length; index += 1) {
-    const item = selectedQueue[index]
-    console.log('')
-    console.log(`[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`)
+  if (!syncPendingOnly) {
+    for (let index = 0; index < selectedQueue.length; index += 1) {
+      const item = selectedQueue[index]
+      console.log('')
+      console.log(`[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`)
 
-    const result = await runModelRepair(item)
-    report.results.push(result)
-    report.totals = calculateTotals(report.results)
-    writeReport(report)
+      const result = await runModelRepair(item)
+      report.results.push(result)
+      report.totals = calculateTotals(report.results)
+      writeReport(report)
 
-    if (!skipNasSync) {
-      queuePendingNasSyncModel(state, item.model)
-    }
+      if (!skipNasSync) {
+        queuePendingNasSyncModel(state, item.model)
+      }
 
-    if (
-      argv['stop-on-error'] &&
-      (result.scrape.status === 'failed' ||
-        !result.hashPrune.ok ||
-        !result.hashBackfill.ok ||
-        !result.validation.ok)
-    ) {
-      console.log('Stopping on first error because --stop-on-error was set.')
-      break
+      if (
+        argv['stop-on-error'] &&
+        (result.scrape.status === 'failed' ||
+          !result.hashPrune.ok ||
+          !result.hashBackfill.ok ||
+          !result.validation.ok)
+      ) {
+        console.log('Stopping on first error because --stop-on-error was set.')
+        break
+      }
     }
   }
 
@@ -164,6 +201,9 @@ Options:
   --registry <path>        Override model_aliases.json path.
   --log-dir <path>         Override repair runner report directory.
   --stop-on-error          Stop the batch when one model fails.
+  --only-errors            Only repair models currently listed in errors-to-check.
+  --errors-file <path>     Override errors-to-check JSON path.
+  --sync-pending-only      Skip repair work and only flush pending NAS sync models.
   -h, --help               Show help.
 
 Default behavior:
@@ -233,6 +273,11 @@ function buildQueue(registry) {
 
 function applySelection(queue) {
   let next = queue
+  const errorModels = onlyErrors ? loadErroredModels(errorsFilePath) : null
+
+  if (errorModels) {
+    next = next.filter((item) => errorModels.has(item.model))
+  }
 
   if (singleModel) {
     next = next.filter((item) => item.model === singleModel)
@@ -252,6 +297,27 @@ function applySelection(queue) {
   }
 
   return next
+}
+
+function loadErroredModels(filePath) {
+  if (!fs.existsSync(filePath)) return new Set()
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    const sections = Array.isArray(parsed?.sections) ? parsed.sections : []
+    const repairSection = sections.find(
+      (section) => String(section?.source || '').trim() === 'repair'
+    )
+    const items = Array.isArray(repairSection?.items) ? repairSection.items : []
+
+    return new Set(
+      items
+        .map((item) => String(item?.model || '').trim())
+        .filter(Boolean)
+    )
+  } catch {
+    return new Set()
+  }
 }
 
 async function runModelRepair(item) {
