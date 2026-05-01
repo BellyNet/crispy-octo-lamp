@@ -45,6 +45,7 @@ Useful variants:
 npm run repair -- --model=tianastummy
 npm run repair -- --models=tianastummy,udderly_adorable
 npm run repair -- --only-errors
+npm run repair -- --scrape-only
 npm run repair -- --start-from=laurenlushh
 npm run repair -- --skip-nas-sync
 ```
@@ -61,6 +62,19 @@ If you only want to revisit models still listed in `%APPDATA%\.slopvault\errors-
 
 ```powershell
 npm run repair -- --only-errors
+```
+
+If you only want to refresh StufferDB pages and populate seen-media cache without
+running prune/backfill/validate, use:
+
+```powershell
+npm run repair -- --scrape-only
+```
+
+To rebuild seen-media cache from existing historical milkmaid logs first, use:
+
+```powershell
+npm run backfill:seen-media
 ```
 
 ### 4. Run session repair for quarantined tail-decode videos
