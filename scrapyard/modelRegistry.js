@@ -144,7 +144,7 @@ function upsertCoomerSource(entry, sourceUrl, rawName) {
   const url = String(sourceUrl || '').trim()
   const now = new Date().toISOString()
 
-  // e.g. https://coomer.st/onlyfans/user/username → service = 'onlyfans'
+  // e.g. https://coomerfans.com/onlyfans/user/username → service = 'onlyfans'
   const service = url.replace(/^https?:\/\/[^/]+\//, '').split('/')[0] || null
 
   if (!Array.isArray(entry.sources.coomer)) entry.sources.coomer = []

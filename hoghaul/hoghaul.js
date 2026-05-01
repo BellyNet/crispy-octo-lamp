@@ -457,7 +457,7 @@ function normalizeUrl(url) {
 }
 
 // ─── COOMER API ───────────────────────────────────────────────────────────────
-const COOMER_HOST = 'coomer.st'
+const COOMER_HOST = 'coomerfans.com'
 const COOMER_CDN = `https://${COOMER_HOST}`
 
 function coomerApiGet(url) {
@@ -513,7 +513,7 @@ async function fetchPostsPage(service, username, offset) {
 
 /**
  * Extract { service, username } from a Coomer user URL.
- * e.g. https://coomer.st/onlyfans/user/someuser → { service: 'onlyfans', username: 'someuser' }
+ * e.g. https://coomerfans.com/onlyfans/user/someuser → { service: 'onlyfans', username: 'someuser' }
  */
 function parseCoomerUrl(userUrl) {
   const m = String(userUrl).match(
@@ -949,7 +949,7 @@ async function safeDownload(url) {
 /**
  * Process a single post from the Coomer API.
  * post = { id, published, file: { name, path }, attachments: [{ name, path }] }
- * Media CDN URL = https://coomer.st/data{path}
+ * Media CDN URL = https://coomerfans.com/data{path}
  */
 async function processPost(
   post,
@@ -980,7 +980,7 @@ async function processPost(
     }
 
     for (const item of mediaItems) {
-      // CDN URL: https://coomer.st/data{/path/to/file.ext}
+      // CDN URL: https://coomerfans.com/data{/path/to/file.ext}
       const url = `${COOMER_CDN}/data${item.cdnPath}`
 
       // Prefer the original filename from the API; fall back to CDN path basename
