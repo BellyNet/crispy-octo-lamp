@@ -7,6 +7,7 @@ const crypto = require('crypto')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const pLimit = require('p-limit')
+const sharp = require('sharp')
 
 const execFileAsync = promisify(execFile)
 const mediaDates = require('../milkmaid/media-dates.js')
@@ -53,12 +54,12 @@ async function findFfTools() {
     } catch {}
   }
   if (!ffmpegPath)
-    console.log('  ffmpeg: not found — video thumbnails unavailable')
+    console.log('  ffmpeg: not found — video previews unavailable')
 }
 
-// ─── VIDEO THUMBNAILS ─────────────────────────────────────────────────────────
-// Tries frames at 20%, 35%, 50% of duration. A mostly-black frame compresses to
-// a tiny JPEG, so we use file size as a proxy for "useful frame" and skip it.
+// ─── ANIMATED GIF PREVIEWS ────────────────────────────────────────────────────
+// Generates a short looping GIF (≈2 s at 6 fps, 280 px wide) from a video.
+// Stored in THUMB_DIR and served statically — no concurrent video decoding.
 
 async function getDuration(videoPath) {
   if (!ffprobePath) return null
@@ -75,50 +76,44 @@ async function getDuration(videoPath) {
   }
 }
 
-async function extractFrame(videoPath, seekSec, outPath) {
+async function generatePreviewGif(videoPath, gifPath) {
   if (!ffmpegPath) return false
-  try {
-    await execFileAsync(
-      ffmpegPath,
-      [
-        '-ss',
-        seekSec.toFixed(2),
-        '-i',
-        videoPath,
-        '-vframes',
-        '1',
-        '-q:v',
-        '4',
-        '-vf',
-        'scale=360:-2',
-        '-y',
-        outPath,
-      ],
-      { timeout: 20000 }
-    )
-    const stat = fs.statSync(outPath)
-    return stat.size > 8000 // < 8 KB → near-black frame, skip
-  } catch {
-    return false
-  }
-}
-
-async function generateThumbnail(videoPath, thumbPath) {
   const duration = await getDuration(videoPath)
   if (!duration) return false
 
-  const seekPoints = [0.2, 0.35, 0.5, 0.65].map((p) => duration * p)
+  // Skip the opener: at least 15 s or 25% of the video, whichever is larger,
+  // capped at 90 s so we don't skip half a long clip.
+  // Then sample 4 evenly-spaced points across the remaining run time.
+  const skipSec = Math.min(Math.max(15, duration * 0.25), 90)
+  const usable = duration - skipSec - 2.5          // leave room for the 2.5 s clip
+  const seekPoints = usable > 0
+    ? [0, 0.33, 0.66, 1].map((p) => skipSec + p * usable)
+    : [duration * 0.5]                             // very short video — just use midpoint
 
   for (const seek of seekPoints) {
-    const tmp = thumbPath + '.tmp.jpg'
-    const ok = await extractFrame(videoPath, seek, tmp)
-    if (ok) {
-      fs.renameSync(tmp, thumbPath)
-      return true
-    }
+    const tmp = gifPath + '.tmp.gif'
     try {
+      await execFileAsync(
+        ffmpegPath,
+        [
+          '-ss', seek.toFixed(2),
+          '-t',  '2.5',
+          '-i',  videoPath,
+          '-vf', 'fps=6,scale=280:-2:flags=lanczos',
+          '-loop', '0',
+          '-y',  tmp,
+        ],
+        { timeout: 30000 }
+      )
+      const stat = fs.statSync(tmp)
+      if (stat.size > 5000) {
+        fs.renameSync(tmp, gifPath)
+        return true
+      }
       fs.unlinkSync(tmp)
-    } catch {}
+    } catch {
+      try { fs.unlinkSync(tmp) } catch {}
+    }
   }
   return false
 }
@@ -236,7 +231,7 @@ app.post('/auth', (req, res) => {
   if (req.body.password === PASSWORD) {
     res.setHeader(
       'Set-Cookie',
-      `${AUTH_COOKIE}=${AUTH_TOKEN}; Path=/; HttpOnly; SameSite=Strict`
+      `${AUTH_COOKIE}=${AUTH_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`
     )
     return res.redirect('/')
   }
@@ -249,12 +244,129 @@ app.use((req, res, next) => {
   res.redirect('/login.html')
 })
 
+// ─── MODEL STATS CACHE ────────────────────────────────────────────────────────
+// Fast scan: sidecar + filename dates only (no ffprobe), stat for addedMs.
+// Runs in the background; /api/users returns zeros until first scan completes.
+
+let modelStatsCache = {} // { username: { earliestMs, latestMs, latestAddedMs, fileCount } }
+
+async function buildModelStats() {
+  let dirs
+  try {
+    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+  } catch { return }
+
+  const modelDirs = dirs.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+  const limit = pLimit(32) // high concurrency — mostly fast filename + stat ops
+  const result = {}
+
+  await Promise.all(modelDirs.map((dir) => limit(async () => {
+    const username = dir.name
+    const userDir  = path.join(datasetDir, username)
+    let earliestMs = Infinity, latestMs = 0, latestAddedMs = 0, fileCount = 0
+    const yearCounts = {} // { year: fileCount }
+
+    for (const folder of MEDIA_FOLDERS) {
+      const folderPath = path.join(userDir, folder)
+      let files
+      try { files = await fs.promises.readdir(folderPath) } catch { continue }
+
+      for (const file of files) {
+        if (!MEDIA_EXTS.has(path.extname(file).toLowerCase())) continue
+        fileCount++
+
+        // Fast date: sidecar first, then filename pattern
+        let dateMs = 0
+        let dateIsReal = false
+        const sidecar = mediaDates.resolveDateFromSidecar(userDir, folder, file)
+        if (sidecar?.date) {
+          dateMs = new Date(sidecar.date).getTime()
+          dateIsReal = true
+        } else {
+          const fn = mediaDates.extractFilenameDate(file)
+          if (fn) { dateMs = new Date(fn).getTime(); dateIsReal = true }
+        }
+
+        // Filesystem stat — used for addedMs and as date fallback
+        try {
+          const st = await fs.promises.stat(path.join(folderPath, file))
+          const addedMs = st.birthtime.getTime() > 0 ? st.birthtime.getTime() : st.mtime.getTime()
+          if (addedMs > latestAddedMs) latestAddedMs = addedMs
+          // Fall back to filesystem date for yearCounts only if no real date found
+          if (!dateIsReal && isSane(new Date(addedMs))) dateMs = addedMs
+        } catch {}
+
+        if (dateMs > 0 && isSane(new Date(dateMs))) {
+          // Only update earliest/latest from real media dates, not filesystem fallback
+          if (dateIsReal) {
+            if (dateMs < earliestMs) earliestMs = dateMs
+            if (dateMs > latestMs)   latestMs   = dateMs
+          }
+          const yr = new Date(dateMs).getFullYear()
+          yearCounts[yr] = (yearCounts[yr] || 0) + 1
+        }
+      }
+    }
+
+    result[username] = {
+      earliestMs:    earliestMs === Infinity ? 0 : earliestMs,
+      latestMs,
+      latestAddedMs,
+      fileCount,
+      yearCounts,
+    }
+  })))
+
+  modelStatsCache = result
+  console.log(`  Stats:     indexed ${modelDirs.length} models ✓`)
+}
+
+// ─── FEATURED MODEL ───────────────────────────────────────────────────────────
+// Rotates one featured model per day. No model repeats until all have been shown.
+// State persisted in THUMB_DIR/featured.json so it survives restarts.
+
+const FEATURED_FILE = path.join(THUMB_DIR, 'featured.json')
+let _featuredCache = { date: null, model: null }
+
+function shuffleArray(arr) {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+function getFeaturedModel(allModelNames) {
+  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+  if (_featuredCache.date === today) return _featuredCache.model
+
+  let state = { date: null, model: null, queue: [] }
+  try { state = JSON.parse(fs.readFileSync(FEATURED_FILE, 'utf8')) } catch {}
+
+  if (state.date !== today) {
+    // Filter queue to only models that still exist
+    state.queue = (state.queue || []).filter((m) => allModelNames.includes(m))
+    if (state.queue.length === 0) {
+      // Start a new rotation — shuffle all models, exclude today's outgoing model
+      const pool = allModelNames.filter((m) => m !== state.model)
+      state.queue = shuffleArray(pool.length > 0 ? pool : allModelNames)
+    }
+    state.model = state.queue.shift()
+    state.date = today
+    try { fs.writeFileSync(FEATURED_FILE, JSON.stringify(state, null, 2)) } catch {}
+  }
+
+  _featuredCache = { date: today, model: state.model }
+  return state.model
+}
+
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
 app.use(express.static(__dirname))
 app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 
-// Users list — returns [{ name, sources: { coomer: [], kemono: [], stufferdb: [] } }, ...]
+// Users list — returns [{ name, sources, featured }, ...]
 app.get('/api/users', async (_req, res) => {
   try {
     const entries = await fs.promises.readdir(datasetDir, {
@@ -271,11 +383,38 @@ app.get('/api/users', async (_req, res) => {
       .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
       )
-    res.json(users)
+
+    const featuredModel = getFeaturedModel(users.map((u) => u.name))
+    res.json(users.map((u) => {
+      const s = modelStatsCache[u.name] || {}
+      return {
+        ...u,
+        featured:      u.name === featuredModel,
+        earliestMs:    s.earliestMs    || 0,
+        latestMs:      s.latestMs      || 0,
+        latestAddedMs: s.latestAddedMs || 0,
+        fileCount:     s.fileCount     || 0,
+        yearCounts:    s.yearCounts    || {},
+      }
+    }))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
+
+// Image dimension cache: filePath → { width, height }
+const _dimCache = new Map()
+async function getImageDimensions(filePath) {
+  if (_dimCache.has(filePath)) return _dimCache.get(filePath)
+  try {
+    const meta = await sharp(filePath).metadata()
+    const dims = { width: meta.width || 0, height: meta.height || 0 }
+    _dimCache.set(filePath, dims)
+    return dims
+  } catch {
+    return { width: 0, height: 0 }
+  }
+}
 
 // Media list for a user
 app.get('/api/users/:username/media', async (req, res) => {
@@ -308,11 +447,13 @@ app.get('/api/users/:username/media', async (req, res) => {
   const allMedia = await Promise.all(
     rawFiles.map((item) =>
       limit(async () => {
-        const [meta, stat] = await Promise.all([
+        const isVideo = item.type === 'video'
+        const [meta, stat, duration, dims] = await Promise.all([
           resolveDateForFile(userDir, item.folder, item.filename, item.filePath),
           fs.promises.stat(item.filePath).catch(() => null),
+          isVideo ? getDuration(item.filePath) : Promise.resolve(null),
+          isVideo ? Promise.resolve({ width: 0, height: 0 }) : getImageDimensions(item.filePath),
         ])
-        const isVideo = item.type === 'video'
         return {
           filename: item.filename,
           folder: item.folder,
@@ -320,11 +461,19 @@ app.get('/api/users/:username/media', async (req, res) => {
           url: item.url,
           date: meta.date,
           source: meta.source,
-          dateMs: meta.date ? new Date(meta.date).getTime() : 0,
+          // mediaDateMs: real media date only (EXIF / sidecar / filename / mp4 metadata).
+          // Never set from filesystem fallback — used for "media date" sorts so that
+          // recently-downloaded files don't appear as "newest" content.
+          mediaDateMs: (meta.source && meta.source !== 'filesystem' && meta.date)
+            ? new Date(meta.date).getTime() : 0,
           addedMs: stat
             ? (stat.birthtime.getTime() > 0 ? stat.birthtime.getTime() : stat.mtime.getTime())
             : 0,
-          thumbnailUrl: isVideo
+          size: stat ? stat.size : 0,
+          duration: duration || 0,
+          width: dims.width,
+          height: dims.height,
+          previewUrl: isVideo
             ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
             : null,
         }
@@ -332,42 +481,39 @@ app.get('/api/users/:username/media', async (req, res) => {
     )
   )
 
-  allMedia.sort((a, b) => a.dateMs - b.dateMs)
+  // Default order: real media date asc, falling back to added-to-disk date
+  allMedia.sort((a, b) => (a.mediaDateMs || a.addedMs) - (b.mediaDateMs || b.addedMs))
   res.json(allMedia)
 })
 
-// Video thumbnail (generated on demand, cached to disk)
+// Video preview GIF (generated on demand, cached to disk)
 app.get('/thumbnail/:username/:filename', async (req, res) => {
   const { username, filename } = req.params
   if (!ffmpegPath) return res.status(503).send('ffmpeg not available')
 
   const userThumbDir = path.join(THUMB_DIR, username)
   fs.mkdirSync(userThumbDir, { recursive: true })
-  const thumbPath = path.join(
+  const gifPath = path.join(
     userThumbDir,
-    path.basename(filename, path.extname(filename)) + '.jpg'
+    path.basename(filename, path.extname(filename)) + '.gif'
   )
 
   // Serve from cache
-  if (fs.existsSync(thumbPath)) {
-    return res.sendFile(
-      path.basename(thumbPath),
-      { root: userThumbDir },
-      (err) => {
-        if (err && !res.headersSent) res.status(404).send('Not found')
-      }
-    )
+  if (fs.existsSync(gifPath)) {
+    return res.sendFile(path.basename(gifPath), { root: userThumbDir }, (err) => {
+      if (err && !res.headersSent) res.status(404).send('Not found')
+    })
   }
 
-  // Find the actual video file (could be in webm folder)
+  // Find the actual video file
   const videoPath = safeSubPath(datasetDir, username, 'webm', filename)
   if (!videoPath || !fs.existsSync(videoPath))
     return res.status(404).send('Not found')
 
-  const ok = await generateThumbnail(videoPath, thumbPath)
-  if (!ok) return res.status(404).send('Could not generate thumbnail')
+  const ok = await generatePreviewGif(videoPath, gifPath)
+  if (!ok) return res.status(404).send('Could not generate preview')
 
-  res.sendFile(path.basename(thumbPath), { root: userThumbDir }, (err) => {
+  res.sendFile(path.basename(gifPath), { root: userThumbDir }, (err) => {
     if (err && !res.headersSent) res.status(500).send('Error')
   })
 })
@@ -418,8 +564,38 @@ app.get('/media/:username/:folder/:filename', (req, res) => {
   })
 })
 
-// ─── THUMBNAIL PREWARM ────────────────────────────────────────────────────────
-// Walks all model webm folders and pre-generates any missing thumbnails.
+// Video preview GIF (generated on demand, cached to disk)
+app.get('/thumbnail/:username/:filename', async (req, res) => {
+  const { username, filename } = req.params
+  if (!ffmpegPath) return res.status(503).send('ffmpeg not available')
+
+  const userThumbDir = path.join(THUMB_DIR, username)
+  fs.mkdirSync(userThumbDir, { recursive: true })
+  const gifPath = path.join(
+    userThumbDir,
+    path.basename(filename, path.extname(filename)) + '.gif'
+  )
+
+  if (fs.existsSync(gifPath)) {
+    return res.sendFile(path.basename(gifPath), { root: userThumbDir }, (err) => {
+      if (err && !res.headersSent) res.status(404).send('Not found')
+    })
+  }
+
+  const videoPath = safeSubPath(datasetDir, username, 'webm', filename)
+  if (!videoPath || !fs.existsSync(videoPath))
+    return res.status(404).send('Not found')
+
+  const ok = await generatePreviewGif(videoPath, gifPath)
+  if (!ok) return res.status(404).send('Could not generate preview')
+
+  res.sendFile(path.basename(gifPath), { root: userThumbDir }, (err) => {
+    if (err && !res.headersSent) res.status(500).send('Error')
+  })
+})
+
+// ─── PREVIEW PREWARM ──────────────────────────────────────────────────────────
+// Walks all model webm folders and pre-generates any missing animated GIF previews.
 // Runs in the background after the server starts — doesn't block requests.
 async function prewarmThumbnails() {
   if (!ffmpegPath) return
@@ -455,44 +631,44 @@ async function prewarmThumbnails() {
   }
 
   const missing = allVideos.filter(({ username, filename }) => {
-    const thumbPath = path.join(
+    const gifPath = path.join(
       THUMB_DIR,
       username,
-      path.basename(filename, path.extname(filename)) + '.jpg'
+      path.basename(filename, path.extname(filename)) + '.gif'
     )
-    return !fs.existsSync(thumbPath)
+    return !fs.existsSync(gifPath)
   })
 
   if (missing.length === 0) {
-    console.log(`  Thumbs:    all ${allVideos.length} cached ✓`)
+    console.log(`  Previews:  all ${allVideos.length} cached ✓`)
     return
   }
 
   console.log(
-    `  Thumbs:    generating ${missing.length} missing (${allVideos.length - missing.length} cached)…`
+    `  Previews:  generating ${missing.length} GIFs (${allVideos.length - missing.length} cached)…`
   )
 
-  const concurrency = pLimit(4)
+  const concurrency = pLimit(2) // GIF encoding is CPU-heavy — keep concurrency low
   let done = 0
   await Promise.all(
     missing.map(({ username, filename, videoPath }) =>
       concurrency(async () => {
         const userThumbDir = path.join(THUMB_DIR, username)
         fs.mkdirSync(userThumbDir, { recursive: true })
-        const thumbPath = path.join(
+        const gifPath = path.join(
           userThumbDir,
-          path.basename(filename, path.extname(filename)) + '.jpg'
+          path.basename(filename, path.extname(filename)) + '.gif'
         )
-        await generateThumbnail(videoPath, thumbPath)
+        await generatePreviewGif(videoPath, gifPath)
         done++
-        if (done % 20 === 0 || done === missing.length) {
-          process.stdout.write(`\r  Thumbs:    ${done}/${missing.length} done`)
+        if (done % 10 === 0 || done === missing.length) {
+          process.stdout.write(`\r  Previews:  ${done}/${missing.length} done`)
         }
       })
     )
   )
 
-  console.log(`\r  Thumbs:    ${missing.length} generated ✓          `)
+  console.log(`\r  Previews:  ${missing.length} GIFs generated ✓          `)
 }
 
 // ─── INFO ENDPOINT ───────────────────────────────────────────────────────────
@@ -518,21 +694,19 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`\n  Dataset Dashboard → http://localhost:${PORT}`)
     console.log(`  Dataset:   ${datasetDir}`)
-    console.log(`  Thumbs:    ${THUMB_DIR}`)
+    console.log(`  Previews:  ${THUMB_DIR}`)
     console.log(`  Registry:  ${registryPath}`)
     console.log(`  Prewarm:   every ${PREWARM_INTERVAL_MS / 60000} min\n`)
   })
 
-  // Initial prewarm on startup
-  prewarmThumbnails().catch((err) =>
-    console.warn('  Thumb prewarm error:', err.message)
-  )
+  // Initial background tasks
+  buildModelStats().catch((err) => console.warn('  Stats scan error:', err.message))
+  prewarmThumbnails().catch((err) => console.warn('  Preview prewarm error:', err.message))
 
-  // Periodic prewarm — picks up new videos synced to the NAS without restart
+  // Periodic refresh — picks up new models / videos synced to the NAS
   setInterval(() => {
-    prewarmThumbnails().catch((err) =>
-      console.warn('  Thumb prewarm (periodic) error:', err.message)
-    )
+    buildModelStats().catch((err) => console.warn('  Stats scan error:', err.message))
+    prewarmThumbnails().catch((err) => console.warn('  Preview prewarm (periodic) error:', err.message))
   }, PREWARM_INTERVAL_MS)
 }
 

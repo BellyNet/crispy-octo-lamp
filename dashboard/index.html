@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dataset Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css" />
     <style>
       *,
       *::before,
@@ -292,46 +293,44 @@
         color: var(--muted);
         flex-shrink: 0;
       }
+      #sort-select {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 4px 28px 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237070a0'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-color: var(--card-bg);
+      }
+      #sort-select:hover { border-color: var(--accent); }
+      #date-range {
+        flex: 1;
+        font-size: 11px;
+        color: var(--muted);
+        font-style: italic;
+        text-align: center;
+      }
+      .sort-bar-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
 
       .sort-label {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.06em;
         font-size: 10px;
-      }
-
-      .sort-btn {
-        background: none;
-        border: none;
-        color: var(--muted);
-        cursor: pointer;
-        font-size: 12px;
-        padding: 3px 8px;
-        border-radius: 4px;
-        transition: all 0.1s;
-      }
-      .sort-btn:hover {
-        background: var(--card-bg);
-        color: var(--text);
-      }
-      .sort-btn.active {
-        color: var(--accent);
-        font-weight: 600;
-      }
-
-      #date-range {
-        margin-left: auto;
-        font-size: 11px;
-        color: var(--muted);
-        font-style: italic;
-      }
-
-      .sort-sep {
-        width: 1px;
-        height: 16px;
-        background: var(--border);
-        margin: 0 4px;
-        flex-shrink: 0;
       }
 
       .size-btn {
@@ -366,8 +365,12 @@
       #source-links {
         display: flex;
         gap: 5px;
-        margin-top: 5px;
+        margin-top: 4px;
         flex-wrap: wrap;
+        min-height: 0;
+      }
+      #source-links:empty {
+        margin-top: 0;
       }
 
       .src-link {
@@ -620,166 +623,93 @@
         }
       }
 
-      /* ─── LIGHTBOX ────────────────────────────────────────────── */
-      #lightbox {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.94);
-        z-index: 1000;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+      /* ─── PHOTOSWIPE THEME ────────────────────────────────────── */
+      .pswp {
+        --pswp-bg: #0a0a0f;
+        --pswp-placeholder-bg: #1a1a24;
+        --pswp-icon-color: #e0e0f0;
+        --pswp-icon-color-secondary: #7070a0;
+        --pswp-icon-stroke-color: #7070a0;
+        --pswp-icon-stroke-width: 1.5px;
+        --pswp-error-text-color: #7070a0;
       }
-      #lightbox.hidden {
-        display: none;
+      .pswp__top-bar {
+        background: linear-gradient(to bottom, rgba(10,10,15,0.7) 0%, transparent 100%);
       }
-
-      #lb-media-wrap {
-        flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        min-height: 0;
-        padding: 60px 80px 0;
-      }
-
-      #lb-media-wrap img,
-      #lb-media-wrap video {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: contain;
-        border-radius: 4px;
-        display: block;
-      }
-
-      /* pinch-zoom + double-tap zoom on image */
-      #lb-media-wrap img {
-        touch-action: pinch-zoom;
-        transform-origin: center center;
-        transition: transform 0.2s ease;
-        will-change: transform;
-      }
-
-      #lb-info-bar {
-        width: 100%;
-        padding: 14px 80px;
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        border-top: 1px solid var(--border);
-        margin-top: 12px;
-        flex-shrink: 0;
-      }
-
-      #lb-filename {
-        font-size: 13px;
+      /* Counter element */
+      .pswp__pswp-counter {
         color: var(--muted);
+        font-size: 13px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        line-height: 44px;
+        padding: 0 12px;
+        user-select: none;
+      }
+      /* Info button style */
+      .pswp__pswp-info-button svg {
+        opacity: 0.75;
+        transition: opacity 0.15s;
+      }
+      .pswp__pswp-info-button:hover svg,
+      .pswp__pswp-info-button.pswp-info-active svg {
+        opacity: 1;
+      }
+      .pswp__pswp-info-button.pswp-info-active {
+        color: var(--accent);
+      }
+      /* Info panel — slides up from bottom */
+      .pswp__pswp-info-panel {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 14px 60px;
+        background: rgba(10, 10, 15, 0.88);
+        backdrop-filter: blur(10px);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;             /* always flex so transition works */
+        align-items: center;
+        gap: 14px;
+        font-size: 13px;
+        color: var(--text);
+        transform: translateY(100%);
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 0.22s ease, opacity 0.22s ease;
+      }
+      .pswp__pswp-info-panel.pswp-info-visible {
+        transform: translateY(0);
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .pswp-info-filename {
         flex: 1;
+        color: var(--muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-      }
-      #lb-date {
-        font-size: 13px;
-        color: var(--text);
-        font-weight: 500;
-        flex-shrink: 0;
-      }
-      #lb-added-date {
         font-size: 12px;
-        color: var(--muted);
-        flex-shrink: 0;
       }
-
-      #lb-counter {
-        font-size: 12px;
-        color: var(--muted);
-        flex-shrink: 0;
-      }
-
-      .lb-nav {
-        position: fixed;
-        top: 50%;
-        transform: translateY(-50%);
-        background: rgba(255, 255, 255, 0.08);
-        border: none;
-        color: var(--text);
-        font-size: 28px;
-        width: 52px;
-        height: 52px;
-        border-radius: 50%;
-        cursor: pointer;
+      .pswp-info-date { font-weight: 500; flex-shrink: 0; }
+      .pswp-info-added { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+      .pswp-info-src { font-size: 11px; color: var(--muted); font-style: italic; }
+      /* Video slide wrapper */
+      .pswp-video-wrap {
+        width: 100%;
+        height: 100%;
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background 0.15s;
-        z-index: 1001;
       }
-      .lb-nav:hover {
-        background: rgba(124, 108, 252, 0.4);
-      }
-      #lb-prev {
-        left: 16px;
-      }
-      #lb-next {
-        right: 16px;
-      }
-
-      #lb-close {
-        position: fixed;
-        top: 16px;
-        right: 20px;
-        background: rgba(255, 255, 255, 0.08);
-        border: none;
-        color: var(--text);
-        font-size: 20px;
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1001;
-        transition: background 0.15s;
-      }
-      #lb-close:hover {
-        background: rgba(255, 80, 80, 0.4);
-      }
-
-      /* swipe-down handle — visible on mobile only */
-      #lb-drag-handle {
-        display: none;
-        position: fixed;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 36px;
-        height: 4px;
-        background: rgba(255, 255, 255, 0.25);
-        border-radius: 2px;
-        z-index: 1002;
-        pointer-events: none;
-      }
-
-      /* lightbox slide-away on swipe-down */
-      #lightbox {
-        transition: transform 0.22s ease, opacity 0.22s ease;
-      }
-      #lightbox.swiping-down {
-        transition: none;
-      }
-
-      #lb-type-badge {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        padding: 3px 8px;
+      .pswp-video-wrap video {
+        max-width: 100%;
+        max-height: 100%;
+        outline: none;
         border-radius: 4px;
-        text-transform: uppercase;
-        flex-shrink: 0;
+      }
+      @media (max-width: 640px) {
+        .pswp__pswp-info-panel { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
+        .pswp-info-filename { order: 3; width: 100%; white-space: normal; }
       }
 
       /* ─── NO-RESULTS ─────────────────────────────────────────── */
@@ -822,12 +752,29 @@
       #home-sort-bar {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
         padding: 0 0 12px;
         font-size: 12px;
         color: var(--muted);
-        flex-wrap: wrap;
       }
+      #home-sort-select {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 4px 28px 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237070a0'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-color: var(--card-bg);
+      }
+      #home-sort-select:hover { border-color: var(--accent); }
       .home-size-btn {
         background: none;
         border: none;
@@ -897,6 +844,73 @@
         background: #1e1e32;
         color: var(--accent);
         border: 1px solid var(--accent-dim);
+      }
+
+      /* ─── MODEL ACTIVITY GRAPH ──────────────────────────────────── */
+      .home-card-activity {
+        margin-top: 6px;
+      }
+      .activity-labels {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 3px;
+      }
+      .activity-label {
+        font-size: 8px;
+        color: var(--muted);
+        opacity: 0.55;
+        font-variant-numeric: tabular-nums;
+      }
+      .activity-graph {
+        display: flex;
+        gap: 2px;
+        align-items: flex-end;
+      }
+      .yr-cell {
+        flex: 1;
+        height: 8px;
+        border-radius: 2px;
+        background: var(--border);
+        position: relative;
+        cursor: default;
+      }
+      /* activity levels — inactive stays border colour */
+      .yr-cell.lvl-1 { background: #2d4a2d; }
+      .yr-cell.lvl-2 { background: #3a7a3a; }
+      .yr-cell.lvl-3 { background: #4caf50; }
+      .yr-cell.lvl-4 { background: #76d77a; }
+
+      /* ─── FEATURED CARD ──────────────────────────────────────────── */
+      .home-card.featured {
+        border-color: #f5c518;
+        box-shadow: 0 0 0 1px #f5c518, 0 6px 28px rgba(245, 197, 24, 0.35);
+        grid-column: span 2;
+      }
+      .home-card.featured:hover {
+        border-color: #f5c518;
+        box-shadow: 0 0 0 2px #f5c518, 0 10px 40px rgba(245, 197, 24, 0.45);
+      }
+      .home-card.featured .home-card-thumb {
+        aspect-ratio: 16/9;
+      }
+      .featured-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: #f5c518;
+        color: #1a1200;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border-radius: 4px;
+        pointer-events: none;
+        z-index: 2;
+      }
+      /* On small home-card sizes, collapse the span */
+      @media (max-width: 640px) {
+        .home-card.featured { grid-column: span 2; }
       }
 
       /* ─── FILTER SELECT (mobile) ─────────────────────────────── */
@@ -1018,58 +1032,15 @@
           grid-template-columns: repeat(var(--mobile-cols), 1fr);
           gap: 6px;
         }
-        /* home grid: 2 cols on mobile */
+        /* home grid: driven by --home-mobile-cols on mobile */
         #home-grid {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(var(--home-mobile-cols, 2), 1fr);
           gap: 8px;
         }
         #home-view {
           padding: 10px 12px;
         }
 
-        /* lightbox mobile tweaks */
-        #lb-drag-handle {
-          display: block;
-        }
-        #lb-media-wrap {
-          padding: 28px 4px 0;
-          overflow: hidden; /* contain zoomed images */
-        }
-        #lb-info-bar {
-          padding: 10px 12px;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-        #lb-filename {
-          font-size: 11px;
-          order: 3;
-          width: 100%;
-        }
-        #lb-date {
-          font-size: 11px;
-        }
-
-        /* bigger touch targets for nav + close */
-        .lb-nav {
-          width: 48px;
-          height: 48px;
-          font-size: 26px;
-          /* push inward so they don't eat into image area */
-          background: rgba(0, 0, 0, 0.35);
-        }
-        #lb-prev {
-          left: 2px;
-        }
-        #lb-next {
-          right: 2px;
-        }
-        #lb-close {
-          width: 48px;
-          height: 48px;
-          font-size: 22px;
-          top: 12px;
-          right: 12px;
-        }
       }
     </style>
   </head>
@@ -1134,29 +1105,41 @@
       </header>
 
       <div id="sort-bar" style="display: none">
-        <span class="sort-label">Media date</span>
-        <button class="sort-btn active" data-sort="asc">Oldest</button>
-        <button class="sort-btn" data-sort="desc">Newest</button>
-        <div class="sort-sep"></div>
-        <span class="sort-label">Added to disk</span>
-        <button class="sort-btn" data-sort="added-asc">Oldest</button>
-        <button class="sort-btn" data-sort="added-desc">Newest</button>
+        <select id="sort-select" aria-label="Sort order">
+          <option value="asc">Date: Oldest first</option>
+          <option value="desc">Date: Newest first</option>
+          <option value="added-asc">Added: Oldest first</option>
+          <option value="added-desc">Added: Newest first</option>
+          <option value="size-desc">File size: Largest first</option>
+          <option value="size-asc">File size: Smallest first</option>
+          <option value="duration-desc">Duration: Longest first</option>
+          <option value="duration-asc">Duration: Shortest first</option>
+        </select>
         <span id="date-range"></span>
-        <div class="sort-sep"></div>
-        <span class="sort-label">Size</span>
-        <button class="size-btn active" data-size="small">S</button>
-        <button class="size-btn" data-size="medium">M</button>
-        <button class="size-btn" data-size="large">L</button>
+        <div class="sort-bar-right">
+          <span class="sort-label">Card</span>
+          <button class="size-btn active" data-size="small">S</button>
+          <button class="size-btn" data-size="medium">M</button>
+          <button class="size-btn" data-size="large">L</button>
+        </div>
       </div>
 
       <div id="grid-container">
         <!-- HOME VIEW: model card grid -->
         <div id="home-view">
           <div id="home-sort-bar">
-            <span class="sort-label">Size</span>
-            <button class="home-size-btn active" data-home-size="small">S</button>
-            <button class="home-size-btn" data-home-size="medium">M</button>
-            <button class="home-size-btn" data-home-size="large">L</button>
+            <select id="home-sort-select" aria-label="Sort models">
+              <option value="az">A → Z</option>
+              <option value="oldest-media">Oldest media first</option>
+              <option value="newest-media">Newest media first</option>
+              <option value="recently-added">Recently added</option>
+            </select>
+            <div class="sort-bar-right">
+              <span class="sort-label">Card</span>
+              <button class="home-size-btn active" data-home-size="small">S</button>
+              <button class="home-size-btn" data-home-size="medium">M</button>
+              <button class="home-size-btn" data-home-size="large">L</button>
+            </div>
           </div>
           <div id="home-grid"></div>
         </div>
@@ -1189,21 +1172,6 @@
       </div>
     </div>
 
-    <!-- LIGHTBOX -->
-    <div id="lightbox" class="hidden">
-      <div id="lb-drag-handle"></div>
-      <button id="lb-close" title="Close (Esc)">✕</button>
-      <button class="lb-nav" id="lb-prev" title="Previous (←)">‹</button>
-      <button class="lb-nav" id="lb-next" title="Next (→)">›</button>
-      <div id="lb-media-wrap"></div>
-      <div id="lb-info-bar">
-        <span id="lb-type-badge" class="type-badge"></span>
-        <span id="lb-date"></span>
-        <span id="lb-filename"></span>
-        <span id="lb-added-date"></span>
-        <span id="lb-counter"></span>
-      </div>
-    </div>
 
     <script>
       'use strict'
@@ -1213,7 +1181,6 @@
       let filtered = [] // filtered + sorted list
       let activeType = 'all'
       let activeSort = 'asc'
-      let lbIndex = 0 // lightbox current index into filtered[]
       let homeVisible = false
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
@@ -1224,7 +1191,7 @@
       const mediaStatsEl = document.getElementById('media-stats')
       const filterBtns = document.querySelectorAll('.filter-btn')
       const filterSelect = document.getElementById('filter-select')
-      const sortBtns = document.querySelectorAll('.sort-btn')
+      const sortSelect = document.getElementById('sort-select')
       const sortBar = document.getElementById('sort-bar')
       const dateRangeEl = document.getElementById('date-range')
       const gridEl = document.getElementById('media-grid')
@@ -1238,13 +1205,8 @@
       const smpModelPanel = document.getElementById('sidebar-model-panel')
       const smpFilterBtns = document.querySelectorAll('.smp-filter-btn')
       const homeSizeBtns = document.querySelectorAll('.home-size-btn')
-      const lightbox = document.getElementById('lightbox')
-      const lbMediaWrap = document.getElementById('lb-media-wrap')
-      const lbDate = document.getElementById('lb-date')
-      const lbFilename = document.getElementById('lb-filename')
-      const lbAddedDate = document.getElementById('lb-added-date')
-      const lbCounter = document.getElementById('lb-counter')
-      const lbTypeBadge = document.getElementById('lb-type-badge')
+      const homeSortSelect = document.getElementById('home-sort-select')
+      let homeSort = 'az'
 
       // ─── HELPERS ──────────────────────────────────────────────────────────
       function formatDate(iso) {
@@ -1306,20 +1268,57 @@
         gridEl.style.display = ''
       }
 
+      // Global year range across all models — defines the x-axis for every card
+      function getYearRange() {
+        let minYear = Infinity, maxYear = new Date().getFullYear()
+        for (const u of usersData) {
+          if (u.earliestMs) minYear = Math.min(minYear, new Date(u.earliestMs).getFullYear())
+          if (u.latestMs)   maxYear = Math.max(maxYear, new Date(u.latestMs).getFullYear())
+          // Also scan yearCounts keys — these include filesystem-fallback years that
+          // earliestMs/latestMs don't capture (since those only track real media dates)
+          for (const yr of Object.keys(u.yearCounts || {})) {
+            const y = parseInt(yr, 10)
+            if (!isNaN(y)) { minYear = Math.min(minYear, y); maxYear = Math.max(maxYear, y) }
+          }
+        }
+        return { start: minYear === Infinity ? maxYear : minYear, end: maxYear }
+      }
+
       function renderHomeGrid() {
         homeGridEl.innerHTML = ''
-        for (const u of usersData) {
+        const { start: globalStart, end: globalEnd } = getYearRange()
+
+        // Sort: featured always first, then by selected sort
+        const sorted = [...usersData].sort((a, b) => {
+          if (a.featured && !b.featured) return -1
+          if (b.featured && !a.featured) return 1
+          if (homeSort === 'oldest-media') return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
+          if (homeSort === 'newest-media') return (b.latestMs || 0) - (a.latestMs || 0)
+          if (homeSort === 'recently-added') return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
+          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+        })
+
+        for (const u of sorted) {
+          const isFeatured = !!u.featured
           const card = document.createElement('div')
-          card.className = 'home-card'
+          card.className = 'home-card' + (isFeatured ? ' featured' : '')
           card.addEventListener('click', () => selectUser(u))
 
-          // Placeholder while loading
+          // Placeholder thumb (replaced async)
           const mediaEl = document.createElement('div')
           mediaEl.className = 'home-card-thumb'
           mediaEl.style.background = 'var(--card-bg)'
           card.appendChild(mediaEl)
 
-          // Fetch random cover async, replace placeholder when ready
+          if (isFeatured) {
+            const badge = document.createElement('div')
+            badge.className = 'featured-badge'
+            badge.textContent = '⭐ Model of the Day'
+            card.style.position = 'relative'
+            card.appendChild(badge)
+          }
+
+          // Fetch random cover async
           fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
             .then((r) => r.ok ? r.json() : null)
             .then((cover) => {
@@ -1332,6 +1331,9 @@
                 el.muted = true
                 el.loop = true
                 el.playsInline = true
+                el.addEventListener('timeupdate', () => {
+                  if (el.currentTime > 5) el.currentTime = 0
+                })
               } else {
                 el = document.createElement('img')
                 el.src = cover.url
@@ -1361,6 +1363,50 @@
 
           body.appendChild(name)
           body.appendChild(srcs)
+
+          // Activity graph — GitHub-style year cells
+          {
+            const yearCounts = u.yearCounts || {}
+            const maxCount   = Math.max(...Object.values(yearCounts), 1)
+
+            const activity = document.createElement('div')
+            activity.className = 'home-card-activity'
+
+            // Year labels: just show start + end
+            const labels = document.createElement('div')
+            labels.className = 'activity-labels'
+            const lStart = document.createElement('span')
+            lStart.className = 'activity-label'
+            lStart.textContent = globalStart
+            const lEnd = document.createElement('span')
+            lEnd.className = 'activity-label'
+            lEnd.textContent = globalEnd
+            labels.appendChild(lStart)
+            labels.appendChild(lEnd)
+
+            // Cell row
+            const graph = document.createElement('div')
+            graph.className = 'activity-graph'
+
+            for (let yr = globalStart; yr <= globalEnd; yr++) {
+              const count = yearCounts[yr] || 0
+              const cell  = document.createElement('div')
+              const ratio = count / maxCount
+              const lvl   = count === 0 ? 0
+                          : ratio < 0.15 ? 1
+                          : ratio < 0.40 ? 2
+                          : ratio < 0.75 ? 3
+                          : 4
+              cell.className = `yr-cell${lvl > 0 ? ` lvl-${lvl}` : ''}`
+              cell.title = count > 0 ? `${yr}: ${count} files` : `${yr}: no files`
+              graph.appendChild(cell)
+            }
+
+            activity.appendChild(labels)
+            activity.appendChild(graph)
+            body.appendChild(activity)
+          }
+
           card.appendChild(body)
           homeGridEl.appendChild(card)
         }
@@ -1456,11 +1502,6 @@
         const li = liEl || userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
         if (li) li.classList.add('active')
 
-        activeSort = 'asc'
-        sortBtns.forEach((b) =>
-          b.classList.toggle('active', b.dataset.sort === 'asc')
-        )
-
         currentNameEl.textContent = username
         smpNameEl.textContent = username
         renderSourceLinks(sources)
@@ -1479,6 +1520,35 @@
         ).catch(() => null)
         allMedia = mediaRes?.ok ? await mediaRes.json() : []
 
+        // ── Update this model's activity graph with accurate media dates ──────
+        // buildModelStats() runs fast (no ffprobe/EXIF) so its yearCounts can be
+        // wrong for files without sidecar/filename dates. Now that we have the
+        // full resolved dates (EXIF, MP4 metadata, etc.), refresh usersData so
+        // the home graph is correct the next time it's rendered.
+        if (allMedia.length) {
+          const uIdx = usersData.findIndex(u => u.name === username)
+          if (uIdx !== -1) {
+            const yc = {}
+            let earliest = Infinity, latest = 0
+            for (const m of allMedia) {
+              const dateMs = m.mediaDateMs || m.addedMs
+              if (!dateMs) continue
+              const yr = new Date(dateMs).getFullYear()
+              if (yr >= 1990 && yr <= 2035) yc[yr] = (yc[yr] || 0) + 1
+              if (m.mediaDateMs) {
+                if (m.mediaDateMs < earliest) earliest = m.mediaDateMs
+                if (m.mediaDateMs > latest)   latest   = m.mediaDateMs
+              }
+            }
+            usersData[uIdx] = {
+              ...usersData[uIdx],
+              yearCounts:  yc,
+              earliestMs:  earliest === Infinity ? usersData[uIdx].earliestMs : earliest,
+              latestMs:    latest   || usersData[uIdx].latestMs,
+            }
+          }
+        }
+
         loadingEl.style.display = 'none'
         sortBar.style.display = allMedia.length ? 'flex' : 'none'
         applyFilter()
@@ -1492,9 +1562,21 @@
             ? [...allMedia]
             : allMedia.filter((m) => m.type === activeType)
 
-        if (activeSort === 'desc') filtered.reverse()
-        else if (activeSort === 'added-asc') filtered.sort((a, b) => a.addedMs - b.addedMs)
-        else if (activeSort === 'added-desc') filtered.sort((a, b) => b.addedMs - a.addedMs)
+        // Sort by real media date, falling back to added-to-disk date as last resort
+        const effectiveDate = (m) => m.mediaDateMs || m.addedMs
+        const byMediaDate = (dir) => (a, b) => {
+          const da = effectiveDate(a), db = effectiveDate(b)
+          return dir === 'asc' ? da - db : db - da
+        }
+
+        if      (activeSort === 'asc')           filtered.sort(byMediaDate('asc'))
+        else if (activeSort === 'desc')          filtered.sort(byMediaDate('desc'))
+        else if (activeSort === 'added-asc')     filtered.sort((a, b) => a.addedMs - b.addedMs)
+        else if (activeSort === 'added-desc')    filtered.sort((a, b) => b.addedMs - a.addedMs)
+        else if (activeSort === 'size-desc')     filtered.sort((a, b) => b.size - a.size)
+        else if (activeSort === 'size-asc')      filtered.sort((a, b) => a.size - b.size)
+        else if (activeSort === 'duration-desc') filtered.sort((a, b) => b.duration - a.duration)
+        else if (activeSort === 'duration-asc')  filtered.sort((a, b) => a.duration - b.duration)
 
         renderGrid()
         updateDateRange()
@@ -1527,12 +1609,9 @@
         })
       })
 
-      sortBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          activeSort = btn.dataset.sort
-          sortBtns.forEach((b) => b.classList.toggle('active', b === btn))
-          applyFilter()
-        })
+      sortSelect.addEventListener('change', () => {
+        activeSort = sortSelect.value
+        applyFilter()
       })
 
       function updateStats() {
@@ -1580,16 +1659,13 @@
           return
         }
 
-        const withDates = filtered.filter((m) => m.date)
-        if (!withDates.length) {
-          dateRangeEl.textContent = ''
-          return
-        }
-        const earliest =
-          withDates[activeSort === 'asc' ? 0 : withDates.length - 1]
-        const latest =
-          withDates[activeSort === 'asc' ? withDates.length - 1 : 0]
-        dateRangeEl.textContent = `${formatDateShort(earliest.date)} – ${formatDateShort(latest.date)}`
+        const effDate = (m) => m.mediaDateMs || m.addedMs
+        const withDates = filtered.filter(effDate)
+        if (!withDates.length) { dateRangeEl.textContent = ''; return }
+        const toISO = (ms) => new Date(ms).toISOString()
+        const first = withDates[0]
+        const last  = withDates[withDates.length - 1]
+        dateRangeEl.textContent = `${formatDateShort(toISO(effDate(first)))} – ${formatDateShort(toISO(effDate(last)))}`
       }
 
       // ─── GRID RENDER ──────────────────────────────────────────────────────
@@ -1613,29 +1689,23 @@
           thumb.className = 'card-thumb'
 
           if (item.type === 'video') {
-            // Video: autoplay muted loop preview clamped to first 5 s, lazy-loaded
-            const vid = document.createElement('video')
-            vid.muted = true
-            vid.loop = true
-            vid.playsInline = true
-            vid.style.cssText =
-              'width:100%;height:100%;object-fit:cover;display:block;'
-            vid.addEventListener('timeupdate', () => {
-              if (vid.currentTime > 5) vid.currentTime = 0
-            })
-            // Only load + play once the card scrolls into view
-            const observer = new IntersectionObserver(
-              (entries, obs) => {
-                if (entries[0].isIntersecting) {
-                  vid.src = item.url
-                  vid.play().catch(() => {})
-                  obs.disconnect()
-                }
-              },
-              { rootMargin: '200px' }
-            )
-            observer.observe(thumb)
-            thumb.appendChild(vid)
+            // Video: show animated GIF preview (pre-generated by server, loops automatically)
+            const img = document.createElement('img')
+            img.loading = 'lazy'
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
+            if (item.previewUrl) {
+              img.src = item.previewUrl
+              img.onerror = () => {
+                // GIF not ready yet — show a dark placeholder
+                img.remove()
+                const ph = document.createElement('div')
+                ph.style.cssText =
+                  'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
+                ph.textContent = '⏳'
+                thumb.insertBefore(ph, thumb.firstChild)
+              }
+            }
+            thumb.appendChild(img)
           } else {
             // Image / GIF: lazy load
             const img = document.createElement('img')
@@ -1724,114 +1794,114 @@
         gridEl.appendChild(frag)
       }
 
-      // ─── LIGHTBOX ─────────────────────────────────────────────────────────
-      function openLightbox(index) {
-        lbIndex = index
-        renderLightboxItem()
-        lightbox.classList.remove('hidden')
-        document.body.style.overflow = 'hidden'
-      }
-
-      function closeLightbox() {
-        resetZoom()
-        lightbox.classList.add('hidden')
-        document.body.style.overflow = ''
-        lbMediaWrap.innerHTML = ''
-      }
-
-      function renderLightboxItem() {
-        const item = filtered[lbIndex]
-        if (!item) return
-
-        lbMediaWrap.innerHTML = ''
-
-        if (item.type === 'video') {
-          const video = document.createElement('video')
-          video.src = item.url
-          video.controls = true
-          video.autoplay = true
-          video.loop = true
-          lbMediaWrap.appendChild(video)
-        } else {
-          const img = document.createElement('img')
-          img.src = item.url
-          img.alt = item.filename
-          lbMediaWrap.appendChild(img)
+      // ─── LIGHTBOX (PhotoSwipe v5) ─────────────────────────────────────────
+      // Use PhotoSwipe core directly (no lightbox wrapper) for programmatic use.
+      // Cache the import promise so the first click opens instantly.
+      let _pswpModule = null
+      function loadPswp() {
+        if (!_pswpModule) {
+          _pswpModule = import('https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.esm.js')
+            .then(m => m.default)
         }
+        return _pswpModule
+      }
+      loadPswp() // preload immediately
 
-        const sourceTips = {
-          filename: 'filename timestamp',
-          exif: 'EXIF metadata',
-          mp4: 'MP4 container (ffprobe)',
-          uploaded: 'platform upload date',
-          filesystem: 'local download date*',
-        }
-        const srcLabel = item.source
-          ? ` [${sourceTips[item.source] || item.source}]`
-          : ''
-        lbDate.textContent = formatDate(item.date) + srcLabel
-        lbFilename.textContent = item.filename
-        lbAddedDate.textContent = item.addedMs
-          ? `Added ${formatDate(new Date(item.addedMs).toISOString())}`
-          : ''
-        lbCounter.textContent = `${lbIndex + 1} / ${filtered.length}`
-
-        lbTypeBadge.className = `type-badge ${item.type}`
-        lbTypeBadge.textContent = item.type === 'image' ? 'img' : item.type
+      const SOURCE_TIPS = {
+        filename:   'filename timestamp',
+        exif:       'EXIF metadata',
+        mp4:        'MP4 container (ffprobe)',
+        uploaded:   'platform upload date',
+        filesystem: 'local download date',
       }
 
-      // ─── LIGHTBOX ZOOM ────────────────────────────────────────────────────
-      let zoomActive = false
-      const ZOOM_SCALE = 2.5
+      function openLightbox(startIndex) {
+        loadPswp().then(PhotoSwipe => {
+          const dataSource = filtered.map(item => {
+            if (item.type === 'video') {
+              return {
+                html: `<div class="pswp-video-wrap"><video controls autoplay loop playsinline src="${item.url}"></video></div>`,
+                _item: item,
+              }
+            }
+            return {
+              src:    item.url,
+              width:  item.width  || 0,
+              height: item.height || 0,
+              _item:  item,
+            }
+          })
 
-      function getLbImage() {
-        return lbMediaWrap.querySelector('img')
+          const pswp = new PhotoSwipe({
+            dataSource,
+            index:     startIndex,
+            bgOpacity: 0.97,
+            padding:   { top: 44, bottom: 0, left: 44, right: 44 },
+            loop:      true,
+          })
+
+          let infoPanelEl = null
+
+          // All UI registration happens inside uiRegister — pswp.ui is guaranteed
+          // to exist here (set in _createMainStructure before ui.init fires this event).
+          pswp.on('uiRegister', () => {
+            // Slide counter (top-bar, left of zoom/close)
+            pswp.ui.registerElement({
+              name:     'pswp-counter',
+              order:    5,
+              isButton: false,
+              onInit(el) {
+                const update = () => { el.textContent = `${pswp.currIndex + 1} / ${pswp.getNumItems()}` }
+                pswp.on('change', update)
+                update()
+              },
+            })
+
+            // Info panel — slides up from bottom when ⓘ is pressed
+            pswp.ui.registerElement({
+              name:     'pswp-info-panel',
+              appendTo: 'root',
+              onInit(el) {
+                infoPanelEl = el
+                const update = () => {
+                  const item = filtered[pswp.currIndex]
+                  if (!item) return
+                  const srcHtml = item.source
+                    ? `<span class="pswp-info-src">[${SOURCE_TIPS[item.source] || item.source}]</span>`
+                    : ''
+                  const addedHtml = item.addedMs
+                    ? `<span class="pswp-info-added">Added ${formatDate(new Date(item.addedMs).toISOString())}</span>`
+                    : ''
+                  el.innerHTML = `
+                    <span class="type-badge ${item.type}">${item.type === 'image' ? 'img' : item.type}</span>
+                    <span class="pswp-info-date">${formatDate(item.date)} ${srcHtml}</span>
+                    <span class="pswp-info-filename">${item.filename}</span>
+                    ${addedHtml}
+                  `
+                }
+                pswp.on('change', update)
+                update()
+              },
+            })
+
+            // ⓘ toggle button
+            pswp.ui.registerElement({
+              name:     'pswp-info-button',
+              order:    9,
+              isButton: true,
+              title:    'Info',
+              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.5" r="1" fill="currentColor"/></svg>',
+              onClick(e, el) {
+                if (!infoPanelEl) return
+                const on = infoPanelEl.classList.toggle('pswp-info-visible')
+                el.classList.toggle('pswp-info-active', on)
+              },
+            })
+          })
+
+          pswp.init()
+        })
       }
-
-      function setZoom(on) {
-        const img = getLbImage()
-        if (!img) return
-        zoomActive = on
-        img.style.transform = on ? `scale(${ZOOM_SCALE})` : 'scale(1)'
-      }
-
-      function resetZoom() {
-        setZoom(false)
-      }
-
-      function lbPrev() {
-        if (!filtered.length) return
-        resetZoom()
-        lbIndex = (lbIndex - 1 + filtered.length) % filtered.length
-        renderLightboxItem()
-      }
-
-      function lbNext() {
-        if (!filtered.length) return
-        resetZoom()
-        lbIndex = (lbIndex + 1) % filtered.length
-        renderLightboxItem()
-      }
-
-      document
-        .getElementById('lb-close')
-        .addEventListener('click', closeLightbox)
-      document.getElementById('lb-prev').addEventListener('click', lbPrev)
-      document.getElementById('lb-next').addEventListener('click', lbNext)
-
-      // Desktop: tap backdrop to close
-      lightbox.addEventListener('click', (e) => {
-        if (Date.now() - pinchEndMs < 400) return // suppress click after pinch
-        if (window.matchMedia('(pointer: coarse)').matches) return // mobile: use swipe-down
-        if (e.target === lightbox) closeLightbox()
-      })
-
-      document.addEventListener('keydown', (e) => {
-        if (lightbox.classList.contains('hidden')) return
-        if (e.key === 'Escape') closeLightbox()
-        else if (e.key === 'ArrowLeft') lbPrev()
-        else if (e.key === 'ArrowRight') lbNext()
-      })
 
       // ─── CARD SIZE ────────────────────────────────────────────────────────
       const sizeBtns = document.querySelectorAll('.size-btn')
@@ -1858,11 +1928,16 @@
       const HOME_CARD_SIZES = { small: '140px', medium: '200px', large: '280px' }
       const HOME_MOBILE_COLS = { small: 3, medium: 2, large: 1 }
 
+      homeSortSelect.addEventListener('change', () => {
+        homeSort = homeSortSelect.value
+        renderHomeGrid()
+      })
+
       homeSizeBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
           homeSizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
           if (isMobile()) {
-            document.documentElement.style.setProperty('--mobile-cols', HOME_MOBILE_COLS[btn.dataset.homeSize])
+            document.documentElement.style.setProperty('--home-mobile-cols', HOME_MOBILE_COLS[btn.dataset.homeSize])
           } else {
             document.documentElement.style.setProperty('--home-card-min', HOME_CARD_SIZES[btn.dataset.homeSize])
           }
@@ -1902,67 +1977,6 @@
       })
       sidebarOverlay.addEventListener('click', closeSidebar)
 
-      // ─── TOUCH GESTURES (LIGHTBOX) ────────────────────────────────────────
-      // Handles: swipe left/right (navigate), swipe down (close),
-      //          double-tap (zoom toggle), pinch detection (suppress close).
-      let touchStartX = 0
-      let touchStartY = 0
-      let isPinching  = false
-      let pinchEndMs  = 0
-      let lastTapMs   = 0
-
-      lightbox.addEventListener('touchstart', (e) => {
-        if (e.touches.length >= 2) {
-          isPinching = true
-          return
-        }
-        // Only record start for single-touch (ignore mid-pinch single releases)
-        if (!isPinching) {
-          touchStartX = e.touches[0].clientX
-          touchStartY = e.touches[0].clientY
-        }
-      }, { passive: true })
-
-      lightbox.addEventListener('touchend', (e) => {
-        // All fingers lifted after a pinch — mark cooldown and bail
-        if (isPinching) {
-          if (e.touches.length === 0) {
-            isPinching = false
-            pinchEndMs = Date.now()
-          }
-          return
-        }
-
-        const touch = e.changedTouches[0]
-        const dx = touch.clientX - touchStartX
-        const dy = touch.clientY - touchStartY
-        const absDx = Math.abs(dx)
-        const absDy = Math.abs(dy)
-
-        // Swipe down → close (prioritise over horizontal nav)
-        if (absDy > absDx && dy > 72) {
-          closeLightbox()
-          return
-        }
-
-        // Swipe left/right → navigate (only when not zoomed in)
-        if (!zoomActive && absDx > absDy && absDx > 40) {
-          if (dx < 0) lbNext()
-          else lbPrev()
-          return
-        }
-
-        // Small movement = tap — check for double-tap zoom (images only)
-        if (absDx < 12 && absDy < 12 && getLbImage()) {
-          const now = Date.now()
-          if (now - lastTapMs < 300) {
-            setZoom(!zoomActive)
-            lastTapMs = 0
-          } else {
-            lastTapMs = now
-          }
-        }
-      }, { passive: true })
 
       // ─── INIT ─────────────────────────────────────────────────────────────
       loadUsers()
