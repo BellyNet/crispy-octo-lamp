@@ -34,6 +34,7 @@ const {
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
+const AUTO = !!argv.auto   // auto-save exact matches, skip everything else
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -313,6 +314,7 @@ async function run() {
   console.log(`  Registry: ${registryPath}`)
   console.log(`  Delay:    ${DELAY}ms between API requests`)
   if (FORCE) console.log('  Mode:     --force (reviewing all models)')
+  if (AUTO) console.log('  Mode:     --auto (save exact matches, skip rest)')
   console.log(`\n  Models needing sources: ${toProcess.length}\n`)
 
   if (toProcess.length === 0) {
@@ -358,10 +360,33 @@ async function run() {
       let savedKemono = hasSource(entry, 'kemono')
       let savedStufferdb = hasSource(entry, 'stufferdb')
 
+      // Sanitized alias set for exact-match detection
+      const aliasSet = new Set(
+        [canonicalName, ...(entry.aliases || [])].map((a) => sanitize(a).toLowerCase()).filter(Boolean)
+      )
+
       // ── Accept/reject auto hits ────────────────────────────────────────────
       for (const platform of ['coomer', 'kemono']) {
         if (hasSource(entry, platform)) continue
         for (const hit of autoHits[platform]) {
+          const isExact = aliasSet.has(hit.username.toLowerCase())
+
+          if (AUTO) {
+            if (isExact) {
+              resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
+              console.log(`\n  💾 [auto] ${hit.url}  (${hit.service})`)
+              if (platform === 'coomer') savedCoomer = true
+              if (platform === 'kemono') savedKemono = true
+            }
+            // non-exact hits silently skipped in auto mode
+            if (
+              (platform === 'coomer' && savedCoomer) ||
+              (platform === 'kemono' && savedKemono)
+            )
+              break
+            continue
+          }
+
           console.log(
             `\n  ✅ [${hit.platform}] ${hit.url}  (${hit.service}, id="${hit.name}")`
           )
@@ -371,12 +396,7 @@ async function run() {
               .trim()
               .toLowerCase()
             if (ans === 'y') {
-              resolveAndTrackModel(
-                registryPath,
-                canonicalName,
-                platform,
-                hit.url
-              )
+              resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
               console.log(`  💾 Saved.`)
               if (platform === 'coomer') savedCoomer = true
               if (platform === 'kemono') savedKemono = true
@@ -398,7 +418,9 @@ async function run() {
         }
       }
 
-      // ── Manual loop if still missing anything ─────────────────────────────
+      // ── Manual loop if still missing anything (skipped in --auto mode) ──────
+      if (AUTO) continue
+
       const stillMissing = []
       if (!savedCoomer) stillMissing.push('coomer')
       if (!savedKemono) stillMissing.push('kemono')
