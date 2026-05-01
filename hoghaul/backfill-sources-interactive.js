@@ -4,7 +4,7 @@
  * backfill-sources-interactive.js
  *
  * Unified interactive backfill for all three source types:
- *   - coomer.st  (OnlyFans, Fansly, Patreon, …)
+ *   - coomerfans.com  (OnlyFans, Fansly, Patreon, …)
  *   - kemono.cr  (Patreon, Fanbox, Gumroad, Discord, Fantia, …)
  *   - stufferdb  (manual URL paste only)
  *
@@ -41,7 +41,7 @@ const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 // ─── PLATFORM CONFIG ──────────────────────────────────────────────────────────
 const PLATFORMS = {
   coomer: {
-    host: 'coomer.st',
+    host: 'coomerfans.com',
     label: 'Coomer',
     services: [
       'onlyfans',
@@ -53,14 +53,11 @@ const PLATFORMS = {
       'afdian',
       'boosty',
     ],
+    // URL format: https://coomerfans.com/u/{service}/{id}/{username}
     urlPattern:
-      /^https?:\/\/(?:www\.)?coomer\.(?:st|party)\/([^/]+)\/user\/([^/?#\s]+)/i,
+      /^https?:\/\/(?:www\.)?coomerfans\.com\/u\/([^/]+)\/(\d+)\/([^/?#\s]+)/i,
     searchUrl: (name) =>
-      `https://coomer.st/artists?q=${encodeURIComponent(name)}`,
-    profileUrl: (service, username) =>
-      `https://coomer.st/api/v1/${service}/user/${encodeURIComponent(username)}/profile`,
-    userUrl: (service, username) =>
-      `https://coomer.st/${service}/user/${username}`,
+      `https://coomerfans.com/?q=${encodeURIComponent(name)}`,
   },
   kemono: {
     host: 'kemono.cr',
@@ -128,12 +125,38 @@ function httpsGet(host, url) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ─── API LOOKUPS ──────────────────────────────────────────────────────────────
-async function lookupCreator(platform, service, username) {
-  const cfg = PLATFORMS[platform]
-  const { status, body } = await httpsGet(
-    cfg.host,
-    cfg.profileUrl(service, username)
-  )
+
+/**
+ * Search coomerfans.com for a username. Returns all non-free profile hits
+ * found in the HTML, each with { service, id, username, url, platform }.
+ */
+async function searchCoomer(query) {
+  const cfg = PLATFORMS.coomer
+  const url = `https://coomerfans.com/?q=${encodeURIComponent(query)}`
+  const { status, body } = await httpsGet(cfg.host, url)
+  if (status !== 200) return []
+
+  const hits = []
+  const linkRe = /href="\/u\/([^/"]+)\/(\d+)\/([^/"]+)"/gi
+  let m
+  while ((m = linkRe.exec(body)) !== null) {
+    const service = m[1].toLowerCase()
+    const id = m[2]
+    const username = m[3]
+    if (!cfg.services.includes(service)) continue
+    if (/free/i.test(username)) continue
+    const hitUrl = `https://coomerfans.com/u/${service}/${id}/${username}`
+    if (!hits.some((h) => h.url === hitUrl)) {
+      hits.push({ platform: 'coomer', service, id, username, url: hitUrl, name: username })
+    }
+  }
+  return hits
+}
+
+async function lookupKemono(service, username) {
+  const cfg = PLATFORMS.kemono
+  const apiUrl = `https://kemono.cr/api/v1/${service}/user/${encodeURIComponent(username)}/profile`
+  const { status, body } = await httpsGet(cfg.host, apiUrl)
   if (status === 200) {
     try {
       return JSON.parse(body)
@@ -146,17 +169,21 @@ async function lookupCreator(platform, service, username) {
 }
 
 async function probeUsername(platform, username) {
-  const cfg = PLATFORMS[platform]
+  if (platform === 'coomer') {
+    return searchCoomer(username)
+  }
+  // kemono — direct profile lookup per service
+  const cfg = PLATFORMS.kemono
   const hits = []
   for (const service of cfg.services) {
     try {
-      const creator = await lookupCreator(platform, service, username)
+      const creator = await lookupKemono(service, username)
       if (creator) {
         hits.push({
           platform,
           service,
           username,
-          url: cfg.userUrl(service, username),
+          url: `https://kemono.cr/${service}/user/${username}`,
           name: creator.name || username,
         })
       }
@@ -189,18 +216,34 @@ async function autoProbeModel(canonicalName, entry) {
 function parseSourceUrl(input) {
   const str = String(input || '').trim()
 
-  for (const [platform, cfg] of Object.entries(PLATFORMS)) {
-    const m = str.match(cfg.urlPattern)
-    if (m) {
-      const service = m[1].toLowerCase()
-      const username = m[2]
-      if (cfg.services.includes(service)) {
-        return {
-          platform,
-          service,
-          username,
-          url: cfg.userUrl(service, username),
-        }
+  // CoomerFans: /u/{service}/{id}/{username}
+  const coomerM = str.match(PLATFORMS.coomer.urlPattern)
+  if (coomerM) {
+    const service = coomerM[1].toLowerCase()
+    const id = coomerM[2]
+    const username = coomerM[3]
+    if (PLATFORMS.coomer.services.includes(service)) {
+      return {
+        platform: 'coomer',
+        service,
+        id,
+        username,
+        url: `https://coomerfans.com/u/${service}/${id}/${username}`,
+      }
+    }
+  }
+
+  // Kemono: /{service}/user/{username}
+  const kemonoM = str.match(PLATFORMS.kemono.urlPattern)
+  if (kemonoM) {
+    const service = kemonoM[1].toLowerCase()
+    const username = kemonoM[2]
+    if (PLATFORMS.kemono.services.includes(service)) {
+      return {
+        platform: 'kemono',
+        service,
+        username,
+        url: `https://kemono.cr/${service}/user/${username}`,
       }
     }
   }
@@ -535,7 +578,7 @@ async function run() {
             continue
           }
 
-          // Coomer or Kemono — validate via API
+          // Coomer or Kemono — validate then save
           const platform = parsed.platform
           if (
             (platform === 'coomer' && savedCoomer) ||
@@ -547,14 +590,26 @@ async function run() {
 
           process.stdout.write(`  Validating ${parsed.url} ...`)
           try {
-            const creator = await lookupCreator(
-              platform,
-              parsed.service,
-              parsed.username
-            )
-            if (creator) {
-              const displayName = creator.name || parsed.username
-              process.stdout.write(` found (id="${displayName}")\n`)
+            const host =
+              platform === 'coomer' ? 'coomerfans.com' : 'kemono.cr'
+            let found = false
+            if (platform === 'kemono') {
+              const creator = await lookupKemono(
+                parsed.service,
+                parsed.username
+              )
+              found = !!creator
+              if (found)
+                process.stdout.write(` found (id="${creator.name || parsed.username}")\n`)
+              else process.stdout.write(' not found (404)\n')
+            } else {
+              // CoomerFans — verify the page exists
+              const { status } = await httpsGet(host, parsed.url)
+              found = status === 200
+              process.stdout.write(found ? ' found\n' : ` HTTP ${status}\n`)
+            }
+
+            if (found) {
               currentUrl = parsed.url
               openInBrowser(currentUrl)
               const confirm = (
@@ -576,8 +631,6 @@ async function run() {
                 if (platform === 'coomer') savedCoomer = true
                 if (platform === 'kemono') savedKemono = true
               }
-            } else {
-              process.stdout.write(' not found (404)\n')
             }
           } catch (err) {
             process.stdout.write(` error: ${err.message}\n`)
