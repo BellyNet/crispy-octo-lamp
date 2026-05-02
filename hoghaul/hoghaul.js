@@ -1674,6 +1674,7 @@ async function fetchCoomerFansPosts(source, options) {
   await resolveCoomerFansCreator(source)
   const posts = []
   let page = options.startPage
+  const postLimit = pLimit(options.postConcurrency || 1)
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -1693,18 +1694,27 @@ async function fetchCoomerFansPosts(source, options) {
         ? postLinks.slice(0, Math.max(options.maxPosts - posts.length, 0))
         : postLinks
 
-    for (const post of selectedPostLinks) {
-      console.log(`Loading coomerfans post ${post.id}`)
-      const { html: postHtml } = await fetchHtml(post.url)
-      const mediaEntries = parseCoomerFansMediaEntries(source, post, postHtml)
-      posts.push({
-        id: post.id,
-        url: post.url,
-        title: mediaEntries[0]?.title || null,
-        published: mediaEntries[0]?.uploadedDate || null,
-        mediaEntries,
-      })
-    }
+    const pagePosts = await Promise.all(
+      selectedPostLinks.map((post) =>
+        postLimit(async () => {
+          console.log(`Loading coomerfans post ${post.id}`)
+          const { html: postHtml } = await fetchHtml(post.url)
+          const mediaEntries = parseCoomerFansMediaEntries(
+            source,
+            post,
+            postHtml
+          )
+          return {
+            id: post.id,
+            url: post.url,
+            title: mediaEntries[0]?.title || null,
+            published: mediaEntries[0]?.uploadedDate || null,
+            mediaEntries,
+          }
+        })
+      )
+    )
+    posts.push(...pagePosts)
 
     if (
       Number.isFinite(options.maxPosts) &&
@@ -2237,6 +2247,7 @@ async function run() {
       'browser-profile',
       'browser-connect',
       'browser-validate-ms',
+      'post-concurrency',
       'image-concurrency',
       'video-concurrency',
     ],
@@ -2309,7 +2320,7 @@ async function run() {
   }
   if (!inputUrl) {
     console.error(
-      'Usage: npm run hoghaul -- "<coomer-or-kemono-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--image-concurrency=3] [--video-concurrency=2]'
+      'Usage: npm run hoghaul -- "<coomer-or-kemono-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
     )
     process.exitCode = 1
     return
@@ -2327,6 +2338,12 @@ async function run() {
       process.env.npm_config_image_concurrency ||
       process.env.HOGHAUL_IMAGE_CONCURRENCY,
     source.site === 'coomerfans' ? 3 : 6
+  )
+  const postConcurrency = parsePositiveInteger(
+    argv['post-concurrency'] ||
+      process.env.npm_config_post_concurrency ||
+      process.env.HOGHAUL_POST_CONCURRENCY,
+    source.site === 'coomerfans' ? 8 : 1
   )
   const videoConcurrency = parsePositiveInteger(
     argv['video-concurrency'] ||
@@ -2363,7 +2380,12 @@ async function run() {
     return
   }
 
-  const posts = await fetchPosts(source, { startPage, endPage, maxPosts })
+  const posts = await fetchPosts(source, {
+    startPage,
+    endPage,
+    maxPosts,
+    postConcurrency,
+  })
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
   const mediaEntries = selectedPosts.flatMap((post) =>
@@ -2425,6 +2447,7 @@ async function run() {
   console.log(
     `Download concurrency: ${imageConcurrency} image/gif, ${videoConcurrency} video`
   )
+  console.log(`Post fetch concurrency: ${postConcurrency}`)
 
   startRunLog(modelName, inputUrl, folders, keepHistory)
   appendRunEvent('source_posts_loaded', {

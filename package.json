@@ -17,6 +17,7 @@
     "lint:fix": "eslint . --ext .js --fix",
     "format": "prettier . --write",
     "hoghaul": "node hoghaul/hoghaul.js",
+    "hoghaul:all-coomerfans": "node hoghaul/run-all-coomerfans.js",
     "milkmaid": "node milkmaid/milkmaid.js",
     "backfill:seen-media": "node milkmaid/backfill-seen-media-index.js",
     "repair:stufferdb": "node milkmaid/repair-stufferdb-models.js --scrape",
