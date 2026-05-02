@@ -23,9 +23,11 @@ const {
   saveVisualHashCache,
   getVisualHashFromBuffer,
   getVisualHashFromVideoPath,
+  getVisualHashDistance,
   isVisualDupe,
   addVisualHash,
   getVisualHashRecord,
+  getVisualHashEntries,
 } = require('../scrapyard/visualHasher')
 const {
   loadBitwiseHashCache,
@@ -60,6 +62,8 @@ let queuedVideoCount = 0
 let convertedGifCount = 0
 let savedBytes = 0
 let browserMediaDownloader = null
+const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
+const pendingImageVisualClaims = new Map()
 
 function sanitize(name) {
   return String(name || '')
@@ -158,6 +162,43 @@ function findCanonicalModelName(registry, rawName) {
   return null
 }
 
+function findCanonicalModelNameBySource(registry, sourceInfo) {
+  const normalizedUrl = String(sourceInfo?.inputUrl || '').trim()
+  const normalizedSite = String(sourceInfo?.site || '').trim()
+  const normalizedService = String(sourceInfo?.service || '').trim()
+  const normalizedUserId = String(sourceInfo?.userId || '').trim()
+
+  for (const [canonicalName, entry] of Object.entries(registry || {})) {
+    const sources =
+      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+
+    for (const [siteKey, sourceList] of Object.entries(sources)) {
+      if (normalizedSite && siteKey !== normalizedSite) continue
+
+      for (const source of Array.isArray(sourceList) ? sourceList : []) {
+        const sourceUrl = String(source?.url || '').trim()
+        const sourceService = String(source?.service || '').trim()
+        const sourceUserId = String(source?.userId || '').trim()
+
+        if (normalizedUrl && sourceUrl === normalizedUrl) {
+          return canonicalName
+        }
+
+        if (
+          normalizedService &&
+          normalizedUserId &&
+          sourceService === normalizedService &&
+          sourceUserId === normalizedUserId
+        ) {
+          return canonicalName
+        }
+      }
+    }
+  }
+
+  return null
+}
+
 function upsertHoghaulSource(entry, sourceInfo) {
   const sourceKey = sourceInfo.site
   const now = new Date().toISOString()
@@ -193,10 +234,19 @@ function resolveAndTrackModel(rawName, sourceInfo, canonicalOverride) {
   const registry = loadModelRegistry()
   const cleanedRawName = sanitize(rawName) || 'unknown_model'
   const cleanedOverride = sanitize(canonicalOverride)
+  const existingCanonicalBySource = findCanonicalModelNameBySource(
+    registry,
+    sourceInfo
+  )
   const existingCanonical = cleanedOverride
     ? findCanonicalModelName(registry, cleanedOverride)
-    : findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName = existingCanonical || cleanedOverride || cleanedRawName
+    : existingCanonicalBySource ||
+      findCanonicalModelName(registry, cleanedRawName)
+  const canonicalName =
+    existingCanonical ||
+    existingCanonicalBySource ||
+    cleanedOverride ||
+    cleanedRawName
 
   registry[canonicalName] = ensureModelEntryShape(
     registry[canonicalName],
@@ -304,6 +354,88 @@ function getVisualDuplicationRecord(visualHash) {
     activeRefs,
     isDuplicate: activeRefs.length > 0 && isVisualDupe(visualHash),
   }
+}
+
+function isSameModelRef(modelName, relativePath) {
+  return String(relativePath || '').startsWith(`${modelName}/`)
+}
+
+function getFuzzyVisualDuplicationRecord(modelName, visualHash, maxDistance) {
+  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
+    return null
+  }
+
+  let bestMatch = null
+  for (const entry of getVisualHashEntries()) {
+    const candidateHash = String(entry?.hash || '')
+    const distance = getVisualHashDistance(visualHash, candidateHash)
+    if (distance === null || distance > maxDistance) continue
+
+    const activeRefs = getActiveRecordRefs(entry).filter((relativePath) =>
+      isSameModelRef(modelName, relativePath)
+    )
+    if (activeRefs.length === 0) continue
+
+    if (
+      !bestMatch ||
+      distance < bestMatch.distance ||
+      (distance === bestMatch.distance &&
+        candidateHash.localeCompare(bestMatch.matchedHash) < 0)
+    ) {
+      bestMatch = {
+        record: entry,
+        activeRefs,
+        distance,
+        matchedHash: candidateHash,
+        isDuplicate: true,
+      }
+    }
+  }
+
+  return bestMatch
+}
+
+function getPendingImageVisualDuplicate(modelName, visualHash, maxDistance) {
+  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
+    return null
+  }
+
+  let bestMatch = null
+  for (const claim of pendingImageVisualClaims.values()) {
+    if (!claim || claim.modelName !== modelName) continue
+    const distance = getVisualHashDistance(visualHash, claim.visualHash)
+    if (distance === null || distance > maxDistance) continue
+    if (
+      !bestMatch ||
+      distance < bestMatch.distance ||
+      (distance === bestMatch.distance &&
+        claim.relativePath.localeCompare(bestMatch.activeRefs[0]) < 0)
+    ) {
+      bestMatch = {
+        activeRefs: [claim.relativePath],
+        distance,
+        matchedHash: claim.visualHash,
+        isDuplicate: true,
+      }
+    }
+  }
+
+  return bestMatch
+}
+
+function reservePendingImageVisualClaim(modelName, relativePath, visualHash) {
+  const claimKey = `${modelName}:${relativePath}`
+  pendingImageVisualClaims.set(claimKey, {
+    modelName,
+    relativePath,
+    visualHash,
+  })
+  return claimKey
+}
+
+function releasePendingImageVisualClaim(claimKey) {
+  if (!claimKey) return
+  pendingImageVisualClaims.delete(claimKey)
 }
 
 function buildHashMetadata(
@@ -1698,7 +1830,7 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
   return response.buffer
 }
 
-function recordDuplicate(entry, savedPath, reason, folders) {
+function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
   duplicateCount += 1
   if (currentRunLog) currentRunLog.counters.duplicates += 1
   appendRunEvent(reason, {
@@ -1706,6 +1838,7 @@ function recordDuplicate(entry, savedPath, reason, folders) {
     mediaUrl: entry.mediaUrl,
     mediaPageUrl: entry.mediaPageUrl,
     savedPath,
+    ...(extra && typeof extra === 'object' ? extra : {}),
   })
   recordSuccessfulSeenMedia(folders.logDir, {
     relativePath: savedPath,
@@ -1768,6 +1901,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
   }
 
   let visualHash = null
+  let visualClaimKey = null
   if (kind === 'image') {
     visualHash = await getVisualHashFromBuffer(buffer)
     const visualMatch = visualHash
@@ -1783,53 +1917,113 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
       console.log(`Visual dupe: ${entry.filename}`)
       return
     }
+
+    const fuzzyMatch = visualHash
+      ? getFuzzyVisualDuplicationRecord(
+          modelName,
+          visualHash,
+          MAX_FUZZY_IMAGE_VISUAL_DISTANCE
+        )
+      : null
+    if (fuzzyMatch?.isDuplicate) {
+      recordDuplicate(
+        entry,
+        fuzzyMatch.activeRefs[0],
+        'duplicate_visual_fuzzy',
+        folders,
+        {
+          visualHash,
+          matchedVisualHash: fuzzyMatch.matchedHash,
+          distance: fuzzyMatch.distance,
+        }
+      )
+      console.log(
+        `Fuzzy visual dupe (${fuzzyMatch.distance}): ${entry.filename}`
+      )
+      return
+    }
+
+    const pendingMatch = visualHash
+      ? getPendingImageVisualDuplicate(
+          modelName,
+          visualHash,
+          MAX_FUZZY_IMAGE_VISUAL_DISTANCE
+        )
+      : null
+    if (pendingMatch?.isDuplicate) {
+      recordDuplicate(
+        entry,
+        pendingMatch.activeRefs[0],
+        'duplicate_visual_pending',
+        folders,
+        {
+          visualHash,
+          matchedVisualHash: pendingMatch.matchedHash,
+          distance: pendingMatch.distance,
+        }
+      )
+      console.log(
+        `Pending visual dupe (${pendingMatch.distance}): ${entry.filename}`
+      )
+      return
+    }
+
+    visualClaimKey = reservePendingImageVisualClaim(
+      modelName,
+      relativePath,
+      visualHash
+    )
   }
 
-  fs.writeFileSync(finalPath, buffer)
-  const recordedDate = await mediaDates.recordImageDates(
-    path.join(datasetDir, modelName),
-    bucket,
-    entry.filename,
-    buffer,
-    entry.uploadedDate
-  )
-  const fileDate = applyFileTimestamp(
-    finalPath,
-    parseResolvedDate(recordedDate?.date) || entry.uploadedDate
-  )
-  const metadata = buildHashMetadata(
-    modelName,
-    finalPath,
-    kind === 'gif' ? 'gif' : 'image',
-    buffer.length,
-    fileDate
-  )
+  try {
+    fs.writeFileSync(finalPath, buffer)
+    const recordedDate = await mediaDates.recordImageDates(
+      path.join(datasetDir, modelName),
+      bucket,
+      entry.filename,
+      buffer,
+      entry.uploadedDate
+    )
+    const fileDate = applyFileTimestamp(
+      finalPath,
+      parseResolvedDate(recordedDate?.date) || entry.uploadedDate
+    )
+    const metadata = buildHashMetadata(
+      modelName,
+      finalPath,
+      kind === 'gif' ? 'gif' : 'image',
+      buffer.length,
+      fileDate
+    )
 
-  addBitwiseHash(hash, metadata)
-  if (visualHash) addVisualHash(visualHash, metadata)
-  saveBitwiseHashCache()
-  if (visualHash) saveVisualHashCache()
+    addBitwiseHash(hash, metadata)
+    if (visualHash) addVisualHash(visualHash, metadata)
+    saveBitwiseHashCache()
+    if (visualHash) saveVisualHashCache()
 
-  successCount += 1
-  savedBytes += buffer.length
-  if (currentRunLog) {
-    currentRunLog.counters.saved += 1
-    currentRunLog.transfer.savedBytes += buffer.length
+    successCount += 1
+    savedBytes += buffer.length
+    if (currentRunLog) {
+      currentRunLog.counters.saved += 1
+      currentRunLog.transfer.savedBytes += buffer.length
+    }
+    recordSuccessfulSeenMedia(folders.logDir, {
+      relativePath,
+      filename: entry.filename,
+      mediaUrl: entry.mediaUrl,
+      mediaPageUrl: null,
+    })
+    appendRunEvent(kind === 'gif' ? 'saved_gif' : 'saved_image', {
+      modelName,
+      filename: entry.filename,
+      savedPath: relativePath,
+      hash,
+      visualHash,
+    })
+    console.log(`Saved ${kind}: ${entry.filename}`)
+  } finally {
+    releasePendingImageVisualClaim(visualClaimKey)
   }
-  recordSuccessfulSeenMedia(folders.logDir, {
-    relativePath,
-    filename: entry.filename,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrl: null,
-  })
-  appendRunEvent(kind === 'gif' ? 'saved_gif' : 'saved_image', {
-    modelName,
-    filename: entry.filename,
-    savedPath: relativePath,
-    hash,
-    visualHash,
-  })
-  console.log(`Saved ${kind}: ${entry.filename}`)
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
@@ -2354,12 +2548,6 @@ async function run() {
   saveBitwiseHashCache()
   saveVisualHashCache()
 
-  if (skipNasSync) {
-    console.log('NAS sync skipped by --skip-nas-sync')
-  } else {
-    await syncToNAS(modelName)
-  }
-
   finalizeRunLog({
     successCount,
     duplicateCount,
@@ -2371,6 +2559,12 @@ async function run() {
     mediaCount: selectedMedia.length,
     sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
   })
+
+  if (skipNasSync) {
+    console.log('NAS sync skipped by --skip-nas-sync')
+  } else {
+    await syncToNAS(modelName)
+  }
 
   console.log(
     `Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
