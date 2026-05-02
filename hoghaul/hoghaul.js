@@ -162,9 +162,15 @@ function findCanonicalModelName(registry, rawName) {
   return null
 }
 
+function getSourceRegistryKey(site) {
+  return site === 'coomerfans' ? 'coomer' : site
+}
+
 function findCanonicalModelNameBySource(registry, sourceInfo) {
   const normalizedUrl = String(sourceInfo?.inputUrl || '').trim()
-  const normalizedSite = String(sourceInfo?.site || '').trim()
+  const normalizedSite = String(
+    getSourceRegistryKey(String(sourceInfo?.site || '').trim())
+  ).trim()
   const normalizedService = String(sourceInfo?.service || '').trim()
   const normalizedUserId = String(sourceInfo?.userId || '').trim()
 
@@ -200,7 +206,7 @@ function findCanonicalModelNameBySource(registry, sourceInfo) {
 }
 
 function upsertHoghaulSource(entry, sourceInfo) {
-  const sourceKey = sourceInfo.site
+  const sourceKey = getSourceRegistryKey(sourceInfo.site)
   const now = new Date().toISOString()
   if (!entry.sources) entry.sources = {}
   if (!Array.isArray(entry.sources[sourceKey])) entry.sources[sourceKey] = []
