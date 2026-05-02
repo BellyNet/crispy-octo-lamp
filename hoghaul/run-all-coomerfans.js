@@ -65,7 +65,7 @@ function main() {
       'keep-history': true,
       'post-concurrency': '8',
       'image-concurrency': '6',
-      'video-concurrency': '3',
+      'video-concurrency': '6',
       'delay-ms': '0',
     },
   })

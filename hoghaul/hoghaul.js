@@ -2286,7 +2286,7 @@ async function run() {
     argv['video-concurrency'] ||
       process.env.npm_config_video_concurrency ||
       process.env.HOGHAUL_VIDEO_CONCURRENCY,
-    3
+    6
   )
   const { startPage, endPage } = parsePageRange(
     argv.pages || process.env.npm_config_pages
