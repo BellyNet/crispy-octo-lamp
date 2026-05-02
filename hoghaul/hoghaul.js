@@ -59,7 +59,6 @@ let successCount = 0
 let duplicateCount = 0
 let errorCount = 0
 let queuedVideoCount = 0
-let convertedGifCount = 0
 let savedBytes = 0
 let browserMediaDownloader = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
@@ -523,7 +522,6 @@ function startRunLog(modelName, inputUrl, folders, keepHistory) {
       saved: 0,
       duplicates: 0,
       queuedVideos: 0,
-      convertedGifs: 0,
       failures: 0,
     },
     transfer: {
@@ -1777,62 +1775,6 @@ function classifyMedia(filename) {
   return { ext, kind: 'unknown' }
 }
 
-function getVideoDuration(filePath) {
-  return new Promise((resolve) => {
-    const cmd = `ffprobe -v error -show_entries format=duration -of csv=p=0 "${filePath}"`
-    exec(cmd, (err, stdout) => {
-      if (err) return resolve(null)
-      const duration = Number.parseFloat(stdout.trim())
-      resolve(Number.isFinite(duration) ? duration : null)
-    })
-  })
-}
-
-function convertShortMp4ToGif(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=15,scale=480:-1:flags=lanczos" "${outputPath}"`
-    exec(cmd, (err) => (err ? reject(err) : resolve()))
-  })
-}
-
-async function maybeCreateShortVideoGif(
-  modelName,
-  folders,
-  videoPath,
-  filename,
-  uploadedDate
-) {
-  const stat = fs.statSync(videoPath)
-  const duration = await getVideoDuration(videoPath)
-  if (
-    !Number.isFinite(duration) ||
-    duration > 6 ||
-    stat.size >= 5 * 1024 * 1024
-  ) {
-    return null
-  }
-
-  const gifName = filename.replace(/\.(mp4|m4v|webm|mov)$/i, '.gif')
-  const gifPath = path.join(folders.createGifFolder(), gifName)
-  if (fs.existsSync(gifPath)) return null
-
-  await convertShortMp4ToGif(videoPath, gifPath)
-  const recordedDate = await mediaDates.recordVideoDates(
-    path.join(datasetDir, modelName),
-    'gif',
-    gifName,
-    gifPath,
-    uploadedDate
-  )
-  applyFileTimestamp(
-    gifPath,
-    parseResolvedDate(recordedDate?.date) || uploadedDate
-  )
-  convertedGifCount += 1
-  if (currentRunLog) currentRunLog.counters.convertedGifs += 1
-  return gifName
-}
-
 async function downloadMediaBuffer(mediaUrl, entry = {}) {
   if (browserMediaDownloader) {
     return browserMediaDownloader.download(mediaUrl, entry)
@@ -2148,21 +2090,6 @@ async function saveVideoMedia(modelName, folders, entry) {
     saveBitwiseHashCache()
     saveVisualHashCache()
 
-    const gifName = await maybeCreateShortVideoGif(
-      modelName,
-      folders,
-      finalPath,
-      entry.filename,
-      entry.uploadedDate
-    ).catch((err) => {
-      appendRunEvent('short_video_gif_error', {
-        modelName,
-        filename: entry.filename,
-        error: err.message,
-      })
-      return null
-    })
-
     successCount += 1
     savedBytes += stat.size
     if (currentRunLog) {
@@ -2182,7 +2109,6 @@ async function saveVideoMedia(modelName, folders, entry) {
       savedPath: relativePath,
       hash,
       visualHash,
-      convertedGif: gifName,
     })
     console.log(`Saved video: ${entry.filename}`)
   } catch (err) {
@@ -2567,7 +2493,6 @@ async function run() {
     duplicateCount,
     errorCount,
     queuedVideoCount,
-    convertedGifCount,
     savedBytes,
     postCount: selectedPosts.length,
     mediaCount: selectedMedia.length,
@@ -2582,7 +2507,6 @@ async function run() {
     duplicateCount,
     errorCount,
     queuedVideoCount,
-    convertedGifCount,
     savedBytes,
     postCount: selectedPosts.length,
     mediaCount: selectedMedia.length,

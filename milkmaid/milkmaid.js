@@ -804,7 +804,6 @@ function startRunLog(modelName, inputUrl, folders) {
       saved: 0,
       duplicates: 0,
       queuedVideos: 0,
-      convertedGifs: 0,
       failures: 0,
     },
     transfer: {
@@ -1806,13 +1805,6 @@ function getVideoDuration(filePath) {
       const duration = parseFloat(stdout.trim())
       resolve(isNaN(duration) ? 9999 : duration)
     })
-  })
-}
-
-function convertShortMp4ToGif(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=15,scale=480:-1:flags=lanczos" "${outputPath}"`
-    exec(cmd, (err) => (err ? reject(err) : resolve()))
   })
 }
 
