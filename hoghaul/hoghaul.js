@@ -47,6 +47,9 @@ const slopvaultRoot = path.join(
 )
 const datasetDir = path.join(slopvaultRoot, 'dataset')
 const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const nasDatasetDir = path.resolve(
+  String(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+)
 const registryPath = path.join(rootDir, 'model_aliases.json')
 const API_PAGE_SIZE = 50
 const API_ACCEPT_HEADER = 'text/css'
@@ -317,12 +320,20 @@ function getQuarantineMirrorPath(filePath) {
   )
 }
 
+function getNasMirrorPath(filePath) {
+  return path.join(
+    nasDatasetDir,
+    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
+  )
+}
+
 function isQuarantinedPath(filePath) {
   return fs.existsSync(getQuarantineMirrorPath(filePath))
 }
 
 function existsForRepair(filePath) {
-  return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
+  if (fs.existsSync(filePath)) return !isQuarantinedPath(filePath)
+  return fs.existsSync(getNasMirrorPath(filePath))
 }
 
 function getRecordRefs(record) {

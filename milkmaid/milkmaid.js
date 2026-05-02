@@ -369,7 +369,9 @@ function inferModelNameFromPageInfo(pageInfo) {
 }
 
 function parseStufferDbSourceUrl(inputUrl) {
-  const normalizedUrl = String(inputUrl || '').replace(/&acs=[^&]+/gi, '').trim()
+  const normalizedUrl = String(inputUrl || '')
+    .replace(/&acs=[^&]+/gi, '')
+    .trim()
   if (!normalizedUrl) return null
 
   const categoryId = normalizedUrl.match(/\/category\/?(\d+)/i)?.[1]
@@ -475,6 +477,9 @@ const slopvaultRoot = path.join(
 )
 const datasetDir = path.join(slopvaultRoot, 'dataset')
 const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const nasDatasetDir = path.resolve(
+  String(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+)
 const quarantineManifestPath = path.join(
   slopvaultRoot,
   'quarantine',
@@ -525,7 +530,10 @@ function recordLazySpeedSample(bytes, at = Date.now()) {
   const cutoff = at - LAZY_SPEED_WINDOW_MS
   lazySpeedSamples = lazySpeedSamples.filter((sample) => sample.at >= cutoff)
 
-  const totalBytes = lazySpeedSamples.reduce((sum, sample) => sum + sample.bytes, 0)
+  const totalBytes = lazySpeedSamples.reduce(
+    (sum, sample) => sum + sample.bytes,
+    0
+  )
   const oldestAt = lazySpeedSamples[0]?.at || at
   const spanSeconds = Math.max((at - oldestAt) / 1000, 0.001)
   lazyInstantSpeedBytesPerSecond = totalBytes / spanSeconds
@@ -587,6 +595,13 @@ function getDatasetRelativePath(filePath) {
 function getQuarantineMirrorPath(filePath) {
   return path.join(
     quarantineDatasetDir,
+    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
+  )
+}
+
+function getNasMirrorPath(filePath) {
+  return path.join(
+    nasDatasetDir,
     getDatasetRelativePath(filePath).replace(/\//g, path.sep)
   )
 }
@@ -728,7 +743,8 @@ function normalizePath(filePath) {
 }
 
 function existsForRepair(filePath) {
-  return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
+  if (fs.existsSync(filePath)) return !isQuarantinedPath(filePath)
+  return fs.existsSync(getNasMirrorPath(filePath))
 }
 
 function getRecordRefs(record) {
@@ -964,10 +980,7 @@ function writeRunErrorArtifacts(summary) {
         : ''
       const actionMarkup = error.tailSalvage
         ? `<div class="action-stack">
-            ${renderCopyButton(
-              error.tailSalvage.command,
-              'Copy tail chop cmd'
-            )}
+            ${renderCopyButton(error.tailSalvage.command, 'Copy tail chop cmd')}
             ${renderErrorLink(error.tailSalvage.fileUrl, 'quarantine file')}
           </div>`
         : '<span class="muted">-</span>'
@@ -1731,8 +1744,9 @@ async function extractStufferDbComments(page) {
               ?.textContent?.replace(/^•\s*/, '')
               .trim() || null
           const spoilerText =
-            commentEl.querySelector('.comment-spoiler-text')?.textContent?.trim() ||
-            ''
+            commentEl
+              .querySelector('.comment-spoiler-text')
+              ?.textContent?.trim() || ''
           const mainText =
             commentEl
               .querySelector('.comment-text-p, .comment-text, .comment-body')
@@ -2639,16 +2653,16 @@ async function scrapeGallery(browser, url, modelName, folders) {
     logAndProgress(`Lazy downloading videos: ${lazyVideoQueue.length}`)
     resetProgressBar(null, 'lazy')
     lastDraw = 0
-  totalLazyBytes = 0
-  lazyBytesDownloaded = 0
-  lazyDownloadStartedAt = Date.now()
-  lazyActiveDownloads = 0
-  lazyCompletedDownloads = 0
-  lazyInstantSpeedBytesPerSecond = 0
-  lazyLastChunkAt = 0
-  lazySpeedSamples = []
-  setRunLazyExpectedBytes(0)
-  setProgressMode('lazy')
+    totalLazyBytes = 0
+    lazyBytesDownloaded = 0
+    lazyDownloadStartedAt = Date.now()
+    lazyActiveDownloads = 0
+    lazyCompletedDownloads = 0
+    lazyInstantSpeedBytesPerSecond = 0
+    lazyLastChunkAt = 0
+    lazySpeedSamples = []
+    setRunLazyExpectedBytes(0)
+    setProgressMode('lazy')
 
     // Pre-fetch expected file sizes (best-effort)
     await Promise.all(
@@ -2672,25 +2686,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const percent = totalLazyBytes
         ? (lazyBytesDownloaded / totalLazyBytes) * 100
         : 0
-    const elapsedSeconds = lazyDownloadStartedAt
-      ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
-      : 0
-    const averageSpeedBytesPerSecond = elapsedSeconds
-      ? lazyBytesDownloaded / elapsedSeconds
-      : 0
-    const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
-    const etaSeconds =
-      lazyInstantSpeedBytesPerSecond > 0
-        ? remainingBytes / lazyInstantSpeedBytesPerSecond
-        : averageSpeedBytesPerSecond > 0
-          ? remainingBytes / averageSpeedBytesPerSecond
-          : null
+      const elapsedSeconds = lazyDownloadStartedAt
+        ? Math.max((Date.now() - lazyDownloadStartedAt) / 1000, 0.001)
+        : 0
+      const averageSpeedBytesPerSecond = elapsedSeconds
+        ? lazyBytesDownloaded / elapsedSeconds
+        : 0
+      const remainingBytes = Math.max(totalLazyBytes - lazyBytesDownloaded, 0)
+      const etaSeconds =
+        lazyInstantSpeedBytesPerSecond > 0
+          ? remainingBytes / lazyInstantSpeedBytesPerSecond
+          : averageSpeedBytesPerSecond > 0
+            ? remainingBytes / averageSpeedBytesPerSecond
+            : null
 
-    logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
-      speedBytesPerSecond: lazyInstantSpeedBytesPerSecond,
-      etaSeconds,
-      activeCount: lazyActiveDownloads,
-      completedCount: lazyCompletedDownloads,
+      logLazyProgress(percent, lazyBytesDownloaded, totalLazyBytes, {
+        speedBytesPerSecond: lazyInstantSpeedBytesPerSecond,
+        etaSeconds,
+        activeCount: lazyActiveDownloads,
+        completedCount: lazyCompletedDownloads,
         totalCount: lazyVideoQueue.length,
         totalTransferredBytes: currentRunLog?.transfer?.transferredBytes || 0,
       })
@@ -3145,8 +3159,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
     }
     logRunSummaryTable(liveSummary)
     if (liveSummary?.errorArtifacts) {
-      console.log(`🧾 Run error report: ${liveSummary.errorArtifacts.latestJsonPath}`)
-      console.log(`🌐 Run error dashboard: ${liveSummary.errorArtifacts.latestHtmlPath}`)
+      console.log(
+        `🧾 Run error report: ${liveSummary.errorArtifacts.latestJsonPath}`
+      )
+      console.log(
+        `🌐 Run error dashboard: ${liveSummary.errorArtifacts.latestHtmlPath}`
+      )
     }
 
     console.log(
