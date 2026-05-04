@@ -32,7 +32,7 @@ const FORCE = !!argv.force
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
-const COOMER_HOST = 'coomer.st'
+const COOMER_HOST = 'coomerfans.com'
 
 // All services Coomer aggregates from
 const SERVICES = [

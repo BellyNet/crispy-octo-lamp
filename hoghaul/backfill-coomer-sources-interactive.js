@@ -34,7 +34,7 @@ const FORCE = !!argv.force
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
-const COOMER_HOST = 'coomer.st'
+const COOMER_HOST = 'coomerfans.com'
 const SERVICES = [
   'onlyfans',
   'fansly',
@@ -143,9 +143,9 @@ async function autoProbeModel(canonicalName, entry) {
  */
 function parseCoomerUrl(input) {
   const str = String(input || '').trim()
-  // https://coomer.st/{service}/user/{username}[/...]
+  // https://coomerfans.com/{service}/user/{username}[/...]
   const m = str.match(
-    /^https?:\/\/(?:www\.)?coomer\.(?:st|party)\/([^/]+)\/user\/([^/?#\s]+)/i
+    /^https?:\/\/(?:www\.)?coomerfans\.com\/([^/]+)\/user\/([^/?#\s]+)/i
   )
   if (!m) return null
   const service = m[1].toLowerCase()
@@ -265,7 +265,8 @@ async function run() {
 
       // ── Manual loop ───────────────────────────────────────────────────────
       const searchUrl = `https://${COOMER_HOST}/artists?q=${encodeURIComponent(canonicalName)}`
-      console.log(`\n  Opening Coomer search: ${searchUrl}`)
+      console.log(`\n  Opening CoomerFans search: ${searchUrl}`)
+
       openInBrowser(searchUrl)
 
       let currentUrl = null
@@ -274,7 +275,7 @@ async function run() {
         console.log(`
   Commands:
     <username>   Test a username against all Coomer services
-    <url>        Paste a full coomer.st URL to validate and save
+    <url>        Paste a full coomerfans.com URL to validate and save
     o            Reopen current URL in browser
     s            Skip this model
     q            Save and quit`)

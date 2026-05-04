@@ -43,7 +43,7 @@ const reportPath = path.join(__dirname, '..', 'batch-probe-report.txt')
 // ─── PLATFORM CONFIG ──────────────────────────────────────────────────────────
 const PLATFORMS = {
   coomer: {
-    host: 'coomer.st',
+    host: 'coomerfans.com',
     label: 'Coomer',
     services: [
       'onlyfans',
@@ -56,9 +56,9 @@ const PLATFORMS = {
       'boosty',
     ],
     profileUrl: (service, username) =>
-      `https://coomer.st/api/v1/${service}/user/${encodeURIComponent(username)}/profile`,
+      `https://coomerfans.com/api/v1/${service}/user/${encodeURIComponent(username)}/profile`,
     userUrl: (service, username) =>
-      `https://coomer.st/${service}/user/${username}`,
+      `https://coomerfans.com/${service}/user/${username}`,
   },
   kemono: {
     host: 'kemono.cr',
