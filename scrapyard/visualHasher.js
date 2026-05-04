@@ -67,7 +67,8 @@ async function getVideoFrameHashesFromPath(videoPath, options = {}) {
   const hash = createHash('md5').update(videoPath).digest('hex')
   const outputPrefix = path.join(tmpDir, `vh_video_${hash}`)
   const streamInfo = await probePrimaryVideoStream(videoPath)
-  const duration = streamInfo?.durationSeconds ?? (await probeVideoDuration(videoPath))
+  const duration =
+    streamInfo?.durationSeconds ?? (await probeVideoDuration(videoPath))
   const timestamps = Array.isArray(options.timestamps)
     ? options.timestamps
     : buildVideoFrameTimestamps(duration)
@@ -197,7 +198,9 @@ function probePrimaryVideoStream(videoPath) {
         const stream = Array.isArray(parsed?.streams) ? parsed.streams[0] : null
         const width = Number(stream?.width)
         const height = Number(stream?.height)
-        const durationSeconds = Number.parseFloat(String(stream?.duration || ''))
+        const durationSeconds = Number.parseFloat(
+          String(stream?.duration || '')
+        )
         resolve({
           width: Number.isFinite(width) ? width : null,
           height: Number.isFinite(height) ? height : null,
@@ -284,7 +287,11 @@ function extractVideoFrameRawYuv420p(inputPath, outputPath, timestampSeconds) {
 
     child.on('error', reject)
     child.on('exit', (code) => {
-      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+      if (
+        code === 0 &&
+        fs.existsSync(outputPath) &&
+        fs.statSync(outputPath).size > 0
+      ) {
         return resolve()
       }
       reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
@@ -332,7 +339,8 @@ async function getVideoFrameHashFromRawYuv(
   frameIndex
 ) {
   if (!streamInfo?.width || !streamInfo?.height) return null
-  if (streamInfo.pixelFormat && streamInfo.pixelFormat !== 'yuv420p') return null
+  if (streamInfo.pixelFormat && streamInfo.pixelFormat !== 'yuv420p')
+    return null
 
   const rawPath = `${outputPrefix}_${frameIndex}.yuv`
   const pngPath = `${outputPrefix}_${frameIndex}_raw.png`
@@ -340,7 +348,11 @@ async function getVideoFrameHashFromRawYuv(
   try {
     await extractVideoFrameRawYuv420p(videoPath, rawPath, timestampSeconds)
     const rawBuffer = fs.readFileSync(rawPath)
-    const rgbBuffer = yuv420pToRgb(rawBuffer, streamInfo.width, streamInfo.height)
+    const rgbBuffer = yuv420pToRgb(
+      rawBuffer,
+      streamInfo.width,
+      streamInfo.height
+    )
     await sharp(rgbBuffer, {
       raw: {
         width: streamInfo.width,
@@ -410,6 +422,31 @@ function clampRgb(value) {
   return value
 }
 
+function getVisualHashDistance(left, right) {
+  const normalizedLeft = String(left || '')
+    .trim()
+    .toLowerCase()
+  const normalizedRight = String(right || '')
+    .trim()
+    .toLowerCase()
+
+  if (!normalizedLeft || !normalizedRight) return null
+  if (normalizedLeft.includes('|') || normalizedRight.includes('|')) return null
+  if (normalizedLeft.length !== normalizedRight.length) return null
+
+  let distance = 0
+  for (let index = 0; index < normalizedLeft.length; index += 1) {
+    const leftNibble = Number.parseInt(normalizedLeft[index], 16)
+    const rightNibble = Number.parseInt(normalizedRight[index], 16)
+    if (!Number.isFinite(leftNibble) || !Number.isFinite(rightNibble)) {
+      return null
+    }
+    distance += (leftNibble ^ rightNibble).toString(2).replace(/0/g, '').length
+  }
+
+  return distance
+}
+
 function isVisualDupe(visualHash) {
   return visualHashStore.has(visualHash)
 }
@@ -436,6 +473,7 @@ module.exports = {
   getVisualHashFromBuffer,
   getVideoFrameHashesFromPath,
   getVisualHashFromVideoPath,
+  getVisualHashDistance,
   isVisualDupe,
   addVisualHash,
   getVisualHashRecord,
