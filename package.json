@@ -47,6 +47,7 @@
     "validate:model-hashes": "node scrapyard/validateModelHashes.js",
     "validate:quarantine": "node scrapyard/validateQuarantineState.js",
     "dashboard": "node dashboard/server.js",
+    "dashboard:prebuild": "node dashboard/build-meta-cache.js",
     "review:orientation": "node dashboard/orientation-review-server.js",
     "backfill:dates": "node milkmaid/backfill-exif-dates.js",
     "backfill:coomer": "node hoghaul/backfill-coomer-sources.js",
