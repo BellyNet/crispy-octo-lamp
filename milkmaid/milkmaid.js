@@ -2568,7 +2568,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
     const modelSelection = modelOverride
       ? {
-          aliasName: modelOverride,
+          aliasName: sanitize(inferredRawName) || modelOverride,
           canonicalName: modelOverride,
         }
       : await promptForModelSelection(aliasMapPath, inferredRawName)
@@ -2577,7 +2577,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     if (modelOverride) {
       console.log(
-        `🏷️ Using manual model override: ${modelOverride} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
+        `🏷️ Using manual model override: alias ${rawName} -> bucket ${canonicalModelName} (breadcrumb inferred ${inferredRawName || 'unknown_cow'})`
       )
     } else {
       console.log(

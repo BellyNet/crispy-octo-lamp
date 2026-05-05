@@ -22,9 +22,99 @@ Notes:
 - If the detected page alias is wrong, it now asks for:
   - the page alias as shown on the site
   - the canonical model bucket that alias belongs under
+- To force a StufferDB scrape into a specific existing model bucket, use:
+
+```powershell
+npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyadriana
+```
+
+  That keeps the detected page alias for registry tracking, but saves the scrape into the `heyyadriana` dataset bucket.
 - `milkmaid` writes into the local Slopvault dataset first.
 
-### 2. Repair local model folders
+### 2. Scrape Coomer / Kemono / mixed-source models
+
+Single model, direct URL:
+
+```powershell
+npm run hoghaul -- "https://coomerfans.com/u/onlyfans/333819/cakedupkayyla" --model=cakedupkayyla
+```
+
+Single model, rerun through the registry batch path:
+
+```powershell
+npm run hoghaul:all-coomer -- --only-models=cakedupkayyla
+npm run hoghaul:all-kemono -- --only-models=satanpanties666
+```
+
+All models:
+
+```powershell
+npm run update:all-models
+```
+
+Source-specific batches:
+
+```powershell
+npm run update:stufferdb
+npm run hoghaul:all-coomer
+npm run hoghaul:all-kemono
+```
+
+Interactive launcher:
+
+```powershell
+npm run scrape:interactive
+```
+
+Notes:
+- CoomerFans URLs still live under `sources.coomer` in `model_aliases.json`.
+- Hoghaul repeat scrapes reuse seen-media, existing files, and hash checks, so reruns should skip already handled media quickly.
+- Useful Hoghaul tuning flags:
+
+```powershell
+npm run hoghaul:all-coomer -- --only-models=bbw_bonnie --video-concurrency=6 --image-concurrency=6 --post-concurrency=8
+```
+
+### 3. Force rerun a model
+
+Use these when you want to revisit a model even if it already exists in the dataset.
+
+Force rerun a StufferDB URL into a specific canonical model:
+
+```powershell
+npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyadriana
+```
+
+Rerun one StufferDB model from registry sources:
+
+```powershell
+npm run update:stufferdb -- --models=heyyadriana
+```
+
+Rerun one Coomer model from registry sources:
+
+```powershell
+npm run hoghaul:all-coomer -- --only-models=heyyadriana
+```
+
+Rerun one Kemono model from registry sources:
+
+```powershell
+npm run hoghaul:all-kemono -- --only-models=heyyadriana
+```
+
+Local repair-only revisit without a fresh scrape:
+
+```powershell
+npm run repair -- --model=heyyadriana
+```
+
+Notes:
+- `--model=<name>` on `milkmaid` forces the canonical dataset bucket.
+- `--only-models=` on Hoghaul batch runs narrows the batch to one or more canonical model names.
+- `update:stufferdb -- --models=...` reruns registry-backed StufferDB models without needing to paste the source URL again.
+
+### 4. Repair local model folders
 
 ```powershell
 npm run repair
@@ -50,7 +140,7 @@ npm run repair -- --start-from=laurenlushh
 npm run repair -- --skip-nas-sync
 ```
 
-### 3. Repair and scrape a StufferDB batch
+### 5. Repair and scrape a StufferDB batch
 
 ```powershell
 npm run repair:stufferdb -- --model=tianastummy
@@ -77,7 +167,7 @@ To rebuild seen-media cache from existing historical milkmaid logs first, use:
 npm run backfill:seen-media
 ```
 
-### 4. Run session repair for quarantined tail-decode videos
+### 6. Run session repair for quarantined tail-decode videos
 
 ```powershell
 npm run repair:tail-decode
@@ -103,7 +193,7 @@ npm run repair:tail-decode -- --all
 npm run repair:tail-decode -- --limit=20
 ```
 
-### 5. Review repair failures
+### 7. Review repair failures
 
 ```powershell
 npm run report:repair-failures
@@ -113,7 +203,7 @@ Outputs:
 - `tmp/repair-stufferdb/repair-failure-summary-latest.json`
 - `tmp/repair-stufferdb/repair-failure-summary-latest.md`
 
-### 6. Open the main model viewer
+### 8. Open the main model viewer
 
 ```powershell
 npm run dashboard
@@ -121,7 +211,7 @@ npm run dashboard
 
 Use this to browse a model’s media and metadata.
 
-### 7. Review duplicate files
+### 9. Review duplicate files
 
 ```powershell
 npm run review:slopvault-duplicates-express
@@ -136,7 +226,7 @@ npm run manifest:slopvault-duplicates
 npm run review:slopvault-duplicates
 ```
 
-### 8. Review image orientation manually
+### 10. Review image orientation manually
 
 ```powershell
 npm run review:orientation
@@ -150,7 +240,7 @@ Features:
 - `Space` or `Right Arrow` accept and move next
 - `Left Arrow` previous
 
-### 9. Audit the Slopvault dataset
+### 11. Audit the Slopvault dataset
 
 ```powershell
 npm run audit:slopvault
@@ -163,7 +253,7 @@ Use this for:
 - run-error review
 - duplicate and audit findings
 
-### 10. Rebuild or repair model hash data
+### 12. Rebuild or repair model hash data
 
 ```powershell
 npm run prune:model-hashes -- --model=model_name
@@ -173,7 +263,7 @@ npm run validate:model-hashes -- --model=model_name
 
 Use these when a model’s hash stores drift from the actual files on disk.
 
-### 11. Backfill support data
+### 13. Backfill support data
 
 ```powershell
 npm run backfill:sources
@@ -236,8 +326,18 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
   - scrape a StufferDB gallery/category into the local dataset
 - `npm run hoghaul`
   - scrape Coomer-backed sources
+- `npm run hoghaul:all-coomerfans`
+  - batch scrape all `coomerfans.com` URLs stored under `sources.coomer`
+- `npm run hoghaul:all-coomer`
+  - batch scrape all `sources.coomer` entries
+- `npm run hoghaul:all-kemono`
+  - batch scrape all `sources.kemono` entries
 - `npm run update:stufferdb`
   - refresh/update StufferDB models from the registry
+- `npm run update:all-models`
+  - run all configured StufferDB, Coomer, and Kemono updates
+- `npm run scrape:interactive`
+  - interactive launcher for all-model, per-source, or pasted-URL scrapes
 - `npm run repair`
   - local dataset repair pass across model folders, with prune/backfill/validate and NAS sync
 - `npm run repair:stufferdb`
@@ -305,7 +405,8 @@ If you are unsure what to run:
    - `.\update-local.ps1`
 2. Run the scrape or repair you need:
    - `npm run milkmaid -- "<url>"`
-  - or `npm run repair`
+   - `npm run hoghaul -- "<url>" --model=model_name`
+   - or `npm run repair`
 3. Review anything suspicious:
    - `npm run review:slopvault`
    - `npm run review:slopvault-duplicates-express`
