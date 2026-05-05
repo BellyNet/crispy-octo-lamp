@@ -60,6 +60,9 @@ const {
   logScrollingMessage,
 } = require('../stuffinglogger')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
+const {
+  resolveAndTrackModel: resolveAndTrackModelInRegistry,
+} = require('../scrapyard/modelRegistry')
 
 function sanitize(name) {
   return String(name || '')
@@ -199,33 +202,13 @@ function resolveAndTrackModel(
   sourceUrl,
   canonicalOverride
 ) {
-  const registry = loadModelRegistry(registryPath)
-  const cleanedRawName = sanitize(rawName) || 'unknown_cow'
-  const cleanedCanonicalOverride = sanitize(canonicalOverride)
-  const existingCanonical = cleanedCanonicalOverride
-    ? findCanonicalModelName(registry, cleanedCanonicalOverride)
-    : findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName =
-    existingCanonical || cleanedCanonicalOverride || cleanedRawName
-
-  registry[canonicalName] = ensureModelEntryShape(
-    registry[canonicalName],
-    canonicalName
+  return resolveAndTrackModelInRegistry(
+    registryPath,
+    rawName,
+    'stufferdb',
+    sourceUrl,
+    canonicalOverride
   )
-
-  const aliases = registry[canonicalName].aliases
-  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
-    aliases.push(cleanedRawName)
-  }
-
-  registry[canonicalName].aliases = Array.from(
-    new Set(aliases.filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b))
-
-  upsertStufferSource(registry[canonicalName], sourceUrl, cleanedRawName)
-  saveModelRegistry(registryPath, registry)
-
-  return canonicalName
 }
 
 function extractModelNameFromBreadcrumb(anchors) {
@@ -395,6 +378,14 @@ function parseStufferDbSourceUrl(inputUrl) {
   }
 
   return null
+}
+
+function normalizeStufferDbPictureUrl(inputUrl) {
+  return String(inputUrl || '')
+    .replace(/([?&])slideshow(?:=[^&]*)?/gi, '')
+    .replace(/&acs=[^&]+/gi, '')
+    .replace(/[?&]$/, '')
+    .trim()
 }
 
 async function collectChildCategoryUrls(browser, parentUrl) {
@@ -2051,8 +2042,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
         ...new Set(links.map((l) => l.href)),
       ])
+      const uniqueUrls = [
+        ...new Set(urls.map(normalizeStufferDbPictureUrl).filter(Boolean)),
+      ]
 
-      const total = urls.length
+      const total = uniqueUrls.length
 
       setProgressTotal(
         Math.max(global.totalSearchTotal || 1, completedTotal + total)
@@ -2060,13 +2054,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
       const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
       logAndProgress(
-        `📸 ${modelName} - [${mode}] - ${urls.length} media links (tracking ${global.totalSearchTotal})`
+        `📸 ${modelName} - [${mode}] - ${uniqueUrls.length} media links (tracking ${global.totalSearchTotal})`
       )
       appendRunEvent('category_page_loaded', {
         modelName,
         categoryUrl: url,
         mode,
-        mediaLinks: urls.length,
+        mediaLinks: uniqueUrls.length,
         trackedTotal: global.totalSearchTotal || 0,
       })
 
@@ -2084,6 +2078,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const pageLocks = pages.map(() => pLimit(1)) // 🧠 One lock per tab
 
       async function scrapeMediaOnPage(page, mediaPageUrl, i) {
+        mediaPageUrl = normalizeStufferDbPictureUrl(mediaPageUrl)
         totalCount++
         let mediaUrl = null
         let filename = null
@@ -2498,7 +2493,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       }
 
       await Promise.all(
-        urls.map((mediaPageUrl, i) => {
+        uniqueUrls.map((mediaPageUrl, i) => {
           const page = pages[i % pages.length]
           const lock = pageLocks[i % pageLocks.length]
 
