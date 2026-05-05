@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const readline = require('readline')
+const minimist = require('minimist')
 
 const slopvaultRoot = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
@@ -17,8 +18,22 @@ main().catch((err) => {
 })
 
 async function main() {
-  const sourceModel = await askModelName('Source model to fix', 'unknown_cow')
-  const targetModel = await askModelName('Correct target model')
+  const args = minimist(process.argv.slice(2), {
+    string: ['source', 'target'],
+    boolean: ['yes'],
+    alias: {
+      s: 'source',
+      t: 'target',
+      y: 'yes',
+    },
+  })
+
+  const sourceModel = sanitizeModelName(args.source)
+    ? sanitizeModelName(args.source)
+    : await askModelName('Source model to fix', 'unknown_cow')
+  const targetModel = sanitizeModelName(args.target)
+    ? sanitizeModelName(args.target)
+    : await askModelName('Correct target model')
 
   if (!sourceModel || !targetModel) {
     throw new Error('Both source and target models are required.')
@@ -48,10 +63,12 @@ async function main() {
   console.log(`Media files to move: ${mediaFiles.length}`)
   console.log(`Other files to move: ${logFiles.length}`)
 
-  const confirm = await askYesNo(
-    'Proceed with remap, hash ref rewrite, and source cleanup?',
-    true
-  )
+  const confirm = args.yes
+    ? true
+    : await askYesNo(
+        'Proceed with remap, hash ref rewrite, and source cleanup?',
+        true
+      )
   if (!confirm) {
     console.log('Cancelled.')
     return
@@ -59,21 +76,38 @@ async function main() {
 
   fs.mkdirSync(targetRoot, { recursive: true })
 
-  const movedPaths = []
-  for (const filePath of files) {
+  const movePlan = files.map((filePath) => {
     const relativePath = path.relative(sourceRoot, filePath)
     const destinationPath = path.join(targetRoot, relativePath)
+    return {
+      filePath,
+      relativePath,
+      destinationPath,
+      from: normalizePath(path.relative(datasetRoot, filePath)),
+      to: normalizePath(path.relative(datasetRoot, destinationPath)),
+    }
+  })
+
+  const refMap = new Map(movePlan.map((item) => [item.from, item.to]))
+  const movedPaths = []
+  for (const item of movePlan) {
+    const { filePath, destinationPath, from, to } = item
     fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
 
     if (fs.existsSync(destinationPath)) {
-      throw new Error(`Refusing to overwrite existing file: ${destinationPath}`)
+      const handled = handleExistingDestination({
+        filePath,
+        destinationPath,
+        refMap,
+      })
+      if (!handled) {
+        throw new Error(`Refusing to overwrite existing file: ${destinationPath}`)
+      }
+      continue
     }
 
     fs.renameSync(filePath, destinationPath)
-    movedPaths.push({
-      from: normalizePath(path.relative(datasetRoot, filePath)),
-      to: normalizePath(path.relative(datasetRoot, destinationPath)),
-    })
+    movedPaths.push({ from, to })
   }
 
   cleanupEmptyParentDirs(sourceRoot, datasetRoot)
@@ -101,6 +135,44 @@ async function main() {
   console.log(
     '\nNext step: rerun Milkmaid and confirm the correct model when prompted.'
   )
+}
+
+function handleExistingDestination({ filePath, destinationPath, refMap }) {
+  const basename = path.basename(filePath).toLowerCase()
+
+  if (basename === '.media-dates.json') {
+    const source = readJsonFile(filePath, {})
+    const target = readJsonFile(destinationPath, {})
+    const merged = mergeMediaDates(target, source)
+    fs.writeFileSync(destinationPath, JSON.stringify(merged))
+    fs.unlinkSync(filePath)
+    return true
+  }
+
+  if (basename === 'milkmaid-seen-media-index.json') {
+    const source = readJsonFile(filePath, {})
+    const target = readJsonFile(destinationPath, {})
+    const merged = mergeSeenMediaIndexes(target, source, refMap)
+    fs.writeFileSync(destinationPath, JSON.stringify(merged, null, 2) + '\n')
+    fs.unlinkSync(filePath)
+    return true
+  }
+
+  if (
+    basename === 'milkmaid-last-run.json' ||
+    basename === 'milkmaid-run-latest-summary.json'
+  ) {
+    const source = readJsonFile(filePath, null)
+    const target = readJsonFile(destinationPath, null)
+    const preferred = preferRunSummary(target, source)
+    if (preferred !== null) {
+      fs.writeFileSync(destinationPath, JSON.stringify(preferred, null, 2) + '\n')
+    }
+    fs.unlinkSync(filePath)
+    return true
+  }
+
+  return false
 }
 
 function normalizePath(value) {
@@ -180,6 +252,91 @@ function rewriteHashRefs(storePath, movedPaths) {
 
   fs.writeFileSync(storePath, JSON.stringify(parsed))
   return { updatedRefs, updatedEntries }
+}
+
+function readJsonFile(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback
+    const raw = fs.readFileSync(filePath, 'utf8').trim()
+    if (!raw) return fallback
+    return JSON.parse(raw)
+  } catch (_) {
+    return fallback
+  }
+}
+
+function mergeMediaDates(target, source) {
+  const merged = { ...(target || {}) }
+  for (const [key, value] of Object.entries(source || {})) {
+    if (key === '__version') {
+      merged.__version = Math.max(Number(merged.__version) || 0, Number(value) || 0)
+      continue
+    }
+    if (!Object.prototype.hasOwnProperty.call(merged, key)) {
+      merged[key] = value
+    }
+  }
+  return merged
+}
+
+function remapSeenMediaRecord(record, refMap) {
+  if (!record || typeof record !== 'object') return record
+  const normalizedRelativePath = normalizePath(record.relativePath)
+  const nextRelativePath = refMap.get(normalizedRelativePath) || normalizedRelativePath
+  return {
+    ...record,
+    relativePath: nextRelativePath,
+  }
+}
+
+function mergeSeenMediaIndexes(target, source, refMap) {
+  const targetIndex = target && typeof target === 'object' ? target : {}
+  const sourceIndex = source && typeof source === 'object' ? source : {}
+  const sourcePageUrls = Object.fromEntries(
+    Object.entries(sourceIndex.mediaPageUrls || {}).map(([key, value]) => [
+      key,
+      remapSeenMediaRecord(value, refMap),
+    ])
+  )
+  const sourceMediaUrls = Object.fromEntries(
+    Object.entries(sourceIndex.mediaUrls || {}).map(([key, value]) => [
+      key,
+      remapSeenMediaRecord(value, refMap),
+    ])
+  )
+
+  return {
+    version: Math.max(Number(targetIndex.version) || 0, Number(sourceIndex.version) || 0, 1),
+    updatedAt: new Date().toISOString(),
+    mediaPageUrls: {
+      ...sourcePageUrls,
+      ...(targetIndex.mediaPageUrls || {}),
+    },
+    mediaUrls: {
+      ...sourceMediaUrls,
+      ...(targetIndex.mediaUrls || {}),
+    },
+  }
+}
+
+function preferRunSummary(target, source) {
+  if (!target) return source
+  if (!source) return target
+
+  const targetFinished = typeof target.finishedAt === 'string' ? Date.parse(target.finishedAt) : NaN
+  const sourceFinished = typeof source.finishedAt === 'string' ? Date.parse(source.finishedAt) : NaN
+
+  if (!Number.isNaN(targetFinished) || !Number.isNaN(sourceFinished)) {
+    if (Number.isNaN(sourceFinished)) return target
+    if (Number.isNaN(targetFinished)) return source
+    return sourceFinished > targetFinished ? source : target
+  }
+
+  const targetStarted = typeof target.startedAt === 'string' ? Date.parse(target.startedAt) : NaN
+  const sourceStarted = typeof source.startedAt === 'string' ? Date.parse(source.startedAt) : NaN
+  if (Number.isNaN(targetStarted)) return source
+  if (Number.isNaN(sourceStarted)) return target
+  return sourceStarted > targetStarted ? source : target
 }
 
 function cleanupEmptyParentDirs(startPath, stopPath) {
