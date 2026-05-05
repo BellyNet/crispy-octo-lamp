@@ -18,12 +18,17 @@
     "format": "prettier . --write",
     "hoghaul": "node hoghaul/hoghaul.js",
     "hoghaul:all-coomerfans": "node hoghaul/run-all-coomerfans.js",
+    "hoghaul:all-coomer": "node hoghaul/run-source-batch.js --source=coomer",
+    "hoghaul:all-kemono": "node hoghaul/run-source-batch.js --source=kemono",
     "milkmaid": "node milkmaid/milkmaid.js",
+    "scrape:interactive": "node scrapyard/run-scrape-interactive.js",
     "evict:nas-media": "node scrapyard/evictLocalNasBackedMedia.js",
+    "evict:nas-media:apply": "node scrapyard/evictLocalNasBackedMedia.js --apply",
     "backfill:seen-media": "node milkmaid/backfill-seen-media-index.js",
     "repair:stufferdb": "node milkmaid/repair-stufferdb-models.js --scrape",
     "repair:scrape-only": "node milkmaid/repair-stufferdb-models.js --scrape-only",
     "update:stufferdb": "node milkmaid/update-stufferdb-models.js",
+    "update:all-models": "node scrapyard/run-all-source-updates.js",
     "report:repair-failures": "node milkmaid/report-repair-failures.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
     "repair": "node milkmaid/repair-stufferdb-models.js",
@@ -87,3 +92,4 @@
     "puppeteer": "^24.12.0"
   }
 }
+

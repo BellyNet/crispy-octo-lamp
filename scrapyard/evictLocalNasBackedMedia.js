@@ -80,7 +80,7 @@ function tryRemoveEmptyParents(startDir, stopDir) {
 
 function main() {
   const argv = minimist(process.argv.slice(2), {
-    string: ['model', 'models', 'bucket'],
+    string: ['model', 'models', 'bucket', 'mode'],
     boolean: ['apply', 'dry-run'],
     default: {
       bucket: 'webm',
@@ -88,14 +88,29 @@ function main() {
     },
   })
 
+  const getOption = (name) => {
+    const directValue = argv[name]
+    if (directValue !== undefined) return directValue
+    const envName = `npm_config_${String(name).replace(/-/g, '_')}`
+    return process.env[envName]
+  }
+
+  const isTruthy = (value) =>
+    value === true ||
+    value === 'true' ||
+    value === '1' ||
+    value === 1 ||
+    value === 'yes'
+
   const requestedModels = [
-    ...normalizeModelList(argv.model),
-    ...normalizeModelList(argv.models),
+    ...normalizeModelList(getOption('model')),
+    ...normalizeModelList(getOption('models')),
   ]
   const modelNames =
     requestedModels.length > 0 ? requestedModels : getAllModelNames()
-  const bucket = String(argv.bucket || 'webm').trim()
-  const shouldApply = argv.apply === true
+  const bucket = String(getOption('bucket') || 'webm').trim()
+  const mode = String(getOption('mode') || '').trim().toLowerCase()
+  const shouldApply = isTruthy(getOption('apply')) || mode === 'apply'
   const dryRun = !shouldApply
 
   let scannedFiles = 0
@@ -162,7 +177,7 @@ function main() {
   )
   if (dryRun) {
     console.log(
-      'No files were deleted. Re-run with --apply to evict matching local files.'
+      'No files were deleted. Re-run with --apply=true, --mode=apply, or npm run evict:nas-media:apply to evict matching local files.'
     )
   }
 }

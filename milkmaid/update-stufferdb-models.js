@@ -9,10 +9,11 @@ const argv = minimist(process.argv.slice(2), {
     m: 'model',
   },
   string: ['model', 'models', 'start-from', 'registry', 'log-dir'],
-  boolean: ['stop-on-error'],
+  boolean: ['stop-on-error', 'skip-nas-sync'],
   default: {
     limit: 0,
     'stop-on-error': false,
+    'skip-nas-sync': false,
   },
 })
 
@@ -84,7 +85,8 @@ async function main() {
       (!result.scrape.ok ||
         !result.hashPrune.ok ||
         !result.hashBackfill.ok ||
-        !result.validation.ok)
+        !result.validation.ok ||
+        !result.nasSync?.ok)
     ) {
       console.log('Stopping on first error because --stop-on-error was set.')
       break
@@ -107,6 +109,7 @@ Options:
   --registry <path>      Override model_aliases.json path.
   --log-dir <path>       Override updater report directory.
   --stop-on-error        Stop the batch when one model fails.
+  --skip-nas-sync        Skip final per-model NAS sync.
   -h, --help             Show help.
 
 Notes:
@@ -166,6 +169,7 @@ async function runModelUpdate(item) {
     hashPrune: null,
     hashBackfill: null,
     validation: null,
+    nasSync: null,
     finishedAt: null,
     lastRunSummaryPath: null,
     sourceSummaries: [],
@@ -179,7 +183,6 @@ async function runModelUpdate(item) {
         sourceUrl,
         '--model',
         item.model,
-        '--skip-nas-sync',
       ],
       { cwd: rootDir, label: `milkmaid:${item.model}` }
     )
@@ -255,6 +258,23 @@ async function runModelUpdate(item) {
     { cwd: rootDir, label: `validate:${item.model}` }
   )
   result.validation = hydrateValidationResult(result.validation, validationPath)
+
+  if (!argv['skip-nas-sync']) {
+    result.nasSync = await runCommand(
+      process.execPath,
+      [path.join(rootDir, 'scrapyard', 'sync.js')],
+      {
+        cwd: rootDir,
+        label: `nas-sync:${item.model}`,
+        env: {
+          ...process.env,
+          npm_config_model: item.model,
+        },
+      }
+    )
+  } else {
+    result.nasSync = skippedCommandResult('nas sync skipped by --skip-nas-sync')
+  }
 
   result.finishedAt = new Date().toISOString()
   return result
@@ -336,10 +356,11 @@ function hydrateValidationResult(validationResult, validationPath) {
   return hydrated
 }
 
-function runCommand(command, args, { cwd, label }) {
+function runCommand(command, args, { cwd, label, env }) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
+      env: env || process.env,
       stdio: 'inherit',
     })
 
@@ -386,6 +407,7 @@ function writeReport(report) {
         `prune=${item.hashPrune?.ok ? 'ok' : item.hashPrune?.skipped ? 'skipped' : 'fail'}`,
         `backfill=${item.hashBackfill?.ok ? 'ok' : item.hashBackfill?.skipped ? 'skipped' : 'fail'}`,
         `validate=${item.validation?.ok ? 'clean' : 'needs_attention'}`,
+        `sync=${item.nasSync?.ok ? 'ok' : item.nasSync?.skipped ? 'skipped' : 'fail'}`,
       ].join(' :: ')
     )
 
