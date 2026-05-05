@@ -183,6 +183,7 @@ async function runModelUpdate(item) {
         sourceUrl,
         '--model',
         item.model,
+        '--skip-nas-sync',
       ],
       { cwd: rootDir, label: `milkmaid:${item.model}` }
     )

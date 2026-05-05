@@ -17,6 +17,8 @@ const chalk = require('chalk').default
 const MEDIA_PAGE_CONCURRENCY = 4
 const MEDIA_PAGE_TIMEOUT_MS = 20000
 const MEDIA_PAGE_RETRY_TIMEOUT_MS = 30000
+const CATEGORY_PAGE_TIMEOUT_MS = 30000
+const CATEGORY_PAGE_RETRY_TIMEOUT_MS = 45000
 const LAZY_REQUEST_TIMEOUT_MS = 30000
 const LAZY_IDLE_TIMEOUT_MS = 30000
 const LAZY_SPEED_WINDOW_MS = 3000
@@ -2037,7 +2039,34 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   try {
     while (url) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' })
+      try {
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: CATEGORY_PAGE_TIMEOUT_MS,
+        })
+      } catch (error) {
+        if (!/Navigation timeout/i.test(error.message || '')) {
+          throw error
+        }
+
+        appendRunEvent('category_page_retry', {
+          modelName,
+          categoryUrl: url,
+          attempt: 2,
+          timeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+          reason: error.message,
+        })
+        logAndProgress(
+          `⏱️ Category page timeout, retrying: ${url}`,
+          true
+        )
+
+        await sleep(750)
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+        })
+      }
 
       const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
         ...new Set(links.map((l) => l.href)),
