@@ -9,12 +9,15 @@ const http = require('http')
 const minimist = require('minimist')
 const pLimit = require('p-limit')
 const { pathToFileURL } = require('url')
-const limit = pLimit(8)
-const lazyLimit = pLimit(4)
+const DEFAULT_MEDIA_TASK_CONCURRENCY = 8
+const DEFAULT_LAZY_VIDEO_CONCURRENCY = 4
+const DEFAULT_MEDIA_PAGE_CONCURRENCY = 4
+let limit = pLimit(DEFAULT_MEDIA_TASK_CONCURRENCY)
+let lazyLimit = pLimit(DEFAULT_LAZY_VIDEO_CONCURRENCY)
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
 const chalk = require('chalk').default
-const MEDIA_PAGE_CONCURRENCY = 4
+let MEDIA_PAGE_CONCURRENCY = DEFAULT_MEDIA_PAGE_CONCURRENCY
 const MEDIA_PAGE_TIMEOUT_MS = 20000
 const MEDIA_PAGE_RETRY_TIMEOUT_MS = 30000
 const CATEGORY_PAGE_TIMEOUT_MS = 30000
@@ -249,12 +252,30 @@ function extractModelNameFromBreadcrumb(anchors) {
 
 function parseCliArgs(argv) {
   const args = minimist(argv, {
-    string: ['model'],
+    string: [
+      'model',
+      'media-concurrency',
+      'video-concurrency',
+      'page-concurrency',
+    ],
     boolean: ['review-errors', 'skip-nas-sync', 'keep-history'],
     alias: {
       m: 'model',
     },
   })
+
+  const mediaConcurrency = parsePositiveInteger(
+    args['media-concurrency'],
+    DEFAULT_MEDIA_TASK_CONCURRENCY
+  )
+  const videoConcurrency = parsePositiveInteger(
+    args['video-concurrency'],
+    DEFAULT_LAZY_VIDEO_CONCURRENCY
+  )
+  const pageConcurrency = parsePositiveInteger(
+    args['page-concurrency'],
+    DEFAULT_MEDIA_PAGE_CONCURRENCY
+  )
 
   return {
     inputUrl: args._[0] || '',
@@ -262,7 +283,15 @@ function parseCliArgs(argv) {
     reviewErrors: Boolean(args['review-errors']),
     skipNasSync: Boolean(args['skip-nas-sync']),
     keepHistory: Boolean(args['keep-history']),
+    mediaConcurrency,
+    videoConcurrency,
+    pageConcurrency,
   }
+}
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
 function askQuestion(prompt) {
@@ -1627,6 +1656,26 @@ function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
   saveMediaSeenIndex(modelLogDir, index)
 }
 
+function findSameModelSeenRelativePath(activeRefs, modelName) {
+  const refs = Array.isArray(activeRefs) ? activeRefs : []
+  const prefix = `${String(modelName || '').trim()}/`
+  if (!prefix || prefix === '/') return null
+
+  for (const relativePath of refs) {
+    const normalized = String(relativePath || '').trim().replace(/\\/g, '/')
+    if (!normalized.startsWith(prefix)) continue
+    const absolutePath = path.join(
+      datasetDir,
+      normalized.replace(/\//g, path.sep)
+    )
+    if (existsForRepair(absolutePath)) {
+      return normalized
+    }
+  }
+
+  return null
+}
+
 function buildHashMetadata(
   modelName,
   absolutePath,
@@ -2319,12 +2368,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
             hash = createHash('md5').update(buffer).digest('hex')
             const bitwiseMatch = getBitwiseDuplicationRecord(hash)
             if (bitwiseMatch.isDuplicate) {
+              const sameModelRelativePath = findSameModelSeenRelativePath(
+                bitwiseMatch.activeRefs,
+                modelName
+              )
+              if (sameModelRelativePath) {
+                recordSuccessfulSeenMedia(folders.logDir, {
+                  relativePath: sameModelRelativePath,
+                  filename,
+                  mediaUrl,
+                  mediaPageUrl,
+                })
+              }
               duplicateCount++
               currentRunLog && currentRunLog.counters.duplicates++
               appendRunEvent('duplicate_bitwise', {
                 modelName,
                 filename,
                 hash,
+                savedPath: sameModelRelativePath,
                 activeRefs: bitwiseMatch.activeRefs.slice(0, 5),
               })
               return logAndProgress(`♻️ Bitwise dupe: ${filename}`, true)
@@ -2336,12 +2398,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
               ? getVisualDuplicationRecord(visualHash)
               : null
             if (visualMatch?.isDuplicate) {
+              const sameModelRelativePath = findSameModelSeenRelativePath(
+                visualMatch.activeRefs,
+                modelName
+              )
+              if (sameModelRelativePath) {
+                recordSuccessfulSeenMedia(folders.logDir, {
+                  relativePath: sameModelRelativePath,
+                  filename,
+                  mediaUrl,
+                  mediaPageUrl,
+                })
+              }
               duplicateCount++
               currentRunLog && currentRunLog.counters.duplicates++
               appendRunEvent('duplicate_visual', {
                 modelName,
                 filename,
                 visualHash,
+                savedPath: sameModelRelativePath,
                 activeRefs: visualMatch.activeRefs.slice(0, 5),
               })
               return logAndProgress(
@@ -2615,7 +2690,13 @@ async function scrapeGallery(browser, url, modelName, folders) {
       reviewErrors,
       skipNasSync,
       keepHistory,
+      mediaConcurrency,
+      videoConcurrency,
+      pageConcurrency,
     } = parseCliArgs(process.argv.slice(2))
+    limit = pLimit(mediaConcurrency)
+    lazyLimit = pLimit(videoConcurrency)
+    MEDIA_PAGE_CONCURRENCY = pageConcurrency
     let inputUrl = initialInputUrl
     const sourceInfo = parseStufferDbSourceUrl(inputUrl)
     if (!sourceInfo) {
@@ -2706,6 +2787,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     resetProgressCounter(combinedTotal)
 
+    console.log(
+      `Download concurrency: ${mediaConcurrency} media, ${videoConcurrency} video, ${pageConcurrency} picture pages`
+    )
     console.log(`📊 Combined media total: ${combinedTotal}`)
     console.log(`💦 Starting scrape for ${modelName}`)
 

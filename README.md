@@ -15,6 +15,7 @@ This repo is the local control center for collecting, repairing, reviewing, hash
 
 ```powershell
 npm run milkmaid -- "https://stufferdb.com/index?/category/1234"
+npm run milkmaid -- "https://stufferdb.com/index?/category/1234" --media-concurrency=10 --video-concurrency=6 --page-concurrency=5
 ```
 
 Notes:
@@ -29,6 +30,7 @@ npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyad
 ```
 
   That keeps the detected page alias for registry tracking, but saves the scrape into the `heyyadriana` dataset bucket.
+- Concurrency can be tuned with `--media-concurrency=`, `--video-concurrency=`, and `--page-concurrency=`.
 - `milkmaid` writes into the local Slopvault dataset first.
 
 ### 2. Scrape Coomer / Kemono / mixed-source models
