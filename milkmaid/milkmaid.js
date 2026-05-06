@@ -2074,6 +2074,34 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const uniqueUrls = [
         ...new Set(urls.map(normalizeStufferDbPictureUrl).filter(Boolean)),
       ]
+      const urlsToScrape = []
+      let preSkippedSeenCount = 0
+
+      for (const mediaPageUrl of uniqueUrls) {
+        const seenMediaMatch = getSuccessfulSeenMediaMatch(
+          folders.logDir,
+          mediaPageUrl,
+          null
+        )
+        if (seenMediaMatch) {
+          duplicateCount++
+          currentRunLog && currentRunLog.counters.duplicates++
+          completedTotal++
+          preSkippedSeenCount++
+          appendRunEvent('skip_seen_media', {
+            modelName,
+            filename: seenMediaMatch.filename || null,
+            mediaUrl: seenMediaMatch.mediaUrl || null,
+            mediaPageUrl,
+            matchType: seenMediaMatch.matchType,
+            savedPath: seenMediaMatch.relativePath,
+            skippedBeforeOpen: true,
+          })
+          continue
+        }
+
+        urlsToScrape.push(mediaPageUrl)
+      }
 
       const total = uniqueUrls.length
 
@@ -2092,6 +2120,29 @@ async function scrapeGallery(browser, url, modelName, folders) {
         mediaLinks: uniqueUrls.length,
         trackedTotal: global.totalSearchTotal || 0,
       })
+
+      if (preSkippedSeenCount > 0) {
+        logAndProgress(
+          `⏩ Pre-skipped ${preSkippedSeenCount} seen media page${preSkippedSeenCount === 1 ? '' : 's'} before opening picture pages`
+        )
+        appendRunEvent('skip_seen_media_batch', {
+          modelName,
+          categoryUrl: url,
+          skippedCount: preSkippedSeenCount,
+        })
+      }
+
+      if (urlsToScrape.length === 0) {
+        const nextHref = await page
+          .$eval('a[rel="next"]', (el) => el?.href)
+          .catch(() => null)
+        if (nextHref) {
+          const baseUrl = new URL(url)
+          url = new URL(nextHref, baseUrl).href
+          continue
+        }
+        break
+      }
 
       const pages = await Promise.all(
         Array.from({ length: MEDIA_PAGE_CONCURRENCY }, () =>
@@ -2522,7 +2573,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       }
 
       await Promise.all(
-        uniqueUrls.map((mediaPageUrl, i) => {
+        urlsToScrape.map((mediaPageUrl, i) => {
           const page = pages[i % pages.length]
           const lock = pageLocks[i % pageLocks.length]
 
