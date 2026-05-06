@@ -1926,8 +1926,7 @@ function preserveFailedTailDecodeVideo(tmpPath, finalPath) {
   if (normalizePath(sourcePath) === normalizePath(mirrorPath)) {
     return mirrorPath
   }
-  fs.mkdirSync(path.dirname(mirrorPath), { recursive: true })
-  fs.renameSync(sourcePath, mirrorPath)
+  moveFileIntoPlace(sourcePath, mirrorPath)
   return mirrorPath
 }
 
