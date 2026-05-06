@@ -1908,17 +1908,26 @@ function removeQuarantineMirrorIfExists(filePath) {
   return true
 }
 
-function preserveFailedTailDecodeVideo(filePath) {
-  const mirrorPath = getQuarantineMirrorPath(filePath)
-  if (!fs.existsSync(filePath)) {
-    return fs.existsSync(mirrorPath) ? mirrorPath : null
-  }
+function preserveFailedTailDecodeVideo(tmpPath, finalPath) {
+  const quarantineTarget = finalPath || tmpPath
+  if (!quarantineTarget) return null
+  const mirrorPath = getQuarantineMirrorPath(quarantineTarget)
   if (fs.existsSync(mirrorPath)) {
     return mirrorPath
   }
 
+  const sourcePath = [finalPath, tmpPath].find(
+    (candidate) => candidate && fs.existsSync(candidate)
+  )
+
+  if (!sourcePath) {
+    return null
+  }
+  if (normalizePath(sourcePath) === normalizePath(mirrorPath)) {
+    return mirrorPath
+  }
   fs.mkdirSync(path.dirname(mirrorPath), { recursive: true })
-  fs.renameSync(filePath, mirrorPath)
+  fs.renameSync(sourcePath, mirrorPath)
   return mirrorPath
 }
 
@@ -3217,11 +3226,26 @@ async function scrapeGallery(browser, url, modelName, folders) {
             } catch (err) {
               errorCount++
               currentRunLog && currentRunLog.counters.failures++
-              const quarantinePath = isTailDecodeErrorMessage(err.message)
-                ? preserveFailedTailDecodeVideo(finalPath)
+              const isTailDecodeFailure = isTailDecodeErrorMessage(err.message)
+              const quarantinePath = isTailDecodeFailure
+                ? preserveFailedTailDecodeVideo(tmpPath, finalPath)
                 : hadQuarantineMirror
                   ? getQuarantineMirrorPath(finalPath)
                   : null
+              const addedPermanentSkip =
+                isTailDecodeFailure &&
+                responseEndedCleanly &&
+                Number.isFinite(responseContentLength) &&
+                responseContentLength > 0 &&
+                bytesDownloadedForFile === responseContentLength &&
+                addPermanentSkip({
+                  relativePath: getDatasetRelativePath(finalPath),
+                  sourceUrl: url,
+                  mediaPageUrl,
+                  filename,
+                  reason: 'upstream_tail_decode_error',
+                  note: 'Fully downloaded but tail decode failed; skipping future reruns unless manually cleared.',
+                })
               const manifestUpdated =
                 hadQuarantineMirror &&
                 updateQuarantineManifestForRepairAttempt(finalPath, {
@@ -3247,6 +3271,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 hadQuarantineMirror,
                 quarantinePath,
                 manifestUpdated: Boolean(manifestUpdated),
+                addedPermanentSkip: Boolean(addedPermanentSkip),
               })
               appendRunEvent('lazy_video_error', {
                 modelName,
@@ -3263,6 +3288,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 hadQuarantineMirror,
                 quarantinePath,
                 manifestUpdated,
+                addedPermanentSkip: Boolean(addedPermanentSkip),
               })
               logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
               if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
