@@ -2023,12 +2023,16 @@
       // ─── INIT ─────────────────────────────────────────────────────────────
       loadUsers()
 
-      // Version / last-updated footer
-      fetch('/api/info').then(r => r.json()).then(info => {
-        const el = document.getElementById('sidebar-footer')
-        const fmtShort = (iso) => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '—'
-        el.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
-      }).catch(() => {})
+      // Version / last-updated footer — refreshed on the same interval as user stats
+      const sidebarFooterEl = document.getElementById('sidebar-footer')
+      const fmtShort = (iso) => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '—'
+      function refreshFooter() {
+        fetch('/api/info').then(r => r.json()).then(info => {
+          sidebarFooterEl.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
+        }).catch(() => {})
+      }
+      refreshFooter()
+      setInterval(refreshFooter, 5 * 60 * 1000)
     </script>
   </body>
 </html>
