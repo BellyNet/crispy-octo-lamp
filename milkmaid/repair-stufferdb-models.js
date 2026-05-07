@@ -3,10 +3,7 @@ const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
 const { spawn } = require('child_process')
-const {
-  upsertErrorsSource,
-  latestJsonPath: errorsToCheckLatestJsonPath,
-} = require('../scrapyard/errorsToCheck')
+const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -21,24 +18,13 @@ const argv = minimist(process.argv.slice(2), {
     'log-dir',
     'dataset-root',
     'nas-dataset-root',
-    'errors-file',
   ],
-  boolean: [
-    'stop-on-error',
-    'scrape',
-    'scrape-only',
-    'skip-nas-sync',
-    'only-errors',
-    'sync-pending-only',
-  ],
+  boolean: ['stop-on-error', 'scrape', 'skip-nas-sync'],
   default: {
     limit: 0,
     scrape: false,
-    'scrape-only': false,
     'stop-on-error': false,
     'skip-nas-sync': false,
-    'only-errors': false,
-    'sync-pending-only': false,
   },
 })
 
@@ -65,9 +51,6 @@ const statePath = path.join(logDir, 'repair-stufferdb-state.json')
 const nasDatasetRoot = path.resolve(
   String(argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
 )
-const errorsFilePath = path.resolve(
-  String(argv['errors-file'] || errorsToCheckLatestJsonPath)
-)
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
 const singleModel = argv.model ? String(argv.model).trim() : null
 const explicitModels = String(argv.models || '')
@@ -79,18 +62,9 @@ const rawArgv = process.argv.slice(2)
 const shouldScrape =
   rawArgv.includes('--scrape') ||
   parseBooleanEnv(process.env.npm_config_scrape)
-const scrapeOnly =
-  rawArgv.includes('--scrape-only') ||
-  parseBooleanEnv(process.env.npm_config_scrape_only)
 const skipNasSync =
   rawArgv.includes('--skip-nas-sync') ||
   parseBooleanEnv(process.env.npm_config_skip_nas_sync)
-const onlyErrors =
-  rawArgv.includes('--only-errors') ||
-  parseBooleanEnv(process.env.npm_config_only_errors)
-const syncPendingOnly =
-  rawArgv.includes('--sync-pending-only') ||
-  parseBooleanEnv(process.env.npm_config_sync_pending_only)
 
 main().catch((err) => {
   console.error(`Fatal repair-runner error: ${err.stack || err.message}`)
@@ -106,20 +80,13 @@ async function main() {
 
   const report = {
     generatedAt: new Date().toISOString(),
-    mode: syncPendingOnly
-      ? 'nas_sync_only'
-      : scrapeOnly
-        ? 'scrape_only'
-      : shouldScrape
-        ? 'update_and_repair'
-        : 'local_dataset_repair',
+    mode: shouldScrape ? 'update_and_repair' : 'local_dataset_repair',
     registryPath,
     datasetRoot,
     nasDatasetRoot,
     totalModelsInDataset: queue.length,
     selectedModels: selectedQueue.length,
-    scrapeEnabled: shouldScrape || scrapeOnly,
-    scrapeOnly,
+    scrapeEnabled: shouldScrape,
     skipNasSync,
     stopOnError: Boolean(argv['stop-on-error']),
     pendingNasSyncModelsAtStart: [...state.pendingNasSyncModels].sort((a, b) =>
@@ -133,49 +100,35 @@ async function main() {
   console.log(
     `Repair queue: ${selectedQueue.length} model(s) selected from ${queue.length} dataset folders`
   )
-  if (onlyErrors) {
-    console.log(`Error-targeted mode is enabled via ${errorsFilePath}`)
-  }
-  if (syncPendingOnly) {
-    console.log(
-      `Sync-only mode is enabled for ${report.pendingNasSyncModelsAtStart.length} pending model(s).`
-    )
-  }
   console.log(
-    syncPendingOnly
-      ? 'Local repair steps are disabled; only pending NAS sync work will run.'
-      : scrapeOnly
-        ? 'Scrape-only mode is enabled; local hash repair steps are skipped.'
-      : shouldScrape
-        ? 'Scrape refresh is enabled for models with StufferDB sources.'
+    shouldScrape
+      ? 'Scrape refresh is enabled for models with StufferDB sources.'
       : 'Scrape refresh is disabled; checking local dataset state only.'
   )
 
-  if (!syncPendingOnly) {
-    for (let index = 0; index < selectedQueue.length; index += 1) {
-      const item = selectedQueue[index]
-      console.log('')
-      console.log(`[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`)
+  for (let index = 0; index < selectedQueue.length; index += 1) {
+    const item = selectedQueue[index]
+    console.log('')
+    console.log(`[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`)
 
-      const result = await runModelRepair(item)
-      report.results.push(result)
-      report.totals = calculateTotals(report.results)
-      writeReport(report)
+    const result = await runModelRepair(item)
+    report.results.push(result)
+    report.totals = calculateTotals(report.results)
+    writeReport(report)
 
-      if (!skipNasSync) {
-        queuePendingNasSyncModel(state, item.model)
-      }
+    if (!skipNasSync && result.nasSyncQueued) {
+      queuePendingNasSyncModel(state, item.model)
+    }
 
-      if (
-        argv['stop-on-error'] &&
-        (result.scrape.status === 'failed' ||
-          !result.hashPrune.ok ||
-          !result.hashBackfill.ok ||
-          !result.validation.ok)
-      ) {
-        console.log('Stopping on first error because --stop-on-error was set.')
-        break
-      }
+    if (
+      argv['stop-on-error'] &&
+      (result.scrape.status === 'failed' ||
+        !result.hashPrune.ok ||
+        !result.hashBackfill.ok ||
+        !result.validation.ok)
+    ) {
+      console.log('Stopping on first error because --stop-on-error was set.')
+      break
     }
   }
 
@@ -205,16 +158,12 @@ Options:
   --start-from <name>      Start from this model name.
   --limit <n>              Only process the first n selected models.
   --scrape                 Re-run milkmaid before local repair.
-  --scrape-only            Re-run milkmaid only, without prune/backfill/validate.
   --skip-nas-sync          Skip NAS sync and leave models queued for a later run.
   --dataset-root <path>    Override local dataset root.
   --nas-dataset-root <p>   Override NAS dataset root.
   --registry <path>        Override model_aliases.json path.
   --log-dir <path>         Override repair runner report directory.
   --stop-on-error          Stop the batch when one model fails.
-  --only-errors            Only repair models currently listed in errors-to-check.
-  --errors-file <path>     Override errors-to-check JSON path.
-  --sync-pending-only      Skip repair work and only flush pending NAS sync models.
   -h, --help               Show help.
 
 Default behavior:
@@ -284,11 +233,6 @@ function buildQueue(registry) {
 
 function applySelection(queue) {
   let next = queue
-  const errorModels = onlyErrors ? loadErroredModels(errorsFilePath) : null
-
-  if (errorModels) {
-    next = next.filter((item) => errorModels.has(item.model))
-  }
 
   if (singleModel) {
     next = next.filter((item) => item.model === singleModel)
@@ -310,62 +254,6 @@ function applySelection(queue) {
   return next
 }
 
-function loadErroredModels(filePath) {
-  if (!fs.existsSync(filePath)) return new Set()
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-    const sections = Array.isArray(parsed?.sections) ? parsed.sections : []
-    const repairSection = sections.find(
-      (section) => String(section?.source || '').trim() === 'repair'
-    )
-    const items = Array.isArray(repairSection?.items) ? repairSection.items : []
-
-    return new Set(
-      items
-        .filter((item) => isRepairActionStatus(item?.status))
-        .map((item) => String(item?.model || '').trim())
-        .filter(Boolean)
-    )
-  } catch {
-    return new Set()
-  }
-}
-
-function isRepairActionStatus(status) {
-  const normalized = String(status || '').trim()
-  return normalized === 'needs_repair' || normalized === 'needs_review'
-}
-
-function buildSkippedMaintenanceResult(label) {
-  return {
-    ok: true,
-    skipped: true,
-    code: 0,
-    label,
-    command: 'skipped in scrape-only mode',
-  }
-}
-
-function buildSkippedValidationResult(label) {
-  return {
-    ok: true,
-    skipped: true,
-    clean: true,
-    code: 0,
-    label,
-    command: 'skipped in scrape-only mode',
-    summary: {
-      bitwiseMissing: 0,
-      bitwiseExtra: 0,
-      visualMissing: 0,
-      visualExtra: 0,
-      videoVisualMissing: 0,
-      videoVisualExtra: 0,
-    },
-  }
-}
-
 async function runModelRepair(item) {
   const startedAt = new Date().toISOString()
   const result = {
@@ -375,7 +263,7 @@ async function runModelRepair(item) {
     sourceUrls: item.sources,
     scrapeRuns: [],
     scrape: buildSkippedScrapeSummary(
-      shouldScrape || scrapeOnly ? 'no_sources' : 'disabled',
+      shouldScrape ? 'no_sources' : 'disabled',
       item.sources
     ),
     hashPrune: null,
@@ -388,7 +276,7 @@ async function runModelRepair(item) {
     errorArtifactsCleared: [],
   }
 
-  if ((shouldScrape || scrapeOnly) && item.sources.length > 0) {
+  if (shouldScrape && item.sources.length > 0) {
     for (const sourceUrl of item.sources) {
       const scrapeRun = await runCommand(
         process.execPath,
@@ -399,7 +287,11 @@ async function runModelRepair(item) {
           item.model,
           '--skip-nas-sync',
         ],
-        { cwd: rootDir, label: `milkmaid:${item.model}` }
+        {
+          cwd: rootDir,
+          label: `milkmaid:${item.model}`,
+          env: { MILKMAID_PROGRESS_MODE: 'plain' },
+        }
       )
       result.scrapeRuns.push(scrapeRun)
       if (!scrapeRun.ok && argv['stop-on-error']) {
@@ -410,42 +302,36 @@ async function runModelRepair(item) {
     result.scrape = summarizeScrapeRuns(result.scrapeRuns)
   }
 
-  if (scrapeOnly) {
-    result.hashPrune = buildSkippedMaintenanceResult(`prune:${item.model}`)
-    result.hashBackfill = buildSkippedMaintenanceResult(`backfill:${item.model}`)
-    result.validation = buildSkippedValidationResult(`validate:${item.model}`)
-  } else {
-    result.hashPrune = await runCommand(
-      process.execPath,
-      [path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'), '--model', item.model],
-      { cwd: rootDir, label: `prune:${item.model}` }
-    )
+  result.hashPrune = await runCommand(
+    process.execPath,
+    [path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'), '--model', item.model],
+    { cwd: rootDir, label: `prune:${item.model}` }
+  )
 
-    result.hashBackfill = await runCommand(
-      process.execPath,
-      [
-        path.join(rootDir, 'scrapyard', 'backfillModelHashes.js'),
-        '--model',
-        item.model,
-        '--include-video-visuals',
-      ],
-      { cwd: rootDir, label: `backfill:${item.model}` }
-    )
+  result.hashBackfill = await runCommand(
+    process.execPath,
+    [
+      path.join(rootDir, 'scrapyard', 'backfillModelHashes.js'),
+      '--model',
+      item.model,
+      '--include-video-visuals',
+    ],
+    { cwd: rootDir, label: `backfill:${item.model}` }
+  )
 
-    const validationPath = path.join(logDir, `${item.model}.validate.json`)
-    result.validation = await runCommand(
-      process.execPath,
-      [
-        path.join(rootDir, 'scrapyard', 'validateModelHashes.js'),
-        '--model',
-        item.model,
-        '--json-out',
-        validationPath,
-      ],
-      { cwd: rootDir, label: `validate:${item.model}` }
-    )
-    result.validation = hydrateValidationResult(result.validation, validationPath)
-  }
+  const validationPath = path.join(logDir, `${item.model}.validate.json`)
+  result.validation = await runCommand(
+    process.execPath,
+    [
+      path.join(rootDir, 'scrapyard', 'validateModelHashes.js'),
+      '--model',
+      item.model,
+      '--json-out',
+      validationPath,
+    ],
+    { cwd: rootDir, label: `validate:${item.model}` }
+  )
+  result.validation = hydrateValidationResult(result.validation, validationPath)
 
   result.lastRunSummary = readJsonIfExists(result.lastRunSummaryPath)
   result.localRunErrors = readLocalRunErrors(item.model)
@@ -456,6 +342,10 @@ async function runModelRepair(item) {
 
   result.finishedAt = new Date().toISOString()
   result.needsAttention = modelNeedsAttention(result)
+  result.nasSyncQueued = shouldQueueNasSyncForResult(result)
+  result.nasSyncReason = result.nasSyncQueued
+    ? 'saved_media'
+    : 'no_material_dataset_changes'
   return result
 }
 
@@ -559,7 +449,6 @@ function readLocalRunErrors(modelName) {
 }
 
 function shouldClearErrorArtifacts(result) {
-  if (scrapeOnly) return false
   const scrapeFailed = result.scrape.status === 'failed'
   return Boolean(result.validation?.clean && !scrapeFailed)
 }
@@ -584,10 +473,6 @@ function clearResolvedErrorArtifacts(modelName) {
 
 function modelNeedsAttention(result) {
   const scrapeFailed = result.scrape.status === 'failed'
-  if (scrapeOnly) {
-    const currentRunErrorCount = getRunErrorCount(result.lastRunSummary)
-    return scrapeFailed || currentRunErrorCount > 0
-  }
   const validationFailed = !result.validation?.ok
   const currentRunErrorCount = shouldScrape
     ? getRunErrorCount(result.lastRunSummary)
@@ -603,12 +488,22 @@ function getRunErrorCount(summary) {
   return Number(summary.errorCount || 0)
 }
 
-function runCommand(command, args, { cwd, label }) {
+function shouldQueueNasSyncForResult(result) {
+  const summary = result?.lastRunSummary
+  if (!summary || summary.parseError) return false
+
+  const savedCount = Number(summary.successCount || 0)
+  const savedBytes = Number(summary?.transfer?.savedBytes || 0)
+  return savedCount > 0 || savedBytes > 0
+}
+
+function runCommand(command, args, { cwd, label, env } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
       windowsHide: true,
+      env: { ...process.env, ...(env || {}) },
     })
 
     child.on('error', (err) => {
@@ -655,12 +550,16 @@ function writeReport(report) {
         `backfill=${item.hashBackfill?.ok ? 'ok' : 'fail'}`,
         `validate=${item.validation?.ok ? 'clean' : 'needs_attention'}`,
         `attention=${item.needsAttention ? 'yes' : 'no'}`,
+        `nasSync=${item.nasSyncQueued ? 'queued' : 'skipped'}`,
       ].join(' :: ')
     )
 
-    if ((shouldScrape || scrapeOnly) && item.lastRunSummary && !item.lastRunSummary.parseError) {
+    if (shouldScrape && item.lastRunSummary && !item.lastRunSummary.parseError) {
       lines.push(
         `  scrape saved=${item.lastRunSummary.successCount || 0} dupes=${item.lastRunSummary.duplicateCount || 0} errors=${item.lastRunSummary.errorCount || 0}`
+      )
+      lines.push(
+        `  transfer savedBytes=${item.lastRunSummary.transfer?.savedBytes || 0} failedBytes=${item.lastRunSummary.transfer?.failedBytes || 0} transferredBytes=${item.lastRunSummary.transfer?.transferredBytes || 0} lazyTransferredBytes=${item.lastRunSummary.transfer?.lazyTransferredBytes || 0}`
       )
     }
 
@@ -696,7 +595,7 @@ function calculateTotals(results) {
         totals.modelsClean += 1
       }
 
-      if (shouldScrape || scrapeOnly) {
+      if (shouldScrape) {
         const summary = item?.lastRunSummary
         if (summary && !summary.parseError) {
           totals.filesSaved += Number(summary.successCount || 0)
@@ -903,7 +802,7 @@ function writeErrorsToCheckSummary(report) {
       }
     }
 
-    if (shouldScrape || scrapeOnly) {
+    if (shouldScrape) {
       const runErrorCount = getRunErrorCount(item.lastRunSummary)
       if (runErrorCount > 0) {
         detailParts.push(`${runErrorCount} scrape run error(s)`)
@@ -919,7 +818,7 @@ function writeErrorsToCheckSummary(report) {
     items.push({
       model: item.model,
       status: item.scrape.status === 'failed' ? 'needs_repair' : 'needs_review',
-      count: shouldScrape || scrapeOnly ? getRunErrorCount(item.lastRunSummary) : undefined,
+      count: shouldScrape ? getRunErrorCount(item.lastRunSummary) : undefined,
       details: detailParts.join('; ') || 'Model still needs local review.',
     })
   }
@@ -932,13 +831,24 @@ function writeErrorsToCheckSummary(report) {
     })
   }
 
+  for (const pendingModel of report?.nasSync?.pendingAfterRun || []) {
+    if (report?.nasSync?.failed?.some((entry) => entry.model === pendingModel)) {
+      continue
+    }
+    items.push({
+      model: pendingModel,
+      status: 'nas_sync_pending',
+      details: 'Pending retry on next repair run.',
+    })
+  }
+
   upsertErrorsSource('repair', {
     title: 'Repair',
     summary:
       items.length > 0
         ? `${items.length} model-level repair follow-up item(s) still need attention.`
         : 'Latest repair run is clean.',
-    commandHint: shouldScrape || scrapeOnly ? 'npm run repair -- --scrape' : 'npm run repair',
+    commandHint: shouldScrape ? 'npm run repair -- --scrape' : 'npm run repair',
     items,
   })
 }
