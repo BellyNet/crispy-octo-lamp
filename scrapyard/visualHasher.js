@@ -54,13 +54,19 @@ async function getVisualHashFromBuffer(buffer) {
       return visualHash
     } catch (fallbackErr) {
       console.warn(
-        `Failed visual hash: ${err.message}; ffmpeg fallback failed: ${fallbackErr.message}`
+        `Failed visual hash: ${compactErrorMessage(err)}; ffmpeg fallback failed: ${compactErrorMessage(fallbackErr)}`
       )
       if (fs.existsSync(ffmpegInputPath)) fs.unlinkSync(ffmpegInputPath)
       if (fs.existsSync(ffmpegOutputPath)) fs.unlinkSync(ffmpegOutputPath)
       return null
     }
   }
+}
+
+function compactErrorMessage(error) {
+  return String(error?.message || error || '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 async function getVideoFrameHashesFromPath(videoPath, options = {}) {

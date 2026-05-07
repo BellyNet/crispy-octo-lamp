@@ -2,15 +2,16 @@ const chalk = require('chalk').default
 const stripAnsi = require('strip-ansi').default
 const readline = require('readline')
 const ansiEscapes = require('ansi-escapes')
+
 const plainProgressMode =
   process.env.MILKMAID_PROGRESS_MODE === 'plain' ||
   process.env.MILKMAID_PLAIN_PROGRESS === '1'
 
-const scrapeEmojis = ['🐷', '🐽', '🍰', '🍕', '🧁', '🐄']
-const lazyEmojis = ['🥛', '🧈', '🍮', '🫃', '🍓', '💞']
-const gifEmojis = ['🧈', '🍑', '🍮', '🫃', '🐄', '🐷']
+const scrapeFillChars = ['=']
+const lazyFillChars = ['#']
+const gifFillChars = ['+']
 
-let persistentEmoji = pickEmoji(scrapeEmojis)
+let persistentFillChar = pickFillChar(scrapeFillChars)
 
 let pinnedTopLineText = ''
 let pinnedBottomLineText = ''
@@ -18,6 +19,43 @@ let reservedProgressRows = false
 const PINNED_ROW_COUNT = 2
 let lastPlainScrapeBucket = null
 let lastPlainLazyBucket = null
+
+const scrapeLines = [
+  'Scanning source pages.',
+  'Checking new media candidates.',
+  'Working through the category list.',
+]
+
+const gifLines = [
+  'Processing GIF media.',
+  'Checking animated images.',
+  'Finishing GIF work.',
+]
+
+const lazyLines = [
+  'Downloading queued videos.',
+  'Streaming video bytes.',
+  'Working through lazy downloads.',
+]
+
+const finishers = [
+  'Scrape pass complete.',
+  'Finished processing this run.',
+  'Run complete.',
+]
+
+const milestoneLines = {
+  25: ['Quarter complete.'],
+  50: ['Halfway through.'],
+  75: ['Three quarters complete.'],
+  100: ['Complete.'],
+}
+
+const statusHeaders = [
+  'status: scanning',
+  'status: processing',
+  'status: downloading',
+]
 
 function hasPinnedTerminalSupport() {
   return Boolean(
@@ -38,7 +76,9 @@ function ensurePinnedRows() {
 function redrawPinnedLines() {
   if (!reservedProgressRows || !hasPinnedTerminalSupport()) return
 
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT))
+  process.stdout.write(
+    ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT)
+  )
   readline.clearLine(process.stdout, 0)
   process.stdout.write(pinnedTopLineText)
 
@@ -71,118 +111,15 @@ function logScrollingMessage(message = '') {
   const maxMessageWidth = Math.max((process.stdout.columns || 80) - 1, 20)
   const displayMessage = truncateDisplayText(message, maxMessageWidth)
 
-  // Print the message above the reserved bottom rows, then redraw the pinned lines.
-  process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT))
+  process.stdout.write(
+    ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT)
+  )
   process.stdout.write(ansiEscapes.eraseDown)
   process.stdout.write(`${displayMessage}\n`)
   redrawPinnedLines()
 }
 
-const scrapeLines = [
-  '🐄 Soft little cow is nosing around for another treat before she is even done swallowing the last one.',
-  '🐷 Hungry piggy is sniffing out something warm and filling for that empty little belly.',
-  '🍰 She has got that needy look again, like a bratty cow who knows she is about to overdo it.',
-  '🐽 Little piggy is already wandering back toward the trough without meaning to.',
-  '🧁 She swore she was done snacking, but that soft belly says otherwise.',
-  '🥛 Sweet cow girl is looking for something rich enough to make her wobble.',
-  '🍓 Piggy is poking around for a mouthful that turns into five.',
-  '🐄 She is not even acting hungry anymore, just drawn toward another bite like a silly little heifer.',
-  '🍞 Full cheeks, empty hands, and still somehow looking for more.',
-  '🐷 Little piggy is roaming around like she forgot how full she got last time.',
-  '🍮 Soft brat wants just a nibble, which of course means stuffing herself silly.',
-  '🐽 She has got that helpless snacky look, like once she starts she will not stop.',
-  '🐄 Pretty little cow is drifting back to the feed again, all soft and absentminded about it.',
-  '🍰 She keeps telling herself one more treat will not hurt, and she never means just one.',
-  '🥐 Piggy has got that look in her eyes like she is about to fill up way too fast again.',
-]
-
-const gifLines = [
-  '🐷 Her belly is sloshing and those thick thighs will not stop brushing together.',
-  '🐄 Soft little cow is wobbling all over, full belly leading the way.',
-  '🧈 All that plush softness just jiggling with every tiny movement.',
-  '🍮 She moves like pudding now, slow, soft, and completely overfilled.',
-  '🥛 That round belly keeps wobbling like it is still settling.',
-  '🍰 Thick thighs swaying, soft tummy bouncing, little piggy looking properly stuffed.',
-  '🐽 Every step makes her belly and thighs slosh together in the sweetest way.',
-  '🫃 She is so full her whole body has that heavy, wobbling softness to it.',
-  '🐄 Cow belly swaying low and slow, like she got fed a little too well.',
-  '🧁 Big soft piggy is jiggling top to bottom without even trying.',
-  '🍓 Belly bouncing, thighs kissing, cheeks warm, she is a wobbling little mess.',
-  '🥖 She is all plush tummy, heavy thighs, and slow overstuffed wiggles.',
-  '🍦 Stuffed too full to move gracefully, so now everything just sloshes.',
-  '🐷 Her belly keeps bouncing like it is proud of what she did.',
-  '💞 Soft all over, full all over, wobbling like a darling little dairy cow.',
-]
-
-const lazyLines = [
-  '🐷 Piggy is taking slow little bites now, but she still cannot seem to stop.',
-  '🐄 Sweet cow girl is being fed nice and easy, just enough to keep that belly rounding out.',
-  '🍰 She is already full, but she keeps opening up for one more bite.',
-  '🥛 Slow stuffing for a soft little thing who always says she cannot eat another bite, right before she does.',
-  '🐽 She is chewing so slowly now, like a stuffed piggy who got in too deep but does not want it to end.',
-  '🫃 Little piggy is full to the brim and still making room, somehow.',
-  '🍮 She keeps taking bites like she is embarrassed by it, but not enough to stop.',
-  '🐄 Pretty little cow is still taking her feed, warm and docile and way too full already.',
-  '🧁 One more sweet little bite for the overstuffed brat.',
-  '🍞 She is being filled up so gently, and that soft belly just keeps rising.',
-  '🐷 Slow bites, full cheeks, thick thighs spread a little wider every minute.',
-  '🥐 She looks like she wants to stop, but her mouth keeps opening anyway.',
-  '🍓 Stuffed piggy is eating with that dazed little look she gets when she has gone past full.',
-  '🐄 Cow girl is taking it nice and slow, heavy belly settling in her lap.',
-  '💞 Soft, sleepy, overfed little thing still nibbling like she was made for this.',
-]
-
-const finishers = [
-  '🐄 Soft little cow is so full she can barely waddle, and she is blushing because she loved every second of it.',
-  '🐷 Piggy belly is heavy, her thighs are rubbing, and she looks way too pleased for someone this overstuffed.',
-  '🍰 She got so full she can hardly move now, just waddling and blushing and secretly wishing for dessert.',
-  '🫃 That belly is round and swaying, and she has got that shy little look like she knows she overdid it again.',
-  '🐽 Stuffed silly, waddling slow, cheeks warm, and still not really ready to be done.',
-  '🥛 She looks embarrassed by how full she got, but her happy little face gives her away.',
-  '🐄 Pretty cow girl got fed until she was slow and heavy and absolutely glowing with it.',
-  '🍮 Belly packed full, steps clumsy, and somehow she would still make room for something sweet.',
-  '🐷 Piggy waddled herself into that soft overfull haze and stayed there on purpose.',
-  '🧁 She is so stuffed her belly sways when she walks, and she still looks like she wants another treat.',
-  '🍓 Overfed, flushed, and just a little ashamed, but not ashamed enough to regret a single bite.',
-  '🐄 Sweet heifer got herself impossibly full and now she is standing there all dazed and lovely about it.',
-  '🥖 She ate until her little waddle came out, then acted shy like she did not adore getting this stuffed.',
-  '🍦 Too full to move properly, too happy to care, and still thinking about one last little bite.',
-  '💞 Soft piggy got carried away again, now she is all round belly, wobbly steps, and bashful satisfaction.',
-]
-
-const milestoneLines = {
-  25: [
-    '🐷 Piggy is just getting started.',
-    '🍰 First few bites down, and she is already looking softer.',
-    '🐄 Little cow is warming up nicely now.',
-  ],
-  50: [
-    '🫃 Half full and getting that sweet heavy-bellied look.',
-    '🥛 Belly rounding out now. She is in trouble.',
-    '🐽 Piggy is at that point where she knows she should slow down, but will not.',
-  ],
-  75: [
-    '🐄 She is getting waddly now, poor soft thing.',
-    '🍮 Stuffed enough to blush, still taking more.',
-    '🐷 Belly full, cheeks warm, and somehow she keeps going.',
-  ],
-  100: [
-    '💞 Properly stuffed and very quietly thrilled about it.',
-    '🍓 Full to the brim and still wishing there was room for dessert.',
-    '🐄 Waddling, blushing, and entirely too pleased with herself.',
-  ],
-}
-
-const statusHeaders = [
-  '🐷 piggy mode: hungry',
-  '🐄 cow mode: overfed',
-  '🍰 stuffing session: active',
-  '🧈 softness levels: rising',
-  '🍮 belly status: rounding out',
-  '💞 bratty feeder mode: engaged',
-]
-
-function pickEmoji(pool) {
+function pickFillChar(pool) {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
@@ -192,11 +129,15 @@ function pickLine(pool, index = null) {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
-function resetProgressBar(emoji = null, phase = 'scrape') {
+function resetProgressBar(fillChar = null, phase = 'scrape') {
   const pool =
-    phase === 'lazy' ? lazyEmojis : phase === 'gif' ? gifEmojis : scrapeEmojis
+    phase === 'lazy'
+      ? lazyFillChars
+      : phase === 'gif'
+        ? gifFillChars
+        : scrapeFillChars
 
-  persistentEmoji = emoji || pickEmoji(pool)
+  persistentFillChar = fillChar || pickFillChar(pool)
   if (phase === 'lazy') {
     lastPlainLazyBucket = null
   } else {
@@ -233,36 +174,20 @@ function getMidPhrase(current, total) {
   const safeTotal = Math.max(total || 1, 1)
   const percent = (current / safeTotal) * 100
 
-  if (percent > 90) return 'waddling and very full...'
-  if (percent > 80) return 'blushing through it...'
-  if (percent > 70) return 'way too stuffed to stop...'
-  if (percent > 60) return 'soft belly getting heavy...'
-  if (percent > 50) return 'rounding out nicely...'
-  if (percent > 40) return 'getting fuller by the bite...'
-  if (percent > 30) return 'snacking like a little piggy...'
-  if (percent > 20) return 'warming up that belly...'
-  if (percent > 10) return 'just getting started...'
-  return 'hungry and nosing around...'
+  if (percent > 90) return 'wrapping up...'
+  if (percent > 80) return 'almost there...'
+  if (percent > 70) return 'moving steadily...'
+  if (percent > 60) return 'good progress...'
+  if (percent > 50) return 'halfway through...'
+  if (percent > 40) return 'working through the queue...'
+  if (percent > 30) return 'building momentum...'
+  if (percent > 20) return 'warming up...'
+  if (percent > 10) return 'getting started...'
+  return 'starting scan...'
 }
 
 function getDisplayWidth(text) {
-  const visible = stripAnsi(String(text || ''))
-  let width = 0
-
-  for (const char of Array.from(visible)) {
-    const codePoint = char.codePointAt(0) || 0
-
-    if (
-      codePoint === 0x200d ||
-      (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
-    ) {
-      continue
-    }
-
-    width += codePoint > 0xffff ? 2 : 1
-  }
-
-  return width
+  return stripAnsi(String(text || '')).length
 }
 
 function truncateDisplayText(text, maxWidth) {
@@ -271,17 +196,8 @@ function truncateDisplayText(text, maxWidth) {
   if (getDisplayWidth(source) <= maxWidth) return source
 
   const ellipsis = '...'
-  const ellipsisWidth = getDisplayWidth(ellipsis)
-  const targetWidth = Math.max(maxWidth - ellipsisWidth, 0)
-  let output = ''
-
-  for (const char of Array.from(source)) {
-    const next = output + char
-    if (getDisplayWidth(next) > targetWidth) break
-    output = next
-  }
-
-  return `${output}${ellipsis}`
+  const targetWidth = Math.max(maxWidth - ellipsis.length, 0)
+  return `${source.slice(0, targetWidth)}${ellipsis}`
 }
 
 function getProgressRatio(current, total) {
@@ -302,7 +218,7 @@ function getProgressRatio(current, total) {
   }
 }
 
-function buildEmojiBar(leftText, current, total, emoji = persistentEmoji) {
+function buildProgressBar(leftText, current, total, fillChar = persistentFillChar) {
   const terminalWidth = process.stdout.columns || 80
   const visibleLeft = getDisplayWidth(leftText)
   const innerWidth = Math.max(terminalWidth - visibleLeft - 5, 10)
@@ -310,12 +226,10 @@ function buildEmojiBar(leftText, current, total, emoji = persistentEmoji) {
   const { ratio } = getProgressRatio(current, total)
   const boundedRatio = Math.max(0, Math.min(1, ratio || 0))
   const filledWidth = Math.floor(innerWidth * boundedRatio)
+  const emptyCount = Math.max(innerWidth - filledWidth, 0)
+  const safeFillChar = String(fillChar || '=').slice(0, 1)
 
-  const emojiWidth = 2
-  const emojiCount = Math.floor(filledWidth / emojiWidth)
-  const emptyCount = Math.max(innerWidth - emojiCount * emojiWidth, 0)
-
-  return `[${emoji.repeat(emojiCount)}${'—'.repeat(emptyCount)}]`
+  return `[${safeFillChar.repeat(filledWidth)}${'-'.repeat(emptyCount)}]`
 }
 
 function drawPinnedLines(topText, bottomText = '') {
@@ -332,7 +246,7 @@ function formatBytes(bytes) {
 
   while (value >= 1024 && unitIndex < units.length - 1) {
     value /= 1024
-    unitIndex++
+    unitIndex += 1
   }
 
   const decimals = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
@@ -366,10 +280,12 @@ function truncateLabel(text, maxLength = 42) {
   return `...${normalized.slice(-(maxLength - 3))}`
 }
 
-function logProgress(current, total) {
+function logProgress(current, total, options = {}) {
   const safeTotal = Math.max(total || 1, 1)
   const percent = (Math.max(Number(current) || 0, 0) / safeTotal) * 100
   const plainBucket = Math.min(100, Math.floor(percent / 10) * 10)
+  const bottomText =
+    typeof options.bottomText === 'string' ? options.bottomText.trim() : ''
 
   if (plainProgressMode) {
     if (plainBucket === lastPlainScrapeBucket && current < safeTotal) {
@@ -377,30 +293,26 @@ function logProgress(current, total) {
     }
 
     lastPlainScrapeBucket = plainBucket
+    const line = `[scrape] ${current}/${safeTotal} (${percent.toFixed(1)}%) ${getMidPhrase(current, safeTotal)}`
     process.stdout.write(
-      `[scrape] ${current}/${safeTotal} (${percent.toFixed(1)}%) ${getMidPhrase(current, safeTotal)}\n`
+      `${bottomText ? `${line} | ${stripAnsi(bottomText)}` : line}\n`
     )
     return
   }
 
   const { overflow } = getProgressRatio(current, safeTotal)
-  const progressStats = chalk.cyan(
-    `${current}/${safeTotal}${overflow ? '+' : ''}`
+  const progressStats = chalk.black.bgCyan(
+    ` ${current}/${safeTotal}${overflow ? '+' : ''} `
   )
-  const pig = chalk.magentaBright('🐷')
+  const phaseText = chalk.whiteBright('SCRAPE')
   const phrase = chalk.gray(getMidPhrase(current, safeTotal))
-  const leftText = `${progressStats} ${pig} ${phrase} `
-  const bar = buildEmojiBar(leftText, current, safeTotal)
-  const bottomText = chalk.gray(
-    'File save / skip / fail updates should scroll above these pinned stats.'
-  )
-
-  drawPinnedLines(`${leftText}${bar}`, bottomText)
+  const leftText = `${progressStats} ${phaseText} ${phrase} `
+  const bar = buildProgressBar(leftText, current, safeTotal, persistentFillChar)
+  drawPinnedLines(`${leftText}${chalk.cyan(bar)}`, chalk.gray(bottomText))
 }
 
 function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {}) {
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
-  const lazyProgressValue = safePercent
   const plainBucket = Math.min(100, Math.floor(safePercent / 10) * 10)
 
   if (plainProgressMode) {
@@ -429,8 +341,8 @@ function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {})
     return
   }
 
-  const leftText = `${chalk.cyan(`${safePercent.toFixed(1)}%`)} ${chalk.magentaBright('🐷')} ${chalk.gray('slow stuffing...')} `
-  const bar = buildEmojiBar(leftText, lazyProgressValue, 100)
+  const leftText = `${chalk.black.bgMagenta(` ${safePercent.toFixed(1)}% `)} ${chalk.whiteBright('LAZY')} ${chalk.gray('downloading video bytes...')} `
+  const bar = buildProgressBar(leftText, safePercent, 100, persistentFillChar)
   const details = [
     `${formatBytes(downloadedBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : '?'}`,
   ]
@@ -457,7 +369,7 @@ function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {})
   if (currentLabel) details.push(currentLabel)
 
   drawPinnedLines(
-    `${leftText}${bar}`,
+    `${leftText}${chalk.magenta(bar)}`,
     chalk.gray(`(${details.join(' | ')})`)
   )
 }

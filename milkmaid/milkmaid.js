@@ -818,8 +818,12 @@ function existsForRepair(filePath) {
   return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
 }
 
+function existsAtExactPath(filePath) {
+  return fs.existsSync(filePath)
+}
+
 function existsLocallyOrOnNas(filePath) {
-  if (existsForRepair(filePath)) return true
+  if (existsAtExactPath(filePath)) return true
   if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') return false
   return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
 }
@@ -1688,8 +1692,24 @@ function logAndProgress(message, increment = false) {
       currentLabel: lazyCurrentLabel,
     })
   } else {
-    logProgress(completedTotal, global.totalSearchTotal || 1)
+    logProgress(completedTotal, global.totalSearchTotal || 1, {
+      bottomText: getScrapeStatsLine(),
+    })
   }
+}
+
+function getScrapeStatsLine() {
+  const parts = [
+    `${successCount} saved`,
+    `${duplicateCount} dupes`,
+    `${errorCount} errors`,
+  ]
+
+  if (lazyVideoQueue.length > 0) {
+    parts.push(`${lazyVideoQueue.length} queued`)
+  }
+
+  return parts.join(' | ')
 }
 
 function setProgressTotal(total = null) {
@@ -1707,7 +1727,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
   })
 
   process.stdout.write('\n') // Reserve one lines
-  logProgress(completedTotal, global.totalSearchTotal || 1)
+  logProgress(completedTotal, global.totalSearchTotal || 1, {
+    bottomText: getScrapeStatsLine(),
+  })
 
   try {
     while (url) {

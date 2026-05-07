@@ -342,8 +342,12 @@ function existsForRepair(filePath) {
   return fs.existsSync(getNasMirrorPath(filePath))
 }
 
+function existsAtExactPath(filePath) {
+  return fs.existsSync(filePath)
+}
+
 function existsLocallyOrOnNas(filePath) {
-  if (existsForRepair(filePath)) return true
+  if (existsAtExactPath(filePath)) return true
   if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') return false
   return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
 }
