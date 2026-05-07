@@ -66,6 +66,23 @@ function sanitize(name) {
     .toLowerCase()
 }
 
+function normalizeStufferDbPictureUrl(inputUrl) {
+  const raw = String(inputUrl || '').trim()
+  if (!raw) return raw
+  if (!/stufferdb\.com/i.test(raw) || !/picture\?\//i.test(raw)) {
+    return raw
+  }
+
+  return raw
+    .replace(
+      /(https?:\/\/(?:www\.)?stufferdb\.com)\/index(?:\.php)?\?\/picture\?\//i,
+      '$1/picture?/'
+    )
+    .replace(/&acs=[^&]+/gi, '')
+    .replace(/&slideshow=?/gi, '')
+    .replace(/[?&=]+$/, '')
+}
+
 function loadModelRegistry(registryPath) {
   if (!fs.existsSync(registryPath)) {
     const emptyRegistry = {}
@@ -96,18 +113,28 @@ function sortStringValues(values) {
   )
 }
 
-function sortStufferSources(sources) {
+function sortSourceEntries(sources) {
   return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
     const left =
       String(a?.discoveredAs || '') ||
+      String(a?.userId || '') ||
       String(a?.categoryId || '') ||
       String(a?.url || '')
     const right =
       String(b?.discoveredAs || '') ||
+      String(b?.userId || '') ||
       String(b?.categoryId || '') ||
       String(b?.url || '')
     return left.localeCompare(right)
   })
+}
+
+function sortSourcesObject(sources) {
+  return Object.fromEntries(
+    Object.entries(sources && typeof sources === 'object' ? sources : {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceName, entries]) => [sourceName, sortSourceEntries(entries)])
+  )
 }
 
 function sortModelRegistry(registry) {
@@ -118,9 +145,7 @@ function sortModelRegistry(registry) {
         canonicalName,
         {
           aliases: sortStringValues(entry?.aliases),
-          sources: {
-            stufferdb: sortStufferSources(entry?.sources?.stufferdb),
-          },
+          sources: sortSourcesObject(entry?.sources),
         },
       ])
   )
@@ -133,13 +158,19 @@ function ensureModelEntryShape(entry, canonicalName) {
 
   if (canonicalName) aliasSet.add(canonicalName)
 
+  const existingSources =
+    entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+  const nextSources = Object.fromEntries(
+    Object.entries(existingSources).map(([sourceName, sources]) => [
+      sourceName,
+      Array.isArray(sources) ? [...sources] : [],
+    ])
+  )
+  if (!Array.isArray(nextSources.stufferdb)) nextSources.stufferdb = []
+
   return {
     aliases: Array.from(aliasSet),
-    sources: {
-      stufferdb: Array.isArray(entry?.sources?.stufferdb)
-        ? entry.sources.stufferdb
-        : [],
-    },
+    sources: nextSources,
   }
 }
 
@@ -1125,7 +1156,13 @@ async function maybePauseForErrorReview(modelName, failures, reviewErrors) {
 }
 
 function normalizeSkipUrl(url) {
-  return String(url || '').trim().replace(/&acs=[^&]+/gi, '')
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+
+  return normalizeStufferDbPictureUrl(raw)
+    .replace(/&acs=[^&]+/gi, '')
+    .replace(/&slideshow=?/gi, '')
+    .replace(/[?&]$/, '')
 }
 
 function isNuisanceMediaAsset(filename, ext) {
@@ -1247,6 +1284,40 @@ function getPermanentSkipMatch({ relativePath, mediaUrl, mediaPageUrl, filename 
         entry.filename === normalizedFilename)
     )
   }) || null
+}
+
+function resolveEffectiveFileDate(date, fallbackDate = new Date()) {
+  if (date instanceof Date && !isNaN(date.getTime())) {
+    return date
+  }
+
+  if (fallbackDate instanceof Date && !isNaN(fallbackDate.getTime())) {
+    return fallbackDate
+  }
+
+  return new Date()
+}
+
+function applyFileTimestamp(filePath, date) {
+  const effectiveDate = resolveEffectiveFileDate(date)
+  const ts = effectiveDate.getTime() / 1000
+  fs.utimesSync(filePath, ts, ts)
+  return effectiveDate
+}
+
+function parseResolvedDate(date) {
+  if (date instanceof Date && !isNaN(date.getTime())) {
+    return date
+  }
+
+  if (typeof date === 'string') {
+    const parsed = new Date(date)
+    if (!isNaN(parsed.getTime())) {
+      return parsed
+    }
+  }
+
+  return null
 }
 
 function buildHashMetadata(modelName, absolutePath, mediaType, sizeBytes, uploadedDate) {
@@ -1626,13 +1697,34 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   try {
     while (url) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' })
+      await gotoWithTimeoutRetry(page, url, {
+        waitUntil: 'domcontentloaded',
+        timeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
+        retryTimeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+        onRetry: (error) => {
+          appendRunEvent('category_page_retry', {
+            modelName,
+            categoryUrl: url,
+            timeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+            reason: error.message,
+          })
+        },
+      })
 
-      const urls = await page.$$eval('a[href^="picture?/"]', (links) => [
-        ...new Set(links.map((l) => l.href)),
-      ])
+      const urls = await page.$$eval('a[href^="picture?/"]', (links) =>
+        links.map((l) => l.href)
+      )
+      const dedupedUrls = [
+        ...new Set(
+          urls
+            .map((mediaPageUrl) =>
+              normalizeStufferDbPictureUrl(mediaPageUrl)
+            )
+            .filter(Boolean)
+        ),
+      ]
 
-      const total = urls.length
+      const total = dedupedUrls.length
 
       // If prefetch undercounted, keep the rollup large enough to cover
       // what we have already processed plus what remains visible right now.
@@ -1642,13 +1734,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
       const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
       logAndProgress(
-        `📸 ${modelName} - [${mode}] - ${urls.length} media links (tracking ${global.totalSearchTotal})`
+        `📸 ${modelName} - [${mode}] - ${dedupedUrls.length} media links (tracking ${global.totalSearchTotal})`
       )
       appendRunEvent('category_page_loaded', {
         modelName,
         categoryUrl: url,
         mode,
-        mediaLinks: urls.length,
+        mediaLinks: dedupedUrls.length,
+        rawMediaLinks: urls.length,
         trackedTotal: global.totalSearchTotal || 0,
       })
 
@@ -1666,12 +1759,58 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const pageLocks = pages.map(() => pLimit(1)) // 🧠 One lock per tab
 
       async function scrapeMediaOnPage(page, mediaPageUrl, i) {
+        mediaPageUrl = normalizeStufferDbPictureUrl(mediaPageUrl)
         totalCount++
         let mediaUrl = null
         let filename = null
         let ext = null
 
         try {
+          const permanentSkipPageMatch = getPermanentSkipMatch({
+            mediaPageUrl,
+          })
+          if (permanentSkipPageMatch) {
+            duplicateCount++
+            currentRunLog && currentRunLog.counters.duplicates++
+            appendRunEvent('skip_permanent', {
+              modelName,
+              filename: null,
+              relativePath: permanentSkipPageMatch.relativePath || null,
+              mediaUrl: permanentSkipPageMatch.sourceUrl || null,
+              mediaPageUrl,
+              reason: permanentSkipPageMatch.reason || 'manual_skip',
+              note: permanentSkipPageMatch.note || null,
+              preNavigation: true,
+            })
+            return logAndProgress(
+              `🛑 Permanent page skip: ${mediaPageUrl}`,
+              true
+            )
+          }
+
+          const seenMediaPageMatch = getSuccessfulSeenMediaMatch(
+            folders.logDir,
+            mediaPageUrl,
+            null
+          )
+          if (seenMediaPageMatch) {
+            duplicateCount++
+            currentRunLog && currentRunLog.counters.duplicates++
+            appendRunEvent('skip_seen_media', {
+              modelName,
+              filename: null,
+              mediaUrl: seenMediaPageMatch.sourceUrl || null,
+              mediaPageUrl,
+              matchType: seenMediaPageMatch.matchType,
+              savedPath: seenMediaPageMatch.relativePath,
+              preNavigation: true,
+            })
+            return logAndProgress(
+              `⏩ Seen page skip (${seenMediaPageMatch.matchType}): ${mediaPageUrl}`,
+              true
+            )
+          }
+
           try {
             await page.goto(mediaPageUrl, {
               waitUntil: 'domcontentloaded',
@@ -1708,7 +1847,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           })
 
           const uploadedDate = uploadedDateIso
-            ? new Date(uploadedDateIso)
+            ? resolveEffectiveFileDate(new Date(uploadedDateIso), null)
             : null
           const pageMeta = await extractStufferDbComments(page)
 
@@ -1866,18 +2005,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
 
             fs.writeFileSync(gifPath, buffer)
-            if (uploadedDate) {
-              const ts = uploadedDate.getTime() / 1000
-              fs.utimesSync(gifPath, ts, ts)
-            }
 
-            await mediaDates.recordImageDates(
+            const recordedDate = await mediaDates.recordImageDates(
               path.join(datasetDir, modelName),
               'gif',
               filename,
               buffer,
               uploadedDate,
               pageMeta
+            )
+            const fileDate = applyFileTimestamp(
+              gifPath,
+              parseResolvedDate(recordedDate?.date) || uploadedDate
             )
 
             if (!isBitwiseDupe(hash)) {
@@ -1888,7 +2027,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   gifPath,
                   'gif',
                   buffer.length,
-                  uploadedDate
+                  fileDate
                 )
               )
               saveBitwiseHashCache()
@@ -1977,18 +2116,17 @@ async function scrapeGallery(browser, url, modelName, folders) {
           const finalPath = path.join(images, filename)
           fs.writeFileSync(finalPath, buffer)
 
-          if (uploadedDate) {
-            const ts = uploadedDate.getTime() / 1000
-            fs.utimesSync(finalPath, ts, ts)
-          }
-
-          await mediaDates.recordImageDates(
+          const recordedDate = await mediaDates.recordImageDates(
             path.join(datasetDir, modelName),
             'images',
             filename,
             buffer,
             uploadedDate,
             pageMeta
+          )
+          const fileDate = applyFileTimestamp(
+            finalPath,
+            parseResolvedDate(recordedDate?.date) || uploadedDate
           )
 
           if (!isBitwiseDupe(hash)) {
@@ -1999,7 +2137,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 finalPath,
                 'image',
                 buffer.length,
-                uploadedDate
+                fileDate
               )
             )
             saveBitwiseHashCache()
@@ -2013,7 +2151,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 finalPath,
                 'image',
                 buffer.length,
-                uploadedDate
+                fileDate
               )
             )
           }
@@ -2064,7 +2202,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
       }
 
       await Promise.all(
-        urls.map((mediaPageUrl, i) => {
+        dedupedUrls.map((mediaPageUrl, i) => {
           const page = pages[i % pages.length]
           const lock = pageLocks[i % pageLocks.length]
 
@@ -2520,20 +2658,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
               )
             }
 
-            if (uploadedDate) {
-              const ts = uploadedDate.getTime() / 1000
-              fs.utimesSync(tmpPath, ts, ts)
-            }
-
             moveFileIntoPlace(tmpPath, finalPath)
-
-            await mediaDates.recordVideoDates(
+            const recordedDate = await mediaDates.recordVideoDates(
               path.join(datasetDir, modelName),
               'webm',
               filename,
               finalPath,
               uploadedDate,
               pageMeta
+            )
+            const fileDate = applyFileTimestamp(
+              finalPath,
+              parseResolvedDate(recordedDate?.date) || uploadedDate
             )
 
             const finalStat = fs.statSync(finalPath)
@@ -2545,7 +2681,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                 finalPath,
                 'video',
                 finalStat.size,
-                uploadedDate
+                fileDate
               )
             )
             saveBitwiseHashCache()
@@ -2559,7 +2695,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
                   finalPath,
                   'video',
                   finalStat.size,
-                  uploadedDate
+                  fileDate
                 )
               )
               saveVisualHashCache()

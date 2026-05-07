@@ -9,10 +9,11 @@ const argv = minimist(process.argv.slice(2), {
     m: 'model',
   },
   string: ['model', 'models', 'start-from', 'registry', 'log-dir'],
-  boolean: ['stop-on-error'],
+  boolean: ['stop-on-error', 'with-repair'],
   default: {
     limit: 0,
     'stop-on-error': false,
+    'with-repair': false,
   },
 })
 
@@ -37,6 +38,7 @@ const explicitModels = String(argv.models || '')
   .map((value) => value.trim())
   .filter(Boolean)
 const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
+const withRepair = Boolean(argv['with-repair'])
 
 main().catch((err) => {
   console.error(`Fatal updater error: ${err.stack || err.message}`)
@@ -54,6 +56,7 @@ async function main() {
     totalModelsInRegistry: queue.length,
     selectedModels: selectedQueue.length,
     stopOnError: Boolean(argv['stop-on-error']),
+    withRepair,
     totals: {
       filesSaved: 0,
       sourceItemsHandled: 0,
@@ -82,9 +85,10 @@ async function main() {
     if (
       argv['stop-on-error'] &&
       (!result.scrape.ok ||
-        !result.hashPrune.ok ||
-        !result.hashBackfill.ok ||
-        !result.validation.ok)
+        (withRepair &&
+          (!result.hashPrune.ok ||
+            !result.hashBackfill.ok ||
+            !result.validation.ok)))
     ) {
       console.log('Stopping on first error because --stop-on-error was set.')
       break
@@ -107,11 +111,13 @@ Options:
   --registry <path>      Override model_aliases.json path.
   --log-dir <path>       Override updater report directory.
   --stop-on-error        Stop the batch when one model fails.
+  --with-repair          After each scrape, also prune/backfill/validate hashes.
   -h, --help             Show help.
 
 Notes:
   Each model is scraped once per configured StufferDB source URL.
-  After scraping, hashes are pruned, backfilled (including video visuals), and validated.
+  By default this updater is scrape-only so reruns stay fast.
+  Use --with-repair when you explicitly want per-model prune/backfill/validate work.
 `)
 }
 
@@ -184,7 +190,6 @@ async function runModelUpdate(item) {
       {
         cwd: rootDir,
         label: `milkmaid:${item.model}`,
-        env: { MILKMAID_PROGRESS_MODE: 'plain' },
       }
     )
 
@@ -213,7 +218,17 @@ async function runModelUpdate(item) {
 
   result.scrape = summarizeScrapeRuns(result.scrapeRuns)
 
-  if (result.scrape.ok) {
+  if (!withRepair) {
+    result.hashPrune = skippedCommandResult(
+      'pruneModelHashes skipped by default; rerun with --with-repair to enable'
+    )
+    result.hashBackfill = skippedCommandResult(
+      'backfillModelHashes skipped by default; rerun with --with-repair to enable'
+    )
+    result.validation = skippedCommandResult(
+      'validateModelHashes skipped by default; rerun with --with-repair to enable'
+    )
+  } else if (result.scrape.ok) {
     result.hashPrune = await runCommand(
       process.execPath,
       [
@@ -229,7 +244,11 @@ async function runModelUpdate(item) {
     )
   }
 
-  if (result.scrape.ok) {
+  if (!withRepair) {
+    result.hashBackfill = skippedCommandResult(
+      'backfillModelHashes skipped by default; rerun with --with-repair to enable'
+    )
+  } else if (result.scrape.ok) {
     result.hashBackfill = await runCommand(
       process.execPath,
       [
@@ -246,19 +265,21 @@ async function runModelUpdate(item) {
     )
   }
 
-  const validationPath = path.join(logDir, `${item.model}.validate.json`)
-  result.validation = await runCommand(
-    process.execPath,
-    [
-      path.join(rootDir, 'scrapyard', 'validateModelHashes.js'),
-      '--model',
-      item.model,
-      '--json-out',
-      validationPath,
-    ],
-    { cwd: rootDir, label: `validate:${item.model}` }
-  )
-  result.validation = hydrateValidationResult(result.validation, validationPath)
+  if (withRepair) {
+    const validationPath = path.join(logDir, `${item.model}.validate.json`)
+    result.validation = await runCommand(
+      process.execPath,
+      [
+        path.join(rootDir, 'scrapyard', 'validateModelHashes.js'),
+        '--model',
+        item.model,
+        '--json-out',
+        validationPath,
+      ],
+      { cwd: rootDir, label: `validate:${item.model}` }
+    )
+    result.validation = hydrateValidationResult(result.validation, validationPath)
+  }
 
   result.finishedAt = new Date().toISOString()
   return result
@@ -302,7 +323,7 @@ function summarizeScrapeRuns(scrapeRuns) {
 
 function skippedCommandResult(command) {
   return {
-    ok: false,
+    ok: true,
     skipped: true,
     code: null,
     command,
@@ -388,9 +409,15 @@ function writeReport(report) {
         item.model,
         `scrape=${item.scrape.ok ? 'ok' : 'fail'}`,
         `sources=${item.scrape.runs || 0}`,
-        `prune=${item.hashPrune?.ok ? 'ok' : item.hashPrune?.skipped ? 'skipped' : 'fail'}`,
-        `backfill=${item.hashBackfill?.ok ? 'ok' : item.hashBackfill?.skipped ? 'skipped' : 'fail'}`,
-        `validate=${item.validation?.ok ? 'clean' : 'needs_attention'}`,
+        `prune=${item.hashPrune?.skipped ? 'skipped' : item.hashPrune?.ok ? 'ok' : 'fail'}`,
+        `backfill=${item.hashBackfill?.skipped ? 'skipped' : item.hashBackfill?.ok ? 'ok' : 'fail'}`,
+        `validate=${
+          item.validation?.skipped
+            ? 'skipped'
+            : item.validation?.ok
+              ? 'clean'
+              : 'needs_attention'
+        }`,
       ].join(' :: ')
     )
 
