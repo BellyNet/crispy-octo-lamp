@@ -68,11 +68,13 @@ function logScrollingMessage(message = '') {
   }
 
   ensurePinnedRows()
+  const maxMessageWidth = Math.max((process.stdout.columns || 80) - 1, 20)
+  const displayMessage = truncateDisplayText(message, maxMessageWidth)
 
   // Print the message above the reserved bottom rows, then redraw the pinned lines.
   process.stdout.write(ansiEscapes.cursorTo(0, process.stdout.rows - PINNED_ROW_COUNT))
   process.stdout.write(ansiEscapes.eraseDown)
-  process.stdout.write(`${message}\n`)
+  process.stdout.write(`${displayMessage}\n`)
   redrawPinnedLines()
 }
 
@@ -261,6 +263,25 @@ function getDisplayWidth(text) {
   }
 
   return width
+}
+
+function truncateDisplayText(text, maxWidth) {
+  const source = String(text || '')
+  if (!Number.isFinite(maxWidth) || maxWidth <= 0) return ''
+  if (getDisplayWidth(source) <= maxWidth) return source
+
+  const ellipsis = '...'
+  const ellipsisWidth = getDisplayWidth(ellipsis)
+  const targetWidth = Math.max(maxWidth - ellipsisWidth, 0)
+  let output = ''
+
+  for (const char of Array.from(source)) {
+    const next = output + char
+    if (getDisplayWidth(next) > targetWidth) break
+    output = next
+  }
+
+  return `${output}${ellipsis}`
 }
 
 function getProgressRatio(current, total) {
