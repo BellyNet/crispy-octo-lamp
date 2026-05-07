@@ -1243,6 +1243,46 @@
         showHomeView() // start on the home grid
       }
 
+      // Models whose full media has been loaded — their client-resolved dates are
+      // more accurate than the server's fast buildModelStats() scan, so we preserve
+      // them on periodic refresh and only update file count + latest-added.
+      const _accurateModels = new Set()
+
+      async function refreshUsers() {
+        try {
+          const res = await fetch('/api/users')
+          if (!res.ok) return
+          const fresh = await res.json()
+          let changed = false
+          for (const u of fresh) {
+            const idx = usersData.findIndex((x) => x.name === u.name)
+            if (idx === -1) {
+              usersData.push(u)
+              changed = true
+            } else {
+              const prev = usersData[idx]
+              const update = { fileCount: u.fileCount, latestAddedMs: u.latestAddedMs }
+              // Only overwrite media dates for models not yet visited by the client
+              if (!_accurateModels.has(u.name)) {
+                update.earliestMs = u.earliestMs
+                update.latestMs   = u.latestMs
+                update.yearCounts = u.yearCounts
+              }
+              const needsUpdate = Object.entries(update).some(([k, v]) => prev[k] !== v)
+              if (needsUpdate) { usersData[idx] = { ...prev, ...update }; changed = true }
+            }
+          }
+          if (changed) {
+            userCountEl.textContent = usersData.length
+            renderUserList(usersData)
+            if (homeVisible) renderHomeGrid()
+          }
+        } catch {}
+      }
+
+      // Refresh every 5 minutes — picks up new files without a page reload
+      setInterval(refreshUsers, 5 * 60 * 1000)
+
       // ─── HOME VIEW ────────────────────────────────────────────────────────
       function showHomeView() {
         homeVisible = true
@@ -1546,6 +1586,7 @@
               earliestMs:  earliest === Infinity ? usersData[uIdx].earliestMs : earliest,
               latestMs:    latest   || usersData[uIdx].latestMs,
             }
+            _accurateModels.add(username)
           }
         }
 
@@ -1834,10 +1875,11 @@
 
           const pswp = new PhotoSwipe({
             dataSource,
-            index:     startIndex,
-            bgOpacity: 0.97,
-            padding:   { top: 44, bottom: 0, left: 44, right: 44 },
-            loop:      true,
+            index:       startIndex,
+            bgOpacity:   0.97,
+            padding:     { top: 44, bottom: 0, left: 44, right: 44 },
+            loop:        true,
+            wheelToZoom: true,
           })
 
           let infoPanelEl = null
