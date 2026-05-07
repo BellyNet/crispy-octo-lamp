@@ -60,7 +60,10 @@
     "backfill:sources-interactive": "node hoghaul/backfill-sources-interactive.js",
     "ingest:kemonodownloader": "node hoghaul/ingest-kemonodownloader.js",
     "probe:sources": "node hoghaul/batch-probe-sources.js",
-    "backfill:exif": "node milkmaid/backfill-exif-dates.js"
+    "backfill:exif": "node milkmaid/backfill-exif-dates.js",
+    "cleanup:gif-derived-mp4s": "node scrapyard/removeGifDerivedMp4s.js",
+    "cleanup:mirrored-mp4s": "node scrapyard/removeMirroredMp4s.js",
+    "rebuild:nas-mp4-index": "node scrapyard/rebuildNasMp4Index.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
@@ -92,4 +95,3 @@
     "puppeteer": "^24.12.0"
   }
 }
-

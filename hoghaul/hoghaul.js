@@ -19,6 +19,12 @@ const { bannerHoghaul } = require('../banners.js')
 const mediaDates = require('../milkmaid/media-dates.js')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const {
+  hasNasMp4RelativePath,
+  mergeNasMp4Entries,
+  collectMp4RelativePaths,
+  syncNasMp4IndexToMirror,
+} = require('../scrapyard/nasMp4Index')
+const {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
@@ -336,6 +342,12 @@ function existsForRepair(filePath) {
   return fs.existsSync(getNasMirrorPath(filePath))
 }
 
+function existsLocallyOrOnNas(filePath) {
+  if (existsForRepair(filePath)) return true
+  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') return false
+  return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
+}
+
 function getRecordRefs(record) {
   return Array.isArray(record?.refs)
     ? record.refs
@@ -346,7 +358,7 @@ function getRecordRefs(record) {
 
 function getActiveRecordRefs(record) {
   return getRecordRefs(record).filter((relativePath) =>
-    existsForRepair(
+    existsLocallyOrOnNas(
       path.join(datasetDir, relativePath.replace(/\//g, path.sep))
     )
   )
@@ -686,7 +698,7 @@ function getActiveMediaSeenRecord(modelLogDir, entry) {
     datasetDir,
     String(entry.relativePath).replace(/\//g, path.sep)
   )
-  if (!existsForRepair(absolutePath)) return null
+  if (!existsLocallyOrOnNas(absolutePath)) return null
   return {
     ...entry,
     absolutePath,
@@ -1849,7 +1861,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
-  if (existsForRepair(finalPath)) {
+  if (existsLocallyOrOnNas(finalPath)) {
     recordDuplicate(entry, relativePath, `skip_existing_${kind}`, folders)
     console.log(`Exists already: ${entry.filename}`)
     return
@@ -2026,7 +2038,7 @@ async function saveVideoMedia(modelName, folders, entry) {
     return
   }
 
-  if (existsForRepair(finalPath)) {
+  if (existsLocallyOrOnNas(finalPath)) {
     recordDuplicate(entry, relativePath, 'skip_lazy_existing', folders)
     console.log(`Exists already: ${entry.filename}`)
     return
@@ -2513,6 +2525,18 @@ async function run() {
   saveBitwiseHashCache()
   saveVisualHashCache()
 
+  if (skipNasSync) {
+    console.log('NAS sync skipped by --skip-nas-sync')
+  } else {
+    const nasSyncOk = await syncToNAS(modelName)
+    if (nasSyncOk) {
+      mergeNasMp4Entries(
+        collectMp4RelativePaths(path.join(datasetDir, modelName), datasetDir),
+        datasetDir
+      )
+      syncNasMp4IndexToMirror('Z:\\dataset', datasetDir)
+    }
+  }
   finalizeRunLog({
     successCount,
     duplicateCount,

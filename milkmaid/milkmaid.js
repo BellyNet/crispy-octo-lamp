@@ -57,6 +57,12 @@ const {
   logScrollingMessage,
 } = require('../stuffinglogger')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
+const {
+  hasNasMp4RelativePath,
+  mergeNasMp4Entries,
+  collectMp4RelativePaths,
+  syncNasMp4IndexToMirror,
+} = require('../scrapyard/nasMp4Index')
 
 function sanitize(name) {
   return String(name || '')
@@ -812,6 +818,12 @@ function existsForRepair(filePath) {
   return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
 }
 
+function existsLocallyOrOnNas(filePath) {
+  if (existsForRepair(filePath)) return true
+  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') return false
+  return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
+}
+
 function getRecordRefs(record) {
   return Array.isArray(record?.refs)
     ? record.refs
@@ -822,7 +834,9 @@ function getRecordRefs(record) {
 
 function getActiveRecordRefs(record) {
   return getRecordRefs(record).filter((relativePath) =>
-    existsForRepair(path.join(datasetDir, relativePath.replace(/\//g, path.sep)))
+    existsLocallyOrOnNas(
+      path.join(datasetDir, relativePath.replace(/\//g, path.sep))
+    )
   )
 }
 
@@ -1054,7 +1068,7 @@ function getActiveMediaSeenRecord(modelLogDir, entry) {
     datasetDir,
     String(entry.relativePath).replace(/\//g, path.sep)
   )
-  if (!existsForRepair(absolutePath)) return null
+  if (!existsLocallyOrOnNas(absolutePath)) return null
   return {
     ...entry,
     absolutePath,
@@ -1992,7 +2006,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             const gifFolder = folders.createGifFolder()
             const gifPath = path.join(gifFolder, filename)
 
-            if (knownFilenames.has(filename) || existsForRepair(gifPath)) {
+            if (knownFilenames.has(filename) || existsLocallyOrOnNas(gifPath)) {
               duplicateCount++
               currentRunLog && currentRunLog.counters.duplicates++
               appendRunEvent('skip_existing_gif', {
@@ -2056,7 +2070,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
             const webmFolder = folders.createWebmFolder() // Create only when needed
             const finalPath = path.join(webmFolder, filename)
 
-            if (knownFilenames.has(filename) || existsForRepair(finalPath)) {
+            if (knownFilenames.has(filename) || existsLocallyOrOnNas(finalPath)) {
               duplicateCount++
               currentRunLog && currentRunLog.counters.duplicates++
               appendRunEvent('skip_existing_video', {
@@ -2095,7 +2109,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
           if (
             knownFilenames.has(filename) ||
-            existsForRepair(path.join(images, filename))
+            existsLocallyOrOnNas(path.join(images, filename))
           ) {
             duplicateCount++
             currentRunLog && currentRunLog.counters.duplicates++
@@ -2416,7 +2430,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
         i
       ) =>
         lazyLimit(async () => {
-          if (knownFilenames.has(filename) || existsForRepair(finalPath)) {
+          if (knownFilenames.has(filename) || existsLocallyOrOnNas(finalPath)) {
             duplicateCount++
             currentRunLog && currentRunLog.counters.duplicates++
             appendRunEvent('skip_lazy_existing', {
@@ -2862,6 +2876,11 @@ async function scrapeGallery(browser, url, modelName, folders) {
       if (!nasSync.ok && nasSync.code > 3) {
         console.error('❌ NAS sync failed with code', nasSync.code)
       } else {
+        mergeNasMp4Entries(
+          collectMp4RelativePaths(path.join(datasetDir, modelName), datasetDir),
+          datasetDir
+        )
+        syncNasMp4IndexToMirror('Z:\\dataset', datasetDir)
         console.log('✅ NAS sync complete.')
       }
     }

@@ -43,32 +43,29 @@ const mirrorRoot = argv['mirror-root']
   ? path.resolve(String(argv['mirror-root']))
   : null
 const reportDir = path.resolve(
-  String(
-    argv['report-dir'] || path.join(process.cwd(), 'tmp', 'cleanup-gif-mp4')
-  )
+  String(argv['report-dir'] || path.join(process.cwd(), 'tmp', 'cleanup-mirrored-mp4'))
 )
-const reportPath = path.join(reportDir, 'remove-gif-derived-mp4s-latest.json')
+const reportPath = path.join(reportDir, 'remove-mirrored-mp4s-latest.json')
 
 main()
 
 function main() {
+  if (!mirrorRoot) {
+    console.error('Missing required --mirror-root for mirrored MP4 cleanup.')
+    process.exit(1)
+  }
+
   ensureDir(reportDir)
   const matches = collectMatches(datasetRoot)
-  const verifiedMatches = mirrorRoot
-    ? matches.filter((match) =>
-        fs.existsSync(path.join(mirrorRoot, match.mp4RelativePath))
-      )
-    : matches
-  const skippedMissingMirrorPaths = mirrorRoot
-    ? matches
-        .filter(
-          (match) => !fs.existsSync(path.join(mirrorRoot, match.mp4RelativePath))
-        )
-        .map((match) => match.mp4RelativePath)
-    : []
-  const deletedRelativePaths = verifiedMatches.map((match) => match.mp4RelativePath)
-  const affectedModels = Array.from(new Set(matches.map((match) => match.model))).sort(
-    (a, b) => a.localeCompare(b)
+  const verifiedMatches = matches.filter((match) =>
+    fs.existsSync(path.join(mirrorRoot, match.relativePath))
+  )
+  const skippedMissingMirrorPaths = matches
+    .filter((match) => !fs.existsSync(path.join(mirrorRoot, match.relativePath)))
+    .map((match) => match.relativePath)
+  const deletedRelativePaths = verifiedMatches.map((match) => match.relativePath)
+  const affectedModels = Array.from(new Set(matches.map((match) => match.model))).sort((a, b) =>
+    a.localeCompare(b)
   )
 
   const report = {
@@ -91,8 +88,8 @@ function main() {
 
   if (argv.apply && verifiedMatches.length > 0) {
     for (const match of verifiedMatches) {
-      if (fs.existsSync(match.mp4AbsolutePath)) {
-        fs.unlinkSync(match.mp4AbsolutePath)
+      if (fs.existsSync(match.absolutePath)) {
+        fs.unlinkSync(match.absolutePath)
       }
     }
 
@@ -112,34 +109,30 @@ function main() {
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
 
   console.log(`Dataset root: ${datasetRoot}`)
-  console.log(`Matched GIF-derived MP4s: ${matches.length}`)
-  if (mirrorRoot) {
-    console.log(`Verified on mirror: ${verifiedMatches.length}`)
-    console.log(`Missing on mirror: ${skippedMissingMirrorPaths.length}`)
-  }
+  console.log(`Matched mirrored MP4 candidates: ${matches.length}`)
+  console.log(`Verified on mirror: ${verifiedMatches.length}`)
+  console.log(`Missing on mirror: ${skippedMissingMirrorPaths.length}`)
   console.log(`Affected models: ${affectedModels.length}`)
   console.log(argv.apply ? 'Mode: apply' : 'Mode: dry-run')
   if (argv.apply) {
-    console.log(
-      `Bitwise refs removed: ${report.hashCleanup.bitwiseRefsRemoved}`
-    )
+    console.log(`Bitwise refs removed: ${report.hashCleanup.bitwiseRefsRemoved}`)
     console.log(`Visual refs removed: ${report.hashCleanup.visualRefsRemoved}`)
   }
   console.log(`Report: ${reportPath}`)
 }
 
 function printHelp() {
-  console.log(`Usage: node scrapyard/removeGifDerivedMp4s.js [options]
+  console.log(`Usage: node scrapyard/removeMirroredMp4s.js [options]
 
 Options:
-  --apply                Delete matched MP4 files and prune hash refs.
+  --apply                Delete local MP4 files that also exist under the mirror root.
   --dataset-root <path>  Override dataset root.
-  --mirror-root <path>   Only delete MP4s that also exist under this mirror root.
+  --mirror-root <path>   Required mirror root used to verify safe deletion.
   --report-dir <path>    Override report directory.
   -h, --help             Show help.
 
 Match rule:
-  Deletes webm/<stem>.mp4 only when the same model also has gif/<stem>.gif.
+  Deletes any local .mp4 only when the same relative path exists under the mirror root.
 `)
 }
 
@@ -156,32 +149,38 @@ function collectMatches(root) {
     .sort((a, b) => a.localeCompare(b))
 
   for (const model of models) {
-    const gifDir = path.join(root, model, 'gif')
-    const webmDir = path.join(root, model, 'webm')
-    if (!fs.existsSync(gifDir) || !fs.existsSync(webmDir)) continue
+    const modelDir = path.join(root, model)
+    const mp4Files = findMp4Files(modelDir)
 
-    const gifStems = new Set(
-      fs
-        .readdirSync(gifDir)
-        .filter((name) => name.toLowerCase().endsWith('.gif'))
-        .map((name) => name.slice(0, -4).toLowerCase())
-    )
-
-    for (const name of fs.readdirSync(webmDir)) {
-      if (!name.toLowerCase().endsWith('.mp4')) continue
-      const stem = name.slice(0, -4).toLowerCase()
-      if (!gifStems.has(stem)) continue
-
-      const mp4AbsolutePath = path.join(webmDir, name)
+    for (const absolutePath of mp4Files) {
       matches.push({
         model,
-        mp4AbsolutePath,
-        mp4RelativePath: normalizePath(path.relative(root, mp4AbsolutePath)),
+        absolutePath,
+        relativePath: normalizePath(path.relative(root, absolutePath)),
       })
     }
   }
 
   return matches
+}
+
+function findMp4Files(dirPath) {
+  const results = []
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+
+  for (const entry of entries) {
+    const absolutePath = path.join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      results.push(...findMp4Files(absolutePath))
+      continue
+    }
+
+    if (entry.isFile() && entry.name.toLowerCase().endsWith('.mp4')) {
+      results.push(absolutePath)
+    }
+  }
+
+  return results
 }
 
 function getRelativePath(ref) {
