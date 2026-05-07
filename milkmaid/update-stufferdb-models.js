@@ -37,7 +37,13 @@ const explicitModels = String(argv.models || '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean)
-const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
+const positionalSelector =
+  !singleModel && !explicitModels.length && argv._.length
+    ? String(argv._[0] || '').trim()
+    : null
+const startFrom = argv['start-from']
+  ? String(argv['start-from']).trim()
+  : positionalSelector
 const withRepair = Boolean(argv['with-repair'])
 
 main().catch((err) => {
@@ -104,6 +110,7 @@ function printHelp() {
   console.log(`Usage: node milkmaid/update-stufferdb-models.js [options]
 
 Options:
+  [start-from]          Optional positional shorthand for --start-from.
   --model <name>         Update one model only.
   --models <a,b,c>       Update a comma-separated set of models.
   --start-from <name>    Start from this canonical model name.
