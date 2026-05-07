@@ -22,6 +22,9 @@ if (argv.help) {
   process.exit(0)
 }
 
+const positionalArgs = Array.isArray(argv._)
+  ? argv._.map((value) => String(value).trim()).filter(Boolean)
+  : []
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.resolve(
   String(argv.registry || path.join(rootDir, 'model_aliases.json'))
@@ -37,10 +40,7 @@ const explicitModels = String(argv.models || '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean)
-const positionalSelector =
-  !singleModel && !explicitModels.length && argv._.length
-    ? String(argv._[0] || '').trim()
-    : null
+const positionalSelector = resolvePositionalSelector()
 const startFrom = argv['start-from']
   ? String(argv['start-from']).trim()
   : positionalSelector
@@ -110,7 +110,7 @@ function printHelp() {
   console.log(`Usage: node milkmaid/update-stufferdb-models.js [options]
 
 Options:
-  [start-from]          Optional positional shorthand for --start-from.
+  [start-from]           Optional positional shorthand for --start-from.
   --model <name>         Update one model only.
   --models <a,b,c>       Update a comma-separated set of models.
   --start-from <name>    Start from this canonical model name.
@@ -126,6 +126,24 @@ Notes:
   By default this updater is scrape-only so reruns stay fast.
   Use --with-repair when you explicitly want per-model prune/backfill/validate work.
 `)
+}
+
+function resolvePositionalSelector() {
+  if (!positionalArgs.length) return null
+
+  if (positionalArgs.length > 1) {
+    throw new Error(
+      `Unexpected positional arguments: ${positionalArgs.join(', ')}`
+    )
+  }
+
+  if (singleModel || explicitModels.length || argv['start-from']) {
+    throw new Error(
+      `Positional selector "${positionalArgs[0]}" cannot be combined with --model, --models, or --start-from`
+    )
+  }
+
+  return positionalArgs[0]
 }
 
 function ensureDir(dirPath) {
