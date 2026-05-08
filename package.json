@@ -41,6 +41,7 @@
     "review:slopvault-duplicates": "node audit/review-slopvault-duplicates.js",
     "review:slopvault-duplicates-express": "node audit/review-slopvault-duplicates-express.js",
     "sync": "node scrapyard/sync.js",
+    "restore:nas-mp4-hashes": "node scrapyard/restoreNasMp4Hashes.js",
     "sort:model-aliases": "node scrapyard/sortModelAliases.js",
     "purge-hashes": "node scrapyard/purgeModelHashes.js",
     "prune:model-hashes": "node scrapyard/pruneModelHashes.js",

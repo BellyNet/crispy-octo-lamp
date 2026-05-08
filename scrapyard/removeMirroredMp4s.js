@@ -3,17 +3,6 @@ const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
 
-const {
-  loadBitwiseHashCache,
-  saveBitwiseHashCache,
-  removeBitwiseRefs,
-} = require('./bitwiseHasher')
-const {
-  loadVisualHashCache,
-  saveVisualHashCache,
-  removeVisualRefs,
-} = require('./visualHasher')
-
 const argv = minimist(process.argv.slice(2), {
   alias: {
     h: 'help',
@@ -83,6 +72,7 @@ function main() {
     hashCleanup: {
       bitwiseRefsRemoved: 0,
       visualRefsRemoved: 0,
+      refsPreserved: true,
     },
   }
 
@@ -92,18 +82,6 @@ function main() {
         fs.unlinkSync(match.absolutePath)
       }
     }
-
-    const deletedSet = new Set(deletedRelativePaths)
-    loadBitwiseHashCache()
-    loadVisualHashCache()
-    report.hashCleanup.bitwiseRefsRemoved = removeBitwiseRefs((ref) =>
-      deletedSet.has(getRelativePath(ref))
-    )
-    report.hashCleanup.visualRefsRemoved = removeVisualRefs((ref) =>
-      deletedSet.has(getRelativePath(ref))
-    )
-    saveBitwiseHashCache()
-    saveVisualHashCache()
   }
 
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
@@ -115,8 +93,7 @@ function main() {
   console.log(`Affected models: ${affectedModels.length}`)
   console.log(argv.apply ? 'Mode: apply' : 'Mode: dry-run')
   if (argv.apply) {
-    console.log(`Bitwise refs removed: ${report.hashCleanup.bitwiseRefsRemoved}`)
-    console.log(`Visual refs removed: ${report.hashCleanup.visualRefsRemoved}`)
+    console.log('Hash refs preserved for NAS-backed MP4s.')
   }
   console.log(`Report: ${reportPath}`)
 }
@@ -181,14 +158,6 @@ function findMp4Files(dirPath) {
   }
 
   return results
-}
-
-function getRelativePath(ref) {
-  if (typeof ref === 'string') {
-    return normalizePath(ref)
-  }
-
-  return normalizePath(ref?.relativePath || '')
 }
 
 function normalizePath(value) {
