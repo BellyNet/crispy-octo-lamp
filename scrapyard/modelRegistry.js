@@ -154,6 +154,50 @@ function upsertCoomerSource(entry, sourceUrl, rawName) {
   }
 }
 
+function parseRedditSourceUrl(sourceUrl) {
+  const url = String(sourceUrl || '').trim()
+  const match = url.match(
+    /^https?:\/\/(?:www\.)?reddit\.com\/(?:user|u)\/([^/?#\s]+)(?:\/([^/?#\s]+))?/i
+  )
+  if (!match) return null
+
+  const username = match[1].replace(/^u_/, '')
+  const service = (match[2] || 'submitted').toLowerCase()
+
+  return {
+    url: `https://www.reddit.com/user/${username}/submitted/`,
+    service: service === 'submitted' ? 'submitted' : service,
+    userId: username,
+    username,
+  }
+}
+
+function upsertRedditSource(entry, sourceUrl, rawName) {
+  const parsed = parseRedditSourceUrl(sourceUrl)
+  if (!parsed) return
+  const now = new Date().toISOString()
+
+  if (!Array.isArray(entry.sources.reddit)) entry.sources.reddit = []
+
+  const normalizedUsername = sanitize(parsed.username)
+  const idx = entry.sources.reddit.findIndex(
+    (s) =>
+      s?.url === parsed.url ||
+      sanitize(s?.username || s?.userId) === normalizedUsername
+  )
+  const next = {
+    ...parsed,
+    discoveredAs: rawName,
+    lastCheckedAt: now,
+  }
+
+  if (idx >= 0) {
+    entry.sources.reddit[idx] = { ...entry.sources.reddit[idx], ...next }
+  } else {
+    entry.sources.reddit.push(next)
+  }
+}
+
 // Generic fallback for future platforms — stores url + discoveredAs
 function upsertGenericSource(entry, platform, sourceUrl, rawName) {
   const url = String(sourceUrl || '').trim()
@@ -214,6 +258,8 @@ function resolveAndTrackModel(
       upsertStufferdbSource(registry[canonicalName], sourceUrl, cleanedRawName)
     } else if (platform === 'coomer') {
       upsertCoomerSource(registry[canonicalName], sourceUrl, cleanedRawName)
+    } else if (platform === 'reddit') {
+      upsertRedditSource(registry[canonicalName], sourceUrl, cleanedRawName)
     } else {
       upsertGenericSource(
         registry[canonicalName],
@@ -238,5 +284,6 @@ module.exports = {
   resolveAndTrackModel,
   upsertStufferdbSource,
   upsertCoomerSource,
+  upsertRedditSource,
   upsertGenericSource,
 }

@@ -34,7 +34,7 @@ const {
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
-const AUTO = !!argv.auto   // auto-save exact matches, skip everything else
+const AUTO = !!argv.auto // auto-save exact matches, skip everything else
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -83,12 +83,24 @@ const PLATFORMS = {
     userUrl: (service, username) =>
       `https://kemono.cr/${service}/user/${username}`,
   },
+  reddit: {
+    host: 'www.reddit.com',
+    label: 'Reddit',
+    urlPattern:
+      /^https?:\/\/(?:www\.)?reddit\.com\/(?:user|u)\/([^/?#\s]+)(?:\/submitted)?\/?/i,
+    searchUrl: (name) =>
+      `https://www.reddit.com/search/?q=${encodeURIComponent(name)}&type=users`,
+    userUrl: (username) =>
+      `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/`,
+    listingUrl: (username) =>
+      `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/.json?limit=1&raw_json=1`,
+  },
 }
 
 const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
-function httpsGet(host, url) {
+function httpsGet(host, url, headers = {}) {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -98,6 +110,7 @@ function httpsGet(host, url) {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           Accept: 'text/css',
           Referer: `https://${host}/`,
+          ...headers,
         },
       },
       (res) => {
@@ -106,9 +119,8 @@ function httpsGet(host, url) {
           res.statusCode < 400 &&
           res.headers.location
         ) {
-          return httpsGet(host, res.headers.location)
-            .then(resolve)
-            .catch(reject)
+          const nextUrl = new URL(res.headers.location, url).toString()
+          return httpsGet(host, nextUrl, headers).then(resolve).catch(reject)
         }
         let body = ''
         res.on('data', (c) => (body += c))
@@ -148,7 +160,14 @@ async function searchCoomer(query) {
     if (/free/i.test(username)) continue
     const hitUrl = `https://coomerfans.com/u/${service}/${id}/${username}`
     if (!hits.some((h) => h.url === hitUrl)) {
-      hits.push({ platform: 'coomer', service, id, username, url: hitUrl, name: username })
+      hits.push({
+        platform: 'coomer',
+        service,
+        id,
+        username,
+        url: hitUrl,
+        name: username,
+      })
     }
   }
   return hits
@@ -169,9 +188,53 @@ async function lookupKemono(service, username) {
   throw new Error(`HTTP ${status}`)
 }
 
+async function lookupReddit(username) {
+  const cfg = PLATFORMS.reddit
+  const cleanedUsername = String(username || '').replace(/^u_/, '')
+  if (!cleanedUsername) return null
+
+  const { status, body } = await httpsGet(
+    cfg.host,
+    cfg.listingUrl(cleanedUsername),
+    {
+      Accept: 'application/json',
+    }
+  )
+  if (status === 404) return null
+  if (status !== 200) throw new Error(`HTTP ${status}`)
+
+  try {
+    const data = JSON.parse(body)
+    if (data?.kind === 'Listing' && data?.data) {
+      return {
+        username: cleanedUsername,
+        url: cfg.userUrl(cleanedUsername),
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
 async function probeUsername(platform, username) {
   if (platform === 'coomer') {
     return searchCoomer(username)
+  }
+  if (platform === 'reddit') {
+    const hit = await lookupReddit(username)
+    return hit
+      ? [
+          {
+            platform,
+            service: 'submitted',
+            username: hit.username,
+            url: hit.url,
+            name: hit.username,
+          },
+        ]
+      : []
   }
   // kemono — direct profile lookup per service
   const cfg = PLATFORMS.kemono
@@ -203,11 +266,15 @@ async function autoProbeModel(canonicalName, entry) {
   const usernames = [
     ...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean)),
   ]
-  const allHits = { coomer: [], kemono: [] }
+  const allHits = { coomer: [], kemono: [], reddit: [] }
   for (const username of usernames) {
-    for (const platform of ['coomer', 'kemono']) {
-      const hits = await probeUsername(platform, username)
-      allHits[platform].push(...hits)
+    for (const platform of ['coomer', 'kemono', 'reddit']) {
+      try {
+        const hits = await probeUsername(platform, username)
+        allHits[platform].push(...hits)
+      } catch {
+        await sleep(DELAY * 2)
+      }
     }
   }
   return allHits
@@ -246,6 +313,17 @@ function parseSourceUrl(input) {
         username,
         url: `https://kemono.cr/${service}/user/${username}`,
       }
+    }
+  }
+
+  const redditM = str.match(PLATFORMS.reddit.urlPattern)
+  if (redditM) {
+    const username = redditM[1].replace(/^u_/, '')
+    return {
+      platform: 'reddit',
+      service: 'submitted',
+      username,
+      url: PLATFORMS.reddit.userUrl(username),
     }
   }
 
@@ -304,6 +382,7 @@ async function run() {
     return (
       !hasSource(entry, 'coomer') ||
       !hasSource(entry, 'kemono') ||
+      !hasSource(entry, 'reddit') ||
       !hasSource(entry, 'stufferdb')
     )
   })
@@ -339,49 +418,64 @@ async function run() {
       console.log(`  Aliases:   ${aliases.join(', ')}`)
       console.log(`  Coomer:    ${sourceLabel(entry, 'coomer')}`)
       console.log(`  Kemono:    ${sourceLabel(entry, 'kemono')}`)
+      console.log(`  Reddit:    ${sourceLabel(entry, 'reddit')}`)
       console.log(`  StufferDB: ${sourceLabel(entry, 'stufferdb')}`)
 
       // ── Auto-probe coomer + kemono ─────────────────────────────────────────
       const missing = []
       if (!hasSource(entry, 'coomer')) missing.push('coomer')
       if (!hasSource(entry, 'kemono')) missing.push('kemono')
+      if (!hasSource(entry, 'reddit')) missing.push('reddit')
 
-      let autoHits = { coomer: [], kemono: [] }
+      let autoHits = { coomer: [], kemono: [], reddit: [] }
       if (missing.length > 0) {
         process.stdout.write(
           `\n  Auto-probing ${missing.join(' + ')} for all aliases...`
         )
         autoHits = await autoProbeModel(canonicalName, entry)
-        const total = autoHits.coomer.length + autoHits.kemono.length
+        const total =
+          autoHits.coomer.length +
+          autoHits.kemono.length +
+          autoHits.reddit.length
         process.stdout.write(` ${total} hit(s)\n`)
       }
 
       let savedCoomer = hasSource(entry, 'coomer')
       let savedKemono = hasSource(entry, 'kemono')
+      let savedReddit = hasSource(entry, 'reddit')
       let savedStufferdb = hasSource(entry, 'stufferdb')
 
       // Sanitized alias set for exact-match detection
       const aliasSet = new Set(
-        [canonicalName, ...(entry.aliases || [])].map((a) => sanitize(a).toLowerCase()).filter(Boolean)
+        [canonicalName, ...(entry.aliases || [])]
+          .map((a) => sanitize(a).toLowerCase())
+          .filter(Boolean)
       )
 
       // ── Accept/reject auto hits ────────────────────────────────────────────
-      for (const platform of ['coomer', 'kemono']) {
+      for (const platform of ['coomer', 'kemono', 'reddit']) {
         if (hasSource(entry, platform)) continue
         for (const hit of autoHits[platform]) {
           const isExact = aliasSet.has(hit.username.toLowerCase())
 
           if (AUTO) {
             if (isExact) {
-              resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
+              resolveAndTrackModel(
+                registryPath,
+                canonicalName,
+                platform,
+                hit.url
+              )
               console.log(`\n  💾 [auto] ${hit.url}  (${hit.service})`)
               if (platform === 'coomer') savedCoomer = true
               if (platform === 'kemono') savedKemono = true
+              if (platform === 'reddit') savedReddit = true
             }
             // non-exact hits silently skipped in auto mode
             if (
               (platform === 'coomer' && savedCoomer) ||
-              (platform === 'kemono' && savedKemono)
+              (platform === 'kemono' && savedKemono) ||
+              (platform === 'reddit' && savedReddit)
             )
               break
             continue
@@ -396,10 +490,16 @@ async function run() {
               .trim()
               .toLowerCase()
             if (ans === 'y') {
-              resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
+              resolveAndTrackModel(
+                registryPath,
+                canonicalName,
+                platform,
+                hit.url
+              )
               console.log(`  💾 Saved.`)
               if (platform === 'coomer') savedCoomer = true
               if (platform === 'kemono') savedKemono = true
+              if (platform === 'reddit') savedReddit = true
               break
             } else if (ans === 's') {
               console.log(`  ⏭️  Skipped.`)
@@ -412,7 +512,8 @@ async function run() {
           }
           if (
             (platform === 'coomer' && savedCoomer) ||
-            (platform === 'kemono' && savedKemono)
+            (platform === 'kemono' && savedKemono) ||
+            (platform === 'reddit' && savedReddit)
           )
             break
         }
@@ -424,6 +525,7 @@ async function run() {
       const stillMissing = []
       if (!savedCoomer) stillMissing.push('coomer')
       if (!savedKemono) stillMissing.push('kemono')
+      if (!savedReddit) stillMissing.push('reddit')
       if (!savedStufferdb) stillMissing.push('stufferdb')
 
       if (stillMissing.length > 0) {
@@ -438,6 +540,11 @@ async function run() {
           console.log(`  Opening Kemono search: ${url}`)
           openInBrowser(url)
         }
+        if (!savedReddit) {
+          const url = PLATFORMS.reddit.searchUrl(canonicalName)
+          console.log(`  Opening Reddit user search: ${url}`)
+          openInBrowser(url)
+        }
 
         let currentUrl = null
 
@@ -445,14 +552,16 @@ async function run() {
           const still = []
           if (!savedCoomer) still.push('coomer')
           if (!savedKemono) still.push('kemono')
+          if (!savedReddit) still.push('reddit')
           if (!savedStufferdb) still.push('stufferdb')
           if (still.length === 0) break
 
           console.log(`\n  Still missing: ${still.join(', ')}`)
           console.log(`  Commands:
-    <url>        paste coomer/kemono/stufferdb URL to validate + save
+    <url>        paste coomer/kemono/reddit/stufferdb URL to validate + save
     c <username> probe Coomer for a specific username
     k <username> probe Kemono for a specific username
+    r <username> probe Reddit for a specific username
     o            reopen current URL in browser
     s            skip this model (move to next)
     q            quit`)
@@ -568,10 +677,56 @@ async function run() {
           }
 
           // URL paste — parse and validate
+          if (lower.startsWith('r ')) {
+            const username =
+              sanitize(raw.slice(2).trim()) || raw.slice(2).trim()
+            process.stdout.write(`  Checking Reddit "${username}"...`)
+            const hits = await probeUsername('reddit', username).catch(
+              (err) => {
+                process.stdout.write(` error: ${err.message}\n`)
+                return []
+              }
+            )
+            if (hits.length > 0) {
+              process.stdout.write(` ${hits.length} hit(s)\n`)
+            }
+            for (const hit of hits) {
+              console.log(`\n  Found: ${hit.url}  (${hit.service})`)
+              openInBrowser(hit.url)
+              currentUrl = hit.url
+              while (true) {
+                const ans = (await ask(rl, '  Accept? [y/s/q]: '))
+                  .trim()
+                  .toLowerCase()
+                if (ans === 'y') {
+                  resolveAndTrackModel(
+                    registryPath,
+                    canonicalName,
+                    'reddit',
+                    hit.url
+                  )
+                  console.log('  Saved.')
+                  savedReddit = true
+                  break
+                } else if (ans === 's') {
+                  break
+                } else if (ans === 'q') {
+                  console.log('\n  Quitting.')
+                  rl.close()
+                  return
+                }
+              }
+              if (savedReddit) break
+            }
+            if (hits.length === 0)
+              console.log(`  No Reddit profile found for "${username}".`)
+            continue
+          }
+
           const parsed = parseSourceUrl(raw)
           if (!parsed) {
             console.log(
-              '  Unrecognized input. Paste a coomer/kemono/stufferdb URL, or use c/k commands.'
+              '  Unrecognized input. Paste a coomer/kemono/reddit/stufferdb URL, or use c/k/r commands.'
             )
             continue
           }
@@ -604,7 +759,8 @@ async function run() {
           const platform = parsed.platform
           if (
             (platform === 'coomer' && savedCoomer) ||
-            (platform === 'kemono' && savedKemono)
+            (platform === 'kemono' && savedKemono) ||
+            (platform === 'reddit' && savedReddit)
           ) {
             console.log(`  ${platform} already saved for this model.`)
             continue
@@ -613,16 +769,28 @@ async function run() {
           process.stdout.write(`  Validating ${parsed.url} ...`)
           try {
             const host =
-              platform === 'coomer' ? 'coomerfans.com' : 'kemono.cr'
+              platform === 'coomer'
+                ? 'coomerfans.com'
+                : platform === 'reddit'
+                  ? 'www.reddit.com'
+                  : 'kemono.cr'
             let found = false
-            if (platform === 'kemono') {
+            if (platform === 'reddit') {
+              const creator = await lookupReddit(parsed.username)
+              found = !!creator
+              if (found)
+                process.stdout.write(` found (user="${parsed.username}")\n`)
+              else process.stdout.write(' not found (404)\n')
+            } else if (platform === 'kemono') {
               const creator = await lookupKemono(
                 parsed.service,
                 parsed.username
               )
               found = !!creator
               if (found)
-                process.stdout.write(` found (id="${creator.name || parsed.username}")\n`)
+                process.stdout.write(
+                  ` found (id="${creator.name || parsed.username}")\n`
+                )
               else process.stdout.write(' not found (404)\n')
             } else {
               // CoomerFans — verify the page exists
@@ -652,6 +820,7 @@ async function run() {
                 console.log('  💾 Saved.')
                 if (platform === 'coomer') savedCoomer = true
                 if (platform === 'kemono') savedKemono = true
+                if (platform === 'reddit') savedReddit = true
               }
             }
           } catch (err) {
