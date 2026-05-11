@@ -37,6 +37,28 @@ const MEDIA_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.webm'])
 fs.mkdirSync(THUMB_DIR, { recursive: true })
 const metaCache = new MetaCache(THUMB_DIR)
 
+const RESPONSE_CACHE_DIR = path.join(THUMB_DIR, 'response-cache')
+fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
+
+function loadResponseCacheFromDisk(username) {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(RESPONSE_CACHE_DIR, `${username}.json`), 'utf8'))
+    if (data.fingerprint && Array.isArray(data.response)) return data
+  } catch {}
+  return null
+}
+
+function saveResponseCacheToDisk(username, response, fingerprint) {
+  setImmediate(() => {
+    try {
+      fs.writeFileSync(
+        path.join(RESPONSE_CACHE_DIR, `${username}.json`),
+        JSON.stringify({ fingerprint, response })
+      )
+    } catch {}
+  })
+}
+
 // ─── FFMPEG ───────────────────────────────────────────────────────────────────
 let ffprobePath = null
 let ffmpegPath = null
@@ -547,8 +569,9 @@ app.get('/api/users/:username/media', async (req, res) => {
   // Default order: real media date asc, falling back to added-to-disk date
   allMedia.sort((a, b) => (a.mediaDateMs || a.addedMs) - (b.mediaDateMs || b.addedMs))
 
-  // Store in response cache so the next click on this model is instant
+  // Store in memory + on disk so the next click (and the next restart) is instant
   mediaResponseCache.set(username, { response: allMedia, fingerprint })
+  saveResponseCacheToDisk(username, allMedia, fingerprint)
 
   res.json(allMedia)
 })
