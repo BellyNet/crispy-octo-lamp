@@ -453,9 +453,12 @@ async function run() {
       )
 
       // ── Accept/reject auto hits ────────────────────────────────────────────
+      let skipAutoHits = false
       for (const platform of ['coomer', 'kemono', 'reddit']) {
+        if (skipAutoHits) break
         if (hasSource(entry, platform)) continue
         for (const hit of autoHits[platform]) {
+          if (skipAutoHits) break
           const isExact = aliasSet.has(hit.username.toLowerCase())
 
           if (AUTO) {
@@ -486,10 +489,14 @@ async function run() {
           )
           openInBrowser(hit.url)
           while (true) {
-            const ans = (await ask(rl, '  Accept? [y=yes / s=skip / q=quit]: '))
-              .trim()
-              .toLowerCase()
-            if (ans === 'y') {
+            const ans = (
+              await ask(
+                rl,
+                '  Accept? [y=yes / s=skip / m=manual / q=quit / <url>=paste URL]: '
+              )
+            ).trim()
+            const ansLower = ans.toLowerCase()
+            if (ansLower === 'y') {
               resolveAndTrackModel(
                 registryPath,
                 canonicalName,
@@ -501,15 +508,90 @@ async function run() {
               if (platform === 'kemono') savedKemono = true
               if (platform === 'reddit') savedReddit = true
               break
-            } else if (ans === 's') {
+            } else if (ansLower === 's') {
               console.log(`  ⏭️  Skipped.`)
               break
-            } else if (ans === 'q') {
+            } else if (ansLower === 'm') {
+              console.log(`  ↩️  Jumping to manual entry.`)
+              skipAutoHits = true
+              break
+            } else if (ansLower === 'q') {
               console.log('\n  💾 Quitting. Progress saved as you went.')
               rl.close()
               return
+            } else {
+              // Check if it's a URL paste
+              const parsed = parseSourceUrl(ans)
+              if (!parsed) {
+                console.log(
+                  '  ❓ Unrecognized. Use y/s/m/q or paste a coomer/kemono/reddit/stufferdb URL.'
+                )
+                continue
+              }
+              const urlPlatform = parsed.platform
+              if (
+                (urlPlatform === 'coomer' && savedCoomer) ||
+                (urlPlatform === 'kemono' && savedKemono) ||
+                (urlPlatform === 'reddit' && savedReddit) ||
+                (urlPlatform === 'stufferdb' && savedStufferdb)
+              ) {
+                console.log(`  ${urlPlatform} already saved for this model.`)
+                continue
+              }
+              process.stdout.write(`  Validating ${parsed.url} ...`)
+              try {
+                let found = false
+                if (urlPlatform === 'stufferdb') {
+                  found = true // no API to validate
+                  process.stdout.write(' (no validation)\n')
+                } else if (urlPlatform === 'reddit') {
+                  const creator = await lookupReddit(parsed.username)
+                  found = !!creator
+                  process.stdout.write(found ? ` found\n` : ' not found (404)\n')
+                } else if (urlPlatform === 'kemono') {
+                  const creator = await lookupKemono(
+                    parsed.service,
+                    parsed.username
+                  )
+                  found = !!creator
+                  process.stdout.write(found ? ` found\n` : ' not found (404)\n')
+                } else {
+                  const { status } = await httpsGet('coomerfans.com', parsed.url)
+                  found = status === 200
+                  process.stdout.write(found ? ' found\n' : ` HTTP ${status}\n`)
+                }
+                if (found) {
+                  openInBrowser(parsed.url)
+                  const confirm = (
+                    await ask(
+                      rl,
+                      `  Save ${parsed.url} for ${canonicalName}? [y/n]: `
+                    )
+                  )
+                    .trim()
+                    .toLowerCase()
+                  if (confirm === 'y') {
+                    resolveAndTrackModel(
+                      registryPath,
+                      canonicalName,
+                      urlPlatform,
+                      parsed.url
+                    )
+                    console.log('  💾 Saved.')
+                    if (urlPlatform === 'coomer') savedCoomer = true
+                    if (urlPlatform === 'kemono') savedKemono = true
+                    if (urlPlatform === 'reddit') savedReddit = true
+                    if (urlPlatform === 'stufferdb') savedStufferdb = true
+                    // If the pasted URL covers the platform currently being reviewed, move on
+                    if (urlPlatform === platform) break
+                  }
+                }
+              } catch (err) {
+                process.stdout.write(` error: ${err.message}\n`)
+              }
             }
           }
+          if (skipAutoHits) break
           if (
             (platform === 'coomer' && savedCoomer) ||
             (platform === 'kemono' && savedKemono) ||
