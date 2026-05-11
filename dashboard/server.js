@@ -761,12 +761,13 @@ async function prewarmThumbnails() {
   console.log(`\r  Previews:  ${missing.length} GIFs generated ✓          `)
 }
 
-// ─── METADATA CACHE PREWARM ───────────────────────────────────────────────────
-// Walks every model directory and pre-fills the per-user metadata cache with
-// image dimensions (sharp) and video duration/date (ffprobe) for any file not
-// already cached. On first run this can take a while; subsequent runs only
-// process files added since the last startup and finish in seconds.
-async function prewarmMetaCache() {
+// ─── UNIFIED CACHE PREWARM ────────────────────────────────────────────────────
+// Builds the metadata cache AND the full media response for every model before
+// the server opens for connections. On first run this does per-file stat +
+// sharp/ffprobe work. On subsequent runs it loads each model's persisted
+// response cache from disk (4 stat calls per model to verify the fingerprint),
+// so startup is near-instant and the server opens with all models ready.
+async function prewarmAllCaches() {
   let dirs
   try {
     dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
@@ -775,73 +776,110 @@ async function prewarmMetaCache() {
   const modelDirs = dirs.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
   const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif'])
   const VIDEO_EXTS = new Set(['.mp4', '.webm'])
-
-  // Images use higher concurrency (sharp is fast I/O); videos lower (ffprobe spawns processes)
   const imgLimit = pLimit(16)
   const vidLimit = pLimit(4)
 
-  let totalNew = 0
-  let totalHit = 0
+  let modelsFromDisk = 0
+  let modelsBuilt = 0
+  let newFiles = 0
+
+  console.log(`  Cache:     warming ${modelDirs.length} models…`)
 
   await Promise.all(modelDirs.map(async (dir) => {
     const username = dir.name
-    const userDir = path.join(datasetDir, username)
-    let userUpdated = false
+    const userDir  = path.join(datasetDir, username)
 
-    const tasks = []
+    // 4 stat calls — check if anything has changed since last run
+    const fingerprint = await getMediaFingerprint(userDir)
+
+    // Try loading the persisted response from disk
+    const disk = loadResponseCacheFromDisk(username)
+    if (disk && fingerprintMatches(disk.fingerprint, fingerprint)) {
+      mediaResponseCache.set(username, { response: disk.response, fingerprint })
+      modelsFromDisk++
+      return
+    }
+
+    // Fingerprint changed (or no disk cache yet) — rebuild from files
+    const rawFiles = []
     for (const folder of MEDIA_FOLDERS) {
       let files
       try { files = await fs.promises.readdir(path.join(userDir, folder)) } catch { continue }
-
       for (const file of files) {
-        const ext = path.extname(file).toLowerCase()
-        if (!MEDIA_EXTS.has(ext)) continue
-
-        const isVideo = VIDEO_EXTS.has(ext)
-        const limiter = isVideo ? vidLimit : imgLimit
-
-        tasks.push(limiter(async () => {
-          const filePath = path.join(userDir, folder, file)
-          let stat
-          try { stat = await fs.promises.stat(filePath) } catch { return }
-
-          if (metaCache.get(username, folder, file, stat)) {
-            totalHit++
-            return
-          }
-
-          const meta = {}
-          if (isVideo) {
-            const [dur, vd] = await Promise.all([
-              getDuration(filePath),
-              mediaDates.extractVideoDateFromFile(filePath).catch(() => null),
-            ])
-            meta.duration = dur || 0
-            if (vd) meta.videoDate = vd
-          } else if (IMAGE_EXTS.has(ext)) {
-            try {
-              const m = await sharp(filePath).metadata()
-              meta.width = m.width || 0
-              meta.height = m.height || 0
-            } catch { meta.width = 0; meta.height = 0 }
-          }
-
-          metaCache.set(username, folder, file, stat, meta)
-          userUpdated = true
-          totalNew++
-        }))
+        if (!MEDIA_EXTS.has(path.extname(file).toLowerCase())) continue
+        rawFiles.push({ filename: file, folder, filePath: path.join(userDir, folder, file) })
       }
     }
 
-    await Promise.all(tasks)
-    if (userUpdated) metaCache.flush(username)
+    let metaUpdated = false
+    const allMedia = (await Promise.all(rawFiles.map((item) => {
+      const ext     = path.extname(item.filename).toLowerCase()
+      const isVideo = VIDEO_EXTS.has(ext)
+      return (isVideo ? vidLimit : imgLimit)(async () => {
+        const stat = await fs.promises.stat(item.filePath).catch(() => null)
+        if (!stat) return null
+
+        let width = 0, height = 0, duration = 0, videoDate
+        const hit = metaCache.get(username, item.folder, item.filename, stat)
+        if (hit) {
+          width = hit.width || 0; height = hit.height || 0
+          duration = hit.duration || 0; videoDate = hit.videoDate
+        } else {
+          if (isVideo) {
+            const [dur, vd] = await Promise.all([
+              getDuration(item.filePath),
+              mediaDates.extractVideoDateFromFile(item.filePath).catch(() => null),
+            ])
+            duration = dur || 0; videoDate = vd || undefined
+          } else if (IMAGE_EXTS.has(ext)) {
+            try { const m = await sharp(item.filePath).metadata(); width = m.width || 0; height = m.height || 0 }
+            catch { width = 0; height = 0 }
+          }
+          const meta = isVideo
+            ? { duration, ...(videoDate !== undefined && { videoDate }) }
+            : { width, height }
+          metaCache.set(username, item.folder, item.filename, stat, meta)
+          metaUpdated = true
+          newFiles++
+        }
+
+        const type     = getMediaType(item.folder, item.filename)
+        const dateMeta = await resolveDateForFile(
+          userDir, item.folder, item.filename, item.filePath,
+          { cachedVideoDate: videoDate, stat }
+        )
+        return {
+          filename: item.filename,
+          folder:   item.folder,
+          type,
+          url:      `/media/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+          date:     dateMeta.date,
+          source:   dateMeta.source,
+          mediaDateMs: (dateMeta.source && dateMeta.source !== 'filesystem' && dateMeta.date)
+            ? new Date(dateMeta.date).getTime() : 0,
+          addedMs:  stat.birthtime.getTime() > 0 ? stat.birthtime.getTime() : stat.mtime.getTime(),
+          size:     stat.size,
+          duration,
+          width,
+          height,
+          previewUrl: type === 'video'
+            ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
+            : null,
+        }
+      })
+    }))).filter(Boolean)
+
+    allMedia.sort((a, b) => (a.mediaDateMs || a.addedMs) - (b.mediaDateMs || b.addedMs))
+    mediaResponseCache.set(username, { response: allMedia, fingerprint })
+    saveResponseCacheToDisk(username, allMedia, fingerprint)
+    if (metaUpdated) metaCache.flush(username)
+    modelsBuilt++
   }))
 
-  if (totalNew > 0) {
-    console.log(`  Metadata:  cached ${totalNew} new files (${totalHit} already cached) ✓`)
-  } else {
-    console.log(`  Metadata:  all ${totalHit} files cached ✓`)
-  }
+  const parts = []
+  if (modelsFromDisk) parts.push(`${modelsFromDisk} from disk`)
+  if (modelsBuilt)    parts.push(`${modelsBuilt} rebuilt (${newFiles} new files)`)
+  console.log(`  Cache:     ${parts.join(', ') || 'nothing to do'} ✓`)
 }
 
 // ─── INFO ENDPOINT ───────────────────────────────────────────────────────────
@@ -874,7 +912,7 @@ async function start() {
   // since only new files need processing.
   await Promise.all([
     buildModelStats().catch((err) => console.warn('  Stats scan error:', err.message)),
-    prewarmMetaCache().catch((err) => console.warn('  Metadata prewarm error:', err.message)),
+    prewarmAllCaches().catch((err) => console.warn('  Cache prewarm error:', err.message)),
   ])
 
   app.listen(PORT, () => {
@@ -889,7 +927,7 @@ async function start() {
   // Periodic refresh — picks up new content synced to the NAS
   setInterval(() => {
     buildModelStats().catch((err) => console.warn('  Stats scan error:', err.message))
-    prewarmMetaCache().catch((err) => console.warn('  Metadata prewarm (periodic) error:', err.message))
+    prewarmAllCaches().catch((err) => console.warn('  Cache prewarm (periodic) error:', err.message))
     prewarmThumbnails().catch((err) => console.warn('  Preview prewarm (periodic) error:', err.message))
   }, PREWARM_INTERVAL_MS)
 }
