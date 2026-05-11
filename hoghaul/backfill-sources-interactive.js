@@ -137,10 +137,16 @@ function httpsGet(host, url, headers = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+function getCoomerSearchResultTotal(html) {
+  const text = String(html || '').replace(/\s+/g, ' ')
+  const match = text.match(/Names of Models\s*-\s*.*?\bTotal\s+(\d+)/i)
+  return match ? Number.parseInt(match[1], 10) : null
+}
+
 // ─── API LOOKUPS ──────────────────────────────────────────────────────────────
 
 /**
- * Search coomerfans.com for a username. Returns all non-free profile hits
+ * Search coomerfans.com for a username. Returns the first non-free profile hit
  * found in the HTML, each with { service, id, username, url, platform }.
  */
 async function searchCoomer(query) {
@@ -148,6 +154,11 @@ async function searchCoomer(query) {
   const url = `https://coomerfans.com/?q=${encodeURIComponent(query)}`
   const { status, body } = await httpsGet(cfg.host, url)
   if (status !== 200) return []
+
+  const resultTotal = getCoomerSearchResultTotal(body)
+  if (resultTotal === 0 || /Nothing was found for your request/i.test(body)) {
+    return []
+  }
 
   const hits = []
   const linkRe = /href="\/u\/([^/"]+)\/(\d+)\/([^/"]+)"/gi
@@ -170,7 +181,7 @@ async function searchCoomer(query) {
       })
     }
   }
-  return hits
+  return hits.slice(0, 1)
 }
 
 async function lookupKemono(service, username) {
@@ -547,16 +558,23 @@ async function run() {
                 } else if (urlPlatform === 'reddit') {
                   const creator = await lookupReddit(parsed.username)
                   found = !!creator
-                  process.stdout.write(found ? ` found\n` : ' not found (404)\n')
+                  process.stdout.write(
+                    found ? ` found\n` : ' not found (404)\n'
+                  )
                 } else if (urlPlatform === 'kemono') {
                   const creator = await lookupKemono(
                     parsed.service,
                     parsed.username
                   )
                   found = !!creator
-                  process.stdout.write(found ? ` found\n` : ' not found (404)\n')
+                  process.stdout.write(
+                    found ? ` found\n` : ' not found (404)\n'
+                  )
                 } else {
-                  const { status } = await httpsGet('coomerfans.com', parsed.url)
+                  const { status } = await httpsGet(
+                    'coomerfans.com',
+                    parsed.url
+                  )
                   found = status === 200
                   process.stdout.write(found ? ' found\n' : ` HTTP ${status}\n`)
                 }

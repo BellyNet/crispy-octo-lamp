@@ -120,58 +120,17 @@ function writeRepoFileSync(filePath, contents, options = {}) {
   syncModelAliasesToNas(resolvedPath)
 }
 
-function isJsonScalar(value) {
-  return (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  )
-}
-
-function stringifyJsonForPrettier(value, indent = 0) {
-  const padding = ' '.repeat(indent)
-  const childPadding = ' '.repeat(indent + 2)
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]'
-    if (value.every(isJsonScalar)) {
-      return `[${value.map((item) => JSON.stringify(item)).join(', ')}]`
-    }
-    return `[\n${value
-      .map(
-        (item) => `${childPadding}${stringifyJsonForPrettier(item, indent + 2)}`
-      )
-      .join(',\n')}\n${padding}]`
-  }
-
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value)
-    if (entries.length === 0) return '{}'
-    return `{\n${entries
-      .map(
-        ([key, entryValue]) =>
-          `${childPadding}${JSON.stringify(key)}: ${stringifyJsonForPrettier(
-            entryValue,
-            indent + 2
-          )}`
-      )
-      .join(',\n')}\n${padding}}`
-  }
-
-  return JSON.stringify(value)
-}
-
 function writeRepoJsonFileSync(filePath, value, options = {}) {
-  const formatWithPrettier = options.formatWithPrettier !== false
   const spacing = options.spacing ?? 2
   const appendNewline = options.appendNewline !== false
   const payload =
-    (formatWithPrettier
-      ? stringifyJsonForPrettier(value)
-      : JSON.stringify(value, null, spacing)) + (appendNewline ? '\n' : '')
+    JSON.stringify(value, null, spacing) + (appendNewline ? '\n' : '')
 
-  writeRepoFileSync(filePath, payload, options)
+  writeRepoFileSync(filePath, payload, {
+    ...options,
+    formatWithPrettier:
+      options.formatWithPrettier ?? !isRootModelAliasesFile(filePath),
+  })
 }
 
 module.exports = {
