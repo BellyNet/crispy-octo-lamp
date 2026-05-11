@@ -1452,18 +1452,6 @@
         }
       }
 
-      // Hover-prefetch: start fetching a model's media as soon as the cursor
-      // lands on it in the sidebar so the data is already in-flight by click.
-      const _prefetch = new Map() // username → Promise<data[]>
-      function prefetchUser(username) {
-        if (_prefetch.has(username)) return
-        _prefetch.set(username,
-          fetch(`/api/users/${encodeURIComponent(username)}/media`)
-            .then(r => r.ok ? r.json() : null)
-            .catch(() => null)
-        )
-      }
-
       function renderUserList(users) {
         userListEl.innerHTML = ''
         for (const u of users) {
@@ -1471,7 +1459,6 @@
           li.className = 'user-item'
           li.textContent = u.name
           li.dataset.username = u.name
-          li.addEventListener('mouseenter', () => prefetchUser(u.name))
           li.addEventListener('click', () => selectUser(u, li))
           userListEl.appendChild(li)
         }
@@ -1568,10 +1555,8 @@
         sortBar.style.display = 'none'
         loadingEl.style.display = 'flex'
 
-        // Use the hover-prefetch promise if it already started, otherwise fetch now
-        const mediaData = await (_prefetch.get(username)
-          || fetch(`/api/users/${encodeURIComponent(username)}/media`).then(r => r.ok ? r.json() : null).catch(() => null))
-        _prefetch.delete(username)
+        const mediaData = await fetch(`/api/users/${encodeURIComponent(username)}/media`)
+          .then(r => r.ok ? r.json() : null).catch(() => null)
         allMedia = mediaData || []
 
         // ── Update this model's activity graph with accurate media dates ──────
