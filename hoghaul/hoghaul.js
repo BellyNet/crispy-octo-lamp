@@ -891,7 +891,14 @@ function requestBuffer(url, options = {}) {
           const chunks = []
           res.on('data', (chunk) => chunks.push(chunk))
           res.on('end', () => {
-            const body = Buffer.concat(chunks).toString('utf8').slice(0, 500)
+            const raw = Buffer.concat(chunks)
+            let body
+            try {
+              body = decodeBody(raw, res.headers).toString('utf8')
+            } catch {
+              body = raw.toString('utf8')
+            }
+            body = body.replace(/\s+/g, ' ').trim().slice(0, 500)
             reject(new Error(`HTTP ${statusCode}: ${body}`))
           })
           return
@@ -1737,6 +1744,7 @@ async function getRedditMediaEntries(source, post) {
   const uploadedDate = getRedditPostDate(post)
   const entries = getRedditGalleryEntries(source, post, uploadedDate)
   const redgifsId = parseRedgifsId(post.url_overridden_by_dest || post.url)
+  let redgifsResolved = false
   if (redgifsId) {
     const redgifsEntry = await resolveRedgifsEntry(
       source,
@@ -1747,10 +1755,13 @@ async function getRedditMediaEntries(source, post) {
       console.warn(`RedGIFs resolve failed for ${post.id}: ${err.message}`)
       return null
     })
-    if (redgifsEntry) entries.push(redgifsEntry)
+    if (redgifsEntry) {
+      entries.push(redgifsEntry)
+      redgifsResolved = true
+    }
   }
 
-  const videoUrl = redgifsId ? null : getNativeRedditVideoUrl(post)
+  const videoUrl = redgifsResolved ? null : getNativeRedditVideoUrl(post)
   if (videoUrl) {
     entries.push(
       createRedditEntry(source, post, videoUrl, uploadedDate, {
@@ -2971,6 +2982,17 @@ async function run() {
     }
   }
 
+  console.log(
+    `Media buckets: ${imageLike.length} image/gif, ${videos.length} video`
+  )
+
+  console.log(`Lazy downloading videos: ${videos.length}`)
+  await Promise.all(
+    videos.map((entry) =>
+      videoLimit(() => saveVideoMedia(modelName, folders, entry))
+    )
+  )
+
   await Promise.all(
     imageLike.map((entry) =>
       imageLimit(async () => {
@@ -2996,13 +3018,6 @@ async function run() {
           console.log(`Failed media: ${entry.filename} - ${err.message}`)
         }
       })
-    )
-  )
-
-  console.log(`Lazy downloading videos: ${videos.length}`)
-  await Promise.all(
-    videos.map((entry) =>
-      videoLimit(() => saveVideoMedia(modelName, folders, entry))
     )
   )
 
