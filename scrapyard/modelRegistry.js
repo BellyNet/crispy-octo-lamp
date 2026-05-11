@@ -63,28 +63,23 @@ function sortStringValues(values) {
 
 function sortPlatformSources(sources) {
   if (!Array.isArray(sources)) return []
-  return [...sources].sort((a, b) => {
-    const left = String(a?.discoveredAs || a?.url || '')
-    const right = String(b?.discoveredAs || b?.url || '')
-    return left.localeCompare(right)
-  })
+  return sources
 }
 
 function sortModelRegistry(registry) {
   return Object.fromEntries(
-    Object.entries(registry || {})
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([canonicalName, entry]) => [
-        canonicalName,
-        {
-          aliases: sortStringValues(entry?.aliases),
-          sources: Object.fromEntries(
-            Object.entries(entry?.sources || {})
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([platform, srcs]) => [platform, sortPlatformSources(srcs)])
-          ),
-        },
-      ])
+    Object.entries(registry || {}).map(([canonicalName, entry]) => [
+      canonicalName,
+      {
+        aliases: sortStringValues(entry?.aliases),
+        sources: Object.fromEntries(
+          Object.entries(entry?.sources || {}).map(([platform, srcs]) => [
+            platform,
+            sortPlatformSources(srcs),
+          ])
+        ),
+      },
+    ])
   )
 }
 

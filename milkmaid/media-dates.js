@@ -188,6 +188,16 @@ function scheduleSidecarFlush(userDir) {
 
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
+function resolveBestDateRecord(record) {
+  if (!record || typeof record !== 'object') {
+    return { date: null, source: null }
+  }
+  if (record.video) return { date: record.video, source: 'mp4' }
+  if (record.filename) return { date: record.filename, source: 'filename' }
+  if (record.uploaded) return { date: record.uploaded, source: 'uploaded' }
+  return { date: null, source: null }
+}
+
 async function recordImageDates(
   userDir,
   folder,
@@ -204,7 +214,7 @@ async function recordImageDates(
       : null
   const comments = normalizeComments(pageMeta?.comments)
 
-  entry.data[key] = {
+  const nextRecord = {
     ...(existingRecord || {}),
     video: existingRecord?.video || null,
     filename: existingRecord?.filename || extractFilenameDate(filename) || null,
@@ -218,7 +228,9 @@ async function recordImageDates(
           ? existingRecord.comments.length
           : comments.length || null,
   }
+  entry.data[key] = nextRecord
   scheduleSidecarFlush(userDir)
+  return resolveBestDateRecord(nextRecord)
 }
 
 async function recordVideoDates(
@@ -242,7 +254,7 @@ async function recordVideoDates(
   ])
   const comments = normalizeComments(pageMeta?.comments)
 
-  entry.data[key] = {
+  const nextRecord = {
     ...(existingRecord || {}),
     video: existingRecord?.video || video || null,
     filename: existingRecord?.filename || filenameDate || null,
@@ -256,7 +268,9 @@ async function recordVideoDates(
           ? existingRecord.comments.length
           : comments.length || null,
   }
+  entry.data[key] = nextRecord
   scheduleSidecarFlush(userDir)
+  return resolveBestDateRecord(nextRecord)
 }
 
 function resolveDateFromSidecar(userDir, folder, filename) {
@@ -264,10 +278,7 @@ function resolveDateFromSidecar(userDir, folder, filename) {
   const record = entry.data[`${folder}/${filename}`]
   if (!record) return null
 
-  if (record.video) return { date: record.video, source: 'mp4' }
-  if (record.filename) return { date: record.filename, source: 'filename' }
-  if (record.uploaded) return { date: record.uploaded, source: 'uploaded' }
-  return { date: null, source: null }
+  return resolveBestDateRecord(record)
 }
 
 function flushAllSidecars() {
@@ -278,6 +289,7 @@ module.exports = {
   recordImageDates,
   recordVideoDates,
   resolveDateFromSidecar,
+  resolveBestDateRecord,
   extractVideoDateFromFile,
   extractFilenameDate,
   flushAllSidecars,

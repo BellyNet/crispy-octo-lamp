@@ -58,9 +58,13 @@ const nasDatasetDir = path.resolve(
 )
 const registryPath = path.join(rootDir, 'model_aliases.json')
 const API_PAGE_SIZE = 50
+const REDDIT_PAGE_SIZE = 100
 const API_ACCEPT_HEADER = 'text/css'
 const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
+
+const REDGIFS_TEMP_AUTH_URL = 'https://api.redgifs.com/v2/auth/temporary'
+const REDGIFS_GIF_API_BASE = 'https://api.redgifs.com/v2/gifs'
 
 let currentRunLog = null
 let mediaSeenIndexCache = null
@@ -70,6 +74,7 @@ let errorCount = 0
 let queuedVideoCount = 0
 let savedBytes = 0
 let browserMediaDownloader = null
+let redgifsAuth = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 const pendingImageVisualClaims = new Map()
 
@@ -88,42 +93,33 @@ function sortStringValues(values) {
 }
 
 function sortSourceList(sources) {
-  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
-    const left =
-      String(a?.service || '') + String(a?.userId || '') + String(a?.url || '')
-    const right =
-      String(b?.service || '') + String(b?.userId || '') + String(b?.url || '')
-    return left.localeCompare(right)
-  })
+  return Array.isArray(sources) ? sources : []
 }
 
 function sortModelRegistry(registry) {
   return Object.fromEntries(
-    Object.entries(registry || {})
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([canonicalName, entry]) => {
-        const sources =
-          entry?.sources && typeof entry.sources === 'object'
-            ? entry.sources
-            : {}
-        return [
-          canonicalName,
-          {
-            aliases: sortStringValues(entry?.aliases),
-            sources: Object.fromEntries(
-              Object.entries(sources)
-                .sort(([left], [right]) => left.localeCompare(right))
-                .map(([key, value]) => [key, sortSourceList(value)])
-            ),
-          },
-        ]
-      })
+    Object.entries(registry || {}).map(([canonicalName, entry]) => {
+      const sources =
+        entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+      return [
+        canonicalName,
+        {
+          aliases: sortStringValues(entry?.aliases),
+          sources: Object.fromEntries(
+            Object.entries(sources).map(([key, value]) => [
+              key,
+              sortSourceList(value),
+            ])
+          ),
+        },
+      ]
+    })
   )
 }
 
 function loadModelRegistry() {
   if (!fs.existsSync(registryPath)) {
-    writeRepoJsonFileSync(registryPath, {}, { formatWithPrettier: false })
+    writeRepoJsonFileSync(registryPath, {})
     return {}
   }
 
@@ -137,9 +133,7 @@ function loadModelRegistry() {
 }
 
 function saveModelRegistry(registry) {
-  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry), {
-    formatWithPrettier: false,
-  })
+  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry))
 }
 
 function ensureModelEntryShape(entry, canonicalName) {
@@ -181,6 +175,7 @@ function findCanonicalModelNameBySource(registry, sourceInfo) {
   ).trim()
   const normalizedService = String(sourceInfo?.service || '').trim()
   const normalizedUserId = String(sourceInfo?.userId || '').trim()
+  const normalizedUsername = sanitize(sourceInfo?.username)
 
   for (const [canonicalName, entry] of Object.entries(registry || {})) {
     const sources =
@@ -193,6 +188,7 @@ function findCanonicalModelNameBySource(registry, sourceInfo) {
         const sourceUrl = String(source?.url || '').trim()
         const sourceService = String(source?.service || '').trim()
         const sourceUserId = String(source?.userId || '').trim()
+        const sourceUsername = sanitize(source?.username)
 
         if (normalizedUrl && sourceUrl === normalizedUrl) {
           return canonicalName
@@ -203,6 +199,14 @@ function findCanonicalModelNameBySource(registry, sourceInfo) {
           normalizedUserId &&
           sourceService === normalizedService &&
           sourceUserId === normalizedUserId
+        ) {
+          return canonicalName
+        }
+
+        if (
+          normalizedSite === 'reddit' &&
+          normalizedUsername &&
+          sourceUsername === normalizedUsername
         ) {
           return canonicalName
         }
@@ -223,13 +227,17 @@ function upsertHoghaulSource(entry, sourceInfo) {
     (source) =>
       source?.url === sourceInfo.inputUrl ||
       (source?.service === sourceInfo.service &&
-        source?.userId === sourceInfo.userId)
+        source?.userId === sourceInfo.userId) ||
+      (sourceInfo.site === 'reddit' &&
+        source?.username &&
+        sanitize(source.username) === sanitize(sourceInfo.username))
   )
 
   const nextSource = {
     url: sourceInfo.inputUrl,
     service: sourceInfo.service,
     userId: sourceInfo.userId,
+    username: sourceInfo.username || null,
     discoveredAs: sourceInfo.rawName,
     lastCheckedAt: now,
   }
@@ -280,6 +288,21 @@ function resolveAndTrackModel(rawName, sourceInfo, canonicalOverride) {
   saveModelRegistry(registry)
 
   return canonicalName
+}
+
+function registerSourceForRun(source, inputUrl, canonicalOverride) {
+  const modelName = resolveAndTrackModel(
+    source.rawName,
+    {
+      ...source,
+      inputUrl,
+    },
+    canonicalOverride
+  )
+  console.log(
+    `Registered source in model_aliases.json: ${source.site}/${source.service}/${source.userId} -> ${modelName}`
+  )
+  return modelName
 }
 
 function createModelFolders(modelName) {
@@ -348,7 +371,8 @@ function existsAtExactPath(filePath) {
 
 function existsLocallyOrOnNas(filePath) {
   if (existsAtExactPath(filePath)) return true
-  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') return false
+  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4')
+    return false
   return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
 }
 
@@ -653,6 +677,39 @@ function normalizeSeenUrl(url) {
     .replace(/&acs=[^&]+/gi, '')
 }
 
+function uniqueSeenUrls(values) {
+  return Array.from(
+    new Set(
+      values
+        .flat(Infinity)
+        .map((url) => normalizeSeenUrl(htmlDecode(url)))
+        .filter(Boolean)
+    )
+  )
+}
+
+function getEntryMediaUrls(entry) {
+  return uniqueSeenUrls([
+    entry?.mediaUrl,
+    entry?.jsonMediaUrl,
+    entry?.mediaUrls,
+    entry?.sourceUrls,
+  ])
+}
+
+function getEntryMediaPageUrls(entry) {
+  return uniqueSeenUrls([entry?.mediaPageUrl, entry?.mediaPageUrls])
+}
+
+function getEntrySeenDetails(entry) {
+  return {
+    mediaUrl: entry.mediaUrl,
+    mediaUrls: getEntryMediaUrls(entry),
+    mediaPageUrl: entry.mediaPageUrl,
+    mediaPageUrls: getEntryMediaPageUrls(entry),
+  }
+}
+
 function getMediaSeenIndexPath(modelLogDir) {
   return path.join(modelLogDir, 'milkmaid-seen-media-index.json')
 }
@@ -711,23 +768,29 @@ function getActiveMediaSeenRecord(modelLogDir, entry) {
 
 function getSuccessfulSeenMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
   const index = loadMediaSeenIndex(modelLogDir)
-  const normalizedMediaPageUrl = normalizeSeenUrl(mediaPageUrl)
-  const normalizedMediaUrl = normalizeSeenUrl(mediaUrl)
+  const mediaPageUrls = uniqueSeenUrls(
+    Array.isArray(mediaPageUrl) ? mediaPageUrl : [mediaPageUrl]
+  )
+  const mediaUrls = uniqueSeenUrls(
+    Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]
+  )
 
-  if (normalizedMediaPageUrl) {
-    const pageEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaPageUrls[normalizedMediaPageUrl]
-    )
-    if (pageEntry) return { matchType: 'media_page_url', ...pageEntry }
-  }
-
-  if (normalizedMediaUrl) {
+  for (const normalizedMediaUrl of mediaUrls) {
     const mediaEntry = getActiveMediaSeenRecord(
       modelLogDir,
       index.mediaUrls[normalizedMediaUrl]
     )
     if (mediaEntry) return { matchType: 'media_url', ...mediaEntry }
+  }
+
+  if (mediaUrls.length > 0) return null
+
+  for (const normalizedMediaPageUrl of mediaPageUrls) {
+    const pageEntry = getActiveMediaSeenRecord(
+      modelLogDir,
+      index.mediaPageUrls[normalizedMediaPageUrl]
+    )
+    if (pageEntry) return { matchType: 'media_page_url', ...pageEntry }
   }
 
   return null
@@ -738,30 +801,35 @@ function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
   if (!relativePath) return
 
   const index = loadMediaSeenIndex(modelLogDir)
-  const normalizedMediaPageUrl = normalizeSeenUrl(details.mediaPageUrl)
-  const normalizedMediaUrl = normalizeSeenUrl(details.mediaUrl)
+  const mediaPageUrls = uniqueSeenUrls([
+    details.mediaPageUrl,
+    details.mediaPageUrls,
+  ])
+  const mediaUrls = uniqueSeenUrls([details.mediaUrl, details.mediaUrls])
   const payload = {
     relativePath,
     filename: details.filename || path.basename(relativePath),
-    mediaUrl: normalizedMediaUrl || null,
-    mediaPageUrl: normalizedMediaPageUrl || null,
+    mediaUrl: mediaUrls[0] || null,
+    mediaUrls,
+    mediaPageUrl: mediaPageUrls[0] || null,
+    mediaPageUrls,
     savedAt: new Date().toISOString(),
   }
 
   let changed = false
-  if (
-    normalizedMediaPageUrl &&
-    index.mediaPageUrls[normalizedMediaPageUrl]?.relativePath !== relativePath
-  ) {
-    index.mediaPageUrls[normalizedMediaPageUrl] = payload
-    changed = true
+  for (const normalizedMediaPageUrl of mediaPageUrls) {
+    if (
+      index.mediaPageUrls[normalizedMediaPageUrl]?.relativePath !== relativePath
+    ) {
+      index.mediaPageUrls[normalizedMediaPageUrl] = payload
+      changed = true
+    }
   }
-  if (
-    normalizedMediaUrl &&
-    index.mediaUrls[normalizedMediaUrl]?.relativePath !== relativePath
-  ) {
-    index.mediaUrls[normalizedMediaUrl] = payload
-    changed = true
+  for (const normalizedMediaUrl of mediaUrls) {
+    if (index.mediaUrls[normalizedMediaUrl]?.relativePath !== relativePath) {
+      index.mediaUrls[normalizedMediaUrl] = payload
+      changed = true
+    }
   }
 
   if (changed) saveMediaSeenIndex(modelLogDir, index)
@@ -1218,9 +1286,11 @@ async function closeBrowserMediaDownloader() {
 }
 
 async function fetchJson(url) {
+  const parsed = new URL(url)
+  const isReddit = parsed.hostname.toLowerCase().endsWith('reddit.com')
   const response = await requestBuffer(url, {
     headers: {
-      Accept: API_ACCEPT_HEADER,
+      Accept: isReddit ? 'application/json' : API_ACCEPT_HEADER,
     },
   })
   const body = response.buffer.toString('utf8')
@@ -1241,6 +1311,93 @@ async function fetchHtml(url) {
     html: response.buffer.toString('utf8'),
     byteLength: response.buffer.length,
     url,
+  }
+}
+
+async function fetchRedgifsJson(url) {
+  const token = await getRedgifsToken()
+  const response = await requestBuffer(url, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  return JSON.parse(response.buffer.toString('utf8'))
+}
+
+async function getRedgifsToken() {
+  if (redgifsAuth?.token && redgifsAuth.expiresAt > Date.now() + 60000) {
+    return redgifsAuth.token
+  }
+
+  const response = await requestBuffer(REDGIFS_TEMP_AUTH_URL, {
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+  const data = JSON.parse(response.buffer.toString('utf8'))
+  if (!data?.token) throw new Error('RedGIFs temporary auth returned no token')
+
+  redgifsAuth = {
+    token: data.token,
+    expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+  }
+  return redgifsAuth.token
+}
+
+function parseRedgifsId(url) {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    if (!host.includes('redgifs.com')) return null
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    const markerIndex = parts.findIndex((part) =>
+      ['watch', 'ifr', 'iframe'].includes(part.toLowerCase())
+    )
+    const rawId =
+      markerIndex >= 0 ? parts[markerIndex + 1] : parts[parts.length - 1]
+    return sanitize(rawId)
+  } catch {
+    return null
+  }
+}
+
+async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
+  const id = parseRedgifsId(redgifsUrl)
+  if (!id) return null
+
+  const data = await fetchRedgifsJson(
+    `${REDGIFS_GIF_API_BASE}/${encodeURIComponent(id)}`
+  )
+  const gif = data?.gif
+  const mediaUrl = gif?.urls?.hd || gif?.urls?.sd
+  if (!mediaUrl) return null
+
+  const canonicalRedgifsUrl = id ? `https://www.redgifs.com/watch/${id}` : null
+  const filename = `${source.rawName}_reddit_${post.id}_redgifs_${id}${
+    path.extname(new URL(mediaUrl).pathname) || '.mp4'
+  }`
+  const createDateSeconds = Number(gif.createDate)
+  const createdDate =
+    Number.isFinite(createDateSeconds) && createDateSeconds > 0
+      ? new Date(createDateSeconds * 1000)
+      : uploadedDate
+
+  return {
+    postId: String(post.id || ''),
+    title: post.title || null,
+    mediaPageUrl: getPostPageUrl(source, post),
+    mediaPageUrls: getRedditMediaPageUrls(source, post),
+    mediaUrl,
+    mediaUrls: uniqueSeenUrls([mediaUrl, gif?.urls?.hd, gif?.urls?.sd]),
+    sourceUrls: uniqueSeenUrls([
+      redgifsUrl,
+      canonicalRedgifsUrl,
+      getRedditPostLinkedUrls(source, post),
+    ]),
+    filename,
+    originalName: id,
+    uploadedDate: parseResolvedDate(createdDate) || uploadedDate,
   }
 }
 
@@ -1274,10 +1431,31 @@ function parseSourceUrl(inputUrl) {
       ? 'coomer'
       : host.includes('kemono')
         ? 'kemono'
-        : null
+        : host.endsWith('reddit.com')
+          ? 'reddit'
+          : null
   if (!site) throw new Error(`Unsupported Hoghaul host: ${parsed.hostname}`)
 
   const parts = parsed.pathname.split('/').filter(Boolean)
+
+  if (site === 'reddit') {
+    if (parts[0]?.toLowerCase() === 'user' && parts[1]) {
+      const username = parts[1].replace(/^u_/, '')
+      return {
+        inputUrl,
+        origin: 'https://www.reddit.com',
+        site,
+        service: 'submitted',
+        userId: username,
+        username,
+        rawName: sanitize(username),
+      }
+    }
+
+    throw new Error(
+      'Expected a Reddit user URL like /user/name/submitted or /user/name'
+    )
+  }
 
   if (site === 'coomerfans') {
     if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
@@ -1371,6 +1549,11 @@ function getPostPageUrl(source, post) {
       `${source.origin}/p/${post.id}/${source.userId}/${source.service}`
     )
   }
+  if (source.site === 'reddit') {
+    return post.permalink
+      ? new URL(post.permalink, source.origin).toString()
+      : `${source.origin}/comments/${post.id}`
+  }
   return `${source.origin}/${source.service}/user/${source.userId}/post/${post.id}`
 }
 
@@ -1388,6 +1571,204 @@ function filenameFromMediaUrl(mediaUrl) {
   } catch {
     return null
   }
+}
+
+function getRedditPostDate(post) {
+  const createdUtc = Number(post?.created_utc)
+  if (Number.isFinite(createdUtc) && createdUtc > 0) {
+    return new Date(createdUtc * 1000)
+  }
+  return parseResolvedDate(post?.created)
+}
+
+function getRedditLinkedUrl(source, value) {
+  const url = htmlDecode(value)
+  if (!url) return null
+  try {
+    return new URL(url, source.origin).toString()
+  } catch {
+    return url
+  }
+}
+
+function isRedditContainerUrl(source, post, value) {
+  if (!value) return false
+  try {
+    const parsed = new URL(value, source.origin)
+    const host = parsed.hostname.toLowerCase()
+    if (!host.endsWith('reddit.com')) return false
+    const pathname = parsed.pathname.toLowerCase()
+    const postId = String(post?.id || '').toLowerCase()
+    return (
+      pathname.includes(`/comments/${postId}`) ||
+      pathname.includes(`/gallery/${postId}`) ||
+      parsed.toString() === getPostPageUrl(source, post)
+    )
+  } catch {
+    return false
+  }
+}
+
+function getRedditPostLinkedUrls(source, post) {
+  return uniqueSeenUrls([
+    getRedditLinkedUrl(source, post?.url_overridden_by_dest),
+    getRedditLinkedUrl(source, post?.url),
+  ]).filter((url) => !isRedditContainerUrl(source, post, url))
+}
+
+function getRedditMediaPageUrls(source, post) {
+  const pageUrls = [getPostPageUrl(source, post)]
+  if (post?.is_gallery || post?.gallery_data) {
+    pageUrls.push(`${source.origin}/gallery/${post.id}`)
+  }
+  return uniqueSeenUrls(pageUrls)
+}
+
+function getRedditMediaMetadataUrls(metadata) {
+  return uniqueSeenUrls([
+    metadata?.s?.u,
+    metadata?.s?.gif,
+    metadata?.s?.mp4,
+    Array.isArray(metadata?.o) ? metadata.o.map((item) => item?.u) : [],
+    Array.isArray(metadata?.p) ? metadata.p.map((item) => item?.u) : [],
+  ])
+}
+
+function getRedditMediaMetadataUrl(metadata) {
+  return getRedditMediaMetadataUrls(metadata)[0] || ''
+}
+
+function extensionFromMime(mime) {
+  const normalized = String(mime || '').toLowerCase()
+  if (normalized.includes('jpeg') || normalized.includes('jpg')) return '.jpg'
+  if (normalized.includes('png')) return '.png'
+  if (normalized.includes('webp')) return '.webp'
+  if (normalized.includes('gif')) return '.gif'
+  if (normalized.includes('mp4')) return '.mp4'
+  return ''
+}
+
+function buildRedditFilename(source, post, mediaUrl, fallbackExt, index = 0) {
+  const urlName = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
+  const ext = path.extname(urlName || '') || fallbackExt || ''
+  const suffix = index > 0 ? `_${index + 1}` : ''
+  return `${source.rawName}_reddit_${post.id}${suffix}${ext || '.jpg'}`
+}
+
+function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
+  const filename =
+    options.filename ||
+    buildRedditFilename(
+      source,
+      post,
+      mediaUrl,
+      options.fallbackExt,
+      options.index
+    )
+  return {
+    postId: String(post.id || ''),
+    title: post.title || null,
+    mediaPageUrl: getPostPageUrl(source, post),
+    mediaPageUrls: getRedditMediaPageUrls(source, post),
+    mediaUrl,
+    mediaUrls: uniqueSeenUrls([mediaUrl, options.mediaUrls]),
+    sourceUrls: uniqueSeenUrls([
+      options.sourceUrls,
+      getRedditPostLinkedUrls(source, post),
+    ]),
+    filename,
+    originalName: options.originalName || filenameFromMediaUrl(mediaUrl),
+    uploadedDate,
+  }
+}
+
+function getNativeRedditVideoUrl(post) {
+  return (
+    post?.secure_media?.reddit_video?.fallback_url ||
+    post?.media?.reddit_video?.fallback_url ||
+    post?.preview?.reddit_video_preview?.fallback_url ||
+    null
+  )
+}
+
+function getNativeRedditVideoUrls(post) {
+  return uniqueSeenUrls([
+    post?.secure_media?.reddit_video?.fallback_url,
+    post?.secure_media?.reddit_video?.dash_url,
+    post?.secure_media?.reddit_video?.hls_url,
+    post?.media?.reddit_video?.fallback_url,
+    post?.media?.reddit_video?.dash_url,
+    post?.media?.reddit_video?.hls_url,
+    post?.preview?.reddit_video_preview?.fallback_url,
+    post?.preview?.reddit_video_preview?.dash_url,
+    post?.preview?.reddit_video_preview?.hls_url,
+  ])
+}
+
+function getRedditGalleryEntries(source, post, uploadedDate) {
+  const items = Array.isArray(post?.gallery_data?.items)
+    ? post.gallery_data.items
+    : []
+  const metadata = post?.media_metadata || {}
+
+  return items
+    .map((item, index) => {
+      const mediaId = item?.media_id
+      const meta = mediaId ? metadata[mediaId] : null
+      if (!meta || meta.status === 'failed') return null
+      const mediaUrl = getRedditMediaMetadataUrl(meta)
+      if (!mediaUrl) return null
+      return createRedditEntry(source, post, mediaUrl, uploadedDate, {
+        filename: buildRedditFilename(
+          source,
+          post,
+          mediaUrl,
+          extensionFromMime(meta.m),
+          index
+        ),
+        mediaUrls: getRedditMediaMetadataUrls(meta),
+        originalName: mediaId,
+      })
+    })
+    .filter(Boolean)
+}
+
+async function getRedditMediaEntries(source, post) {
+  const uploadedDate = getRedditPostDate(post)
+  const entries = getRedditGalleryEntries(source, post, uploadedDate)
+  const redgifsId = parseRedgifsId(post.url_overridden_by_dest || post.url)
+  if (redgifsId) {
+    const redgifsEntry = await resolveRedgifsEntry(
+      source,
+      post,
+      post.url_overridden_by_dest || post.url,
+      uploadedDate
+    ).catch((err) => {
+      console.warn(`RedGIFs resolve failed for ${post.id}: ${err.message}`)
+      return null
+    })
+    if (redgifsEntry) entries.push(redgifsEntry)
+  }
+
+  const videoUrl = redgifsId ? null : getNativeRedditVideoUrl(post)
+  if (videoUrl) {
+    entries.push(
+      createRedditEntry(source, post, videoUrl, uploadedDate, {
+        fallbackExt: '.mp4',
+        mediaUrls: getNativeRedditVideoUrls(post),
+      })
+    )
+  }
+
+  const directUrl = htmlDecode(post.url_overridden_by_dest || post.url || '')
+  if (
+    /^https?:\/\/(?:i|preview)\.redd\.it\//i.test(directUrl) ||
+    /^https?:\/\/i\.redditmedia\.com\//i.test(directUrl)
+  ) {
+    entries.push(createRedditEntry(source, post, directUrl, uploadedDate))
+  }
+
+  return dedupeMediaEntries(entries).entries
 }
 
 function getMediaEntriesFromPost(source, post) {
@@ -1412,7 +1793,9 @@ function getMediaEntriesFromPost(source, post) {
         postId: String(post.id || ''),
         title: post.title || null,
         mediaPageUrl,
+        mediaPageUrls: [mediaPageUrl],
         mediaUrl,
+        mediaUrls: [mediaUrl],
         filename,
         originalName: media.name || null,
         uploadedDate: postPublishedAt,
@@ -1473,6 +1856,11 @@ async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
         ...enriched[index],
         jsonMediaUrl: enriched[index].mediaUrl,
         mediaUrl: domUrl,
+        mediaUrls: uniqueSeenUrls([
+          enriched[index].mediaUrls,
+          enriched[index].mediaUrl,
+          domUrl,
+        ]),
       }
       replacedCount += 1
     }
@@ -1495,11 +1883,15 @@ function dedupeMediaEntries(entries) {
   const deduped = []
 
   for (const entry of entries) {
-    const key =
-      normalizeSeenUrl(entry.mediaUrl) ||
-      `${normalizeSeenUrl(entry.mediaPageUrl)}\n${entry.filename}`
-    if (!key || seen.has(key)) continue
-    seen.add(key)
+    const mediaKeys = getEntryMediaUrls(entry)
+    const fallbackKey =
+      mediaKeys.length > 0
+        ? null
+        : `${normalizeSeenUrl(entry.mediaPageUrl)}\n${entry.filename}`
+    const keys =
+      mediaKeys.length > 0 ? mediaKeys : [fallbackKey].filter(Boolean)
+    if (keys.length === 0 || keys.some((key) => seen.has(key))) continue
+    for (const key of keys) seen.add(key)
     deduped.push(entry)
   }
 
@@ -1648,6 +2040,10 @@ function getPostsApiUrl(source, offset = 0) {
 }
 
 async function preflightSourceJson(source, page = 0) {
+  if (source.site === 'reddit') {
+    return preflightRedditSource(source)
+  }
+
   const offset = page * API_PAGE_SIZE
   const apiUrl = getPostsApiUrl(source, offset)
   const { data, byteLength } = await fetchJson(apiUrl)
@@ -1756,9 +2152,84 @@ async function fetchCoomerFansPosts(source, options) {
   return posts
 }
 
+function getRedditListingUrl(source, after = null) {
+  const url = new URL(
+    `/user/${encodeURIComponent(source.username || source.userId)}/submitted/.json`,
+    source.origin
+  )
+  url.searchParams.set('limit', String(REDDIT_PAGE_SIZE))
+  url.searchParams.set('raw_json', '1')
+  if (after) url.searchParams.set('after', after)
+  return url.toString()
+}
+
+async function preflightRedditSource(source) {
+  const apiUrl = getRedditListingUrl(source)
+  const { data, byteLength } = await fetchJson(apiUrl)
+  const children = Array.isArray(data?.data?.children)
+    ? data.data.children.map((child) => child?.data).filter(Boolean)
+    : []
+  const newest = children
+    .map((post) => getRedditPostDate(post))
+    .filter(Boolean)
+    .sort((a, b) => b.getTime() - a.getTime())[0]
+
+  return {
+    apiUrl,
+    byteLength,
+    postCount: children.length,
+    newest,
+    firstPostId: children[0]?.id ? String(children[0].id) : null,
+  }
+}
+
+async function fetchRedditPosts(source, options) {
+  const posts = []
+  let after = null
+  let page = 0
+
+  while (true) {
+    if (options.endPage !== null && page > options.endPage) break
+    const apiUrl = getRedditListingUrl(source, after)
+    console.log(`Loading reddit page ${page + 1} (${apiUrl})`)
+    const { data } = await fetchJson(apiUrl)
+    const listing = data?.data
+    const pagePosts = Array.isArray(listing?.children)
+      ? listing.children.map((child) => child?.data).filter(Boolean)
+      : []
+    if (pagePosts.length === 0) break
+
+    for (const post of pagePosts) {
+      const mediaEntries = await getRedditMediaEntries(source, post)
+      posts.push({
+        ...post,
+        id: String(post.id || ''),
+        published: getRedditPostDate(post),
+        mediaEntries,
+      })
+      if (
+        Number.isFinite(options.maxPosts) &&
+        options.maxPosts > 0 &&
+        posts.length >= options.maxPosts
+      ) {
+        return posts
+      }
+    }
+
+    after = listing?.after || null
+    if (!after) break
+    page += 1
+  }
+
+  return posts
+}
+
 async function fetchPosts(source, options) {
   if (source.site === 'coomerfans') {
     return fetchCoomerFansPosts(source, options)
+  }
+  if (source.site === 'reddit') {
+    return fetchRedditPosts(source, options)
   }
 
   const posts = []
@@ -1818,18 +2289,20 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
   duplicateCount += 1
   if (currentRunLog) currentRunLog.counters.duplicates += 1
+  const seenDetails = getEntrySeenDetails(entry)
   appendRunEvent(reason, {
     filename: entry.filename,
     mediaUrl: entry.mediaUrl,
     mediaPageUrl: entry.mediaPageUrl,
+    mediaUrls: seenDetails.mediaUrls,
+    mediaPageUrls: seenDetails.mediaPageUrls,
     savedPath,
     ...(extra && typeof extra === 'object' ? extra : {}),
   })
   recordSuccessfulSeenMedia(folders.logDir, {
     relativePath: savedPath,
     filename: entry.filename,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrl: null,
+    ...seenDetails,
   })
 }
 
@@ -1843,6 +2316,8 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     modelName,
     mediaPageUrl: entry.mediaPageUrl,
     mediaUrl: entry.mediaUrl,
+    mediaPageUrls: getEntryMediaPageUrls(entry),
+    mediaUrls: getEntryMediaUrls(entry),
     filename: entry.filename,
     extension: path.extname(entry.filename).toLowerCase(),
     bucket,
@@ -1851,8 +2326,8 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 
   const seenMediaMatch = getSuccessfulSeenMediaMatch(
     folders.logDir,
-    null,
-    entry.mediaUrl
+    getEntryMediaPageUrls(entry),
+    getEntryMediaUrls(entry)
   )
   if (seenMediaMatch) {
     recordDuplicate(
@@ -1995,8 +2470,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     recordSuccessfulSeenMedia(folders.logDir, {
       relativePath,
       filename: entry.filename,
-      mediaUrl: entry.mediaUrl,
-      mediaPageUrl: null,
+      ...getEntrySeenDetails(entry),
     })
     appendRunEvent(kind === 'gif' ? 'saved_gif' : 'saved_image', {
       modelName,
@@ -2020,6 +2494,8 @@ async function saveVideoMedia(modelName, folders, entry) {
     modelName,
     mediaPageUrl: entry.mediaPageUrl,
     mediaUrl: entry.mediaUrl,
+    mediaPageUrls: getEntryMediaPageUrls(entry),
+    mediaUrls: getEntryMediaUrls(entry),
     filename: entry.filename,
     extension: path.extname(entry.filename).toLowerCase(),
     bucket: 'webm',
@@ -2028,8 +2504,8 @@ async function saveVideoMedia(modelName, folders, entry) {
 
   const seenMediaMatch = getSuccessfulSeenMediaMatch(
     folders.logDir,
-    null,
-    entry.mediaUrl
+    getEntryMediaPageUrls(entry),
+    getEntryMediaUrls(entry)
   )
   if (seenMediaMatch) {
     recordDuplicate(
@@ -2055,6 +2531,8 @@ async function saveVideoMedia(modelName, folders, entry) {
     filename: entry.filename,
     mediaUrl: entry.mediaUrl,
     mediaPageUrl: entry.mediaPageUrl,
+    mediaUrls: getEntryMediaUrls(entry),
+    mediaPageUrls: getEntryMediaPageUrls(entry),
     savedPath: relativePath,
   })
 
@@ -2127,8 +2605,7 @@ async function saveVideoMedia(modelName, folders, entry) {
     recordSuccessfulSeenMedia(folders.logDir, {
       relativePath,
       filename: entry.filename,
-      mediaUrl: entry.mediaUrl,
-      mediaPageUrl: null,
+      ...getEntrySeenDetails(entry),
     })
     appendRunEvent('saved_lazy_video', {
       modelName,
@@ -2208,6 +2685,7 @@ async function run() {
       'dry-run',
       'preflight',
       'skip-nas-sync',
+      'track-source',
       'keep-history',
       'browser-media',
       'browser-headless',
@@ -2228,6 +2706,9 @@ async function run() {
   const skipNasSync =
     argv['skip-nas-sync'] === true ||
     isTruthyFlag(process.env.npm_config_skip_nas_sync)
+  const trackSource =
+    argv['track-source'] === true ||
+    isTruthyFlag(process.env.npm_config_track_source)
   const keepHistory =
     argv['keep-history'] === true ||
     isTruthyFlag(process.env.npm_config_keep_history)
@@ -2273,7 +2754,7 @@ async function run() {
   }
   if (!inputUrl) {
     console.error(
-      'Usage: npm run hoghaul -- "<coomer-or-kemono-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
+      'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
     )
     process.exitCode = 1
     return
@@ -2283,7 +2764,7 @@ async function run() {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
-  if (source.site === 'coomerfans') {
+  if (source.site === 'coomerfans' || source.site === 'reddit') {
     useBrowserMedia = false
   }
   const imageConcurrency = parsePositiveInteger(
@@ -2329,6 +2810,13 @@ async function run() {
     console.log(
       `Newest post: ${report.newest ? report.newest.toISOString() : 'unknown'}`
     )
+    if (trackSource) {
+      registerSourceForRun(
+        source,
+        inputUrl,
+        argv.model || process.env.npm_config_model
+      )
+    }
     console.log('No API key or Authorization header was used.')
     return
   }
@@ -2364,7 +2852,13 @@ async function run() {
       .map((post) => parseResolvedDate(post.published))
       .filter(Boolean)
       .sort((a, b) => b.getTime() - a.getTime())[0]
-    const modelNamePreview = sanitize(argv.model || source.rawName)
+    const modelNamePreview = trackSource
+      ? registerSourceForRun(
+          source,
+          inputUrl,
+          argv.model || process.env.npm_config_model
+        )
+      : sanitize(argv.model || source.rawName)
     console.log(
       `Resolved ${source.site}/${source.service}/${source.userId} -> ${modelNamePreview}: ${selectedPosts.length} posts, ${selectedMedia.length} media files`
     )
@@ -2379,12 +2873,9 @@ async function run() {
     return
   }
 
-  const modelName = resolveAndTrackModel(
-    source.rawName,
-    {
-      ...source,
-      inputUrl,
-    },
+  const modelName = registerSourceForRun(
+    source,
+    inputUrl,
     argv.model || process.env.npm_config_model
   )
   const folders = createModelFolders(modelName)

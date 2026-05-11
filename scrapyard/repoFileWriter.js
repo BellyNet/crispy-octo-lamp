@@ -1,7 +1,10 @@
 const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
-require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true })
+require('dotenv').config({
+  path: path.join(__dirname, '..', '.env'),
+  quiet: true,
+})
 
 const rootDir = path.join(__dirname, '..')
 const MODEL_ALIASES_FILENAME = 'model_aliases.json'
@@ -59,14 +62,10 @@ const prettier = require('prettier')
 })
 `.trim()
 
-  const result = spawnSync(
-    process.execPath,
-    ['-e', prettierScript],
-    {
-      cwd: rootDir,
-      encoding: 'utf8',
-    }
-  )
+  const result = spawnSync(process.execPath, ['-e', prettierScript], {
+    cwd: rootDir,
+    encoding: 'utf8',
+  })
 
   if (result.status !== 0) {
     const stderr = (result.stderr || '').trim()
@@ -86,7 +85,9 @@ function isRootModelAliasesFile(filePath) {
 }
 
 function getNasModelAliasesPath() {
-  const configuredNasDatasetRoot = String(process.env.NAS_DATASET_DIR || '').trim()
+  const configuredNasDatasetRoot = String(
+    process.env.NAS_DATASET_DIR || ''
+  ).trim()
 
   if (!configuredNasDatasetRoot) {
     return DEFAULT_NAS_MODEL_ALIASES_PATH
@@ -119,11 +120,56 @@ function writeRepoFileSync(filePath, contents, options = {}) {
   syncModelAliasesToNas(resolvedPath)
 }
 
+function isJsonScalar(value) {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  )
+}
+
+function stringifyJsonForPrettier(value, indent = 0) {
+  const padding = ' '.repeat(indent)
+  const childPadding = ' '.repeat(indent + 2)
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]'
+    if (value.every(isJsonScalar)) {
+      return `[${value.map((item) => JSON.stringify(item)).join(', ')}]`
+    }
+    return `[\n${value
+      .map(
+        (item) => `${childPadding}${stringifyJsonForPrettier(item, indent + 2)}`
+      )
+      .join(',\n')}\n${padding}]`
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value)
+    if (entries.length === 0) return '{}'
+    return `{\n${entries
+      .map(
+        ([key, entryValue]) =>
+          `${childPadding}${JSON.stringify(key)}: ${stringifyJsonForPrettier(
+            entryValue,
+            indent + 2
+          )}`
+      )
+      .join(',\n')}\n${padding}}`
+  }
+
+  return JSON.stringify(value)
+}
+
 function writeRepoJsonFileSync(filePath, value, options = {}) {
+  const formatWithPrettier = options.formatWithPrettier !== false
   const spacing = options.spacing ?? 2
   const appendNewline = options.appendNewline !== false
   const payload =
-    JSON.stringify(value, null, spacing) + (appendNewline ? '\n' : '')
+    (formatWithPrettier
+      ? stringifyJsonForPrettier(value)
+      : JSON.stringify(value, null, spacing)) + (appendNewline ? '\n' : '')
 
   writeRepoFileSync(filePath, payload, options)
 }
