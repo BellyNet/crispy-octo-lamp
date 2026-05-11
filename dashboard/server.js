@@ -408,12 +408,40 @@ app.get('/api/users', async (_req, res) => {
   }
 })
 
+// In-memory response cache: username → { response, fingerprint }
+// Fingerprint = mtimes of the 3 media folders + sidecar file (4 stat calls).
+// A cache hit returns the full JSON instantly without touching individual files.
+const mediaResponseCache = new Map()
+
+async function getMediaFingerprint(userDir) {
+  const fp = {}
+  for (const folder of MEDIA_FOLDERS) {
+    try { fp[folder] = (await fs.promises.stat(path.join(userDir, folder))).mtimeMs }
+    catch { fp[folder] = 0 }
+  }
+  try { fp._sidecar = (await fs.promises.stat(path.join(userDir, '.media-dates.json'))).mtimeMs }
+  catch { fp._sidecar = 0 }
+  return fp
+}
+
+function fingerprintMatches(a, b) {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  return [...keys].every((k) => a[k] === b[k])
+}
+
 // Media list for a user — uses persistent metadata cache to avoid re-running
 // sharp/ffprobe on every page load. Only processes files missing from cache.
 app.get('/api/users/:username/media', async (req, res) => {
   const username = req.params.username
   const userDir = safeSubPath(datasetDir, username)
   if (!userDir) return res.status(403).json({ error: 'Forbidden' })
+
+  // Check response cache — 4 stat calls vs potentially thousands
+  const fingerprint = await getMediaFingerprint(userDir)
+  const cached = mediaResponseCache.get(username)
+  if (cached && fingerprintMatches(cached.fingerprint, fingerprint)) {
+    return res.json(cached.response)
+  }
 
   const rawFiles = []
   for (const folder of MEDIA_FOLDERS) {
@@ -518,6 +546,10 @@ app.get('/api/users/:username/media', async (req, res) => {
 
   // Default order: real media date asc, falling back to added-to-disk date
   allMedia.sort((a, b) => (a.mediaDateMs || a.addedMs) - (b.mediaDateMs || b.addedMs))
+
+  // Store in response cache so the next click on this model is instant
+  mediaResponseCache.set(username, { response: allMedia, fingerprint })
+
   res.json(allMedia)
 })
 

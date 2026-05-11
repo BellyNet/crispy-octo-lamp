@@ -1710,6 +1710,94 @@
       }
 
       // ─── GRID RENDER ──────────────────────────────────────────────────────
+      const SOURCE_LABELS = { exif: 'exif', mp4: 'mp4', uploaded: 'upload', filesystem: 'local*' }
+      const SOURCE_TIPS   = {
+        exif:       'Date from embedded EXIF metadata',
+        mp4:        'Date from video container metadata (ffprobe)',
+        uploaded:   'Platform upload date (set by milkmaid)',
+        filesystem: '* Local download date — least reliable',
+        filename:   'filename timestamp',
+      }
+      const DATE_FMT = { year: '2-digit', month: 'numeric', day: 'numeric' }
+
+      function createCard(item, i) {
+        const card = document.createElement('div')
+        card.className = 'media-card'
+        card.dataset.index = i
+
+        const thumb = document.createElement('div')
+        thumb.className = 'card-thumb'
+
+        if (item.type === 'video') {
+          const img = document.createElement('img')
+          img.loading = 'lazy'
+          img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
+          if (item.previewUrl) {
+            img.src = item.previewUrl
+            img.onerror = () => {
+              img.remove()
+              const ph = document.createElement('div')
+              ph.style.cssText = 'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
+              ph.textContent = '⏳'
+              thumb.insertBefore(ph, thumb.firstChild)
+            }
+          }
+          thumb.appendChild(img)
+        } else {
+          const img = document.createElement('img')
+          img.loading = 'lazy'
+          img.src = item.url
+          img.alt = item.filename
+          img.onerror = () => { img.style.opacity = '0.3'; img.alt = '⚠ load error' }
+          thumb.appendChild(img)
+        }
+
+        const overlay = document.createElement('div')
+        overlay.className = 'card-overlay'
+        thumb.appendChild(overlay)
+
+        const footer = document.createElement('div')
+        footer.className = 'card-footer'
+
+        const left = document.createElement('div')
+        left.style.cssText = 'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
+
+        const badge = document.createElement('span')
+        badge.className = `type-badge ${item.type}`
+        badge.textContent = item.type === 'image' ? 'img' : item.type
+        left.appendChild(badge)
+
+        if (item.source && item.source !== 'filename') {
+          const srcBadge = document.createElement('span')
+          srcBadge.className = `source-badge ${item.source}`
+          srcBadge.textContent = SOURCE_LABELS[item.source] || item.source
+          srcBadge.title = SOURCE_TIPS[item.source] || item.source
+          left.appendChild(srcBadge)
+        }
+
+        const dateEl = document.createElement('span')
+        dateEl.className = 'card-date'
+        dateEl.textContent = item.date ? new Date(item.date).toLocaleDateString('en-US', DATE_FMT) : '—'
+        dateEl.title = formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
+        left.appendChild(dateEl)
+
+        const addedEl = document.createElement('span')
+        addedEl.className = 'card-added'
+        addedEl.textContent = item.addedMs ? new Date(item.addedMs).toLocaleDateString('en-US', DATE_FMT) : '—'
+        addedEl.title = item.addedMs ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}` : 'Added date unknown'
+
+        footer.appendChild(left)
+        footer.appendChild(addedEl)
+        card.appendChild(thumb)
+        card.appendChild(footer)
+        card.addEventListener('click', () => openLightbox(i))
+        return card
+      }
+
+      // Renders in chunks of 60 per animation frame so the browser stays
+      // responsive and paints the first cards immediately rather than freezing
+      // until the entire list is built.
+      let _renderToken = 0
       function renderGrid() {
         gridEl.innerHTML = ''
 
@@ -1719,120 +1807,20 @@
         }
         noResultsEl.style.display = 'none'
 
-        const frag = document.createDocumentFragment()
+        const token = ++_renderToken // invalidates any in-progress render
+        const CHUNK = 60
+        let i = 0
 
-        filtered.forEach((item, i) => {
-          const card = document.createElement('div')
-          card.className = 'media-card'
-          card.dataset.index = i
+        function renderChunk() {
+          if (_renderToken !== token) return // a newer render started, stop this one
+          const frag = document.createDocumentFragment()
+          const end = Math.min(i + CHUNK, filtered.length)
+          for (; i < end; i++) frag.appendChild(createCard(filtered[i], i))
+          gridEl.appendChild(frag)
+          if (i < filtered.length) requestAnimationFrame(renderChunk)
+        }
 
-          const thumb = document.createElement('div')
-          thumb.className = 'card-thumb'
-
-          if (item.type === 'video') {
-            // Video: show animated GIF preview (pre-generated by server, loops automatically)
-            const img = document.createElement('img')
-            img.loading = 'lazy'
-            img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
-            if (item.previewUrl) {
-              img.src = item.previewUrl
-              img.onerror = () => {
-                // GIF not ready yet — show a dark placeholder
-                img.remove()
-                const ph = document.createElement('div')
-                ph.style.cssText =
-                  'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
-                ph.textContent = '⏳'
-                thumb.insertBefore(ph, thumb.firstChild)
-              }
-            }
-            thumb.appendChild(img)
-          } else {
-            // Image / GIF: lazy load
-            const img = document.createElement('img')
-            img.loading = 'lazy'
-            img.src = item.url
-            img.alt = item.filename
-            img.onerror = () => {
-              img.style.opacity = '0.3'
-              img.alt = '⚠ load error'
-            }
-            thumb.appendChild(img)
-          }
-
-          const overlay = document.createElement('div')
-          overlay.className = 'card-overlay'
-          thumb.appendChild(overlay)
-
-          const footer = document.createElement('div')
-          footer.className = 'card-footer'
-
-          // Left: type badge + optional source badge + media date
-          const left = document.createElement('div')
-          left.style.cssText = 'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
-
-          const badge = document.createElement('span')
-          badge.className = `type-badge ${item.type}`
-          badge.textContent = item.type === 'image' ? 'img' : item.type
-          left.appendChild(badge)
-
-          if (item.source && item.source !== 'filename') {
-            const srcBadge = document.createElement('span')
-            srcBadge.className = `source-badge ${item.source}`
-            const labels = {
-              exif: 'exif',
-              mp4: 'mp4',
-              uploaded: 'upload',
-              filesystem: 'local*',
-            }
-            srcBadge.textContent = labels[item.source] || item.source
-            const tips = {
-              exif: 'Date from embedded EXIF metadata',
-              mp4: 'Date from video container metadata (ffprobe)',
-              uploaded: 'Platform upload date (set by milkmaid)',
-              filesystem: '* Local download date — least reliable',
-            }
-            srcBadge.title = tips[item.source] || item.source
-            left.appendChild(srcBadge)
-          }
-
-          const dateEl = document.createElement('span')
-          dateEl.className = 'card-date'
-          dateEl.textContent = item.date
-            ? new Date(item.date).toLocaleDateString('en-US', {
-                year: '2-digit',
-                month: 'numeric',
-                day: 'numeric',
-              })
-            : '—'
-          dateEl.title =
-            formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
-          left.appendChild(dateEl)
-
-          // Right: date added to disk
-          const addedEl = document.createElement('span')
-          addedEl.className = 'card-added'
-          addedEl.textContent = item.addedMs
-            ? new Date(item.addedMs).toLocaleDateString('en-US', {
-                year: '2-digit',
-                month: 'numeric',
-                day: 'numeric',
-              })
-            : '—'
-          addedEl.title = item.addedMs
-            ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}`
-            : 'Added date unknown'
-
-          footer.appendChild(left)
-          footer.appendChild(addedEl)
-          card.appendChild(thumb)
-          card.appendChild(footer)
-
-          card.addEventListener('click', () => openLightbox(i))
-          frag.appendChild(card)
-        })
-
-        gridEl.appendChild(frag)
+        requestAnimationFrame(renderChunk)
       }
 
       // ─── LIGHTBOX (PhotoSwipe v5) ─────────────────────────────────────────
@@ -1847,14 +1835,6 @@
         return _pswpModule
       }
       loadPswp() // preload immediately
-
-      const SOURCE_TIPS = {
-        filename:   'filename timestamp',
-        exif:       'EXIF metadata',
-        mp4:        'MP4 container (ffprobe)',
-        uploaded:   'platform upload date',
-        filesystem: 'local download date',
-      }
 
       function openLightbox(startIndex) {
         loadPswp().then(PhotoSwipe => {
