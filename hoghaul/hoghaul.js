@@ -42,6 +42,10 @@ const {
   preflightRedditSource: preflightRedditAdapterSource,
 } = require('../scrapyard/sourceAdapters/reddit')
 const {
+  fetchCoomerFansPosts: fetchCoomerFansAdapterPosts,
+  preflightCoomerFansSource,
+} = require('../scrapyard/sourceAdapters/coomerFans')
+const {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
@@ -991,10 +995,6 @@ function dedupeMediaEntries(entries) {
   }
 }
 
-function uniqueValues(values) {
-  return Array.from(new Set(values.filter(Boolean)))
-}
-
 function htmlDecode(value) {
   return String(value || '')
     .replace(/&amp;/g, '&')
@@ -1005,129 +1005,17 @@ function htmlDecode(value) {
     .replace(/&gt;/g, '>')
 }
 
-function absoluteUrl(source, href) {
-  if (!href) return null
-  return new URL(htmlDecode(href), source.origin).toString()
-}
-
-function extractRegexValues(text, regex, group = 1) {
-  return Array.from(String(text || '').matchAll(regex))
-    .map((match) => match[group])
-    .filter(Boolean)
-}
-
-async function resolveCoomerFansCreator(source) {
-  if (source.userId) return source
-
-  const searchUrl = `${source.origin}/?q=${encodeURIComponent(source.rawName)}`
-  const { html } = await fetchHtml(searchUrl)
-  const candidates = extractRegexValues(
-    html,
-    /href=["']\/u\/([^/]+)\/(\d+)\/([^"']+)["']/gi,
-    0
-  )
-    .map((href) => {
-      const match = href.match(/\/u\/([^/]+)\/(\d+)\/([^"']+)/i)
-      if (!match) return null
-      return {
-        service: match[1],
-        userId: match[2],
-        rawName: sanitize(decodeURIComponent(match[3])),
-      }
-    })
-    .filter(Boolean)
-
-  const exact = candidates.find(
-    (candidate) =>
-      candidate.service === source.service &&
-      candidate.rawName === source.rawName
-  )
-  const fallback = candidates.find(
-    (candidate) => candidate.service === source.service
-  )
-  const resolved = exact || fallback
-  if (!resolved) {
-    throw new Error(`No CoomerFans creator found for ${source.rawName}`)
-  }
-
-  source.service = resolved.service
-  source.userId = resolved.userId
-  source.rawName = resolved.rawName
-  source.inputUrl = `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}`
-  console.log(
-    `Resolved CoomerFans creator ${source.rawName} -> ${source.service}/${source.userId}`
-  )
-  return source
-}
-
-function parseCoomerFansPostLinks(source, html) {
-  return uniqueValues(
-    extractRegexValues(html, /href=["'](\/p\/(\d+)\/(\d+)\/([^"']+))["']/gi, 1)
-  )
-    .filter((href) => href.includes(`/${source.userId}/`))
-    .map((href) => {
-      const match = href.match(/\/p\/(\d+)\/(\d+)\/([^/?#]+)/i)
-      return {
-        id: match?.[1] || path.basename(href),
-        url: absoluteUrl(source, href),
-      }
-    })
-    .filter((post) => post.id && post.url)
-}
-
-function parseCoomerFansDate(html) {
-  const decodedHtml = htmlDecode(html)
-  const match = decodedHtml.match(
-    /Added\s+([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9:]+\s+\+0000\s+UTC)/i
-  )
-  return match ? parseResolvedDate(match[1].replace(' UTC', '')) : null
-}
-
-function parseCoomerFansTitle(html) {
-  const ogTitle = String(html || '').match(
-    /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i
-  )?.[1]
-  if (ogTitle) return htmlDecode(ogTitle)
-  return htmlDecode(String(html || '').match(/<h1[^>]*>(.*?)<\/h1>/is)?.[1])
-    .replace(/<[^>]+>/g, ' ')
-    .trim()
-}
-
-function parseCoomerFansMediaEntries(source, post, html) {
-  const uploadedDate = parseCoomerFansDate(html)
-  const title = parseCoomerFansTitle(html) || null
-  const mediaUrls = uniqueValues(
-    extractRegexValues(
-      html,
-      /https?:\/\/(?:img\d+\.coomerfans\.com|coomerfans\.com)\/(?:storage|videos?)\/[^"'<> \r\n]+/gi,
-      0
-    )
-      .map((url) => htmlDecode(url))
-      .filter((url) => !url.includes('/istorage/'))
-  )
-
-  return mediaUrls
-    .map((mediaUrl) => {
-      const filename = filenameFromMediaUrl(mediaUrl)
-      if (!filename) return null
-      return {
-        postId: String(post.id || ''),
-        title,
-        mediaPageUrl: post.url,
-        mediaUrl,
-        filename,
-        originalName: null,
-        uploadedDate,
-      }
-    })
-    .filter(Boolean)
-}
-
 async function preflightSourceJson(source, page = 0) {
   if (source.site === 'reddit') {
     return preflightRedditAdapterSource(source, {
       fetchJson,
       pageSize: REDDIT_PAGE_SIZE,
+    })
+  }
+  if (source.site === 'coomerfans') {
+    return preflightCoomerFansSource(source, page, {
+      fetchHtml,
+      logger: console,
     })
   }
   return preflightCoomerKemonoSource(source, page, {
@@ -1143,70 +1031,12 @@ async function resolveKemonoCreatorIdForJson(source) {
   })
 }
 
-async function fetchCoomerFansPosts(source, options) {
-  await resolveCoomerFansCreator(source)
-  const posts = []
-  let page = options.startPage
-  const postLimit = pLimit(options.postConcurrency || 1)
-
-  while (true) {
-    if (options.endPage !== null && page > options.endPage) break
-    const pageNumber = page + 1
-    const pageUrl =
-      pageNumber <= 1
-        ? `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}`
-        : `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}?page=${pageNumber}`
-    console.log(`Loading coomerfans page ${pageNumber} (${pageUrl})`)
-
-    const { html } = await fetchHtml(pageUrl)
-    const postLinks = parseCoomerFansPostLinks(source, html)
-    if (postLinks.length === 0) break
-
-    const selectedPostLinks =
-      Number.isFinite(options.maxPosts) && options.maxPosts > 0
-        ? postLinks.slice(0, Math.max(options.maxPosts - posts.length, 0))
-        : postLinks
-
-    const pagePosts = await Promise.all(
-      selectedPostLinks.map((post) =>
-        postLimit(async () => {
-          console.log(`Loading coomerfans post ${post.id}`)
-          const { html: postHtml } = await fetchHtml(post.url)
-          const mediaEntries = parseCoomerFansMediaEntries(
-            source,
-            post,
-            postHtml
-          )
-          return {
-            id: post.id,
-            url: post.url,
-            title: mediaEntries[0]?.title || null,
-            published: mediaEntries[0]?.uploadedDate || null,
-            mediaEntries,
-          }
-        })
-      )
-    )
-    posts.push(...pagePosts)
-
-    if (
-      Number.isFinite(options.maxPosts) &&
-      options.maxPosts > 0 &&
-      posts.length >= options.maxPosts
-    ) {
-      break
-    }
-
-    if (!html.includes(`?page=${pageNumber + 1}`)) break
-    page += 1
-  }
-
-  return posts
-}
-
 async function fetchPosts(source, options) {
   if (source.site === 'coomerfans') {
-    return fetchCoomerFansPosts(source, options)
+    return fetchCoomerFansAdapterPosts(source, options, {
+      fetchHtml,
+      logger: console,
+    })
   }
   if (source.site === 'reddit') {
     return fetchRedditAdapterPosts(source, options, {
