@@ -66,6 +66,7 @@ const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
+const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 
 function sanitize(name) {
   return String(name || '')
@@ -506,6 +507,16 @@ const milkmaidMediaSaver = createMediaSaver({
   source: 'milkmaid',
   mediaDates,
 })
+const duplicateChecker = createDuplicateChecker({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  getBitwiseHashRecord,
+  isBitwiseDupe,
+  getVisualHashRecord,
+  isVisualDupe,
+})
+const { getBitwiseDuplicationRecord, getVisualDuplicationRecord } =
+  duplicateChecker
 const quarantineDatasetDir = datasetPaths.quarantineDatasetDir
 const quarantineManifestPath = path.join(
   slopvaultRoot,
@@ -816,42 +827,6 @@ function existsAtExactPath(filePath) {
 
 function existsLocallyOrOnNas(filePath) {
   return datasetPaths.existsLocallyOrOnNas(filePath)
-}
-
-function getRecordRefs(record) {
-  return Array.isArray(record?.refs)
-    ? record.refs
-        .map((ref) => (typeof ref === 'string' ? ref : ref?.relativePath || ''))
-        .filter(Boolean)
-    : []
-}
-
-function getActiveRecordRefs(record) {
-  return getRecordRefs(record).filter((relativePath) =>
-    existsLocallyOrOnNas(
-      path.join(datasetDir, relativePath.replace(/\//g, path.sep))
-    )
-  )
-}
-
-function getBitwiseDuplicationRecord(hash) {
-  const record = getBitwiseHashRecord(hash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isBitwiseDupe(hash),
-  }
-}
-
-function getVisualDuplicationRecord(visualHash) {
-  const record = getVisualHashRecord(visualHash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isVisualDupe(visualHash),
-  }
 }
 
 function startRunLog(modelName, inputUrl, folders) {
