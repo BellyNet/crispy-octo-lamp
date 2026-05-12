@@ -32,6 +32,7 @@ const {
 } = require('../scrapyard/mediaEntries')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
+const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
   loadVisualHashCache,
   saveVisualHashCache,
@@ -88,6 +89,24 @@ const hoghaulMediaSaver = createMediaSaver({
   getEventMetadata: (entry) => getEntrySourceDetails(entry),
   getSeenDetails: (entry) => getEntrySeenDetails(entry),
 })
+const duplicateChecker = createDuplicateChecker({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  getBitwiseHashRecord,
+  isBitwiseDupe,
+  getVisualHashRecord,
+  isVisualDupe,
+  getVisualHashEntries,
+  getVisualHashDistance,
+})
+const {
+  getBitwiseDuplicationRecord,
+  getVisualDuplicationRecord,
+  getFuzzyVisualDuplicationRecord,
+  getPendingImageVisualDuplicate,
+  reservePendingImageVisualClaim,
+  releasePendingImageVisualClaim,
+} = duplicateChecker
 let successCount = 0
 let duplicateCount = 0
 let errorCount = 0
@@ -96,7 +115,6 @@ let savedBytes = 0
 let browserMediaDownloader = null
 let redgifsAuth = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
-const pendingImageVisualClaims = new Map()
 let runTerminationHandled = false
 
 function formatPercent(numerator, denominator) {
@@ -361,124 +379,6 @@ function existsAtExactPath(filePath) {
 
 function existsLocallyOrOnNas(filePath) {
   return datasetPaths.existsLocallyOrOnNas(filePath)
-}
-
-function getRecordRefs(record) {
-  return Array.isArray(record?.refs)
-    ? record.refs
-        .map((ref) => String(ref || '').replace(/\\/g, '/'))
-        .filter(Boolean)
-    : []
-}
-
-function getActiveRecordRefs(record) {
-  return getRecordRefs(record).filter((relativePath) =>
-    existsLocallyOrOnNas(
-      path.join(datasetDir, relativePath.replace(/\//g, path.sep))
-    )
-  )
-}
-
-function getBitwiseDuplicationRecord(hash) {
-  const record = getBitwiseHashRecord(hash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isBitwiseDupe(hash),
-  }
-}
-
-function getVisualDuplicationRecord(visualHash) {
-  const record = getVisualHashRecord(visualHash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isVisualDupe(visualHash),
-  }
-}
-
-function isSameModelRef(modelName, relativePath) {
-  return String(relativePath || '').startsWith(`${modelName}/`)
-}
-
-function getFuzzyVisualDuplicationRecord(modelName, visualHash, maxDistance) {
-  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
-    return null
-  }
-
-  let bestMatch = null
-  for (const entry of getVisualHashEntries()) {
-    const candidateHash = String(entry?.hash || '')
-    const distance = getVisualHashDistance(visualHash, candidateHash)
-    if (distance === null || distance > maxDistance) continue
-
-    const activeRefs = getActiveRecordRefs(entry).filter((relativePath) =>
-      isSameModelRef(modelName, relativePath)
-    )
-    if (activeRefs.length === 0) continue
-
-    if (
-      !bestMatch ||
-      distance < bestMatch.distance ||
-      (distance === bestMatch.distance &&
-        candidateHash.localeCompare(bestMatch.matchedHash) < 0)
-    ) {
-      bestMatch = {
-        record: entry,
-        activeRefs,
-        distance,
-        matchedHash: candidateHash,
-        isDuplicate: true,
-      }
-    }
-  }
-
-  return bestMatch
-}
-
-function getPendingImageVisualDuplicate(modelName, visualHash, maxDistance) {
-  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
-    return null
-  }
-
-  let bestMatch = null
-  for (const claim of pendingImageVisualClaims.values()) {
-    if (!claim || claim.modelName !== modelName) continue
-    const distance = getVisualHashDistance(visualHash, claim.visualHash)
-    if (distance === null || distance > maxDistance) continue
-    if (
-      !bestMatch ||
-      distance < bestMatch.distance ||
-      (distance === bestMatch.distance &&
-        claim.relativePath.localeCompare(bestMatch.activeRefs[0]) < 0)
-    ) {
-      bestMatch = {
-        activeRefs: [claim.relativePath],
-        distance,
-        matchedHash: claim.visualHash,
-        isDuplicate: true,
-      }
-    }
-  }
-
-  return bestMatch
-}
-
-function reservePendingImageVisualClaim(modelName, relativePath, visualHash) {
-  const claimKey = `${modelName}:${relativePath}`
-  pendingImageVisualClaims.set(claimKey, {
-    modelName,
-    relativePath,
-    visualHash,
-  })
-  return claimKey
-}
-
-function releasePendingImageVisualClaim(claimKey) {
-  if (!claimKey) return
-  pendingImageVisualClaims.delete(claimKey)
 }
 
 function parseResolvedDate(date) {
