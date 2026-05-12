@@ -2,4 +2,3 @@ node_modules
 outputs
 *.webp
 *.safetensors
-model_aliases.json

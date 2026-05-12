@@ -24,14 +24,6 @@ const PRETTIER_PARSERS = new Map([
   ['.yml', 'yaml'],
 ])
 
-function isRootModelAliasesFile(filePath) {
-  const resolvedPath = path.resolve(filePath)
-  return (
-    path.basename(resolvedPath).toLowerCase() === 'model_aliases.json' &&
-    path.dirname(resolvedPath) === rootDir
-  )
-}
-
 function shouldFormat(filePath, formatWithPrettier) {
   if (!formatWithPrettier) return false
   return PRETTIER_PARSERS.has(path.extname(filePath).toLowerCase())
@@ -117,8 +109,7 @@ function syncModelAliasesToNas(filePath) {
 function writeRepoFileSync(filePath, contents, options = {}) {
   const resolvedPath = path.resolve(filePath)
   const encoding = options.encoding || 'utf8'
-  const formatWithPrettier =
-    options.formatWithPrettier ?? !isRootModelAliasesFile(resolvedPath)
+  const formatWithPrettier = options.formatWithPrettier !== false
 
   fs.writeFileSync(resolvedPath, contents, encoding)
 
@@ -135,11 +126,7 @@ function writeRepoJsonFileSync(filePath, value, options = {}) {
   const payload =
     JSON.stringify(value, null, spacing) + (appendNewline ? '\n' : '')
 
-  writeRepoFileSync(filePath, payload, {
-    ...options,
-    formatWithPrettier:
-      options.formatWithPrettier ?? !isRootModelAliasesFile(filePath),
-  })
+  writeRepoFileSync(filePath, payload, options)
 }
 
 module.exports = {
