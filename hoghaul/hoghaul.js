@@ -21,7 +21,6 @@ const {
   classifyMediaFilename,
   normalizeMediaEntry,
   normalizeMediaEntries,
-  sanitizeToken,
 } = require('../scrapyard/mediaEntries')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
@@ -38,6 +37,10 @@ const {
   preflightCoomerKemonoSource,
   resolveKemonoCreatorIdForJson: resolveSharedKemonoCreatorIdForJson,
 } = require('../scrapyard/sourceAdapters/coomerKemono')
+const {
+  fetchRedditPosts: fetchRedditAdapterPosts,
+  preflightRedditSource: preflightRedditAdapterSource,
+} = require('../scrapyard/sourceAdapters/reddit')
 const {
   loadVisualHashCache,
   saveVisualHashCache,
@@ -736,47 +739,6 @@ async function fetchHtml(url) {
   return httpClient.fetchHtml(url)
 }
 
-function parseRedgifsId(url) {
-  return redgifsClient.parseRedgifsId(url)
-}
-
-async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
-  const resolved = await redgifsClient.resolveMedia(redgifsUrl)
-  if (!resolved) return null
-  const { id, mediaUrl } = resolved
-
-  const subreddit = getRedditSubreddit(post)
-  const filename = buildRedditFilename(
-    source,
-    post,
-    mediaUrl,
-    path.extname(new URL(mediaUrl).pathname) || '.mp4'
-  )
-  const createdDate = resolved.createdDate || uploadedDate
-
-  return {
-    sourceSite: 'reddit',
-    sourceService: source.service || 'submitted',
-    sourceUserId: source.userId || null,
-    sourceUsername: source.username || source.userId || null,
-    sourceSubreddit: subreddit,
-    postId: String(post.id || ''),
-    title: post.title || null,
-    mediaPageUrl: getPostPageUrl(source, post),
-    mediaPageUrls: getRedditMediaPageUrls(source, post),
-    mediaUrl,
-    mediaUrls: uniqueSeenUrls([mediaUrl, resolved.mediaUrls]),
-    sourceUrls: uniqueSeenUrls([
-      redgifsUrl,
-      resolved.canonicalUrl,
-      getRedditPostLinkedUrls(source, post),
-    ]),
-    filename,
-    originalName: id,
-    uploadedDate: parseResolvedDate(createdDate) || uploadedDate,
-  }
-}
-
 function parseSourceUrl(inputUrl) {
   const parsed = new URL(inputUrl)
   const host = parsed.hostname.toLowerCase()
@@ -913,21 +875,6 @@ function printMediaSample(entries, limit = 5) {
   }
 }
 
-function getPostPageUrl(source, post) {
-  if (source.site === 'coomerfans') {
-    return (
-      post.url ||
-      `${source.origin}/p/${post.id}/${source.userId}/${source.service}`
-    )
-  }
-  if (source.site === 'reddit') {
-    return post.permalink
-      ? new URL(post.permalink, source.origin).toString()
-      : `${source.origin}/comments/${post.id}`
-  }
-  return `${source.origin}/${source.service}/user/${source.userId}/post/${post.id}`
-}
-
 function filenameFromMediaUrl(mediaUrl) {
   try {
     const name = decodeURIComponent(path.basename(new URL(mediaUrl).pathname))
@@ -935,221 +882,6 @@ function filenameFromMediaUrl(mediaUrl) {
   } catch {
     return null
   }
-}
-
-function getRedditPostDate(post) {
-  const createdUtc = Number(post?.created_utc)
-  if (Number.isFinite(createdUtc) && createdUtc > 0) {
-    return new Date(createdUtc * 1000)
-  }
-  return parseResolvedDate(post?.created)
-}
-
-function getRedditSubreddit(post) {
-  return sanitizeToken(
-    post?.subreddit_name_prefixed || post?.subreddit || post?.subreddit_id
-  )
-}
-
-function getRedditLinkedUrl(source, value) {
-  const url = htmlDecode(value)
-  if (!url) return null
-  try {
-    return new URL(url, source.origin).toString()
-  } catch {
-    return url
-  }
-}
-
-function isRedditContainerUrl(source, post, value) {
-  if (!value) return false
-  try {
-    const parsed = new URL(value, source.origin)
-    const host = parsed.hostname.toLowerCase()
-    if (!host.endsWith('reddit.com')) return false
-    const pathname = parsed.pathname.toLowerCase()
-    const postId = String(post?.id || '').toLowerCase()
-    return (
-      pathname.includes(`/comments/${postId}`) ||
-      pathname.includes(`/gallery/${postId}`) ||
-      parsed.toString() === getPostPageUrl(source, post)
-    )
-  } catch {
-    return false
-  }
-}
-
-function getRedditPostLinkedUrls(source, post) {
-  return uniqueSeenUrls([
-    getRedditLinkedUrl(source, post?.url_overridden_by_dest),
-    getRedditLinkedUrl(source, post?.url),
-  ]).filter((url) => !isRedditContainerUrl(source, post, url))
-}
-
-function getRedditMediaPageUrls(source, post) {
-  const pageUrls = [getPostPageUrl(source, post)]
-  if (post?.is_gallery || post?.gallery_data) {
-    pageUrls.push(`${source.origin}/gallery/${post.id}`)
-  }
-  return uniqueSeenUrls(pageUrls)
-}
-
-function getRedditMediaMetadataUrls(metadata) {
-  return uniqueSeenUrls([
-    metadata?.s?.u,
-    metadata?.s?.gif,
-    metadata?.s?.mp4,
-    Array.isArray(metadata?.o) ? metadata.o.map((item) => item?.u) : [],
-    Array.isArray(metadata?.p) ? metadata.p.map((item) => item?.u) : [],
-  ])
-}
-
-function getRedditMediaMetadataUrl(metadata) {
-  return getRedditMediaMetadataUrls(metadata)[0] || ''
-}
-
-function extensionFromMime(mime) {
-  const normalized = String(mime || '').toLowerCase()
-  if (normalized.includes('jpeg') || normalized.includes('jpg')) return '.jpg'
-  if (normalized.includes('png')) return '.png'
-  if (normalized.includes('webp')) return '.webp'
-  if (normalized.includes('gif')) return '.gif'
-  if (normalized.includes('mp4')) return '.mp4'
-  return ''
-}
-
-function buildRedditFilename(_source, post, mediaUrl, fallbackExt, index = 0) {
-  const urlName = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
-  const ext = path.extname(urlName || '') || fallbackExt || ''
-  const suffix = index > 0 ? `_${index + 1}` : ''
-  const subreddit = getRedditSubreddit(post)
-  const subredditPart = subreddit ? `${subreddit}_` : ''
-  return `${subredditPart}${post.id}${suffix}${ext || '.jpg'}`
-}
-
-function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
-  const filename =
-    options.filename ||
-    buildRedditFilename(
-      source,
-      post,
-      mediaUrl,
-      options.fallbackExt,
-      options.index
-    )
-  return {
-    sourceSite: 'reddit',
-    sourceService: source.service || 'submitted',
-    sourceUserId: source.userId || null,
-    sourceUsername: source.username || source.userId || null,
-    sourceSubreddit: getRedditSubreddit(post),
-    postId: String(post.id || ''),
-    title: post.title || null,
-    mediaPageUrl: getPostPageUrl(source, post),
-    mediaPageUrls: getRedditMediaPageUrls(source, post),
-    mediaUrl,
-    mediaUrls: uniqueSeenUrls([mediaUrl, options.mediaUrls]),
-    sourceUrls: uniqueSeenUrls([
-      options.sourceUrls,
-      getRedditPostLinkedUrls(source, post),
-    ]),
-    filename,
-    originalName: options.originalName || filenameFromMediaUrl(mediaUrl),
-    uploadedDate,
-  }
-}
-
-function getNativeRedditVideoUrl(post) {
-  return (
-    post?.secure_media?.reddit_video?.fallback_url ||
-    post?.media?.reddit_video?.fallback_url ||
-    post?.preview?.reddit_video_preview?.fallback_url ||
-    null
-  )
-}
-
-function getNativeRedditVideoUrls(post) {
-  return uniqueSeenUrls([
-    post?.secure_media?.reddit_video?.fallback_url,
-    post?.secure_media?.reddit_video?.dash_url,
-    post?.secure_media?.reddit_video?.hls_url,
-    post?.media?.reddit_video?.fallback_url,
-    post?.media?.reddit_video?.dash_url,
-    post?.media?.reddit_video?.hls_url,
-    post?.preview?.reddit_video_preview?.fallback_url,
-    post?.preview?.reddit_video_preview?.dash_url,
-    post?.preview?.reddit_video_preview?.hls_url,
-  ])
-}
-
-function getRedditGalleryEntries(source, post, uploadedDate) {
-  const items = Array.isArray(post?.gallery_data?.items)
-    ? post.gallery_data.items
-    : []
-  const metadata = post?.media_metadata || {}
-
-  return items
-    .map((item, index) => {
-      const mediaId = item?.media_id
-      const meta = mediaId ? metadata[mediaId] : null
-      if (!meta || meta.status === 'failed') return null
-      const mediaUrl = getRedditMediaMetadataUrl(meta)
-      if (!mediaUrl) return null
-      return createRedditEntry(source, post, mediaUrl, uploadedDate, {
-        filename: buildRedditFilename(
-          source,
-          post,
-          mediaUrl,
-          extensionFromMime(meta.m),
-          index
-        ),
-        mediaUrls: getRedditMediaMetadataUrls(meta),
-        originalName: mediaId,
-      })
-    })
-    .filter(Boolean)
-}
-
-async function getRedditMediaEntries(source, post) {
-  const uploadedDate = getRedditPostDate(post)
-  const entries = getRedditGalleryEntries(source, post, uploadedDate)
-  const redgifsId = parseRedgifsId(post.url_overridden_by_dest || post.url)
-  let redgifsResolved = false
-  if (redgifsId) {
-    const redgifsEntry = await resolveRedgifsEntry(
-      source,
-      post,
-      post.url_overridden_by_dest || post.url,
-      uploadedDate
-    ).catch((err) => {
-      console.warn(`RedGIFs resolve failed for ${post.id}: ${err.message}`)
-      return null
-    })
-    if (redgifsEntry) {
-      entries.push(redgifsEntry)
-      redgifsResolved = true
-    }
-  }
-
-  const videoUrl = redgifsResolved ? null : getNativeRedditVideoUrl(post)
-  if (videoUrl) {
-    entries.push(
-      createRedditEntry(source, post, videoUrl, uploadedDate, {
-        fallbackExt: '.mp4',
-        mediaUrls: getNativeRedditVideoUrls(post),
-      })
-    )
-  }
-
-  const directUrl = htmlDecode(post.url_overridden_by_dest || post.url || '')
-  if (
-    /^https?:\/\/(?:i|preview)\.redd\.it\//i.test(directUrl) ||
-    /^https?:\/\/i\.redditmedia\.com\//i.test(directUrl)
-  ) {
-    entries.push(createRedditEntry(source, post, directUrl, uploadedDate))
-  }
-
-  return dedupeMediaEntries(entries).entries
 }
 
 function getMediaEntriesFromPost(source, post) {
@@ -1393,7 +1125,10 @@ function parseCoomerFansMediaEntries(source, post, html) {
 
 async function preflightSourceJson(source, page = 0) {
   if (source.site === 'reddit') {
-    return preflightRedditSource(source)
+    return preflightRedditAdapterSource(source, {
+      fetchJson,
+      pageSize: REDDIT_PAGE_SIZE,
+    })
   }
   return preflightCoomerKemonoSource(source, page, {
     fetchJson,
@@ -1469,84 +1204,18 @@ async function fetchCoomerFansPosts(source, options) {
   return posts
 }
 
-function getRedditListingUrl(source, after = null) {
-  const url = new URL(
-    `/user/${encodeURIComponent(source.username || source.userId)}/submitted/.json`,
-    source.origin
-  )
-  url.searchParams.set('limit', String(REDDIT_PAGE_SIZE))
-  url.searchParams.set('raw_json', '1')
-  if (after) url.searchParams.set('after', after)
-  return url.toString()
-}
-
-async function preflightRedditSource(source) {
-  const apiUrl = getRedditListingUrl(source)
-  const { data, byteLength } = await fetchJson(apiUrl)
-  const children = Array.isArray(data?.data?.children)
-    ? data.data.children.map((child) => child?.data).filter(Boolean)
-    : []
-  const newest = children
-    .map((post) => getRedditPostDate(post))
-    .filter(Boolean)
-    .sort((a, b) => b.getTime() - a.getTime())[0]
-
-  return {
-    apiUrl,
-    byteLength,
-    postCount: children.length,
-    newest,
-    firstPostId: children[0]?.id ? String(children[0].id) : null,
-  }
-}
-
-async function fetchRedditPosts(source, options) {
-  const posts = []
-  let after = null
-  let page = 0
-
-  while (true) {
-    if (options.endPage !== null && page > options.endPage) break
-    const apiUrl = getRedditListingUrl(source, after)
-    console.log(`Loading reddit page ${page + 1} (${apiUrl})`)
-    const { data } = await fetchJson(apiUrl)
-    const listing = data?.data
-    const pagePosts = Array.isArray(listing?.children)
-      ? listing.children.map((child) => child?.data).filter(Boolean)
-      : []
-    if (pagePosts.length === 0) break
-
-    for (const post of pagePosts) {
-      const mediaEntries = await getRedditMediaEntries(source, post)
-      posts.push({
-        ...post,
-        id: String(post.id || ''),
-        published: getRedditPostDate(post),
-        mediaEntries,
-      })
-      if (
-        Number.isFinite(options.maxPosts) &&
-        options.maxPosts > 0 &&
-        posts.length >= options.maxPosts
-      ) {
-        return posts
-      }
-    }
-
-    after = listing?.after || null
-    if (!after) break
-    page += 1
-  }
-
-  return posts
-}
-
 async function fetchPosts(source, options) {
   if (source.site === 'coomerfans') {
     return fetchCoomerFansPosts(source, options)
   }
   if (source.site === 'reddit') {
-    return fetchRedditPosts(source, options)
+    return fetchRedditAdapterPosts(source, options, {
+      fetchJson,
+      logger: console,
+      normalizeUrl: normalizeSeenUrl,
+      pageSize: REDDIT_PAGE_SIZE,
+      redgifsClient,
+    })
   }
 
   return fetchCoomerKemonoPosts(source, options, {
