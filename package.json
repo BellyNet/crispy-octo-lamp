@@ -16,6 +16,8 @@
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "format": "prettier . --write",
+    "start": "node scrapyard/run-scrape.js",
+    "scrape": "node scrapyard/run-scrape.js",
     "hoghaul": "node hoghaul/hoghaul.js",
     "hoghaul:all-coomerfans": "node hoghaul/run-all-coomerfans.js",
     "hoghaul:all-coomer": "node hoghaul/run-source-batch.js --source=coomer",
