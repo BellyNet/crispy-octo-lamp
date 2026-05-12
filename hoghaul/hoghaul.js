@@ -80,6 +80,15 @@ const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 const pendingImageVisualClaims = new Map()
 let runTerminationHandled = false
 
+function isSkipReason(reason) {
+  return String(reason || '').startsWith('skip_')
+}
+
+function formatPercent(numerator, denominator) {
+  if (!Number.isFinite(denominator) || denominator <= 0) return '0.0'
+  return ((numerator / denominator) * 100).toFixed(1)
+}
+
 function sanitize(name) {
   return String(name || '')
     .replace(/[^a-z0-9_-]/gi, '_')
@@ -574,9 +583,12 @@ function startRunLog(modelName, inputUrl, folders, keepHistory) {
     startedAt: new Date().toISOString(),
     counters: {
       saved: 0,
+      skipped: 0,
       duplicates: 0,
       queuedVideos: 0,
       failures: 0,
+      processed: 0,
+      expectedMedia: 0,
     },
     transfer: {
       savedBytes: 0,
@@ -672,6 +684,47 @@ function finalizeRunLog(extra = {}) {
     currentRunLog.keepHistory || currentRunLog.errors.length > 0
   if (!shouldKeepHistory) removeFileIfExists(currentRunLog.logPath)
   currentRunLog = null
+}
+
+function setExpectedMediaCount(total) {
+  if (!currentRunLog) return
+  currentRunLog.counters.expectedMedia =
+    Number.isFinite(total) && total >= 0 ? total : 0
+}
+
+function logRunProgress(context = '') {
+  if (!currentRunLog) return
+
+  const processed = currentRunLog.counters.processed || 0
+  const expected = currentRunLog.counters.expectedMedia || 0
+  const saved = currentRunLog.counters.saved || 0
+  const skipped = currentRunLog.counters.skipped || 0
+  const duplicates = currentRunLog.counters.duplicates || 0
+  const failures = currentRunLog.counters.failures || 0
+  const remaining = Math.max(expected - processed, 0)
+  const percent = formatPercent(processed, expected)
+  const suffix = context ? ` :: ${context}` : ''
+
+  console.log(
+    `Progress: ${processed}/${expected} (${percent}%) | saved ${saved} | skipped ${skipped} | dupes ${duplicates} | failed ${failures} | remaining ${remaining}${suffix}`
+  )
+}
+
+function noteMediaOutcome(kind, context = '') {
+  if (!currentRunLog) return
+
+  currentRunLog.counters.processed += 1
+  if (kind === 'saved') {
+    currentRunLog.counters.saved += 1
+  } else if (kind === 'skipped') {
+    currentRunLog.counters.skipped += 1
+  } else if (kind === 'duplicate') {
+    currentRunLog.counters.duplicates += 1
+  } else if (kind === 'failed') {
+    currentRunLog.counters.failures += 1
+  }
+
+  logRunProgress(context)
 }
 
 function finalizeAbortedRun(status, error) {
@@ -2364,7 +2417,6 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
 
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
   duplicateCount += 1
-  if (currentRunLog) currentRunLog.counters.duplicates += 1
   const seenDetails = getEntrySeenDetails(entry)
   appendRunEvent(reason, {
     filename: entry.filename,
@@ -2380,6 +2432,10 @@ function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
     filename: entry.filename,
     ...seenDetails,
   })
+  noteMediaOutcome(
+    isSkipReason(reason) ? 'skipped' : 'duplicate',
+    `${reason}: ${entry.filename}`
+  )
 }
 
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
@@ -2540,7 +2596,6 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     successCount += 1
     savedBytes += buffer.length
     if (currentRunLog) {
-      currentRunLog.counters.saved += 1
       currentRunLog.transfer.savedBytes += buffer.length
     }
     recordSuccessfulSeenMedia(folders.logDir, {
@@ -2555,6 +2610,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
       hash,
       visualHash,
     })
+    noteMediaOutcome('saved', `saved_${kind}: ${entry.filename}`)
     console.log(`Saved ${kind}: ${entry.filename}`)
   } finally {
     releasePendingImageVisualClaim(visualClaimKey)
@@ -2674,7 +2730,6 @@ async function saveVideoMedia(modelName, folders, entry) {
     successCount += 1
     savedBytes += stat.size
     if (currentRunLog) {
-      currentRunLog.counters.saved += 1
       currentRunLog.transfer.savedBytes += stat.size
       currentRunLog.transfer.lazyTransferredBytes += stat.size
     }
@@ -2690,11 +2745,11 @@ async function saveVideoMedia(modelName, folders, entry) {
       hash,
       visualHash,
     })
+    noteMediaOutcome('saved', `saved_video: ${entry.filename}`)
     console.log(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)
     errorCount += 1
-    if (currentRunLog) currentRunLog.counters.failures += 1
     recordRunError('lazy_video_error', {
       modelName,
       filename: entry.filename,
@@ -2710,6 +2765,7 @@ async function saveVideoMedia(modelName, folders, entry) {
       mediaPageUrl: entry.mediaPageUrl,
       error: err.message,
     })
+    noteMediaOutcome('failed', `video_error: ${entry.filename}`)
     console.log(`Failed video: ${entry.filename} - ${err.message}`)
   }
 }
@@ -2985,6 +3041,8 @@ async function run() {
     })
   }
 
+  setExpectedMediaCount(selectedMedia.length)
+
   if (useBrowserMedia) {
     browserMediaDownloader = await createBrowserMediaDownloader(
       source,
@@ -3017,6 +3075,7 @@ async function run() {
         `Browser media dedupe: skipped ${browserDeduped.duplicateCount} repeated media URL(s)`
       )
     }
+    setExpectedMediaCount(selectedMedia.length)
   } else {
     console.log(
       'Browser media mode disabled; using direct HTTP media requests.'
@@ -3038,6 +3097,7 @@ async function run() {
         mediaPageUrl: entry.mediaPageUrl,
         extension: classification.ext,
       })
+      noteMediaOutcome('skipped', `skip_unknown_media: ${entry.filename}`)
       continue
     }
     if (classification.kind === 'video') {
@@ -3065,7 +3125,6 @@ async function run() {
           await saveImageLikeMedia(modelName, folders, entry, entry.kind)
         } catch (err) {
           errorCount += 1
-          if (currentRunLog) currentRunLog.counters.failures += 1
           recordRunError('media_error', {
             modelName,
             filename: entry.filename,
@@ -3080,6 +3139,7 @@ async function run() {
             mediaPageUrl: entry.mediaPageUrl,
             error: err.message,
           })
+          noteMediaOutcome('failed', `media_error: ${entry.filename}`)
           console.log(`Failed media: ${entry.filename} - ${err.message}`)
         }
       })
@@ -3112,6 +3172,16 @@ async function run() {
       syncNasMp4IndexToMirror('Z:\\dataset', datasetDir)
     }
   }
+  const runCounters = currentRunLog
+    ? {
+        processed: currentRunLog.counters.processed || 0,
+        expectedMedia: currentRunLog.counters.expectedMedia || 0,
+        saved: currentRunLog.counters.saved || 0,
+        skipped: currentRunLog.counters.skipped || 0,
+        duplicates: currentRunLog.counters.duplicates || 0,
+        failures: currentRunLog.counters.failures || 0,
+      }
+    : null
   finalizeRunLog({
     successCount,
     duplicateCount,
@@ -3124,7 +3194,7 @@ async function run() {
   })
 
   console.log(
-    `Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
+    `Done: ${runCounters?.processed ?? selectedMedia.length}/${runCounters?.expectedMedia ?? selectedMedia.length} processed | saved ${runCounters?.saved ?? successCount} | skipped ${runCounters?.skipped ?? 0} | dupes ${runCounters?.duplicates ?? duplicateCount} | failed ${runCounters?.failures ?? errorCount}`
   )
   console.log(getCompletionLine())
 }
