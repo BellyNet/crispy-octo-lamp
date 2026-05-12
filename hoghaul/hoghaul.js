@@ -45,6 +45,7 @@ const {
 const { getCompletionLine } = require('../stuffinglogger')
 
 bannerHoghaul()
+installProcessTerminationHandlers()
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.join(
@@ -77,6 +78,7 @@ let browserMediaDownloader = null
 let redgifsAuth = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 const pendingImageVisualClaims = new Map()
+let runTerminationHandled = false
 
 function sanitize(name) {
   return String(name || '')
@@ -553,6 +555,7 @@ function moveFileIntoPlace(sourcePath, destinationPath) {
 }
 
 function startRunLog(modelName, inputUrl, folders, keepHistory) {
+  runTerminationHandled = false
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const logPath = path.join(folders.logDir, `hoghaul-run-${stamp}.jsonl`)
   const summaryPath = path.join(
@@ -669,6 +672,68 @@ function finalizeRunLog(extra = {}) {
     currentRunLog.keepHistory || currentRunLog.errors.length > 0
   if (!shouldKeepHistory) removeFileIfExists(currentRunLog.logPath)
   currentRunLog = null
+}
+
+function finalizeAbortedRun(status, error) {
+  if (!currentRunLog || runTerminationHandled) return
+  runTerminationHandled = true
+
+  const normalizedStatus = status || 'failed'
+  const errorMessage =
+    error instanceof Error ? error.message : String(error || '').trim()
+
+  if (errorMessage) {
+    recordRunError('run_error', {
+      error: errorMessage,
+      status: normalizedStatus,
+    })
+    appendRunEvent('run_error', {
+      error: errorMessage,
+      status: normalizedStatus,
+    })
+  }
+
+  finalizeRunLog({
+    status: normalizedStatus,
+    successCount,
+    duplicateCount,
+    errorCount: errorMessage ? errorCount + 1 : errorCount,
+    queuedVideoCount,
+    savedBytes,
+  })
+}
+
+function installProcessTerminationHandlers() {
+  process.on('beforeExit', () => {
+    finalizeAbortedRun(
+      'interrupted',
+      'Process exited before Hoghaul completed normally'
+    )
+  })
+
+  process.on('SIGINT', () => {
+    finalizeAbortedRun('interrupted', 'Received SIGINT')
+    process.exit(130)
+  })
+
+  process.on('SIGTERM', () => {
+    finalizeAbortedRun('interrupted', 'Received SIGTERM')
+    process.exit(143)
+  })
+
+  process.on('uncaughtException', (err) => {
+    finalizeAbortedRun('failed', err)
+    console.error(err.stack || err.message)
+    process.exit(1)
+  })
+
+  process.on('unhandledRejection', (reason) => {
+    const err =
+      reason instanceof Error ? reason : new Error(String(reason || ''))
+    finalizeAbortedRun('failed', err)
+    console.error(err.stack || err.message)
+    process.exit(1)
+  })
 }
 
 function normalizeSeenUrl(url) {
@@ -3058,12 +3123,6 @@ async function run() {
     sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
   })
 
-  if (skipNasSync) {
-    console.log('NAS sync skipped by --skip-nas-sync')
-  } else {
-    await syncToNAS(modelName)
-  }
-
   console.log(
     `Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
   )
@@ -3072,20 +3131,7 @@ async function run() {
 
 run()
   .catch((err) => {
-    recordRunError('run_error', {
-      error: err.message,
-    })
-    appendRunEvent('run_error', {
-      error: err.message,
-    })
-    if (currentRunLog) {
-      finalizeRunLog({
-        status: 'failed',
-        successCount,
-        duplicateCount,
-        errorCount: errorCount + 1,
-      })
-    }
+    finalizeAbortedRun('failed', err)
     console.error(`Hoghaul failed: ${err.message}`)
     process.exitCode = 1
   })
