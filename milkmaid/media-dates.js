@@ -77,9 +77,13 @@ function toISO(date) {
 }
 
 // ─── EXTRACTION: VIDEOS (from saved file via ffprobe) ─────────────────────────
-async function extractVideoDateFromFile(filePath) {
+// Combined probe — one ffprobe spawn returns both duration and creation date.
+// Returns { duration: number|null, videoDate: string|null }. `duration` is seconds,
+// `videoDate` is ISO. Either may be null. Returns `{ duration: null, videoDate: null }`
+// if ffprobe is unavailable or the call fails.
+async function probeVideoFile(filePath) {
   const probe = await ensureFfprobe()
-  if (!probe) return null
+  if (!probe) return { duration: null, videoDate: null }
   try {
     const { stdout } = await execFileAsync(
       probe,
@@ -95,27 +99,42 @@ async function extractVideoDateFromFile(filePath) {
       { timeout: 15000 }
     )
     const info = JSON.parse(stdout)
-    const candidates = []
 
+    // Duration — prefer format.duration, fall back to first stream's duration.
+    let duration = parseFloat(info?.format?.duration)
+    if (!(isFinite(duration) && duration > 0)) {
+      for (const s of info?.streams || []) {
+        const d = parseFloat(s?.duration)
+        if (isFinite(d) && d > 0) { duration = d; break }
+      }
+    }
+    if (!(isFinite(duration) && duration > 0)) duration = null
+
+    // Creation date.
+    const candidates = []
     const ft = info?.format?.tags || {}
     if (ft.creation_time) candidates.push(ft.creation_time)
     if (ft['com.apple.quicktime.creationdate'])
       candidates.push(ft['com.apple.quicktime.creationdate'])
     if (ft.date) candidates.push(ft.date)
-
     for (const stream of info?.streams || []) {
       if (stream?.tags?.creation_time)
         candidates.push(stream.tags.creation_time)
     }
-
+    let videoDate = null
     for (const raw of candidates) {
       const d = new Date(raw)
-      if (isSane(d)) return toISO(d)
+      if (isSane(d)) { videoDate = toISO(d); break }
     }
-    return null
+
+    return { duration, videoDate }
   } catch {
-    return null
+    return { duration: null, videoDate: null }
   }
+}
+
+async function extractVideoDateFromFile(filePath) {
+  return (await probeVideoFile(filePath)).videoDate
 }
 
 // ─── EXTRACTION: FILENAME TIMESTAMP ───────────────────────────────────────────
@@ -291,6 +310,7 @@ module.exports = {
   resolveDateFromSidecar,
   resolveBestDateRecord,
   extractVideoDateFromFile,
+  probeVideoFile,
   extractFilenameDate,
   flushAllSidecars,
   findFfprobe,

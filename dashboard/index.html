@@ -934,6 +934,43 @@
         padding-right: 22px;
       }
 
+      /* ─── RESCAN BUTTON ──────────────────────────────────────── */
+      #rescan-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 5px 8px;
+        border-radius: 6px;
+        flex-shrink: 0;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+      #rescan-btn:hover {
+        background: var(--card-bg);
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      #rescan-btn[disabled] {
+        opacity: 0.5;
+        cursor: progress;
+      }
+      #rescan-btn.spinning svg { animation: spin 1.2s linear infinite; }
+
+      /* ─── SCAN BANNER ────────────────────────────────────────── */
+      #scan-banner {
+        padding: 6px 20px;
+        background: rgba(124, 108, 252, 0.12);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 500;
+        border-bottom: 1px solid var(--border);
+        text-align: center;
+        flex-shrink: 0;
+      }
+
       /* ─── HAMBURGER ──────────────────────────────────────────── */
       #hamburger {
         display: flex;
@@ -1102,7 +1139,17 @@
           <option value="gif">GIFs</option>
           <option value="video">Videos</option>
         </select>
+        <button id="rescan-btn" title="Rescan all models" aria-label="Rescan">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        </button>
       </header>
+      <div id="scan-banner" style="display:none">
+        <span id="scan-banner-text"></span>
+      </div>
 
       <div id="sort-bar" style="display: none">
         <select id="sort-select" aria-label="Sort order">
@@ -1358,32 +1405,39 @@
             card.appendChild(badge)
           }
 
-          // Fetch random cover async
-          fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
-            .then((r) => r.ok ? r.json() : null)
-            .then((cover) => {
-              if (!cover) return
-              let el
-              if (cover.type === 'video') {
-                el = document.createElement('video')
-                el.src = cover.url
-                el.autoplay = true
-                el.muted = true
-                el.loop = true
-                el.playsInline = true
-                el.addEventListener('timeupdate', () => {
-                  if (el.currentTime > 5) el.currentTime = 0
-                })
-              } else {
-                el = document.createElement('img')
-                el.src = cover.url
-                el.loading = 'lazy'
-                el.alt = u.name
-              }
-              el.className = 'home-card-thumb'
-              card.replaceChild(el, mediaEl)
-            })
-            .catch(() => {})
+          // Cover ships with the user object now — no extra HTTP request.
+          // Falls back to /api/users/:name/cover if the server hasn't computed
+          // a cover yet (first-ever scan in progress for this model).
+          const useCover = (cover) => {
+            if (!cover) return
+            let el
+            if (cover.type === 'video') {
+              el = document.createElement('video')
+              el.src = cover.url
+              el.autoplay = true
+              el.muted = true
+              el.loop = true
+              el.playsInline = true
+              el.addEventListener('timeupdate', () => {
+                if (el.currentTime > 5) el.currentTime = 0
+              })
+            } else {
+              el = document.createElement('img')
+              el.src = cover.url
+              el.loading = 'lazy'
+              el.alt = u.name
+            }
+            el.className = 'home-card-thumb'
+            if (mediaEl.parentNode === card) card.replaceChild(el, mediaEl)
+          }
+          if (u.cover) {
+            useCover(u.cover)
+          } else {
+            fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
+              .then((r) => r.ok ? r.json() : null)
+              .then(useCover)
+              .catch(() => {})
+          }
 
           const body = document.createElement('div')
           body.className = 'home-card-body'
@@ -1689,23 +1743,23 @@
           return
         }
 
-        if (activeSort === 'added-asc' || activeSort === 'added-desc') {
-          const withAdded = filtered.filter((m) => m.addedMs)
-          if (!withAdded.length) { dateRangeEl.textContent = ''; return }
-          const first = withAdded[activeSort === 'added-asc' ? 0 : withAdded.length - 1]
-          const last  = withAdded[activeSort === 'added-asc' ? withAdded.length - 1 : 0]
-          const toISO = (ms) => new Date(ms).toISOString()
-          dateRangeEl.textContent = `${formatDateShort(toISO(first.addedMs))} – ${formatDateShort(toISO(last.addedMs))}`
-          return
-        }
+        // Pick the value to range over by sort kind. Compute min/max explicitly
+        // (don't rely on filtered order — it might be sorted by size/duration).
+        const pickValue =
+          activeSort === 'added-asc' || activeSort === 'added-desc'
+            ? (m) => m.addedMs
+            : (m) => m.mediaDateMs || m.addedMs
 
-        const effDate = (m) => m.mediaDateMs || m.addedMs
-        const withDates = filtered.filter(effDate)
-        if (!withDates.length) { dateRangeEl.textContent = ''; return }
+        let min = Infinity, max = 0
+        for (const m of filtered) {
+          const v = pickValue(m)
+          if (!v) continue
+          if (v < min) min = v
+          if (v > max) max = v
+        }
+        if (min === Infinity) { dateRangeEl.textContent = ''; return }
         const toISO = (ms) => new Date(ms).toISOString()
-        const first = withDates[0]
-        const last  = withDates[withDates.length - 1]
-        dateRangeEl.textContent = `${formatDateShort(toISO(effDate(first)))} – ${formatDateShort(toISO(effDate(last)))}`
+        dateRangeEl.textContent = `${formatDateShort(toISO(min))} – ${formatDateShort(toISO(max))}`
       }
 
       // ─── GRID RENDER ──────────────────────────────────────────────────────
@@ -1839,10 +1893,17 @@
         loadPswp().then(PhotoSwipe => {
           const dataSource = filtered.map(item => {
             if (item.type === 'video') {
-              return {
-                html: `<div class="pswp-video-wrap"><video controls autoplay loop playsinline src="${item.url}"></video></div>`,
-                _item: item,
-              }
+              const wrap = document.createElement('div')
+              wrap.className = 'pswp-video-wrap'
+              const video = document.createElement('video')
+              video.controls = true
+              video.autoplay = true
+              video.loop = true
+              video.playsInline = true
+              video.preload = 'metadata'
+              video.src = item.url
+              wrap.appendChild(video)
+              return { html: wrap.outerHTML, _item: item }
             }
             return {
               src:    item.url,
@@ -1887,18 +1948,36 @@
                 const update = () => {
                   const item = filtered[pswp.currIndex]
                   if (!item) return
-                  const srcHtml = item.source
-                    ? `<span class="pswp-info-src">[${SOURCE_TIPS[item.source] || item.source}]</span>`
-                    : ''
-                  const addedHtml = item.addedMs
-                    ? `<span class="pswp-info-added">Added ${formatDate(new Date(item.addedMs).toISOString())}</span>`
-                    : ''
-                  el.innerHTML = `
-                    <span class="type-badge ${item.type}">${item.type === 'image' ? 'img' : item.type}</span>
-                    <span class="pswp-info-date">${formatDate(item.date)} ${srcHtml}</span>
-                    <span class="pswp-info-filename">${item.filename}</span>
-                    ${addedHtml}
-                  `
+                  el.replaceChildren()
+
+                  const typeBadge = document.createElement('span')
+                  typeBadge.className = `type-badge ${item.type}`
+                  typeBadge.textContent = item.type === 'image' ? 'img' : item.type
+                  el.appendChild(typeBadge)
+
+                  const dateSpan = document.createElement('span')
+                  dateSpan.className = 'pswp-info-date'
+                  dateSpan.textContent = formatDate(item.date)
+                  if (item.source) {
+                    dateSpan.appendChild(document.createTextNode(' '))
+                    const srcSpan = document.createElement('span')
+                    srcSpan.className = 'pswp-info-src'
+                    srcSpan.textContent = `[${SOURCE_TIPS[item.source] || item.source}]`
+                    dateSpan.appendChild(srcSpan)
+                  }
+                  el.appendChild(dateSpan)
+
+                  const nameSpan = document.createElement('span')
+                  nameSpan.className = 'pswp-info-filename'
+                  nameSpan.textContent = item.filename
+                  el.appendChild(nameSpan)
+
+                  if (item.addedMs) {
+                    const addedSpan = document.createElement('span')
+                    addedSpan.className = 'pswp-info-added'
+                    addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
+                    el.appendChild(addedSpan)
+                  }
                 }
                 pswp.on('change', update)
                 update()
@@ -1998,6 +2077,62 @@
       })
       sidebarOverlay.addEventListener('click', closeSidebar)
 
+
+      // ─── RESCAN + SCAN STATUS ─────────────────────────────────────────────
+      const rescanBtn = document.getElementById('rescan-btn')
+      const scanBanner = document.getElementById('scan-banner')
+      const scanBannerText = document.getElementById('scan-banner-text')
+      let scanPollTimer = null
+
+      function setBanner(text) {
+        if (!text) { scanBanner.style.display = 'none'; return }
+        scanBannerText.textContent = text
+        scanBanner.style.display = 'block'
+      }
+
+      async function pollScanStatus(initialDelay = 1000) {
+        clearTimeout(scanPollTimer)
+        const tick = async () => {
+          try {
+            const r = await fetch('/api/scan-status')
+            const s = r.ok ? await r.json() : null
+            if (!s) return
+            if (s.inProgress) {
+              rescanBtn.disabled = true
+              rescanBtn.classList.add('spinning')
+              const trig = s.trigger ? `${s.trigger} ` : ''
+              setBanner(`Scanning… ${trig}${s.modelsDone}/${s.modelsTotal} models`)
+              scanPollTimer = setTimeout(tick, 1500)
+            } else {
+              rescanBtn.disabled = false
+              rescanBtn.classList.remove('spinning')
+              setBanner('')
+              // Scan just completed — refresh stats once
+              if (s.completedAt) refreshUsers()
+            }
+          } catch {
+            rescanBtn.disabled = false
+            rescanBtn.classList.remove('spinning')
+          }
+        }
+        scanPollTimer = setTimeout(tick, initialDelay)
+      }
+
+      rescanBtn.addEventListener('click', async () => {
+        if (rescanBtn.disabled) return
+        rescanBtn.disabled = true
+        rescanBtn.classList.add('spinning')
+        try {
+          await fetch('/api/rescan', { method: 'POST' })
+          pollScanStatus(500)
+        } catch {
+          rescanBtn.disabled = false
+          rescanBtn.classList.remove('spinning')
+        }
+      })
+
+      // Poll once on load — if the server is mid-startup-scan, surface a banner.
+      pollScanStatus(0)
 
       // ─── INIT ─────────────────────────────────────────────────────────────
       loadUsers()

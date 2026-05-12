@@ -11,14 +11,10 @@
 
 const fs = require('fs')
 const path = require('path')
-const { execFile } = require('child_process')
-const { promisify } = require('util')
 const pLimit = require('p-limit')
 const sharp = require('sharp')
 const mediaDates = require('../milkmaid/media-dates.js')
 const MetaCache = require('./meta-cache.js')
-
-const execFileAsync = promisify(execFile)
 
 const APPDATA =
   process.env.APPDATA ||
@@ -35,21 +31,6 @@ const VIDEO_EXTS = new Set(['.mp4', '.webm'])
 const ALL_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS])
 
 let ffprobePath = null
-
-async function getDuration(videoPath) {
-  if (!ffprobePath) return 0
-  try {
-    const { stdout } = await execFileAsync(
-      ffprobePath,
-      ['-v', 'quiet', '-print_format', 'json', '-show_format', videoPath],
-      { timeout: 10000 }
-    )
-    const d = parseFloat(JSON.parse(stdout)?.format?.duration)
-    return isFinite(d) && d > 0 ? d : 0
-  } catch {
-    return 0
-  }
-}
 
 async function processFile(cache, username, userDir, folder, filename) {
   const filePath = path.join(userDir, folder, filename)
@@ -72,12 +53,9 @@ async function processFile(cache, username, userDir, folder, filename) {
       meta.height = 0
     }
   } else if (VIDEO_EXTS.has(ext)) {
-    const [duration, videoDate] = await Promise.all([
-      getDuration(filePath),
-      mediaDates.extractVideoDateFromFile(filePath).catch(() => null),
-    ])
-    meta.duration = duration
-    if (videoDate) meta.videoDate = videoDate
+    const probed = await mediaDates.probeVideoFile(filePath).catch(() => ({}))
+    meta.duration = probed.duration || 0
+    if (probed.videoDate) meta.videoDate = probed.videoDate
   }
 
   cache.set(username, folder, filename, stat, meta)
