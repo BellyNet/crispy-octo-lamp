@@ -2,17 +2,10 @@
 
 const fs = require('fs')
 const path = require('path')
-const http = require('http')
-const https = require('https')
-const zlib = require('zlib')
 const { exec } = require('child_process')
 const { createHash } = require('crypto')
 const minimist = require('minimist')
 const pLimit = require('p-limit')
-const puppeteer = require('puppeteer-extra')
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-
-puppeteer.use(StealthPlugin())
 
 const { bannerHoghaul } = require('../banners.js')
 const mediaDates = require('../milkmaid/media-dates.js')
@@ -33,6 +26,12 @@ const {
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
+const { createHttpClient } = require('../scrapyard/httpClient')
+const { createRedgifsClient } = require('../scrapyard/redgifsClient')
+const {
+  createBrowserMediaDownloader: createSharedBrowserMediaDownloader,
+  getDefaultBrowserProfileDir,
+} = require('../scrapyard/browserMediaDownloader')
 const {
   loadVisualHashCache,
   saveVisualHashCache,
@@ -69,9 +68,9 @@ const REDDIT_PAGE_SIZE = 100
 const API_ACCEPT_HEADER = 'text/css'
 const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
-
-const REDGIFS_TEMP_AUTH_URL = 'https://api.redgifs.com/v2/auth/temporary'
-const REDGIFS_GIF_API_BASE = 'https://api.redgifs.com/v2/gifs'
+const httpClient = createHttpClient({ timeoutMs: REQUEST_TIMEOUT_MS })
+const requestBuffer = httpClient.requestBuffer
+const redgifsClient = createRedgifsClient({ requestBuffer })
 
 let currentRunLog = null
 const sharedMediaSeenIndex = createMediaSeenIndex({
@@ -113,7 +112,6 @@ let errorCount = 0
 let queuedVideoCount = 0
 let savedBytes = 0
 let browserMediaDownloader = null
-let redgifsAuth = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 let runTerminationHandled = false
 
@@ -711,456 +709,6 @@ function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
   return sharedMediaSeenIndex.recordSuccessfulSeenMedia(modelLogDir, details)
 }
 
-function decodeBody(buffer, headers) {
-  const encoding = String(headers['content-encoding'] || '').toLowerCase()
-  if (encoding.includes('br')) return zlib.brotliDecompressSync(buffer)
-  if (encoding.includes('gzip')) return zlib.gunzipSync(buffer)
-  if (encoding.includes('deflate')) return zlib.inflateSync(buffer)
-  return buffer
-}
-
-function requestBuffer(url, options = {}) {
-  const {
-    method = 'GET',
-    headers = {},
-    timeoutMs = REQUEST_TIMEOUT_MS,
-    maxRedirects = 5,
-    onProgress = null,
-  } = options
-
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url)
-    const client = parsed.protocol === 'https:' ? https : http
-    const req = client.request(
-      parsed,
-      {
-        method,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          ...headers,
-        },
-      },
-      (res) => {
-        const statusCode = res.statusCode || 0
-        const redirect = res.headers.location
-        if (
-          [301, 302, 303, 307, 308].includes(statusCode) &&
-          redirect &&
-          maxRedirects > 0
-        ) {
-          res.resume()
-          const nextUrl = new URL(redirect, url).toString()
-          requestBuffer(nextUrl, {
-            method: statusCode === 303 ? 'GET' : method,
-            headers,
-            timeoutMs,
-            maxRedirects: maxRedirects - 1,
-            onProgress,
-          }).then(resolve, reject)
-          return
-        }
-
-        if (statusCode < 200 || statusCode >= 300) {
-          const chunks = []
-          res.on('data', (chunk) => chunks.push(chunk))
-          res.on('end', () => {
-            const raw = Buffer.concat(chunks)
-            let body
-            try {
-              body = decodeBody(raw, res.headers).toString('utf8')
-            } catch {
-              body = raw.toString('utf8')
-            }
-            body = body.replace(/\s+/g, ' ').trim().slice(0, 500)
-            reject(new Error(`HTTP ${statusCode}: ${body}`))
-          })
-          return
-        }
-
-        if (method === 'HEAD') {
-          res.resume()
-          resolve({
-            buffer: Buffer.alloc(0),
-            headers: res.headers,
-            statusCode,
-            url,
-          })
-          return
-        }
-
-        const chunks = []
-        let downloadedBytes = 0
-        const totalBytes = Number.parseInt(
-          res.headers['content-length'] || '0',
-          10
-        )
-        const startedAt = Date.now()
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length
-          chunks.push(chunk)
-          if (onProgress) {
-            onProgress({
-              downloadedBytes,
-              totalBytes,
-              chunkBytes: chunk.length,
-              elapsedMs: Date.now() - startedAt,
-            })
-          }
-        })
-        res.on('end', () => {
-          const raw = Buffer.concat(chunks)
-          resolve({
-            buffer: decodeBody(raw, res.headers),
-            headers: res.headers,
-            statusCode,
-            url,
-          })
-        })
-      }
-    )
-
-    req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`Request timed out after ${timeoutMs}ms`))
-    })
-    req.on('error', (err) => {
-      const message =
-        err?.message ||
-        err?.code ||
-        `Request failed for ${new URL(url).hostname}`
-      reject(new Error(message))
-    })
-    req.end()
-  })
-}
-
-function expandWindowsEnvVars(value) {
-  return String(value || '').replace(/%([^%]+)%/g, (_, name) => {
-    return process.env[name] || process.env[name.toUpperCase()] || ''
-  })
-}
-
-function existingPathFromCandidates(candidates) {
-  for (const candidate of candidates.filter(Boolean)) {
-    const expanded = expandWindowsEnvVars(candidate)
-    if (expanded && fs.existsSync(expanded)) return expanded
-  }
-  return null
-}
-
-function getDefaultBrowserExecutablePath() {
-  return existingPathFromCandidates([
-    process.env.HOGHAUL_BROWSER_EXECUTABLE,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    '%LOCALAPPDATA%\\Yandex\\YandexBrowser\\Application\\browser.exe',
-    '%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe',
-    '%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe',
-    '%PROGRAMFILES(X86)%\\Google\\Chrome\\Application\\chrome.exe',
-    '%LOCALAPPDATA%\\Microsoft\\Edge\\Application\\msedge.exe',
-    '%PROGRAMFILES(X86)%\\Microsoft\\Edge\\Application\\msedge.exe',
-    '%PROGRAMFILES%\\Microsoft\\Edge\\Application\\msedge.exe',
-  ])
-}
-
-function getDefaultBrowserProfileDir(sourceSite) {
-  return path.join(slopvaultRoot, 'hoghaul-browser-profile', sourceSite)
-}
-
-function normalizeCookieDomain(hostname) {
-  const lower = String(hostname || '').toLowerCase()
-  const parts = lower.split('.').filter(Boolean)
-  return `.${parts.slice(-2).join('.')}`
-}
-
-function parseCookieHeader(cookieHeader, sourceUrl) {
-  const parsedUrl = new URL(sourceUrl)
-  const domain = normalizeCookieDomain(parsedUrl.hostname)
-  return String(cookieHeader || '')
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const equalsIndex = part.indexOf('=')
-      if (equalsIndex <= 0) return null
-      return {
-        name: part.slice(0, equalsIndex).trim(),
-        value: part.slice(equalsIndex + 1).trim(),
-        domain,
-        path: '/',
-      }
-    })
-    .filter((cookie) => cookie?.name)
-}
-
-function parseNetscapeCookieFile(raw) {
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'))
-    .map((line) => {
-      const parts = line.split('\t')
-      if (parts.length < 7) return null
-      const [domain, , pathValue, secure, expires, name, value] = parts
-      return {
-        domain,
-        path: pathValue || '/',
-        secure: /^true$/i.test(secure),
-        expires: Number.parseInt(expires, 10) || undefined,
-        name,
-        value,
-      }
-    })
-    .filter((cookie) => cookie?.name)
-}
-
-function normalizeCookieJson(parsed, sourceUrl) {
-  const parsedUrl = new URL(sourceUrl)
-  const fallbackDomain = normalizeCookieDomain(parsedUrl.hostname)
-  const cookies = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(parsed?.cookies)
-      ? parsed.cookies
-      : Object.entries(parsed || {}).map(([name, value]) => ({ name, value }))
-
-  return cookies
-    .map((cookie) => {
-      if (!cookie?.name || cookie.value === undefined) return null
-      const normalized = {
-        name: String(cookie.name),
-        value: String(cookie.value),
-        domain: cookie.domain || fallbackDomain,
-        path: cookie.path || '/',
-      }
-      if (cookie.expires || cookie.expirationDate) {
-        normalized.expires = Math.floor(cookie.expires || cookie.expirationDate)
-      }
-      if (cookie.secure !== undefined)
-        normalized.secure = Boolean(cookie.secure)
-      if (cookie.httpOnly !== undefined)
-        normalized.httpOnly = Boolean(cookie.httpOnly)
-      if (cookie.sameSite) normalized.sameSite = cookie.sameSite
-      return normalized
-    })
-    .filter(Boolean)
-}
-
-function loadCookiesFromFile(cookieFile, sourceUrl) {
-  const expanded = expandWindowsEnvVars(cookieFile)
-  if (!expanded || !fs.existsSync(expanded)) {
-    throw new Error(`Cookie file does not exist: ${cookieFile}`)
-  }
-
-  const raw = fs.readFileSync(expanded, 'utf8').trim()
-  if (!raw) return []
-  if (raw.startsWith('{') || raw.startsWith('[')) {
-    return normalizeCookieJson(JSON.parse(raw), sourceUrl)
-  }
-  return parseNetscapeCookieFile(raw)
-}
-
-function getBrowserCookieList(sourceUrl, options) {
-  const cookies = []
-  if (options.cookieHeader) {
-    cookies.push(...parseCookieHeader(options.cookieHeader, sourceUrl))
-  }
-  if (options.cookieFile) {
-    cookies.push(...loadCookiesFromFile(options.cookieFile, sourceUrl))
-  }
-  return cookies
-}
-
-async function createBrowserMediaDownloader(source, options) {
-  let browser = null
-  let shouldCloseBrowser = true
-  if (options.browserConnect) {
-    const browserWSEndpoint = /^https?:\/\//i.test(options.browserConnect)
-      ? await getBrowserWebSocketEndpoint(options.browserConnect)
-      : options.browserConnect
-    console.log(`Browser media mode: connected browser (${browserWSEndpoint})`)
-    browser = await puppeteer.connect({ browserWSEndpoint })
-    shouldCloseBrowser = false
-  }
-
-  const executablePath =
-    options.browserExecutable || getDefaultBrowserExecutablePath()
-  const userDataDir =
-    options.browserProfile || getDefaultBrowserProfileDir(source.site)
-  const headless = options.headless ? 'new' : false
-  if (!browser) {
-    fs.mkdirSync(userDataDir, { recursive: true })
-
-    const launchOptions = {
-      headless,
-      userDataDir,
-      defaultViewport: null,
-      args: [
-        '--ignore-certificate-errors',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-extensions',
-      ],
-      ignoreHTTPSErrors: true,
-    }
-    if (executablePath) launchOptions.executablePath = executablePath
-
-    console.log(
-      `Browser media mode: ${executablePath || 'bundled Chromium'} (${headless ? 'headless' : 'headful'})`
-    )
-    console.log(`Browser profile: ${userDataDir}`)
-
-    browser = await puppeteer.launch(launchOptions)
-  }
-  const cookies = getBrowserCookieList(source.inputUrl, options)
-  if (cookies.length) {
-    const cookiePage = await browser.newPage()
-    await cookiePage.setCookie(...cookies)
-    await cookiePage.close()
-    console.log(
-      `Loaded ${cookies.length} browser cookie(s) for media requests.`
-    )
-  }
-
-  const warmupPage = await browser.newPage()
-  await warmupPage.setExtraHTTPHeaders({
-    'Accept-Language': 'en-US,en;q=0.9',
-  })
-  await warmupPage
-    .goto(source.inputUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: options.timeoutMs,
-    })
-    .catch((err) => {
-      appendRunEvent('browser_warmup_warning', {
-        url: source.inputUrl,
-        error: err.message,
-      })
-      console.warn(`Browser warmup warning: ${err.message}`)
-    })
-  if (options.validateMs > 0) {
-    console.log(
-      `Browser validation pause: ${Math.round(options.validateMs / 1000)}s. Use the opened browser window to pass any site check.`
-    )
-    await new Promise((resolve) => setTimeout(resolve, options.validateMs))
-  }
-
-  async function getCookieHeaderFor(mediaUrl) {
-    const cookiesForRequest = await warmupPage
-      .cookies(source.inputUrl, mediaUrl)
-      .catch(() => [])
-    const browserCookieHeader = cookiesForRequest
-      .map((cookie) => `${cookie.name}=${cookie.value}`)
-      .join('; ')
-    return [options.cookieHeader, browserCookieHeader]
-      .filter(Boolean)
-      .join('; ')
-  }
-
-  return {
-    async download(mediaUrl, entry = {}) {
-      const cookieHeader = await getCookieHeaderFor(mediaUrl)
-      try {
-        const response = await requestBuffer(mediaUrl, {
-          timeoutMs: options.timeoutMs,
-          headers: {
-            Accept: '*/*',
-            Referer: entry.mediaPageUrl || source.inputUrl,
-            ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-          },
-        })
-        return response.buffer
-      } catch (err) {
-        appendRunEvent('browser_cookie_http_error', {
-          mediaUrl,
-          mediaPageUrl: entry.mediaPageUrl,
-          error: err.message,
-          hadCookieHeader: Boolean(cookieHeader),
-        })
-      }
-
-      const page = await browser.newPage()
-      try {
-        await page.setExtraHTTPHeaders({
-          Accept: '*/*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          Referer: entry.mediaPageUrl || source.inputUrl,
-        })
-        const response = await page.goto(mediaUrl, {
-          waitUntil: 'load',
-          timeout: options.timeoutMs,
-        })
-        if (!response) throw new Error('Browser returned no response')
-        const status = response.status()
-        if (status < 200 || status >= 300) {
-          throw new Error(`Browser HTTP ${status}`)
-        }
-        return await response.buffer()
-      } finally {
-        await page.close().catch(() => {})
-      }
-    },
-    async extractPostMediaUrls(postPageUrl) {
-      const page = await browser.newPage()
-      try {
-        await page.setExtraHTTPHeaders({
-          'Accept-Language': 'en-US,en;q=0.9',
-          Referer: source.inputUrl,
-        })
-        await page.goto(postPageUrl, {
-          waitUntil: 'domcontentloaded',
-          timeout: options.timeoutMs,
-        })
-        await page
-          .waitForSelector(
-            'a.fileThumb.image-link, a.post__attachment-link[href], video source[src]',
-            { timeout: 10000 }
-          )
-          .catch(() => {})
-        return await page.evaluate(() => {
-          return Array.from(
-            document.querySelectorAll(
-              'a.fileThumb.image-link, a.post__attachment-link[href], video source[src]'
-            )
-          )
-            .map((el) => {
-              const value =
-                el.href ||
-                el.src ||
-                el.getAttribute('href') ||
-                el.getAttribute('src') ||
-                ''
-              if (!value) return null
-              return new URL(value, location.href).toString()
-            })
-            .filter(Boolean)
-        })
-      } finally {
-        await page.close().catch(() => {})
-      }
-    },
-    async close() {
-      await warmupPage.close().catch(() => {})
-      if (shouldCloseBrowser) {
-        await browser.close().catch(() => {})
-      } else {
-        browser.disconnect()
-      }
-    },
-  }
-}
-
-async function getBrowserWebSocketEndpoint(connectValue) {
-  const versionUrl = new URL('/json/version', connectValue).toString()
-  const response = await requestBuffer(versionUrl, {
-    headers: { Accept: 'application/json' },
-  })
-  const version = JSON.parse(response.buffer.toString('utf8'))
-  if (!version.webSocketDebuggerUrl) {
-    throw new Error(`No webSocketDebuggerUrl found at ${versionUrl}`)
-  }
-  return version.webSocketDebuggerUrl
-}
-
 async function closeBrowserMediaDownloader() {
   if (!browserMediaDownloader) return
   const downloader = browserMediaDownloader
@@ -1171,92 +719,26 @@ async function closeBrowserMediaDownloader() {
 async function fetchJson(url) {
   const parsed = new URL(url)
   const isReddit = parsed.hostname.toLowerCase().endsWith('reddit.com')
-  const response = await requestBuffer(url, {
+  return httpClient.fetchJson(url, {
     headers: {
       Accept: isReddit ? 'application/json' : API_ACCEPT_HEADER,
     },
   })
-  const body = response.buffer.toString('utf8')
-  return {
-    data: JSON.parse(body),
-    byteLength: response.buffer.length,
-    url,
-  }
 }
 
 async function fetchHtml(url) {
-  const response = await requestBuffer(url, {
-    headers: {
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-  })
-  return {
-    html: response.buffer.toString('utf8'),
-    byteLength: response.buffer.length,
-    url,
-  }
-}
-
-async function fetchRedgifsJson(url) {
-  const token = await getRedgifsToken()
-  const response = await requestBuffer(url, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-  })
-  return JSON.parse(response.buffer.toString('utf8'))
-}
-
-async function getRedgifsToken() {
-  if (redgifsAuth?.token && redgifsAuth.expiresAt > Date.now() + 60000) {
-    return redgifsAuth.token
-  }
-
-  const response = await requestBuffer(REDGIFS_TEMP_AUTH_URL, {
-    headers: {
-      Accept: 'application/json',
-    },
-  })
-  const data = JSON.parse(response.buffer.toString('utf8'))
-  if (!data?.token) throw new Error('RedGIFs temporary auth returned no token')
-
-  redgifsAuth = {
-    token: data.token,
-    expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-  }
-  return redgifsAuth.token
+  return httpClient.fetchHtml(url)
 }
 
 function parseRedgifsId(url) {
-  try {
-    const parsed = new URL(url)
-    const host = parsed.hostname.toLowerCase()
-    if (!host.includes('redgifs.com')) return null
-    const parts = parsed.pathname.split('/').filter(Boolean)
-    const markerIndex = parts.findIndex((part) =>
-      ['watch', 'ifr', 'iframe'].includes(part.toLowerCase())
-    )
-    const rawId =
-      markerIndex >= 0 ? parts[markerIndex + 1] : parts[parts.length - 1]
-    return sanitize(rawId)
-  } catch {
-    return null
-  }
+  return redgifsClient.parseRedgifsId(url)
 }
 
 async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
-  const id = parseRedgifsId(redgifsUrl)
-  if (!id) return null
+  const resolved = await redgifsClient.resolveMedia(redgifsUrl)
+  if (!resolved) return null
+  const { id, mediaUrl } = resolved
 
-  const data = await fetchRedgifsJson(
-    `${REDGIFS_GIF_API_BASE}/${encodeURIComponent(id)}`
-  )
-  const gif = data?.gif
-  const mediaUrl = gif?.urls?.hd || gif?.urls?.sd
-  if (!mediaUrl) return null
-
-  const canonicalRedgifsUrl = id ? `https://www.redgifs.com/watch/${id}` : null
   const subreddit = getRedditSubreddit(post)
   const filename = buildRedditFilename(
     source,
@@ -1264,11 +746,7 @@ async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
     mediaUrl,
     path.extname(new URL(mediaUrl).pathname) || '.mp4'
   )
-  const createDateSeconds = Number(gif.createDate)
-  const createdDate =
-    Number.isFinite(createDateSeconds) && createDateSeconds > 0
-      ? new Date(createDateSeconds * 1000)
-      : uploadedDate
+  const createdDate = resolved.createdDate || uploadedDate
 
   return {
     sourceSite: 'reddit',
@@ -1281,10 +759,10 @@ async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
     mediaPageUrl: getPostPageUrl(source, post),
     mediaPageUrls: getRedditMediaPageUrls(source, post),
     mediaUrl,
-    mediaUrls: uniqueSeenUrls([mediaUrl, gif?.urls?.hd, gif?.urls?.sd]),
+    mediaUrls: uniqueSeenUrls([mediaUrl, resolved.mediaUrls]),
     sourceUrls: uniqueSeenUrls([
       redgifsUrl,
-      canonicalRedgifsUrl,
+      resolved.canonicalUrl,
       getRedditPostLinkedUrls(source, post),
     ]),
     filename,
@@ -2829,15 +2307,17 @@ async function run() {
   setExpectedMediaCount(selectedMedia.length)
 
   if (useBrowserMedia) {
-    browserMediaDownloader = await createBrowserMediaDownloader(
-      source,
-      browserOptions
-    )
+    browserMediaDownloader = await createSharedBrowserMediaDownloader(source, {
+      ...browserOptions,
+      slopvaultRoot,
+      requestBuffer,
+      appendRunEvent,
+    })
     appendRunEvent('browser_media_enabled', {
       browserExecutable: browserOptions.browserExecutable || null,
       browserProfile:
         browserOptions.browserProfile ||
-        getDefaultBrowserProfileDir(source.site),
+        getDefaultBrowserProfileDir(slopvaultRoot, source.site),
       browserConnect: browserOptions.browserConnect || null,
       headless: browserOptions.headless,
       cookieFile: browserOptions.cookieFile || null,
