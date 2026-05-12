@@ -33,6 +33,12 @@ const {
   getDefaultBrowserProfileDir,
 } = require('../scrapyard/browserMediaDownloader')
 const {
+  fetchCoomerKemonoPosts,
+  getMediaEntriesFromPost: getCoomerKemonoMediaEntriesFromPost,
+  preflightCoomerKemonoSource,
+  resolveKemonoCreatorIdForJson: resolveSharedKemonoCreatorIdForJson,
+} = require('../scrapyard/sourceAdapters/coomerKemono')
+const {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
@@ -771,27 +777,6 @@ async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
   }
 }
 
-function normalizeCreatorName(value) {
-  return String(value || '')
-    .trim()
-    .replace(/^@+/, '')
-    .toLowerCase()
-}
-
-async function findCreatorIdByName(origin, service, creatorName) {
-  const { data: creators } = await fetchJson(`${origin}/api/v1/creators`)
-  if (!Array.isArray(creators)) return null
-
-  const normalizedName = normalizeCreatorName(creatorName)
-  const hit = creators.find(
-    (creator) =>
-      creator?.service === service &&
-      normalizeCreatorName(creator?.name) === normalizedName
-  )
-
-  return hit ? String(hit.id) : null
-}
-
 function parseSourceUrl(inputUrl) {
   const parsed = new URL(inputUrl)
   const host = parsed.hostname.toLowerCase()
@@ -941,13 +926,6 @@ function getPostPageUrl(source, post) {
       : `${source.origin}/comments/${post.id}`
   }
   return `${source.origin}/${source.service}/user/${source.userId}/post/${post.id}`
-}
-
-function getMediaUrl(source, media) {
-  const mediaPath = String(media?.path || '').trim()
-  if (!mediaPath) return null
-  if (/^https?:\/\//i.test(mediaPath)) return mediaPath
-  return `${source.origin}/data${mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`}`
 }
 
 function filenameFromMediaUrl(mediaUrl) {
@@ -1176,35 +1154,12 @@ async function getRedditMediaEntries(source, post) {
 
 function getMediaEntriesFromPost(source, post) {
   if (Array.isArray(post.mediaEntries)) return post.mediaEntries
-
-  const postPublishedAt = parseResolvedDate(post.published)
-  const mediaPageUrl = getPostPageUrl(source, post)
-  const rawEntries = []
-  if (post.file?.path) rawEntries.push(post.file)
-  if (Array.isArray(post.attachments)) rawEntries.push(...post.attachments)
-
-  const seen = new Set()
-  return rawEntries
-    .map((media) => {
-      const mediaUrl = getMediaUrl(source, media)
-      const filename = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
-      if (!mediaUrl || !filename) return null
-      const key = normalizeSeenUrl(mediaUrl)
-      if (seen.has(key)) return null
-      seen.add(key)
-      return {
-        postId: String(post.id || ''),
-        title: post.title || null,
-        mediaPageUrl,
-        mediaPageUrls: [mediaPageUrl],
-        mediaUrl,
-        mediaUrls: [mediaUrl],
-        filename,
-        originalName: media.name || null,
-        uploadedDate: postPublishedAt,
-      }
+  if (source.site === 'coomer' || source.site === 'kemono') {
+    return getCoomerKemonoMediaEntriesFromPost(source, post, {
+      normalizeUrl: normalizeSeenUrl,
     })
-    .filter(Boolean)
+  }
+  return []
 }
 
 async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
@@ -1436,62 +1391,21 @@ function parseCoomerFansMediaEntries(source, post, html) {
     .filter(Boolean)
 }
 
-function getPostsApiUrl(source, offset = 0) {
-  return `${source.origin}/api/v1/${source.service}/user/${encodeURIComponent(
-    source.userId
-  )}/posts?o=${offset}`
-}
-
 async function preflightSourceJson(source, page = 0) {
   if (source.site === 'reddit') {
     return preflightRedditSource(source)
   }
-
-  const offset = page * API_PAGE_SIZE
-  const apiUrl = getPostsApiUrl(source, offset)
-  const { data, byteLength } = await fetchJson(apiUrl)
-
-  if (!Array.isArray(data)) {
-    throw new Error(
-      `Expected ${apiUrl} to return a JSON post array, got ${typeof data}`
-    )
-  }
-
-  const newest = data
-    .map((post) => parseResolvedDate(post?.published))
-    .filter(Boolean)
-    .sort((a, b) => b.getTime() - a.getTime())[0]
-
-  return {
-    apiUrl,
-    byteLength,
-    postCount: data.length,
-    newest,
-    firstPostId: data[0]?.id ? String(data[0].id) : null,
-  }
+  return preflightCoomerKemonoSource(source, page, {
+    fetchJson,
+    pageSize: API_PAGE_SIZE,
+  })
 }
 
 async function resolveKemonoCreatorIdForJson(source) {
-  if (source.site !== 'kemono' || /^\d+$/.test(source.userId)) {
-    return false
-  }
-
-  const resolvedId = await findCreatorIdByName(
-    source.origin,
-    source.service,
-    source.userId
-  ).catch(() => null)
-
-  if (!resolvedId) {
-    throw new Error(
-      `Kemono rejected "${source.userId}" for ${source.service}. Kemono creator URLs usually need the numeric creator ID, and that username was not found in /api/v1/creators.`
-    )
-  }
-
-  console.log(`Resolved Kemono creator ${source.userId} -> ${resolvedId}`)
-  source.userId = resolvedId
-  source.rawName = sanitize(resolvedId)
-  return true
+  return resolveSharedKemonoCreatorIdForJson(source, {
+    fetchJson,
+    logger: console,
+  })
 }
 
 async function fetchCoomerFansPosts(source, options) {
@@ -1635,34 +1549,12 @@ async function fetchPosts(source, options) {
     return fetchRedditPosts(source, options)
   }
 
-  const posts = []
-  let page = options.startPage
-
-  while (true) {
-    if (options.endPage !== null && page > options.endPage) break
-    const offset = page * API_PAGE_SIZE
-    const apiUrl = getPostsApiUrl(source, offset)
-    console.log(`Loading ${source.site} page ${page + 1} (${apiUrl})`)
-
-    let pagePosts
-    try {
-      const pageResult = await fetchJson(apiUrl)
-      pagePosts = pageResult.data
-    } catch (err) {
-      if (source.site === 'kemono' && !/^\d+$/.test(source.userId)) {
-        await resolveKemonoCreatorIdForJson(source)
-        continue
-      }
-      throw err
-    }
-
-    if (!Array.isArray(pagePosts) || pagePosts.length === 0) break
-    posts.push(...pagePosts)
-    if (pagePosts.length < API_PAGE_SIZE) break
-    page += 1
-  }
-
-  return posts
+  return fetchCoomerKemonoPosts(source, options, {
+    fetchJson,
+    logger: console,
+    normalizeUrl: normalizeSeenUrl,
+    pageSize: API_PAGE_SIZE,
+  })
 }
 
 function classifyMedia(filename) {
