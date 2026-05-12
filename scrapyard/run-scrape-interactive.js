@@ -9,6 +9,7 @@ const {
   findCanonicalModelName,
   sanitize,
 } = require('./modelRegistry')
+const { parseSourceUrl } = require('./sourceRouter')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
@@ -31,64 +32,6 @@ function runNodeScript(scriptPath, args) {
     stdio: 'inherit',
   })
   return result.status || 0
-}
-
-function parseSourceUrl(inputUrl) {
-  try {
-    const parsed = new URL(String(inputUrl || '').trim())
-    const host = parsed.hostname.toLowerCase()
-    const parts = parsed.pathname.split('/').filter(Boolean)
-
-    if (host.includes('stufferdb')) {
-      return {
-        scraper: 'milkmaid',
-        sourceType: 'stufferdb',
-        url: parsed.toString(),
-        rawName: null,
-      }
-    }
-
-    if (host.includes('coomerfans')) {
-      if (parts[0] === 'u' && parts.length >= 4) {
-        return {
-          scraper: 'hoghaul',
-          sourceType: 'coomer',
-          url: parsed.toString(),
-          rawName: parts[3],
-        }
-      }
-      if (parsed.searchParams.get('q')) {
-        return {
-          scraper: 'hoghaul',
-          sourceType: 'coomer',
-          url: parsed.toString(),
-          rawName: parsed.searchParams.get('q'),
-        }
-      }
-    }
-
-    if (host.includes('coomer')) {
-      return {
-        scraper: 'hoghaul',
-        sourceType: 'coomer',
-        url: parsed.toString(),
-        rawName: parts[2] || parts[parts.length - 1] || null,
-      }
-    }
-
-    if (host.includes('kemono')) {
-      return {
-        scraper: 'hoghaul',
-        sourceType: 'kemono',
-        url: parsed.toString(),
-        rawName: parts[2] || parts[parts.length - 1] || null,
-      }
-    }
-  } catch {
-    return null
-  }
-
-  return null
 }
 
 async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
@@ -168,7 +111,7 @@ async function runSingleUrlFlow(rl) {
   const rawUrl = (await ask(rl, 'Paste source URL: ')).trim()
   const parsed = parseSourceUrl(rawUrl)
   if (!parsed) {
-    console.log('Could not recognize that URL as StufferDB, Coomer, or Kemono.')
+    console.log('Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Kemono.')
     return
   }
 

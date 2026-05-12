@@ -58,11 +58,14 @@ const {
 } = require('../stuffinglogger')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const {
-  hasNasMp4RelativePath,
   mergeNasMp4Entries,
   collectMp4RelativePaths,
   syncNasMp4IndexToMirror,
 } = require('../scrapyard/nasMp4Index')
+const { createDatasetPaths } = require('../scrapyard/datasetPaths')
+const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
+const mediaFileRecords = require('../scrapyard/mediaFileRecords')
+const { createMediaSaver } = require('../scrapyard/mediaSaver')
 
 function sanitize(name) {
   return String(name || '')
@@ -484,16 +487,19 @@ let lazyDownloadStartedAt = 0,
   lazyCompletedDownloads = 0,
   lazyCurrentLabel = ''
 
-const rootDir = path.join(__dirname, '..')
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
-  '.slopvault'
-)
-const datasetDir = path.join(
-  slopvaultRoot,
-  'dataset'
-)
-const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const datasetPaths = createDatasetPaths({
+  rootDir: path.join(__dirname, '..'),
+  repairCanUseNasMirror: false,
+})
+const rootDir = datasetPaths.rootDir
+const slopvaultRoot = datasetPaths.slopvaultRoot
+const datasetDir = datasetPaths.datasetDir
+const milkmaidMediaSaver = createMediaSaver({
+  datasetDir,
+  source: 'milkmaid',
+  mediaDates,
+})
+const quarantineDatasetDir = datasetPaths.quarantineDatasetDir
 const quarantineManifestPath = path.join(
   slopvaultRoot,
   'quarantine',
@@ -509,6 +515,13 @@ let permanentSkipLookup = {
   mediaPageUrls: new Set(),
   filenames: new Set(),
 }
+const sharedMediaSeenIndex = createMediaSeenIndex({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  normalizeUrl: normalizeSkipUrl,
+  matchOrder: ['media_page_url', 'media_url'],
+  warn: (message) => console.warn(`Warning: ${message}`),
+})
 let mediaSeenIndexCache = null
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
@@ -539,58 +552,19 @@ function setRunLazyTransferredBytes(bytes) {
 }
 
 function getIncompleteDirs(modelName) {
-  // Per-model scratch space so unfinished work never "bleeds" into the next run
-  const base = path.join(rootDir, 'incomplete', modelName)
-  const gifs = path.join(base, 'gifs')
-  const videos = path.join(base, 'videos')
-
-  if (!fs.existsSync(gifs)) fs.mkdirSync(gifs, { recursive: true })
-  if (!fs.existsSync(videos)) fs.mkdirSync(videos, { recursive: true })
-
-  return { base, gifs, videos }
+  return datasetPaths.getIncompleteDirs(modelName)
 }
 
 function createModelFolders(modelName) {
-  const base = path.join(datasetDir, modelName)
-  const images = path.join(base, 'images')
-  const logDir = path.join(base, 'log')
-
-  // Always create images folder
-  fs.mkdirSync(images, { recursive: true })
-  fs.mkdirSync(logDir, { recursive: true })
-
-  // Per-model incomplete dirs (gifs/videos) live in the project root,
-  // while finished media lives in the dataset folder.
-  const incomplete = getIncompleteDirs(modelName)
-
-  return {
-    base,
-    images,
-    logDir,
-    incompleteGifDir: incomplete.gifs,
-    incompleteVideoDir: incomplete.videos,
-    createGifFolder: () => {
-      const gifPath = path.join(base, 'gif')
-      if (!fs.existsSync(gifPath)) fs.mkdirSync(gifPath, { recursive: true })
-      return gifPath
-    },
-    createWebmFolder: () => {
-      const webmPath = path.join(base, 'webm')
-      if (!fs.existsSync(webmPath)) fs.mkdirSync(webmPath, { recursive: true })
-      return webmPath
-    },
-  }
+  return datasetPaths.createModelFolders(modelName)
 }
 
 function getDatasetRelativePath(filePath) {
-  return path.relative(datasetDir, filePath).replace(/\\/g, '/')
+  return datasetPaths.getDatasetRelativePath(filePath)
 }
 
 function getQuarantineMirrorPath(filePath) {
-  return path.join(
-    quarantineDatasetDir,
-    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
-  )
+  return datasetPaths.getQuarantineMirrorPath(filePath)
 }
 
 function loadQuarantineManifest() {
@@ -807,7 +781,7 @@ function ensureQuarantineManifestEntry(filePath, details = {}) {
 }
 
 function isQuarantinedPath(filePath) {
-  return fs.existsSync(getQuarantineMirrorPath(filePath))
+  return datasetPaths.isQuarantinedPath(filePath)
 }
 
 function normalizePath(filePath) {
@@ -815,17 +789,15 @@ function normalizePath(filePath) {
 }
 
 function existsForRepair(filePath) {
-  return fs.existsSync(filePath) && !isQuarantinedPath(filePath)
+  return datasetPaths.existsForRepair(filePath)
 }
 
 function existsAtExactPath(filePath) {
-  return fs.existsSync(filePath)
+  return datasetPaths.existsAtExactPath(filePath)
 }
 
 function existsLocallyOrOnNas(filePath) {
-  if (existsAtExactPath(filePath)) return true
-  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') return false
-  return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
+  return datasetPaths.existsLocallyOrOnNas(filePath)
 }
 
 function getRecordRefs(record) {
@@ -982,7 +954,7 @@ function finalizeRunLog(extra = {}) {
 }
 
 function getMediaSeenIndexPath(modelLogDir) {
-  return path.join(modelLogDir, 'milkmaid-seen-media-index.json')
+  return sharedMediaSeenIndex.getMediaSeenIndexPath(modelLogDir)
 }
 
 function loadMediaSeenIndex(modelLogDir) {
@@ -1305,57 +1277,23 @@ function getPermanentSkipMatch({ relativePath, mediaUrl, mediaPageUrl, filename 
 }
 
 function resolveEffectiveFileDate(date, fallbackDate = new Date()) {
-  if (date instanceof Date && !isNaN(date.getTime())) {
-    return date
-  }
-
-  if (fallbackDate instanceof Date && !isNaN(fallbackDate.getTime())) {
-    return fallbackDate
-  }
-
-  return new Date()
+  return mediaFileRecords.resolveEffectiveFileDate(date, fallbackDate)
 }
 
-function applyFileTimestamp(filePath, date) {
-  const effectiveDate = resolveEffectiveFileDate(date)
-  const ts = effectiveDate.getTime() / 1000
-  fs.utimesSync(filePath, ts, ts)
-  return effectiveDate
-}
-
-function parseResolvedDate(date) {
-  if (date instanceof Date && !isNaN(date.getTime())) {
-    return date
-  }
-
-  if (typeof date === 'string') {
-    const parsed = new Date(date)
-    if (!isNaN(parsed.getTime())) {
-      return parsed
-    }
-  }
-
-  return null
-}
-
-function buildHashMetadata(modelName, absolutePath, mediaType, sizeBytes, uploadedDate) {
-  const relativePath = path
-    .relative(datasetDir, absolutePath)
-    .replace(/\\/g, '/')
-  const parts = relativePath.split('/').filter(Boolean)
-
-  return {
-    root: 'dataset',
-    model: modelName || parts[0] || null,
-    bucket: parts[1] || null,
-    relativePath,
-    filename: path.basename(absolutePath),
+function buildHashMetadata(
+  modelName,
+  absolutePath,
+  mediaType,
+  sizeBytes,
+  uploadedDate
+) {
+  return milkmaidMediaSaver.buildHashMetadata({
+    modelName,
+    absolutePath,
     mediaType,
-    sizeBytes:
-      Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
-    modifiedAt: uploadedDate?.toISOString?.() || null,
-    source: 'milkmaid',
-  }
+    sizeBytes,
+    modifiedAt: uploadedDate,
+  })
 }
 
 function downloadBufferWithProgress(mediaUrl, onProgress) {
@@ -2042,17 +1980,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
             fs.writeFileSync(gifPath, buffer)
 
-            const recordedDate = await mediaDates.recordImageDates(
-              path.join(datasetDir, modelName),
-              'gif',
+            const recordedDate = await milkmaidMediaSaver.recordImageDates({
+              modelName,
+              bucket: 'gif',
               filename,
               buffer,
               uploadedDate,
-              pageMeta
-            )
-            const fileDate = applyFileTimestamp(
+              pageMeta,
+            })
+            const fileDate = milkmaidMediaSaver.applyRecordedTimestamp(
               gifPath,
-              parseResolvedDate(recordedDate?.date) || uploadedDate
+              recordedDate,
+              uploadedDate
             )
 
             if (!isBitwiseDupe(hash)) {
@@ -2152,17 +2091,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
           const finalPath = path.join(images, filename)
           fs.writeFileSync(finalPath, buffer)
 
-          const recordedDate = await mediaDates.recordImageDates(
-            path.join(datasetDir, modelName),
-            'images',
+          const recordedDate = await milkmaidMediaSaver.recordImageDates({
+            modelName,
+            bucket: 'images',
             filename,
             buffer,
             uploadedDate,
-            pageMeta
-          )
-          const fileDate = applyFileTimestamp(
+            pageMeta,
+          })
+          const fileDate = milkmaidMediaSaver.applyRecordedTimestamp(
             finalPath,
-            parseResolvedDate(recordedDate?.date) || uploadedDate
+            recordedDate,
+            uploadedDate
           )
 
           if (!isBitwiseDupe(hash)) {
@@ -2695,17 +2635,18 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
 
             moveFileIntoPlace(tmpPath, finalPath)
-            const recordedDate = await mediaDates.recordVideoDates(
-              path.join(datasetDir, modelName),
-              'webm',
+            const recordedDate = await milkmaidMediaSaver.recordVideoDates({
+              modelName,
+              bucket: 'webm',
               filename,
-              finalPath,
+              filePath: finalPath,
               uploadedDate,
-              pageMeta
-            )
-            const fileDate = applyFileTimestamp(
+              pageMeta,
+            })
+            const fileDate = milkmaidMediaSaver.applyRecordedTimestamp(
               finalPath,
-              parseResolvedDate(recordedDate?.date) || uploadedDate
+              recordedDate,
+              uploadedDate
             )
 
             const finalStat = fs.statSync(finalPath)
