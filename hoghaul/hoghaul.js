@@ -2,7 +2,6 @@
 
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const http = require('http')
 const https = require('https')
 const zlib = require('zlib')
@@ -19,11 +18,21 @@ const { bannerHoghaul } = require('../banners.js')
 const mediaDates = require('../milkmaid/media-dates.js')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const {
-  hasNasMp4RelativePath,
   mergeNasMp4Entries,
   collectMp4RelativePaths,
   syncNasMp4IndexToMirror,
 } = require('../scrapyard/nasMp4Index')
+const { createDatasetPaths } = require('../scrapyard/datasetPaths')
+const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
+const {
+  classifyMediaFilename,
+  normalizeMediaEntry,
+  normalizeMediaEntries,
+  sanitizeToken,
+} = require('../scrapyard/mediaEntries')
+const mediaFileRecords = require('../scrapyard/mediaFileRecords')
+const { createMediaSaver } = require('../scrapyard/mediaSaver')
+const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
   loadVisualHashCache,
   saveVisualHashCache,
@@ -47,17 +56,14 @@ const { getCompletionLine } = require('../stuffinglogger')
 bannerHoghaul()
 installProcessTerminationHandlers()
 
-const rootDir = path.join(__dirname, '..')
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
-const datasetDir = path.join(slopvaultRoot, 'dataset')
-const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
-const nasDatasetDir = path.resolve(
-  String(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
-)
-const registryPath = path.join(rootDir, 'model_aliases.json')
+const datasetPaths = createDatasetPaths({
+  rootDir: path.join(__dirname, '..'),
+  repairCanUseNasMirror: true,
+})
+const rootDir = datasetPaths.rootDir
+const datasetDir = datasetPaths.datasetDir
+const registryPath =
+  process.env.HOGHAUL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
 const API_PAGE_SIZE = 50
 const REDDIT_PAGE_SIZE = 100
 const API_ACCEPT_HEADER = 'text/css'
@@ -68,7 +74,39 @@ const REDGIFS_TEMP_AUTH_URL = 'https://api.redgifs.com/v2/auth/temporary'
 const REDGIFS_GIF_API_BASE = 'https://api.redgifs.com/v2/gifs'
 
 let currentRunLog = null
-let mediaSeenIndexCache = null
+const sharedMediaSeenIndex = createMediaSeenIndex({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  normalizeUrl: (url) => normalizeSeenUrl(htmlDecode(url)),
+  matchOrder: ['media_url', 'media_page_url'],
+  pageMatchRequiresNoMediaUrl: true,
+})
+const hoghaulMediaSaver = createMediaSaver({
+  datasetDir,
+  source: 'hoghaul',
+  mediaDates,
+  getExtraMetadata: (entry) => getEntryHashMetadata(entry),
+  getEventMetadata: (entry) => getEntrySourceDetails(entry),
+  getSeenDetails: (entry) => getEntrySeenDetails(entry),
+})
+const duplicateChecker = createDuplicateChecker({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  getBitwiseHashRecord,
+  isBitwiseDupe,
+  getVisualHashRecord,
+  isVisualDupe,
+  getVisualHashEntries,
+  getVisualHashDistance,
+})
+const {
+  getBitwiseDuplicationRecord,
+  getVisualDuplicationRecord,
+  getFuzzyVisualDuplicationRecord,
+  getPendingImageVisualDuplicate,
+  reservePendingImageVisualClaim,
+  releasePendingImageVisualClaim,
+} = duplicateChecker
 let successCount = 0
 let duplicateCount = 0
 let errorCount = 0
@@ -77,12 +115,7 @@ let savedBytes = 0
 let browserMediaDownloader = null
 let redgifsAuth = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
-const pendingImageVisualClaims = new Map()
 let runTerminationHandled = false
-
-function isSkipReason(reason) {
-  return String(reason || '').startsWith('skip_')
-}
 
 function formatPercent(numerator, denominator) {
   if (!Number.isFinite(denominator) || denominator <= 0) return '0.0'
@@ -317,233 +350,39 @@ function registerSourceForRun(source, inputUrl, canonicalOverride) {
 }
 
 function createModelFolders(modelName) {
-  const base = path.join(datasetDir, modelName)
-  const images = path.join(base, 'images')
-  const logDir = path.join(base, 'log')
-  const incompleteVideoDir = path.join(
-    rootDir,
-    'incomplete',
-    modelName,
-    'videos'
-  )
-
-  fs.mkdirSync(images, { recursive: true })
-  fs.mkdirSync(logDir, { recursive: true })
-  fs.mkdirSync(incompleteVideoDir, { recursive: true })
-
-  return {
-    base,
-    images,
-    logDir,
-    incompleteVideoDir,
-    createGifFolder: () => {
-      const gifPath = path.join(base, 'gif')
-      fs.mkdirSync(gifPath, { recursive: true })
-      return gifPath
-    },
-    createWebmFolder: () => {
-      const webmPath = path.join(base, 'webm')
-      fs.mkdirSync(webmPath, { recursive: true })
-      return webmPath
-    },
-  }
+  return datasetPaths.createModelFolders(modelName)
 }
 
 function getDatasetRelativePath(filePath) {
-  return path.relative(datasetDir, filePath).replace(/\\/g, '/')
+  return datasetPaths.getDatasetRelativePath(filePath)
 }
 
 function getQuarantineMirrorPath(filePath) {
-  return path.join(
-    quarantineDatasetDir,
-    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
-  )
+  return datasetPaths.getQuarantineMirrorPath(filePath)
 }
 
 function getNasMirrorPath(filePath) {
-  return path.join(
-    nasDatasetDir,
-    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
-  )
+  return datasetPaths.getNasMirrorPath(filePath)
 }
 
 function isQuarantinedPath(filePath) {
-  return fs.existsSync(getQuarantineMirrorPath(filePath))
+  return datasetPaths.isQuarantinedPath(filePath)
 }
 
 function existsForRepair(filePath) {
-  if (fs.existsSync(filePath)) return !isQuarantinedPath(filePath)
-  return fs.existsSync(getNasMirrorPath(filePath))
+  return datasetPaths.existsForRepair(filePath)
 }
 
 function existsAtExactPath(filePath) {
-  return fs.existsSync(filePath)
+  return datasetPaths.existsAtExactPath(filePath)
 }
 
 function existsLocallyOrOnNas(filePath) {
-  if (existsAtExactPath(filePath)) return true
-  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4')
-    return false
-  return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
-}
-
-function getRecordRefs(record) {
-  return Array.isArray(record?.refs)
-    ? record.refs
-        .map((ref) => String(ref || '').replace(/\\/g, '/'))
-        .filter(Boolean)
-    : []
-}
-
-function getActiveRecordRefs(record) {
-  return getRecordRefs(record).filter((relativePath) =>
-    existsLocallyOrOnNas(
-      path.join(datasetDir, relativePath.replace(/\//g, path.sep))
-    )
-  )
-}
-
-function getBitwiseDuplicationRecord(hash) {
-  const record = getBitwiseHashRecord(hash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isBitwiseDupe(hash),
-  }
-}
-
-function getVisualDuplicationRecord(visualHash) {
-  const record = getVisualHashRecord(visualHash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isVisualDupe(visualHash),
-  }
-}
-
-function isSameModelRef(modelName, relativePath) {
-  return String(relativePath || '').startsWith(`${modelName}/`)
-}
-
-function getFuzzyVisualDuplicationRecord(modelName, visualHash, maxDistance) {
-  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
-    return null
-  }
-
-  let bestMatch = null
-  for (const entry of getVisualHashEntries()) {
-    const candidateHash = String(entry?.hash || '')
-    const distance = getVisualHashDistance(visualHash, candidateHash)
-    if (distance === null || distance > maxDistance) continue
-
-    const activeRefs = getActiveRecordRefs(entry).filter((relativePath) =>
-      isSameModelRef(modelName, relativePath)
-    )
-    if (activeRefs.length === 0) continue
-
-    if (
-      !bestMatch ||
-      distance < bestMatch.distance ||
-      (distance === bestMatch.distance &&
-        candidateHash.localeCompare(bestMatch.matchedHash) < 0)
-    ) {
-      bestMatch = {
-        record: entry,
-        activeRefs,
-        distance,
-        matchedHash: candidateHash,
-        isDuplicate: true,
-      }
-    }
-  }
-
-  return bestMatch
-}
-
-function getPendingImageVisualDuplicate(modelName, visualHash, maxDistance) {
-  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
-    return null
-  }
-
-  let bestMatch = null
-  for (const claim of pendingImageVisualClaims.values()) {
-    if (!claim || claim.modelName !== modelName) continue
-    const distance = getVisualHashDistance(visualHash, claim.visualHash)
-    if (distance === null || distance > maxDistance) continue
-    if (
-      !bestMatch ||
-      distance < bestMatch.distance ||
-      (distance === bestMatch.distance &&
-        claim.relativePath.localeCompare(bestMatch.activeRefs[0]) < 0)
-    ) {
-      bestMatch = {
-        activeRefs: [claim.relativePath],
-        distance,
-        matchedHash: claim.visualHash,
-        isDuplicate: true,
-      }
-    }
-  }
-
-  return bestMatch
-}
-
-function reservePendingImageVisualClaim(modelName, relativePath, visualHash) {
-  const claimKey = `${modelName}:${relativePath}`
-  pendingImageVisualClaims.set(claimKey, {
-    modelName,
-    relativePath,
-    visualHash,
-  })
-  return claimKey
-}
-
-function releasePendingImageVisualClaim(claimKey) {
-  if (!claimKey) return
-  pendingImageVisualClaims.delete(claimKey)
-}
-
-function buildHashMetadata(
-  modelName,
-  absolutePath,
-  mediaType,
-  sizeBytes,
-  uploadedDate
-) {
-  return {
-    root: 'dataset',
-    model: modelName,
-    bucket: path.basename(path.dirname(absolutePath)),
-    relativePath: getDatasetRelativePath(absolutePath),
-    filename: path.basename(absolutePath),
-    mediaType,
-    sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
-    modifiedAt: uploadedDate?.toISOString?.() || null,
-    source: 'hoghaul',
-  }
+  return datasetPaths.existsLocallyOrOnNas(filePath)
 }
 
 function parseResolvedDate(date) {
-  if (date instanceof Date && !isNaN(date.getTime())) return date
-  if (typeof date === 'string') {
-    const parsed = new Date(date)
-    if (!isNaN(parsed.getTime())) return parsed
-  }
-  return null
-}
-
-function resolveEffectiveFileDate(date) {
-  const parsed = parseResolvedDate(date)
-  return parsed || new Date()
-}
-
-function applyFileTimestamp(filePath, date) {
-  const effectiveDate = resolveEffectiveFileDate(date)
-  const ts = effectiveDate.getTime() / 1000
-  fs.utimesSync(filePath, ts, ts)
-  return effectiveDate
+  return mediaFileRecords.parseResolvedDate(date)
 }
 
 function removeFileIfExists(filePath) {
@@ -796,14 +635,7 @@ function normalizeSeenUrl(url) {
 }
 
 function uniqueSeenUrls(values) {
-  return Array.from(
-    new Set(
-      values
-        .flat(Infinity)
-        .map((url) => normalizeSeenUrl(htmlDecode(url)))
-        .filter(Boolean)
-    )
-  )
+  return sharedMediaSeenIndex.uniqueSeenUrls(values)
 }
 
 function getEntryMediaUrls(entry) {
@@ -828,129 +660,55 @@ function getEntrySeenDetails(entry) {
   }
 }
 
+function getEntrySourceDetails(entry) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    postId: entry.postId || null,
+  }
+}
+
+function getEntryHashMetadata(entry = {}) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    sourcePostId: entry.postId || null,
+    sourceMediaPageUrl: entry.mediaPageUrl || null,
+  }
+}
+
 function getMediaSeenIndexPath(modelLogDir) {
-  return path.join(modelLogDir, 'milkmaid-seen-media-index.json')
+  return sharedMediaSeenIndex.getMediaSeenIndexPath(modelLogDir)
 }
 
 function loadMediaSeenIndex(modelLogDir) {
-  const indexPath = getMediaSeenIndexPath(modelLogDir)
-  if (mediaSeenIndexCache?.indexPath === indexPath)
-    return mediaSeenIndexCache.data
-
-  let parsed = {}
-  if (fs.existsSync(indexPath)) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
-    } catch (err) {
-      console.warn(
-        `Could not parse media seen index at ${indexPath}: ${err.message}`
-      )
-    }
-  }
-
-  const data = {
-    version: 1,
-    updatedAt: parsed?.updatedAt || null,
-    mediaPageUrls:
-      parsed?.mediaPageUrls && typeof parsed.mediaPageUrls === 'object'
-        ? parsed.mediaPageUrls
-        : {},
-    mediaUrls:
-      parsed?.mediaUrls && typeof parsed.mediaUrls === 'object'
-        ? parsed.mediaUrls
-        : {},
-  }
-  mediaSeenIndexCache = { indexPath, data }
-  return data
+  return sharedMediaSeenIndex.loadMediaSeenIndex(modelLogDir)
 }
 
 function saveMediaSeenIndex(modelLogDir, data) {
-  const indexPath = getMediaSeenIndexPath(modelLogDir)
-  data.updatedAt = new Date().toISOString()
-  fs.writeFileSync(indexPath, JSON.stringify(data, null, 2) + '\n')
-  mediaSeenIndexCache = { indexPath, data }
+  return sharedMediaSeenIndex.saveMediaSeenIndex(modelLogDir, data)
 }
 
 function getActiveMediaSeenRecord(modelLogDir, entry) {
-  if (!entry?.relativePath) return null
-  const absolutePath = path.join(
-    datasetDir,
-    String(entry.relativePath).replace(/\//g, path.sep)
-  )
-  if (!existsLocallyOrOnNas(absolutePath)) return null
-  return {
-    ...entry,
-    absolutePath,
-  }
+  return sharedMediaSeenIndex.getActiveMediaSeenRecord(entry)
 }
 
 function getSuccessfulSeenMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
-  const index = loadMediaSeenIndex(modelLogDir)
-  const mediaPageUrls = uniqueSeenUrls(
-    Array.isArray(mediaPageUrl) ? mediaPageUrl : [mediaPageUrl]
+  return sharedMediaSeenIndex.getSuccessfulSeenMediaMatch(
+    modelLogDir,
+    mediaPageUrl,
+    mediaUrl
   )
-  const mediaUrls = uniqueSeenUrls(
-    Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]
-  )
-
-  for (const normalizedMediaUrl of mediaUrls) {
-    const mediaEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaUrls[normalizedMediaUrl]
-    )
-    if (mediaEntry) return { matchType: 'media_url', ...mediaEntry }
-  }
-
-  if (mediaUrls.length > 0) return null
-
-  for (const normalizedMediaPageUrl of mediaPageUrls) {
-    const pageEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaPageUrls[normalizedMediaPageUrl]
-    )
-    if (pageEntry) return { matchType: 'media_page_url', ...pageEntry }
-  }
-
-  return null
 }
 
 function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
-  const relativePath = String(details.relativePath || '').trim()
-  if (!relativePath) return
-
-  const index = loadMediaSeenIndex(modelLogDir)
-  const mediaPageUrls = uniqueSeenUrls([
-    details.mediaPageUrl,
-    details.mediaPageUrls,
-  ])
-  const mediaUrls = uniqueSeenUrls([details.mediaUrl, details.mediaUrls])
-  const payload = {
-    relativePath,
-    filename: details.filename || path.basename(relativePath),
-    mediaUrl: mediaUrls[0] || null,
-    mediaUrls,
-    mediaPageUrl: mediaPageUrls[0] || null,
-    mediaPageUrls,
-    savedAt: new Date().toISOString(),
-  }
-
-  let changed = false
-  for (const normalizedMediaPageUrl of mediaPageUrls) {
-    if (
-      index.mediaPageUrls[normalizedMediaPageUrl]?.relativePath !== relativePath
-    ) {
-      index.mediaPageUrls[normalizedMediaPageUrl] = payload
-      changed = true
-    }
-  }
-  for (const normalizedMediaUrl of mediaUrls) {
-    if (index.mediaUrls[normalizedMediaUrl]?.relativePath !== relativePath) {
-      index.mediaUrls[normalizedMediaUrl] = payload
-      changed = true
-    }
-  }
-
-  if (changed) saveMediaSeenIndex(modelLogDir, index)
+  return sharedMediaSeenIndex.recordSuccessfulSeenMedia(modelLogDir, details)
 }
 
 function decodeBody(buffer, headers) {
@@ -1499,9 +1257,13 @@ async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
   if (!mediaUrl) return null
 
   const canonicalRedgifsUrl = id ? `https://www.redgifs.com/watch/${id}` : null
-  const filename = `${source.rawName}_reddit_${post.id}_redgifs_${id}${
+  const subreddit = getRedditSubreddit(post)
+  const filename = buildRedditFilename(
+    source,
+    post,
+    mediaUrl,
     path.extname(new URL(mediaUrl).pathname) || '.mp4'
-  }`
+  )
   const createDateSeconds = Number(gif.createDate)
   const createdDate =
     Number.isFinite(createDateSeconds) && createDateSeconds > 0
@@ -1509,6 +1271,11 @@ async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
       : uploadedDate
 
   return {
+    sourceSite: 'reddit',
+    sourceService: source.service || 'submitted',
+    sourceUserId: source.userId || null,
+    sourceUsername: source.username || source.userId || null,
+    sourceSubreddit: subreddit,
     postId: String(post.id || ''),
     title: post.title || null,
     mediaPageUrl: getPostPageUrl(source, post),
@@ -1667,6 +1434,22 @@ function parsePositiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
+function printMediaSample(entries, limit = 5) {
+  const sample = entries.slice(0, limit)
+  if (sample.length === 0) return
+
+  console.log('Media sample:')
+  for (const entry of sample) {
+    const sourceBits = [
+      entry.sourceSite,
+      entry.sourceSubreddit ? `r/${entry.sourceSubreddit}` : null,
+      entry.postId ? `post:${entry.postId}` : null,
+    ].filter(Boolean)
+    const sourceText = sourceBits.length ? ` (${sourceBits.join(', ')})` : ''
+    console.log(`- ${entry.filename}${sourceText}`)
+  }
+}
+
 function getPostPageUrl(source, post) {
   if (source.site === 'coomerfans') {
     return (
@@ -1704,6 +1487,12 @@ function getRedditPostDate(post) {
     return new Date(createdUtc * 1000)
   }
   return parseResolvedDate(post?.created)
+}
+
+function getRedditSubreddit(post) {
+  return sanitizeToken(
+    post?.subreddit_name_prefixed || post?.subreddit || post?.subreddit_id
+  )
 }
 
 function getRedditLinkedUrl(source, value) {
@@ -1773,11 +1562,13 @@ function extensionFromMime(mime) {
   return ''
 }
 
-function buildRedditFilename(source, post, mediaUrl, fallbackExt, index = 0) {
+function buildRedditFilename(_source, post, mediaUrl, fallbackExt, index = 0) {
   const urlName = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
   const ext = path.extname(urlName || '') || fallbackExt || ''
   const suffix = index > 0 ? `_${index + 1}` : ''
-  return `${source.rawName}_reddit_${post.id}${suffix}${ext || '.jpg'}`
+  const subreddit = getRedditSubreddit(post)
+  const subredditPart = subreddit ? `${subreddit}_` : ''
+  return `${subredditPart}${post.id}${suffix}${ext || '.jpg'}`
 }
 
 function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
@@ -1791,6 +1582,11 @@ function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
       options.index
     )
   return {
+    sourceSite: 'reddit',
+    sourceService: source.service || 'submitted',
+    sourceUserId: source.userId || null,
+    sourceUsername: source.username || source.userId || null,
+    sourceSubreddit: getRedditSubreddit(post),
     postId: String(post.id || ''),
     title: post.title || null,
     mediaPageUrl: getPostPageUrl(source, post),
@@ -2392,14 +2188,7 @@ async function fetchPosts(source, options) {
 }
 
 function classifyMedia(filename) {
-  const ext = path.extname(filename).toLowerCase()
-  if (['.mp4', '.m4v', '.webm', '.mov'].includes(ext))
-    return { ext, kind: 'video' }
-  if (ext === '.gif') return { ext, kind: 'gif' }
-  if (['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.avif'].includes(ext)) {
-    return { ext, kind: 'image' }
-  }
-  return { ext, kind: 'unknown' }
+  return classifyMediaFilename(filename)
 }
 
 async function downloadMediaBuffer(mediaUrl, entry = {}) {
@@ -2417,44 +2206,41 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
 
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
   duplicateCount += 1
-  const seenDetails = getEntrySeenDetails(entry)
-  appendRunEvent(reason, {
-    filename: entry.filename,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrls: seenDetails.mediaUrls,
-    mediaPageUrls: seenDetails.mediaPageUrls,
-    savedPath,
-    ...(extra && typeof extra === 'object' ? extra : {}),
-  })
-  recordSuccessfulSeenMedia(folders.logDir, {
-    relativePath: savedPath,
-    filename: entry.filename,
-    ...seenDetails,
-  })
+  appendRunEvent(
+    reason,
+    hoghaulMediaSaver.buildDuplicateEvent({
+      entry,
+      savedPath,
+      extra: extra && typeof extra === 'object' ? extra : {},
+    })
+  )
+  recordSuccessfulSeenMedia(
+    folders.logDir,
+    hoghaulMediaSaver.buildSeenRecord(entry, {
+      savedPath,
+      relativePath: savedPath,
+      filename: entry.filename,
+    })
+  )
   noteMediaOutcome(
-    isSkipReason(reason) ? 'skipped' : 'duplicate',
+    hoghaulMediaSaver.getOutcomeKindForReason(reason),
     `${reason}: ${entry.filename}`
   )
 }
 
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
-  const bucket = kind === 'gif' ? 'gif' : 'images'
-  const finalDir = kind === 'gif' ? folders.createGifFolder() : folders.images
-  const finalPath = path.join(finalDir, entry.filename)
-  const relativePath = getDatasetRelativePath(finalPath)
-
-  appendRunEvent('media_seen', {
+  const destination = hoghaulMediaSaver.getDestination({
     modelName,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-    mediaUrls: getEntryMediaUrls(entry),
+    folders,
     filename: entry.filename,
-    extension: path.extname(entry.filename).toLowerCase(),
-    bucket,
-    candidateRelativePath: relativePath,
+    kind,
   })
+  const { bucket, finalPath, relativePath } = destination
+
+  appendRunEvent(
+    'media_seen',
+    hoghaulMediaSaver.buildMediaSeenEvent({ modelName, entry, destination })
+  )
 
   const seenMediaMatch = getSuccessfulSeenMediaMatch(
     folders.logDir,
@@ -2569,48 +2355,47 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 
   try {
     fs.writeFileSync(finalPath, buffer)
-    const recordedDate = await mediaDates.recordImageDates(
-      path.join(datasetDir, modelName),
-      bucket,
-      entry.filename,
-      buffer,
-      entry.uploadedDate
-    )
-    const fileDate = applyFileTimestamp(
-      finalPath,
-      parseResolvedDate(recordedDate?.date) || entry.uploadedDate
-    )
-    const metadata = buildHashMetadata(
+    const { metadata } = await hoghaulMediaSaver.finalizeImage({
       modelName,
-      finalPath,
-      kind === 'gif' ? 'gif' : 'image',
-      buffer.length,
-      fileDate
-    )
+      bucket,
+      filename: entry.filename,
+      buffer,
+      absolutePath: finalPath,
+      mediaType: kind === 'gif' ? 'gif' : 'image',
+      uploadedDate: entry.uploadedDate,
+      entry,
+    })
 
     addBitwiseHash(hash, metadata)
     if (visualHash) addVisualHash(visualHash, metadata)
     saveBitwiseHashCache()
     if (visualHash) saveVisualHashCache()
 
+    const stats = hoghaulMediaSaver.buildSavedStats({
+      sizeBytes: buffer.length,
+      kind,
+    })
     successCount += 1
-    savedBytes += buffer.length
+    savedBytes += stats.savedBytes
     if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += buffer.length
+      currentRunLog.transfer.savedBytes += stats.savedBytes
+      currentRunLog.transfer.lazyTransferredBytes += stats.lazyTransferredBytes
     }
-    recordSuccessfulSeenMedia(folders.logDir, {
-      relativePath,
-      filename: entry.filename,
-      ...getEntrySeenDetails(entry),
-    })
-    appendRunEvent(kind === 'gif' ? 'saved_gif' : 'saved_image', {
-      modelName,
-      filename: entry.filename,
-      savedPath: relativePath,
-      hash,
-      visualHash,
-    })
-    noteMediaOutcome('saved', `saved_${kind}: ${entry.filename}`)
+    recordSuccessfulSeenMedia(
+      folders.logDir,
+      hoghaulMediaSaver.buildSeenRecord(entry, destination)
+    )
+    appendRunEvent(
+      destination.savedEventType,
+      hoghaulMediaSaver.buildSavedEvent({
+        modelName,
+        entry,
+        destination,
+        hash,
+        visualHash,
+      })
+    )
+    noteMediaOutcome('saved', `${destination.savedOutcome}: ${entry.filename}`)
     console.log(`Saved ${kind}: ${entry.filename}`)
   } finally {
     releasePendingImageVisualClaim(visualClaimKey)
@@ -2618,21 +2403,18 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
-  const finalPath = path.join(folders.createWebmFolder(), entry.filename)
-  const tmpPath = path.join(folders.incompleteVideoDir, entry.filename)
-  const relativePath = getDatasetRelativePath(finalPath)
-
-  appendRunEvent('media_seen', {
+  const destination = hoghaulMediaSaver.getDestination({
     modelName,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-    mediaUrls: getEntryMediaUrls(entry),
     filename: entry.filename,
-    extension: path.extname(entry.filename).toLowerCase(),
-    bucket: 'webm',
-    candidateRelativePath: relativePath,
+    folders,
+    kind: 'video',
   })
+  const { finalPath, tmpPath, relativePath } = destination
+
+  appendRunEvent(
+    'media_seen',
+    hoghaulMediaSaver.buildMediaSeenEvent({ modelName, entry, destination })
+  )
 
   const seenMediaMatch = getSuccessfulSeenMediaMatch(
     folders.logDir,
@@ -2658,15 +2440,10 @@ async function saveVideoMedia(modelName, folders, entry) {
 
   queuedVideoCount += 1
   if (currentRunLog) currentRunLog.counters.queuedVideos += 1
-  appendRunEvent('queued_lazy_video', {
-    modelName,
-    filename: entry.filename,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrls: getEntryMediaUrls(entry),
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-    savedPath: relativePath,
-  })
+  appendRunEvent(
+    'queued_lazy_video',
+    hoghaulMediaSaver.buildQueuedEvent({ modelName, entry, destination })
+  )
 
   try {
     removeFileIfExists(tmpPath)
@@ -2687,18 +2464,17 @@ async function saveVideoMedia(modelName, folders, entry) {
     }
 
     moveFileIntoPlace(tmpPath, finalPath)
-    const recordedDate = await mediaDates.recordVideoDates(
-      path.join(datasetDir, modelName),
-      'webm',
-      entry.filename,
-      finalPath,
-      entry.uploadedDate
-    )
-    const fileDate = applyFileTimestamp(
-      finalPath,
-      parseResolvedDate(recordedDate?.date) || entry.uploadedDate
-    )
     const stat = fs.statSync(finalPath)
+    const { metadata } = await hoghaulMediaSaver.finalizeVideo({
+      modelName,
+      bucket: 'webm',
+      filename: entry.filename,
+      filePath: finalPath,
+      mediaType: 'video',
+      sizeBytes: stat.size,
+      uploadedDate: entry.uploadedDate,
+      entry,
+    })
     let visualHash = await getVisualHashFromVideoPath(finalPath)
     const visualMatch = visualHash
       ? getVisualDuplicationRecord(visualHash)
@@ -2715,56 +2491,58 @@ async function saveVideoMedia(modelName, folders, entry) {
       return
     }
 
-    const metadata = buildHashMetadata(
-      modelName,
-      finalPath,
-      'video',
-      stat.size,
-      fileDate
-    )
     addBitwiseHash(hash, metadata)
     if (visualHash) addVisualHash(visualHash, metadata)
     saveBitwiseHashCache()
     saveVisualHashCache()
 
+    const stats = hoghaulMediaSaver.buildSavedStats({
+      sizeBytes: stat.size,
+      kind: 'video',
+    })
     successCount += 1
-    savedBytes += stat.size
+    savedBytes += stats.savedBytes
     if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += stat.size
-      currentRunLog.transfer.lazyTransferredBytes += stat.size
+      currentRunLog.transfer.savedBytes += stats.savedBytes
+      currentRunLog.transfer.lazyTransferredBytes += stats.lazyTransferredBytes
     }
-    recordSuccessfulSeenMedia(folders.logDir, {
-      relativePath,
-      filename: entry.filename,
-      ...getEntrySeenDetails(entry),
-    })
-    appendRunEvent('saved_lazy_video', {
-      modelName,
-      filename: entry.filename,
-      savedPath: relativePath,
-      hash,
-      visualHash,
-    })
-    noteMediaOutcome('saved', `saved_video: ${entry.filename}`)
+    recordSuccessfulSeenMedia(
+      folders.logDir,
+      hoghaulMediaSaver.buildSeenRecord(entry, destination)
+    )
+    appendRunEvent(
+      destination.savedEventType,
+      hoghaulMediaSaver.buildSavedEvent({
+        modelName,
+        entry,
+        destination,
+        hash,
+        visualHash,
+      })
+    )
+    noteMediaOutcome('saved', `${destination.savedOutcome}: ${entry.filename}`)
     console.log(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)
     errorCount += 1
-    recordRunError('lazy_video_error', {
-      modelName,
-      filename: entry.filename,
-      mediaUrl: entry.mediaUrl,
-      mediaPageUrl: entry.mediaPageUrl,
-      savedPath: relativePath,
-      error: err.message,
-    })
-    appendRunEvent('lazy_video_error', {
-      modelName,
-      filename: entry.filename,
-      mediaUrl: entry.mediaUrl,
-      mediaPageUrl: entry.mediaPageUrl,
-      error: err.message,
-    })
+    recordRunError(
+      'lazy_video_error',
+      hoghaulMediaSaver.buildErrorEvent({
+        modelName,
+        entry,
+        destination,
+        error: err,
+      })
+    )
+    appendRunEvent(
+      'lazy_video_error',
+      hoghaulMediaSaver.buildErrorEvent({
+        modelName,
+        entry,
+        destination,
+        error: err,
+      })
+    )
     noteMediaOutcome('failed', `video_error: ${entry.filename}`)
     console.log(`Failed video: ${entry.filename} - ${err.message}`)
   }
@@ -2961,8 +2739,14 @@ async function run() {
   })
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
-  const mediaEntries = selectedPosts.flatMap((post) =>
-    getMediaEntriesFromPost(source, post)
+  const mediaEntries = normalizeMediaEntries(
+    selectedPosts.flatMap((post) => getMediaEntriesFromPost(source, post)),
+    {
+      sourceSite: source.site,
+      sourceService: source.service,
+      sourceUserId: source.userId,
+      sourceUsername: source.username,
+    }
   )
   const sourceDeduped = dedupeMediaEntries(mediaEntries)
   let selectedMediaSourceDuplicateCount = sourceDeduped.duplicateCount
@@ -2999,6 +2783,7 @@ async function run() {
         `Dry run source media dedupe: ${selectedMediaSourceDuplicateCount} repeated media URL(s)`
       )
     }
+    printMediaSample(selectedMedia)
     console.log(
       `Dry run only. Newest post: ${newest ? newest.toISOString() : 'unknown'}`
     )
@@ -3063,6 +2848,12 @@ async function run() {
       selectedMedia,
       browserMediaDownloader
     )
+    selectedMedia = normalizeMediaEntries(selectedMedia, {
+      sourceSite: source.site,
+      sourceService: source.service,
+      sourceUserId: source.userId,
+      sourceUsername: source.username,
+    })
     const browserDeduped = dedupeMediaEntries(selectedMedia)
     if (browserDeduped.duplicateCount > 0) {
       selectedMedia = browserDeduped.entries
@@ -3088,22 +2879,35 @@ async function run() {
   const videos = []
 
   for (const entry of selectedMedia) {
-    const classification = classifyMedia(entry.filename)
+    const normalizedEntry = normalizeMediaEntry(entry, {
+      sourceSite: source.site,
+      sourceService: source.service,
+      sourceUserId: source.userId,
+      sourceUsername: source.username,
+    })
+    if (!normalizedEntry) {
+      continue
+    }
+    const classification = classifyMedia(normalizedEntry.filename)
     if (classification.kind === 'unknown') {
       appendRunEvent('skip_unknown_media', {
         modelName,
-        filename: entry.filename,
-        mediaUrl: entry.mediaUrl,
-        mediaPageUrl: entry.mediaPageUrl,
+        filename: normalizedEntry.filename,
+        mediaUrl: normalizedEntry.mediaUrl,
+        mediaPageUrl: normalizedEntry.mediaPageUrl,
+        ...getEntrySourceDetails(normalizedEntry),
         extension: classification.ext,
       })
-      noteMediaOutcome('skipped', `skip_unknown_media: ${entry.filename}`)
+      noteMediaOutcome(
+        'skipped',
+        `skip_unknown_media: ${normalizedEntry.filename}`
+      )
       continue
     }
     if (classification.kind === 'video') {
-      videos.push(entry)
+      videos.push(normalizedEntry)
     } else {
-      imageLike.push({ ...entry, kind: classification.kind })
+      imageLike.push({ ...normalizedEntry, kind: classification.kind })
     }
   }
 
@@ -3130,6 +2934,7 @@ async function run() {
             filename: entry.filename,
             mediaUrl: entry.mediaUrl,
             mediaPageUrl: entry.mediaPageUrl,
+            ...getEntrySourceDetails(entry),
             error: err.message,
           })
           appendRunEvent('media_error', {
@@ -3137,6 +2942,7 @@ async function run() {
             filename: entry.filename,
             mediaUrl: entry.mediaUrl,
             mediaPageUrl: entry.mediaPageUrl,
+            ...getEntrySourceDetails(entry),
             error: err.message,
           })
           noteMediaOutcome('failed', `media_error: ${entry.filename}`)
