@@ -470,6 +470,9 @@ const milkmaidMediaSaver = createMediaSaver({
   datasetDir,
   source: 'milkmaid',
   mediaDates,
+  getExtraMetadata: (entry) => getMilkmaidEntryHashMetadata(entry),
+  getEventMetadata: (entry) => getMilkmaidEntrySourceDetails(entry),
+  getSeenDetails: (entry) => getMilkmaidEntrySeenDetails(entry),
 })
 const duplicateChecker = createDuplicateChecker({
   datasetDir,
@@ -507,7 +510,6 @@ const sharedMediaSeenIndex = createMediaSeenIndex({
   matchOrder: ['media_page_url', 'media_url'],
   warn: (message) => console.warn(`Warning: ${message}`),
 })
-let mediaSeenIndexCache = null
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
@@ -919,147 +921,35 @@ function getMediaSeenIndexPath(modelLogDir) {
 }
 
 function loadMediaSeenIndex(modelLogDir) {
-  const indexPath = getMediaSeenIndexPath(modelLogDir)
-  if (mediaSeenIndexCache?.indexPath === indexPath) {
-    return mediaSeenIndexCache.data
-  }
-
-  let parsed = {}
-  if (fs.existsSync(indexPath)) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
-    } catch (err) {
-      console.warn(
-        `⚠️ Could not parse media seen index at ${indexPath}: ${err.message}`
-      )
-    }
-  }
-
-  const data = {
-    version: 1,
-    updatedAt: parsed?.updatedAt || null,
-    mediaPageUrls:
-      parsed?.mediaPageUrls && typeof parsed.mediaPageUrls === 'object'
-        ? parsed.mediaPageUrls
-        : {},
-    mediaUrls:
-      parsed?.mediaUrls && typeof parsed.mediaUrls === 'object'
-        ? parsed.mediaUrls
-        : {},
-  }
-
-  mediaSeenIndexCache = { indexPath, data }
-  return data
+  return sharedMediaSeenIndex.loadMediaSeenIndex(modelLogDir)
 }
 
 function saveMediaSeenIndex(modelLogDir, data) {
-  const indexPath = getMediaSeenIndexPath(modelLogDir)
-  data.updatedAt = new Date().toISOString()
-  fs.writeFileSync(indexPath, JSON.stringify(data, null, 2) + '\n')
-  mediaSeenIndexCache = { indexPath, data }
+  return sharedMediaSeenIndex.saveMediaSeenIndex(modelLogDir, data)
 }
 
 function recordSeenMedia(modelLogDir, details = {}) {
-  const relativePath = String(details.relativePath || '').trim()
-  if (!relativePath) return
-
-  const index = loadMediaSeenIndex(modelLogDir)
-  const normalizedMediaPageUrl = normalizeSkipUrl(details.mediaPageUrl)
-  const normalizedMediaUrl = normalizeSkipUrl(details.mediaUrl)
-  const status = String(details.status || 'saved').trim() || 'saved'
-  const recordedAt = new Date().toISOString()
-  const payload = {
-    relativePath,
-    filename: details.filename || path.basename(relativePath),
-    mediaUrl: normalizedMediaUrl || null,
-    mediaPageUrl: normalizedMediaPageUrl || null,
-    status,
-    recordedAt,
-  }
-
-  if (status === 'saved') {
-    payload.savedAt = recordedAt
-  } else if (status === 'quarantined_failed') {
-    payload.failedAt = recordedAt
-    payload.error = details.error || null
-    payload.quarantinePath = details.quarantinePath || null
-    payload.bytesDownloaded = Number.isFinite(details.bytesDownloaded)
-      ? details.bytesDownloaded
-      : null
-    payload.expectedBytes = Number.isFinite(details.expectedBytes)
-      ? details.expectedBytes
-      : null
-  }
-
-  if (normalizedMediaPageUrl) {
-    index.mediaPageUrls[normalizedMediaPageUrl] = payload
-  }
-  if (normalizedMediaUrl) {
-    index.mediaUrls[normalizedMediaUrl] = payload
-  }
-
-  saveMediaSeenIndex(modelLogDir, index)
+  return sharedMediaSeenIndex.recordSeenMedia(modelLogDir, details)
 }
 
-function getActiveMediaSeenRecord(modelLogDir, entry) {
-  if (!entry?.relativePath) return null
-  const absolutePath = path.join(
-    datasetDir,
-    String(entry.relativePath).replace(/\//g, path.sep)
-  )
-  if (!existsLocallyOrOnNas(absolutePath)) return null
-  return {
-    ...entry,
-    absolutePath,
-  }
+function getActiveMediaSeenRecord(_modelLogDir, entry) {
+  return sharedMediaSeenIndex.getActiveMediaSeenRecord(entry)
 }
 
 function getSuccessfulSeenMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
-  const index = loadMediaSeenIndex(modelLogDir)
-  const normalizedMediaPageUrl = normalizeSkipUrl(mediaPageUrl)
-  const normalizedMediaUrl = normalizeSkipUrl(mediaUrl)
-
-  if (normalizedMediaPageUrl) {
-    const pageEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaPageUrls[normalizedMediaPageUrl]
-    )
-    if (pageEntry) {
-      return {
-        matchType: 'media_page_url',
-        ...pageEntry,
-      }
-    }
-  }
-
-  if (normalizedMediaUrl) {
-    const mediaEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaUrls[normalizedMediaUrl]
-    )
-    if (mediaEntry) {
-      return {
-        matchType: 'media_url',
-        ...mediaEntry,
-      }
-    }
-  }
-
-  return null
+  return sharedMediaSeenIndex.getSuccessfulSeenMediaMatch(
+    modelLogDir,
+    mediaPageUrl,
+    mediaUrl
+  )
 }
 
 function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
-  recordSeenMedia(modelLogDir, {
-    ...details,
-    status: 'saved',
-  })
+  return sharedMediaSeenIndex.recordSuccessfulSeenMedia(modelLogDir, details)
 }
 
 function recordFailedSeenMedia(modelLogDir, details = {}) {
-  recordSeenMedia(modelLogDir, {
-    ...details,
-    status: 'quarantined_failed',
-  })
+  return sharedMediaSeenIndex.recordFailedSeenMedia(modelLogDir, details)
 }
 
 function launchReviewDashboardProcess() {
@@ -1560,6 +1450,343 @@ function setProgressTotal(total = null) {
   }
 }
 
+function getMilkmaidEntryMediaUrls(entry = {}) {
+  return Array.from(
+    new Set([entry.mediaUrl, entry.mediaUrls].flat(Infinity).filter(Boolean))
+  )
+}
+
+function getMilkmaidEntryMediaPageUrls(entry = {}) {
+  return Array.from(
+    new Set(
+      [entry.mediaPageUrl, entry.mediaPageUrls].flat(Infinity).filter(Boolean)
+    )
+  )
+}
+
+function getMilkmaidEntrySeenDetails(entry = {}) {
+  return {
+    mediaUrl: entry.mediaUrl || null,
+    mediaUrls: getMilkmaidEntryMediaUrls(entry),
+    mediaPageUrl: entry.mediaPageUrl || null,
+    mediaPageUrls: getMilkmaidEntryMediaPageUrls(entry),
+  }
+}
+
+function getMilkmaidEntrySourceDetails(entry = {}) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    postId: entry.postId || null,
+  }
+}
+
+function getMilkmaidEntryHashMetadata(entry = {}) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    sourcePostId: entry.postId || null,
+    sourceMediaPageUrl: entry.mediaPageUrl || null,
+  }
+}
+
+function recordMilkmaidDuplicate({
+  modelName,
+  entry,
+  destination,
+  reason,
+  extra = {},
+}) {
+  duplicateCount++
+  if (currentRunLog) currentRunLog.counters.duplicates++
+  appendRunEvent(
+    reason,
+    milkmaidMediaSaver.buildDuplicateEvent({
+      entry,
+      savedPath: destination?.relativePath || null,
+      extra: {
+        modelName,
+        ...extra,
+      },
+    })
+  )
+}
+
+async function saveStufferDbImageLikeMedia({
+  modelName,
+  folders,
+  entry,
+  destination,
+  kind,
+}) {
+  const { bucket, finalPath } = destination
+  const buffer = await downloadBufferWithProgress(entry.mediaUrl)
+  const hash = createHash('md5').update(buffer).digest('hex')
+
+  if (kind === 'image') {
+    const bitwiseMatch = getBitwiseDuplicationRecord(hash)
+    if (bitwiseMatch.isDuplicate) {
+      recordMilkmaidDuplicate({
+        modelName,
+        entry,
+        destination,
+        reason: 'duplicate_bitwise',
+        extra: {
+          hash,
+          activeRefs: bitwiseMatch.activeRefs.slice(0, 5),
+        },
+      })
+      return logAndProgress(`♻️ Bitwise dupe: ${entry.filename}`, true)
+    }
+
+    const visualHash = await getVisualHashFromBuffer(buffer)
+    const visualMatch = visualHash
+      ? getVisualDuplicationRecord(visualHash)
+      : null
+    if (visualMatch?.isDuplicate) {
+      recordMilkmaidDuplicate({
+        modelName,
+        entry,
+        destination,
+        reason: 'duplicate_visual',
+        extra: {
+          visualHash,
+          activeRefs: visualMatch.activeRefs.slice(0, 5),
+        },
+      })
+      return logAndProgress(`👁️ Visual dupe (global): ${entry.filename}`, true)
+    }
+    if (visualHash) addVisualHash(visualHash)
+
+    if (knownFilenames.has(entry.filename) || existsLocallyOrOnNas(finalPath)) {
+      recordMilkmaidDuplicate({
+        modelName,
+        entry,
+        destination,
+        reason: 'skip_existing_image',
+        extra: {
+          quarantinedMirrorExists: isQuarantinedPath(finalPath),
+        },
+      })
+      return logAndProgress(`♻️ Skipped (exists): ${entry.filename}`, true)
+    }
+
+    fs.writeFileSync(finalPath, buffer)
+    const { metadata } = await milkmaidMediaSaver.finalizeImage({
+      modelName,
+      bucket,
+      filename: entry.filename,
+      buffer,
+      absolutePath: finalPath,
+      mediaType: 'image',
+      uploadedDate: entry.uploadedDate,
+      pageMeta: entry.pageMeta,
+      entry,
+    })
+
+    if (!isBitwiseDupe(hash)) {
+      addBitwiseHash(hash, metadata)
+      saveBitwiseHashCache()
+    }
+    if (visualHash) addVisualHash(visualHash, metadata)
+
+    knownFilenames.add(entry.filename)
+    successCount++
+    if (currentRunLog) currentRunLog.counters.saved++
+    addRunSavedBytes(buffer.length)
+    recordSuccessfulSeenMedia(
+      folders.logDir,
+      milkmaidMediaSaver.buildSeenRecord(entry, destination)
+    )
+    appendRunEvent(
+      destination.savedEventType,
+      milkmaidMediaSaver.buildSavedEvent({
+        modelName,
+        entry,
+        destination,
+        hash,
+        visualHash,
+      })
+    )
+    return logAndProgress(`✅ Saved: ${entry.filename}`, true)
+  }
+
+  if (knownFilenames.has(entry.filename) || existsLocallyOrOnNas(finalPath)) {
+    recordMilkmaidDuplicate({
+      modelName,
+      entry,
+      destination,
+      reason: 'skip_existing_gif',
+      extra: {
+        quarantinedMirrorExists: isQuarantinedPath(finalPath),
+      },
+    })
+    return logAndProgress(`♻️ Skipped gif (exists): ${entry.filename}`, true)
+  }
+
+  fs.writeFileSync(finalPath, buffer)
+  const { metadata } = await milkmaidMediaSaver.finalizeImage({
+    modelName,
+    bucket,
+    filename: entry.filename,
+    buffer,
+    absolutePath: finalPath,
+    mediaType: 'gif',
+    uploadedDate: entry.uploadedDate,
+    pageMeta: entry.pageMeta,
+    entry,
+  })
+
+  if (!isBitwiseDupe(hash)) {
+    addBitwiseHash(hash, metadata)
+    saveBitwiseHashCache()
+  }
+
+  knownFilenames.add(entry.filename)
+  successCount++
+  if (currentRunLog) currentRunLog.counters.saved++
+  addRunSavedBytes(buffer.length)
+  recordSuccessfulSeenMedia(
+    folders.logDir,
+    milkmaidMediaSaver.buildSeenRecord(entry, destination)
+  )
+  appendRunEvent(
+    destination.savedEventType,
+    milkmaidMediaSaver.buildSavedEvent({
+      modelName,
+      entry,
+      destination,
+      hash,
+    })
+  )
+  return logAndProgress(`Saved gif: ${entry.filename}`, true)
+}
+
+function queueStufferDbVideoMedia({ modelName, folders, entry, destination }) {
+  const { finalPath, tmpPath } = destination
+
+  if (knownFilenames.has(entry.filename) || existsLocallyOrOnNas(finalPath)) {
+    recordMilkmaidDuplicate({
+      modelName,
+      entry,
+      destination,
+      reason: 'skip_existing_video',
+      extra: {
+        quarantinedMirrorExists: isQuarantinedPath(finalPath),
+      },
+    })
+    return logAndProgress(
+      `⛔ Skipping mp4 - already handled: ${entry.filename}`,
+      true
+    )
+  }
+
+  lazyVideoQueue.push({
+    url: entry.mediaUrl,
+    path: finalPath,
+    tmpPath,
+    filename: entry.filename,
+    uploadedDate: entry.uploadedDate,
+    mediaPageUrl: entry.mediaPageUrl,
+    pageMeta: entry.pageMeta,
+  })
+  if (currentRunLog) currentRunLog.counters.queuedVideos++
+  appendRunEvent(
+    'queued_lazy_video',
+    milkmaidMediaSaver.buildQueuedEvent({ modelName, entry, destination })
+  )
+
+  return logAndProgress(`🐌 Queued lazy video: ${entry.filename}`, true)
+}
+
+async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
+  if (isNuisanceMediaAsset(entry.filename, entry.extension)) {
+    appendRunEvent('skip_nuisance_media', {
+      modelName,
+      ...getMilkmaidEntrySeenDetails(entry),
+      ...getMilkmaidEntrySourceDetails(entry),
+      filename: entry.filename,
+      extension: entry.extension,
+    })
+    return logAndProgress(`🚫 Skipped nuisance asset: ${entry.filename}`, true)
+  }
+
+  const destination = milkmaidMediaSaver.getDestination({
+    modelName,
+    folders,
+    filename: entry.filename,
+    kind: entry.kind,
+  })
+
+  appendRunEvent(
+    'media_seen',
+    milkmaidMediaSaver.buildMediaSeenEvent({ modelName, entry, destination })
+  )
+
+  const permanentSkipMatch = getPermanentSkipMatch({
+    relativePath: destination.relativePath,
+    mediaUrl: entry.mediaUrl,
+    mediaPageUrl: entry.mediaPageUrl,
+    filename: entry.filename,
+  })
+  if (permanentSkipMatch) {
+    recordMilkmaidDuplicate({
+      modelName,
+      entry,
+      destination,
+      reason: 'skip_permanent',
+      extra: {
+        relativePath: destination.relativePath,
+        reason: permanentSkipMatch.reason || 'manual_skip',
+        note: permanentSkipMatch.note || null,
+      },
+    })
+    return logAndProgress(`🛑 Permanent skip: ${entry.filename}`, true)
+  }
+
+  const seenMediaMatch = getSuccessfulSeenMediaMatch(
+    folders.logDir,
+    getMilkmaidEntryMediaPageUrls(entry),
+    getMilkmaidEntryMediaUrls(entry)
+  )
+  if (seenMediaMatch) {
+    recordMilkmaidDuplicate({
+      modelName,
+      entry,
+      destination: {
+        ...destination,
+        relativePath: seenMediaMatch.relativePath,
+      },
+      reason: 'skip_seen_media',
+      extra: {
+        matchType: seenMediaMatch.matchType,
+      },
+    })
+    return logAndProgress(
+      `⏩ Seen media skip (${seenMediaMatch.matchType}): ${entry.filename}`,
+      true
+    )
+  }
+
+  if (entry.kind === 'video') {
+    return queueStufferDbVideoMedia({ modelName, folders, entry, destination })
+  }
+
+  return saveStufferDbImageLikeMedia({
+    modelName,
+    folders,
+    entry,
+    destination,
+    kind: entry.kind === 'gif' ? 'gif' : 'image',
+  })
+}
+
 async function scrapeGallery(browser, url, modelName, folders) {
   const { base, images, webm } = folders
 
@@ -1704,330 +1931,15 @@ async function scrapeGallery(browser, url, modelName, folders) {
             }
           )
           if (!mediaEntry) return
-
-          const uploadedDate = mediaEntry.uploadedDate
-            ? resolveEffectiveFileDate(mediaEntry.uploadedDate, null)
-            : null
-          const pageMeta = mediaEntry.pageMeta
-
           mediaUrl = mediaEntry.mediaUrl
           filename = mediaEntry.filename
           ext = mediaEntry.extension
 
-          if (isNuisanceMediaAsset(filename, ext)) {
-            appendRunEvent('skip_nuisance_media', {
-              modelName,
-              mediaPageUrl,
-              mediaUrl,
-              filename,
-              extension: ext,
-            })
-            return logAndProgress(
-              `🚫 Skipped nuisance asset: ${filename}`,
-              true
-            )
-          }
-
-          const bucketName =
-            ext === '.gif'
-              ? 'gif'
-              : ['.mp4', '.webm'].includes(ext)
-                ? 'webm'
-                : 'images'
-          const candidateRelativePath = `${modelName}/${bucketName}/${filename}`
-
-          appendRunEvent('media_seen', {
+          await saveStufferDbMediaEntry({
             modelName,
-            mediaPageUrl,
-            mediaUrl,
-            filename,
-            extension: ext,
+            folders,
+            entry: mediaEntry,
           })
-
-          const permanentSkipMatch = getPermanentSkipMatch({
-            relativePath: candidateRelativePath,
-            mediaUrl,
-            mediaPageUrl,
-            filename,
-          })
-          if (permanentSkipMatch) {
-            duplicateCount++
-            currentRunLog && currentRunLog.counters.duplicates++
-            appendRunEvent('skip_permanent', {
-              modelName,
-              filename,
-              relativePath: candidateRelativePath,
-              mediaUrl,
-              mediaPageUrl,
-              reason: permanentSkipMatch.reason || 'manual_skip',
-              note: permanentSkipMatch.note || null,
-            })
-            return logAndProgress(`🛑 Permanent skip: ${filename}`, true)
-          }
-
-          const seenMediaMatch = getSuccessfulSeenMediaMatch(
-            folders.logDir,
-            mediaPageUrl,
-            mediaUrl
-          )
-          if (seenMediaMatch) {
-            duplicateCount++
-            currentRunLog && currentRunLog.counters.duplicates++
-            appendRunEvent('skip_seen_media', {
-              modelName,
-              filename,
-              mediaUrl,
-              mediaPageUrl,
-              matchType: seenMediaMatch.matchType,
-              savedPath: seenMediaMatch.relativePath,
-            })
-            return logAndProgress(
-              `⏩ Seen media skip (${seenMediaMatch.matchType}): ${filename}`,
-              true
-            )
-          }
-
-          let buffer = null
-          let hash = null
-          let visualHash = null
-
-          // Step 1: Fetch file buffer
-          if (!['.mp4', '.webm', '.gif'].includes(ext)) {
-            buffer = await downloadBufferWithProgress(mediaUrl)
-
-            // Step 2: Bitwise (fast) hash
-            hash = createHash('md5').update(buffer).digest('hex')
-            const bitwiseMatch = getBitwiseDuplicationRecord(hash)
-            if (bitwiseMatch.isDuplicate) {
-              duplicateCount++
-              currentRunLog && currentRunLog.counters.duplicates++
-              appendRunEvent('duplicate_bitwise', {
-                modelName,
-                filename,
-                hash,
-                activeRefs: bitwiseMatch.activeRefs.slice(0, 5),
-              })
-              return logAndProgress(`♻️ Bitwise dupe: ${filename}`, true)
-            }
-
-            // Step 3: Visual (slow) hash
-            visualHash = await getVisualHashFromBuffer(buffer)
-            const visualMatch = visualHash
-              ? getVisualDuplicationRecord(visualHash)
-              : null
-            if (visualMatch?.isDuplicate) {
-              duplicateCount++
-              currentRunLog && currentRunLog.counters.duplicates++
-              appendRunEvent('duplicate_visual', {
-                modelName,
-                filename,
-                visualHash,
-                activeRefs: visualMatch.activeRefs.slice(0, 5),
-              })
-              return logAndProgress(
-                `👁️ Visual dupe (global): ${filename}`,
-                true
-              )
-            }
-            if (visualHash) addVisualHash(visualHash)
-          }
-
-          if (ext === '.gif') {
-            buffer = await downloadBufferWithProgress(mediaUrl)
-            hash = createHash('md5').update(buffer).digest('hex')
-
-            const gifFolder = folders.createGifFolder()
-            const gifPath = path.join(gifFolder, filename)
-
-            if (knownFilenames.has(filename) || existsLocallyOrOnNas(gifPath)) {
-              duplicateCount++
-              currentRunLog && currentRunLog.counters.duplicates++
-              appendRunEvent('skip_existing_gif', {
-                modelName,
-                filename,
-                savedPath: getDatasetRelativePath(gifPath),
-                quarantinedMirrorExists: isQuarantinedPath(gifPath),
-              })
-              return logAndProgress(
-                `â™»ï¸ Skipped gif (exists): ${filename}`,
-                true
-              )
-            }
-
-            fs.writeFileSync(gifPath, buffer)
-
-            const recordedDate = await milkmaidMediaSaver.recordImageDates({
-              modelName,
-              bucket: 'gif',
-              filename,
-              buffer,
-              uploadedDate,
-              pageMeta,
-            })
-            const fileDate = milkmaidMediaSaver.applyRecordedTimestamp(
-              gifPath,
-              recordedDate,
-              uploadedDate
-            )
-
-            if (!isBitwiseDupe(hash)) {
-              addBitwiseHash(
-                hash,
-                buildHashMetadata(
-                  modelName,
-                  gifPath,
-                  'gif',
-                  buffer.length,
-                  fileDate
-                )
-              )
-              saveBitwiseHashCache()
-            }
-
-            knownFilenames.add(filename)
-            successCount++
-            currentRunLog && currentRunLog.counters.saved++
-            addRunSavedBytes(buffer.length)
-            recordSuccessfulSeenMedia(folders.logDir, {
-              relativePath: getDatasetRelativePath(gifPath),
-              filename,
-              mediaUrl,
-              mediaPageUrl,
-            })
-            appendRunEvent('saved_gif', {
-              modelName,
-              filename,
-              savedPath: getDatasetRelativePath(gifPath),
-              hash,
-            })
-            return logAndProgress(`Saved gif: ${filename}`, true)
-          }
-
-          if (['.mp4', '.webm'].includes(ext)) {
-            const webmFolder = folders.createWebmFolder() // Create only when needed
-            const finalPath = path.join(webmFolder, filename)
-
-            if (
-              knownFilenames.has(filename) ||
-              existsLocallyOrOnNas(finalPath)
-            ) {
-              duplicateCount++
-              currentRunLog && currentRunLog.counters.duplicates++
-              appendRunEvent('skip_existing_video', {
-                modelName,
-                filename,
-                savedPath: getDatasetRelativePath(finalPath),
-                quarantinedMirrorExists: isQuarantinedPath(finalPath),
-              })
-              return logAndProgress(
-                `⛔ Skipping mp4 – already handled: ${filename}`,
-                true
-              )
-            }
-
-            const tmpPath = path.join(folders.incompleteVideoDir, filename)
-
-            lazyVideoQueue.push({
-              url: mediaUrl,
-              path: finalPath,
-              tmpPath,
-              filename,
-              uploadedDate,
-              mediaPageUrl,
-              pageMeta,
-            })
-            currentRunLog && currentRunLog.counters.queuedVideos++
-            appendRunEvent('queued_lazy_video', {
-              modelName,
-              filename,
-              mediaUrl,
-              savedPath: getDatasetRelativePath(finalPath),
-            })
-
-            return logAndProgress(`🐌 Queued lazy video: ${filename}`, true)
-          }
-
-          if (
-            knownFilenames.has(filename) ||
-            existsLocallyOrOnNas(path.join(images, filename))
-          ) {
-            duplicateCount++
-            currentRunLog && currentRunLog.counters.duplicates++
-            appendRunEvent('skip_existing_image', {
-              modelName,
-              filename,
-              savedPath: getDatasetRelativePath(path.join(images, filename)),
-              quarantinedMirrorExists: isQuarantinedPath(
-                path.join(images, filename)
-              ),
-            })
-            return logAndProgress(`♻️ Skipped (exists): ${filename}`, true)
-          }
-
-          buffer = await downloadBufferWithProgress(mediaUrl)
-          hash = createHash('md5').update(buffer).digest('hex')
-
-          const finalPath = path.join(images, filename)
-          fs.writeFileSync(finalPath, buffer)
-
-          const recordedDate = await milkmaidMediaSaver.recordImageDates({
-            modelName,
-            bucket: 'images',
-            filename,
-            buffer,
-            uploadedDate,
-            pageMeta,
-          })
-          const fileDate = milkmaidMediaSaver.applyRecordedTimestamp(
-            finalPath,
-            recordedDate,
-            uploadedDate
-          )
-
-          if (!isBitwiseDupe(hash)) {
-            addBitwiseHash(
-              hash,
-              buildHashMetadata(
-                modelName,
-                finalPath,
-                'image',
-                buffer.length,
-                fileDate
-              )
-            )
-            saveBitwiseHashCache()
-          }
-
-          if (visualHash) {
-            addVisualHash(
-              visualHash,
-              buildHashMetadata(
-                modelName,
-                finalPath,
-                'image',
-                buffer.length,
-                fileDate
-              )
-            )
-          }
-          knownFilenames.add(filename)
-          successCount++
-          currentRunLog && currentRunLog.counters.saved++
-          addRunSavedBytes(buffer.length)
-          recordSuccessfulSeenMedia(folders.logDir, {
-            relativePath: getDatasetRelativePath(finalPath),
-            filename,
-            mediaUrl,
-            mediaPageUrl,
-          })
-          appendRunEvent('saved_image', {
-            modelName,
-            filename,
-            savedPath: getDatasetRelativePath(finalPath),
-            hash,
-            visualHash,
-          })
-          return logAndProgress(`✅ Saved: ${filename}`, true)
         } catch (err) {
           errorCount++
           currentRunLog && currentRunLog.counters.failures++
