@@ -23,7 +23,6 @@ const LAZY_IDLE_TIMEOUT_MS = 30000
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 const mediaDates = require('./media-dates.js')
-bannerMilkmaid()
 
 // Helpers
 const { createScraperPage } = require('../scrapyard/pageHelpers')
@@ -539,6 +538,32 @@ const sharedMediaSeenIndex = createMediaSeenIndex({
 })
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+
+function resetRunState() {
+  knownFilenames.clear()
+  skippedFilenames.clear()
+  queuedVideos.clear()
+  lazyVideoQueue.length = 0
+  totalCount = 0
+  duplicateCount = 0
+  errorCount = 0
+  successCount = 0
+  lastDraw = 0
+  totalLazyBytes = 0
+  lazyBytesDownloaded = 0
+  lazyDownloadStartedAt = 0
+  lazyActiveDownloads = 0
+  lazyCompletedDownloads = 0
+  lazyCurrentLabel = ''
+  currentRunLog = null
+  permanentSkipEntries = []
+  permanentSkipLookup = {
+    relativePaths: new Set(),
+    sourceUrls: new Set(),
+    mediaPageUrls: new Set(),
+    filenames: new Set(),
+  }
+}
 
 function addRunSavedBytes(bytes) {
   if (!currentRunLog) return
@@ -1864,7 +1889,10 @@ async function scrapeGallery(browser, url, modelName, folders) {
   }
 }
 
-;(async () => {
+async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
+  resetRunState()
+  bannerMilkmaid()
+
   let browser = null
   let modelName = null
   let categoryRunList = []
@@ -1877,15 +1905,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
       reviewErrors,
       skipNasSync,
       keepHistory,
-    } = parseCliArgs(process.argv.slice(2))
+    } = parseCliArgs(argvInput)
     let inputUrl = initialInputUrl
-    if (!inputUrl || !inputUrl.includes('/category/'))
-      return logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
+    if (!inputUrl || !inputUrl.includes('/category/')) {
+      logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
+      return 1
+    }
 
     inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
 
     const categoryId = getStufferDbCategoryId(inputUrl)
-    if (!categoryId) return logAndProgress('❌ Invalid category URL')
+    if (!categoryId) {
+      logAndProgress('❌ Invalid category URL')
+      return 1
+    }
 
     browser = await puppeteer.launch({
       headless: 'new',
@@ -2494,6 +2527,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
     console.log(
       `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
     )
+    return 0
   } catch (err) {
     recordRunError('run_error', {
       modelName,
@@ -2522,4 +2556,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     mediaDates.flushAllSidecars()
   }
-})()
+}
+
+async function runMilkmaidCli(argvInput = process.argv.slice(2)) {
+  try {
+    return await runMilkmaidScrape(argvInput)
+  } catch (err) {
+    console.error(`Milkmaid failed: ${err.message}`)
+    return 1
+  }
+}
+
+module.exports = {
+  parseCliArgs,
+  runMilkmaidScrape,
+  runMilkmaidCli,
+}
+
+if (require.main === module) {
+  runMilkmaidCli().then((code) => {
+    process.exitCode = code
+  })
+}

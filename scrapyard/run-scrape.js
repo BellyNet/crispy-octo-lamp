@@ -2,4 +2,11 @@
 
 const { runScraperCli } = require('./scraperRunner')
 
-process.exitCode = runScraperCli()
+runScraperCli()
+  .then((code) => {
+    process.exitCode = code
+  })
+  .catch((err) => {
+    console.error(`Scraper runner failed: ${err.stack || err.message}`)
+    process.exitCode = 1
+  })

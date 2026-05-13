@@ -71,9 +71,6 @@ const {
 } = require('../scrapyard/bitwiseHasher')
 const { getCompletionLine } = require('../stuffinglogger')
 
-bannerHoghaul()
-installProcessTerminationHandlers()
-
 const datasetPaths = createDatasetPaths({
   rootDir: path.join(__dirname, '..'),
   repairCanUseNasMirror: true,
@@ -158,6 +155,18 @@ let savedBytes = 0
 let browserMediaDownloader = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 let runTerminationHandled = false
+let processTerminationHandlersInstalled = false
+
+function resetRunState() {
+  currentRunLog = null
+  successCount = 0
+  duplicateCount = 0
+  errorCount = 0
+  queuedVideoCount = 0
+  savedBytes = 0
+  browserMediaDownloader = null
+  runTerminationHandled = false
+}
 
 function formatPercent(numerator, denominator) {
   if (!Number.isFinite(denominator) || denominator <= 0) return '0.0'
@@ -638,6 +647,9 @@ function finalizeAbortedRun(status, error) {
 }
 
 function installProcessTerminationHandlers() {
+  if (processTerminationHandlersInstalled) return
+  processTerminationHandlersInstalled = true
+
   process.on('beforeExit', () => {
     finalizeAbortedRun(
       'interrupted',
@@ -1299,8 +1311,12 @@ function syncToNAS(modelName) {
   })
 }
 
-async function run() {
-  const argv = minimist(process.argv.slice(2), {
+async function run(argvInput = process.argv.slice(2)) {
+  resetRunState()
+  bannerHoghaul()
+  installProcessTerminationHandlers()
+
+  const argv = minimist(argvInput, {
     string: [
       'pages',
       'model',
@@ -1391,8 +1407,7 @@ async function run() {
     console.error(
       'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
     )
-    process.exitCode = 1
-    return
+    return 1
   }
 
   loadBitwiseHashCache()
@@ -1453,7 +1468,7 @@ async function run() {
       )
     }
     console.log('No API key or Authorization header was used.')
-    return
+    return 0
   }
 
   const posts = await fetchPosts(source, {
@@ -1512,7 +1527,7 @@ async function run() {
     console.log(
       `Dry run only. Newest post: ${newest ? newest.toISOString() : 'unknown'}`
     )
-    return
+    return 0
   }
 
   const modelName = registerSourceForRun(
@@ -1730,20 +1745,35 @@ async function run() {
     `Done: ${runCounters?.processed ?? selectedMedia.length}/${runCounters?.expectedMedia ?? selectedMedia.length} processed | saved ${runCounters?.saved ?? successCount} | skipped ${runCounters?.skipped ?? 0} | dupes ${runCounters?.duplicates ?? duplicateCount} | failed ${runCounters?.failures ?? errorCount}`
   )
   console.log(getCompletionLine())
+  return 0
 }
 
-run()
-  .catch((err) => {
+async function runHoghaulCli(argvInput = process.argv.slice(2)) {
+  try {
+    return await run(argvInput)
+  } catch (err) {
     finalizeAbortedRun('failed', err)
     console.error(`Hoghaul failed: ${err.message}`)
-    process.exitCode = 1
-  })
-  .finally(() => {
-    return closeBrowserMediaDownloader()
+    return 1
+  } finally {
+    await closeBrowserMediaDownloader()
       .catch((err) => {
         console.warn(`Browser close warning: ${err.message}`)
       })
       .finally(() => {
         mediaDates.flushAllSidecars()
       })
+  }
+}
+
+module.exports = {
+  parseSourceUrl,
+  runHoghaulScrape: run,
+  runHoghaulCli,
+}
+
+if (require.main === module) {
+  runHoghaulCli().then((code) => {
+    process.exitCode = code
   })
+}

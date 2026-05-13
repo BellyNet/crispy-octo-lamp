@@ -156,7 +156,7 @@ async function runSingleUrlFlow(rl) {
     ).trim()
   }
 
-  const status = runScrape(parsed.url, runOptions)
+  const status = await runScrape(parsed.url, runOptions)
   if (status !== 0) {
     console.log(`Scraper exited with status ${status}.`)
   }
@@ -253,7 +253,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`Fatal launcher error: ${err.stack || err.message}`)
-  process.exitCode = 1
-})
+module.exports = {
+  main,
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`Fatal launcher error: ${err.stack || err.message}`)
+    process.exitCode = 1
+  })
+}

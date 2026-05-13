@@ -1,7 +1,6 @@
 'use strict'
 
 const path = require('path')
-const { spawnSync } = require('child_process')
 const minimist = require('minimist')
 
 const {
@@ -112,6 +111,7 @@ function appendOptionalBoolean(args, optionName, value) {
 }
 
 function runNodeScript(scriptPath, args, { log = console.log } = {}) {
+  const { spawnSync } = require('child_process')
   log('')
   log(`Running: node ${scriptPath} ${args.join(' ')}`.trim())
   log('')
@@ -120,6 +120,26 @@ function runNodeScript(scriptPath, args, { log = console.log } = {}) {
     stdio: 'inherit',
   })
   return result.status ?? 1
+}
+
+async function runInteractiveLauncher() {
+  const { main } = require('./run-scrape-interactive')
+  await main()
+  return 0
+}
+
+async function runInProcessScraper(parsedSource, args) {
+  if (parsedSource.scraper === 'milkmaid') {
+    const { runMilkmaidCli } = require('../milkmaid/milkmaid')
+    return runMilkmaidCli(args)
+  }
+
+  if (parsedSource.scraper === 'hoghaul') {
+    const { runHoghaulCli } = require('../hoghaul/hoghaul')
+    return runHoghaulCli(args)
+  }
+
+  throw new Error(`No in-process scraper is registered for ${parsedSource}`)
 }
 
 function inferCanonicalModel(parsedSource, explicitModel) {
@@ -178,7 +198,7 @@ function buildScraperArgs(parsedSource, argvInput = {}) {
   return args
 }
 
-function runScrape(inputUrl, argvInput = {}, deps = {}) {
+async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   const log = deps.log || console.log
   const error = deps.error || console.error
   const argv = parseRunnerArgs(argvInput)
@@ -202,10 +222,14 @@ function runScrape(inputUrl, argvInput = {}, deps = {}) {
   }
 
   const runCommand = deps.runCommand || runNodeScript
-  return runCommand(scriptPath, buildScraperArgs(parsedSource, argv), { log })
+  const args = buildScraperArgs(parsedSource, argv)
+  if (deps.runCommand) {
+    return runCommand(scriptPath, args, { log })
+  }
+  return runInProcessScraper(parsedSource, args)
 }
 
-function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
+async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
   const argv = parseRunnerArgs(argvInput)
 
   if (argv.help) {
@@ -215,10 +239,7 @@ function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
 
   const inputUrl = argv._[0]
   if (!inputUrl) {
-    return runNodeScript(
-      path.join('scrapyard', 'run-scrape-interactive.js'),
-      []
-    )
+    return runInteractiveLauncher()
   }
 
   return runScrape(inputUrl, argv, deps)
@@ -239,5 +260,12 @@ module.exports = {
 }
 
 if (require.main === module) {
-  process.exitCode = runScraperCli()
+  runScraperCli()
+    .then((code) => {
+      process.exitCode = code
+    })
+    .catch((err) => {
+      console.error(`Scraper runner failed: ${err.stack || err.message}`)
+      process.exitCode = 1
+    })
 }
