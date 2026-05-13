@@ -1,8 +1,6 @@
 'use strict'
 
-const path = require('path')
 const readline = require('readline')
-const { spawnSync } = require('child_process')
 
 const {
   loadModelRegistry,
@@ -10,29 +8,17 @@ const {
   sanitize,
 } = require('./modelRegistry')
 const { parseSourceUrl } = require('./sourceRouter')
-const { runScrape } = require('./scraperRunner')
+const {
+  runAllSourceUpdates,
+  runScrape,
+  runSourceBatch,
+  runStufferDbBatch,
+} = require('./scraperRunner')
 
-const rootDir = path.join(__dirname, '..')
-const registryPath = path.join(rootDir, 'model_aliases.json')
+const registryPath = require('./scraperRunner').registryPath
 
 function ask(rl, prompt) {
   return new Promise((resolve) => rl.question(prompt, resolve))
-}
-
-function appendOption(args, flag, value) {
-  if (!value) return
-  args.push(flag, value)
-}
-
-function runNodeScript(scriptPath, args) {
-  console.log('')
-  console.log(`Running: node ${scriptPath} ${args.join(' ')}`.trim())
-  console.log('')
-  const result = spawnSync(process.execPath, [scriptPath, ...args], {
-    cwd: rootDir,
-    stdio: 'inherit',
-  })
-  return result.status || 0
 }
 
 async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
@@ -79,25 +65,19 @@ async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
   return options
 }
 
-function buildHoghaulBatchArgs(sourceKey, options) {
-  const args = ['--source', sourceKey]
-  appendOption(args, '--only-models', options.onlyModels)
-  appendOption(args, '--pages', options.pages)
-  appendOption(args, '--max-posts', options.maxPosts)
-  appendOption(args, '--max-files', options.maxFiles)
-  appendOption(args, '--post-concurrency', options.postConcurrency)
-  appendOption(args, '--image-concurrency', options.imageConcurrency)
-  appendOption(args, '--video-concurrency', options.videoConcurrency)
-  if (options.skipNasSync) args.push('--skip-nas-sync')
-  return args
-}
-
-function buildStufferArgs(options) {
-  const args = []
-  appendOption(args, '--models', options.onlyModels)
-  appendOption(args, '--start-from', options.startFrom)
-  if (options.skipNasSync) args.push('--skip-nas-sync')
-  return args
+function toRunnerBatchOptions(options) {
+  return {
+    'only-models': options.onlyModels,
+    models: options.onlyModels,
+    'start-from': options.startFrom,
+    pages: options.pages,
+    'max-posts': options.maxPosts,
+    'max-files': options.maxFiles,
+    'post-concurrency': options.postConcurrency,
+    'image-concurrency': options.imageConcurrency,
+    'video-concurrency': options.videoConcurrency,
+    'skip-nas-sync': options.skipNasSync,
+  }
 }
 
 async function runSingleUrlFlow(rl) {
@@ -191,17 +171,7 @@ async function main() {
           includeStartFrom: true,
           includeHoghaul: true,
         })
-        const args = []
-        appendOption(args, '--only-models', options.onlyModels)
-        appendOption(args, '--start-from', options.startFrom)
-        appendOption(args, '--pages', options.pages)
-        appendOption(args, '--max-posts', options.maxPosts)
-        appendOption(args, '--max-files', options.maxFiles)
-        appendOption(args, '--post-concurrency', options.postConcurrency)
-        appendOption(args, '--image-concurrency', options.imageConcurrency)
-        appendOption(args, '--video-concurrency', options.videoConcurrency)
-        if (options.skipNasSync) args.push('--skip-nas-sync')
-        runNodeScript(path.join('scrapyard', 'run-all-source-updates.js'), args)
+        await runAllSourceUpdates(toRunnerBatchOptions(options))
         continue
       }
 
@@ -210,10 +180,7 @@ async function main() {
           includeStartFrom: true,
           includeHoghaul: false,
         })
-        runNodeScript(
-          path.join('milkmaid', 'update-stufferdb-models.js'),
-          buildStufferArgs(options)
-        )
+        await runStufferDbBatch(toRunnerBatchOptions(options))
         continue
       }
 
@@ -222,10 +189,7 @@ async function main() {
           includeStartFrom: false,
           includeHoghaul: true,
         })
-        runNodeScript(
-          path.join('hoghaul', 'run-source-batch.js'),
-          buildHoghaulBatchArgs('coomer', options)
-        )
+        await runSourceBatch('coomer', toRunnerBatchOptions(options))
         continue
       }
 
@@ -234,10 +198,7 @@ async function main() {
           includeStartFrom: false,
           includeHoghaul: true,
         })
-        runNodeScript(
-          path.join('hoghaul', 'run-source-batch.js'),
-          buildHoghaulBatchArgs('kemono', options)
-        )
+        await runSourceBatch('kemono', toRunnerBatchOptions(options))
         continue
       }
 
