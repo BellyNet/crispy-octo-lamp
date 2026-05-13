@@ -1,5 +1,7 @@
 'use strict'
 
+const fs = require('fs')
+const { createHash } = require('crypto')
 const { getMediaEntryPageUrls, getMediaEntryUrls } = require('./mediaEntries')
 
 function createMediaSavePipeline(options = {}) {
@@ -189,6 +191,248 @@ function createMediaSavePipeline(options = {}) {
     }
   }
 
+  async function saveImageLikeMedia({
+    modelName,
+    folders,
+    entry,
+    destination,
+    kind,
+    downloadBuffer,
+    getBitwiseDuplicationRecord,
+    getVisualHashFromBuffer = null,
+    getVisualDuplicationRecord = null,
+    getFuzzyVisualDuplicationRecord = null,
+    getPendingImageVisualDuplicate = null,
+    reservePendingImageVisualClaim = null,
+    releasePendingImageVisualClaim = null,
+    addBitwiseHash,
+    addVisualHash = null,
+    saveBitwiseHashCache = null,
+    saveVisualHashCache = null,
+    shouldAddBitwiseHash = () => true,
+    checkExistingBeforeDownload = true,
+    duplicateRecordSeen = false,
+    visualChecks = kind === 'image',
+    fuzzyVisualDistance = null,
+    pendingVisualDistance = null,
+    addVisualHashBeforeSave = false,
+    saveVisualHashCacheOnSave = false,
+    pageMeta = entry.pageMeta,
+  }) {
+    if (typeof downloadBuffer !== 'function') {
+      throw new Error('saveImageLikeMedia requires downloadBuffer')
+    }
+    if (typeof getBitwiseDuplicationRecord !== 'function') {
+      throw new Error('saveImageLikeMedia requires getBitwiseDuplicationRecord')
+    }
+    if (typeof addBitwiseHash !== 'function') {
+      throw new Error('saveImageLikeMedia requires addBitwiseHash')
+    }
+
+    const { bucket, finalPath, relativePath } = destination
+    if (checkExistingBeforeDownload && isKnownOrExisting(destination, entry)) {
+      const reason = `skip_existing_${kind}`
+      recordDuplicate({
+        modelName,
+        folders,
+        entry,
+        destination,
+        reason,
+        extra: getExistingExtra(destination),
+        savedPath: relativePath,
+        recordSeen: duplicateRecordSeen,
+      })
+      return { status: 'duplicate', reason, destination }
+    }
+
+    const buffer = await downloadBuffer(entry.mediaUrl, entry)
+    const hash = createHash('md5').update(buffer).digest('hex')
+    const bitwiseMatch = getBitwiseDuplicationRecord(hash)
+    if (bitwiseMatch.isDuplicate) {
+      const reason = 'duplicate_bitwise'
+      recordDuplicate({
+        modelName,
+        folders,
+        entry,
+        destination,
+        reason,
+        extra: {
+          hash,
+          activeRefs: bitwiseMatch.activeRefs.slice(0, 5),
+        },
+        savedPath: duplicateRecordSeen ? bitwiseMatch.activeRefs[0] : null,
+        recordSeen: duplicateRecordSeen,
+      })
+      return { status: 'duplicate', reason, hash, match: bitwiseMatch }
+    }
+
+    let visualHash = null
+    let visualClaimKey = null
+    if (visualChecks && typeof getVisualHashFromBuffer === 'function') {
+      visualHash = await getVisualHashFromBuffer(buffer)
+      const visualMatch =
+        visualHash && typeof getVisualDuplicationRecord === 'function'
+          ? getVisualDuplicationRecord(visualHash)
+          : null
+      if (visualMatch?.isDuplicate) {
+        const reason = 'duplicate_visual'
+        recordDuplicate({
+          modelName,
+          folders,
+          entry,
+          destination,
+          reason,
+          extra: {
+            visualHash,
+            activeRefs: visualMatch.activeRefs.slice(0, 5),
+          },
+          savedPath: duplicateRecordSeen ? visualMatch.activeRefs[0] : null,
+          recordSeen: duplicateRecordSeen,
+        })
+        return { status: 'duplicate', reason, visualHash, match: visualMatch }
+      }
+
+      const fuzzyMatch =
+        visualHash &&
+        Number.isFinite(fuzzyVisualDistance) &&
+        typeof getFuzzyVisualDuplicationRecord === 'function'
+          ? getFuzzyVisualDuplicationRecord(
+              modelName,
+              visualHash,
+              fuzzyVisualDistance
+            )
+          : null
+      if (fuzzyMatch?.isDuplicate) {
+        const reason = 'duplicate_visual_fuzzy'
+        recordDuplicate({
+          modelName,
+          folders,
+          entry,
+          destination,
+          reason,
+          extra: {
+            visualHash,
+            matchedVisualHash: fuzzyMatch.matchedHash,
+            distance: fuzzyMatch.distance,
+          },
+          savedPath: duplicateRecordSeen ? fuzzyMatch.activeRefs[0] : null,
+          recordSeen: duplicateRecordSeen,
+        })
+        return { status: 'duplicate', reason, visualHash, match: fuzzyMatch }
+      }
+
+      const pendingMatch =
+        visualHash &&
+        Number.isFinite(pendingVisualDistance) &&
+        typeof getPendingImageVisualDuplicate === 'function'
+          ? getPendingImageVisualDuplicate(
+              modelName,
+              visualHash,
+              pendingVisualDistance
+            )
+          : null
+      if (pendingMatch?.isDuplicate) {
+        const reason = 'duplicate_visual_pending'
+        recordDuplicate({
+          modelName,
+          folders,
+          entry,
+          destination,
+          reason,
+          extra: {
+            visualHash,
+            matchedVisualHash: pendingMatch.matchedHash,
+            distance: pendingMatch.distance,
+          },
+          savedPath: duplicateRecordSeen ? pendingMatch.activeRefs[0] : null,
+          recordSeen: duplicateRecordSeen,
+        })
+        return { status: 'duplicate', reason, visualHash, match: pendingMatch }
+      }
+
+      if (
+        visualHash &&
+        addVisualHashBeforeSave &&
+        typeof addVisualHash === 'function'
+      ) {
+        addVisualHash(visualHash)
+      }
+
+      if (visualHash && typeof reservePendingImageVisualClaim === 'function') {
+        visualClaimKey = reservePendingImageVisualClaim(
+          modelName,
+          relativePath,
+          visualHash
+        )
+      }
+    }
+
+    if (!checkExistingBeforeDownload && isKnownOrExisting(destination, entry)) {
+      const reason = `skip_existing_${kind}`
+      recordDuplicate({
+        modelName,
+        folders,
+        entry,
+        destination,
+        reason,
+        extra: getExistingExtra(destination),
+        savedPath: relativePath,
+        recordSeen: duplicateRecordSeen,
+      })
+      return { status: 'duplicate', reason, destination }
+    }
+
+    try {
+      fs.writeFileSync(finalPath, buffer)
+      const { metadata, recordedDate, fileDate } =
+        await mediaSaver.finalizeImage({
+          modelName,
+          bucket,
+          filename: entry.filename,
+          buffer,
+          absolutePath: finalPath,
+          mediaType: kind === 'gif' ? 'gif' : 'image',
+          uploadedDate: entry.uploadedDate,
+          pageMeta,
+          entry,
+        })
+
+      if (shouldAddBitwiseHash({ hash, metadata, entry, destination })) {
+        addBitwiseHash(hash, metadata)
+        saveBitwiseHashCache?.()
+      }
+      if (visualHash && typeof addVisualHash === 'function') {
+        addVisualHash(visualHash, metadata)
+      }
+      if (visualHash && saveVisualHashCacheOnSave) {
+        saveVisualHashCache?.()
+      }
+
+      const stats = recordSaved({
+        modelName,
+        folders,
+        entry,
+        destination,
+        sizeBytes: buffer.length,
+        hash,
+        visualHash,
+        kind,
+      })
+      return {
+        status: 'saved',
+        destination,
+        hash,
+        visualHash,
+        metadata,
+        recordedDate,
+        fileDate,
+        stats,
+      }
+    } finally {
+      releasePendingImageVisualClaim?.(visualClaimKey)
+    }
+  }
+
   return {
     getDestination,
     getExistingExtra,
@@ -199,6 +443,7 @@ function createMediaSavePipeline(options = {}) {
     recordMediaSeen,
     recordOutcome,
     recordSaved,
+    saveImageLikeMedia,
   }
 }
 

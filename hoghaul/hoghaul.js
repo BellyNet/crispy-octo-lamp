@@ -1101,7 +1101,6 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     entry,
     kind,
   })
-  const { bucket, finalPath, relativePath } = destination
 
   hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
@@ -1117,133 +1116,57 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
-  if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
-    recordDuplicate(entry, relativePath, `skip_existing_${kind}`, folders)
+  const result = await hoghaulSavePipeline.saveImageLikeMedia({
+    modelName,
+    folders,
+    entry,
+    destination,
+    kind,
+    downloadBuffer: downloadMediaBuffer,
+    getBitwiseDuplicationRecord,
+    getVisualHashFromBuffer,
+    getVisualDuplicationRecord,
+    getFuzzyVisualDuplicationRecord,
+    getPendingImageVisualDuplicate,
+    reservePendingImageVisualClaim,
+    releasePendingImageVisualClaim,
+    addBitwiseHash,
+    addVisualHash,
+    saveBitwiseHashCache,
+    saveVisualHashCache,
+    duplicateRecordSeen: true,
+    visualChecks: kind === 'image',
+    fuzzyVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
+    pendingVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
+    saveVisualHashCacheOnSave: true,
+  })
+
+  if (result.reason?.startsWith('skip_existing_')) {
     console.log(`Exists already: ${entry.filename}`)
     return
   }
-
-  const buffer = await downloadMediaBuffer(entry.mediaUrl, entry)
-  const hash = createHash('md5').update(buffer).digest('hex')
-  const bitwiseMatch = getBitwiseDuplicationRecord(hash)
-  if (bitwiseMatch.isDuplicate) {
-    recordDuplicate(
-      entry,
-      bitwiseMatch.activeRefs[0],
-      'duplicate_bitwise',
-      folders
-    )
+  if (result.reason === 'duplicate_bitwise') {
     console.log(`Bitwise dupe: ${entry.filename}`)
     return
   }
-
-  let visualHash = null
-  let visualClaimKey = null
-  if (kind === 'image') {
-    visualHash = await getVisualHashFromBuffer(buffer)
-    const visualMatch = visualHash
-      ? getVisualDuplicationRecord(visualHash)
-      : null
-    if (visualMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        visualMatch.activeRefs[0],
-        'duplicate_visual',
-        folders
-      )
-      console.log(`Visual dupe: ${entry.filename}`)
-      return
-    }
-
-    const fuzzyMatch = visualHash
-      ? getFuzzyVisualDuplicationRecord(
-          modelName,
-          visualHash,
-          MAX_FUZZY_IMAGE_VISUAL_DISTANCE
-        )
-      : null
-    if (fuzzyMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        fuzzyMatch.activeRefs[0],
-        'duplicate_visual_fuzzy',
-        folders,
-        {
-          visualHash,
-          matchedVisualHash: fuzzyMatch.matchedHash,
-          distance: fuzzyMatch.distance,
-        }
-      )
-      console.log(
-        `Fuzzy visual dupe (${fuzzyMatch.distance}): ${entry.filename}`
-      )
-      return
-    }
-
-    const pendingMatch = visualHash
-      ? getPendingImageVisualDuplicate(
-          modelName,
-          visualHash,
-          MAX_FUZZY_IMAGE_VISUAL_DISTANCE
-        )
-      : null
-    if (pendingMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        pendingMatch.activeRefs[0],
-        'duplicate_visual_pending',
-        folders,
-        {
-          visualHash,
-          matchedVisualHash: pendingMatch.matchedHash,
-          distance: pendingMatch.distance,
-        }
-      )
-      console.log(
-        `Pending visual dupe (${pendingMatch.distance}): ${entry.filename}`
-      )
-      return
-    }
-
-    visualClaimKey = reservePendingImageVisualClaim(
-      modelName,
-      relativePath,
-      visualHash
+  if (result.reason === 'duplicate_visual') {
+    console.log(`Visual dupe: ${entry.filename}`)
+    return
+  }
+  if (result.reason === 'duplicate_visual_fuzzy') {
+    console.log(
+      `Fuzzy visual dupe (${result.match.distance}): ${entry.filename}`
     )
+    return
+  }
+  if (result.reason === 'duplicate_visual_pending') {
+    console.log(
+      `Pending visual dupe (${result.match.distance}): ${entry.filename}`
+    )
+    return
   }
 
-  try {
-    fs.writeFileSync(finalPath, buffer)
-    const { metadata } = await hoghaulMediaSaver.finalizeImage({
-      modelName,
-      bucket,
-      filename: entry.filename,
-      buffer,
-      absolutePath: finalPath,
-      mediaType: kind === 'gif' ? 'gif' : 'image',
-      uploadedDate: entry.uploadedDate,
-      entry,
-    })
-
-    addBitwiseHash(hash, metadata)
-    if (visualHash) addVisualHash(visualHash, metadata)
-    saveBitwiseHashCache()
-    if (visualHash) saveVisualHashCache()
-
-    hoghaulSavePipeline.recordSaved({
-      modelName,
-      folders,
-      entry,
-      destination,
-      sizeBytes: buffer.length,
-      hash,
-      visualHash,
-      kind,
-    })
-    console.log(`Saved ${kind}: ${entry.filename}`)
-  } finally {
-    releasePendingImageVisualClaim(visualClaimKey)
-  }
+  console.log(`Saved ${kind}: ${entry.filename}`)
 }
 
 async function saveVideoMedia(modelName, folders, entry) {

@@ -1514,127 +1514,43 @@ async function saveStufferDbImageLikeMedia({
   destination,
   kind,
 }) {
-  const { bucket, finalPath } = destination
-  const buffer = await downloadBufferWithProgress(entry.mediaUrl)
-  const hash = createHash('md5').update(buffer).digest('hex')
-
-  if (kind === 'image') {
-    const bitwiseMatch = getBitwiseDuplicationRecord(hash)
-    if (bitwiseMatch.isDuplicate) {
-      recordMilkmaidDuplicate({
-        modelName,
-        entry,
-        destination,
-        reason: 'duplicate_bitwise',
-        extra: {
-          hash,
-          activeRefs: bitwiseMatch.activeRefs.slice(0, 5),
-        },
-      })
-      return logAndProgress(`♻️ Bitwise dupe: ${entry.filename}`, true)
-    }
-
-    const visualHash = await getVisualHashFromBuffer(buffer)
-    const visualMatch = visualHash
-      ? getVisualDuplicationRecord(visualHash)
-      : null
-    if (visualMatch?.isDuplicate) {
-      recordMilkmaidDuplicate({
-        modelName,
-        entry,
-        destination,
-        reason: 'duplicate_visual',
-        extra: {
-          visualHash,
-          activeRefs: visualMatch.activeRefs.slice(0, 5),
-        },
-      })
-      return logAndProgress(`👁️ Visual dupe (global): ${entry.filename}`, true)
-    }
-    if (visualHash) addVisualHash(visualHash)
-
-    if (milkmaidSavePipeline.isKnownOrExisting(destination, entry)) {
-      recordMilkmaidDuplicate({
-        modelName,
-        entry,
-        destination,
-        reason: 'skip_existing_image',
-        extra: milkmaidSavePipeline.getExistingExtra(destination),
-      })
-      return logAndProgress(`♻️ Skipped (exists): ${entry.filename}`, true)
-    }
-
-    fs.writeFileSync(finalPath, buffer)
-    const { metadata } = await milkmaidMediaSaver.finalizeImage({
-      modelName,
-      bucket,
-      filename: entry.filename,
-      buffer,
-      absolutePath: finalPath,
-      mediaType: 'image',
-      uploadedDate: entry.uploadedDate,
-      pageMeta: entry.pageMeta,
-      entry,
-    })
-
-    if (!isBitwiseDupe(hash)) {
-      addBitwiseHash(hash, metadata)
-      saveBitwiseHashCache()
-    }
-    if (visualHash) addVisualHash(visualHash, metadata)
-
-    milkmaidSavePipeline.recordSaved({
-      modelName,
-      folders,
-      entry,
-      destination,
-      sizeBytes: buffer.length,
-      hash,
-      visualHash,
-      kind,
-    })
-    return logAndProgress(`✅ Saved: ${entry.filename}`, true)
-  }
-
-  if (milkmaidSavePipeline.isKnownOrExisting(destination, entry)) {
-    recordMilkmaidDuplicate({
-      modelName,
-      entry,
-      destination,
-      reason: 'skip_existing_gif',
-      extra: milkmaidSavePipeline.getExistingExtra(destination),
-    })
-    return logAndProgress(`♻️ Skipped gif (exists): ${entry.filename}`, true)
-  }
-
-  fs.writeFileSync(finalPath, buffer)
-  const { metadata } = await milkmaidMediaSaver.finalizeImage({
-    modelName,
-    bucket,
-    filename: entry.filename,
-    buffer,
-    absolutePath: finalPath,
-    mediaType: 'gif',
-    uploadedDate: entry.uploadedDate,
-    pageMeta: entry.pageMeta,
-    entry,
-  })
-
-  if (!isBitwiseDupe(hash)) {
-    addBitwiseHash(hash, metadata)
-    saveBitwiseHashCache()
-  }
-
-  milkmaidSavePipeline.recordSaved({
+  const result = await milkmaidSavePipeline.saveImageLikeMedia({
     modelName,
     folders,
     entry,
     destination,
-    sizeBytes: buffer.length,
-    hash,
     kind,
+    downloadBuffer: downloadBufferWithProgress,
+    getBitwiseDuplicationRecord,
+    getVisualHashFromBuffer,
+    getVisualDuplicationRecord,
+    addBitwiseHash,
+    addVisualHash,
+    saveBitwiseHashCache,
+    shouldAddBitwiseHash: ({ hash }) => !isBitwiseDupe(hash),
+    checkExistingBeforeDownload: false,
+    visualChecks: kind === 'image',
+    addVisualHashBeforeSave: true,
   })
-  return logAndProgress(`Saved gif: ${entry.filename}`, true)
+
+  if (result.reason === 'duplicate_bitwise') {
+    return logAndProgress(`♻️ Bitwise dupe: ${entry.filename}`, true)
+  }
+  if (result.reason === 'duplicate_visual') {
+    return logAndProgress(`👁️ Visual dupe (global): ${entry.filename}`, true)
+  }
+  if (result.reason === 'skip_existing_image') {
+    return logAndProgress(`♻️ Skipped (exists): ${entry.filename}`, true)
+  }
+  if (result.reason === 'skip_existing_gif') {
+    return logAndProgress(`♻️ Skipped gif (exists): ${entry.filename}`, true)
+  }
+  return logAndProgress(
+    kind === 'gif'
+      ? `Saved gif: ${entry.filename}`
+      : `✅ Saved: ${entry.filename}`,
+    true
+  )
 }
 
 function queueStufferDbVideoMedia({ modelName, folders, entry, destination }) {
