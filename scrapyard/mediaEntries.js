@@ -34,12 +34,15 @@ function classifyMediaFilename(filename) {
   return { ext, kind: 'unknown' }
 }
 
-function compactUnique(values) {
+function compactUnique(
+  values,
+  normalizeValue = (value) => String(value || '').trim()
+) {
   return Array.from(
     new Set(
       values
         .flat(Infinity)
-        .map((value) => String(value || '').trim())
+        .map((value) => normalizeValue(value))
         .filter(Boolean)
     )
   )
@@ -86,10 +89,62 @@ function normalizeMediaEntries(entries, options = {}) {
     .filter(Boolean)
 }
 
+function getMediaEntryUrls(entry = {}, options = {}) {
+  return compactUnique(
+    [entry.mediaUrl, entry.jsonMediaUrl, entry.mediaUrls, entry.sourceUrls],
+    options.normalizeUrl
+  )
+}
+
+function getMediaEntryPageUrls(entry = {}, options = {}) {
+  return compactUnique(
+    [entry.mediaPageUrl, entry.mediaPageUrls],
+    options.normalizeUrl
+  )
+}
+
+function getMediaEntrySeenDetails(entry = {}, options = {}) {
+  return {
+    mediaUrl: entry.mediaUrl || null,
+    mediaUrls: getMediaEntryUrls(entry, options),
+    mediaPageUrl: entry.mediaPageUrl || null,
+    mediaPageUrls: getMediaEntryPageUrls(entry, options),
+  }
+}
+
+function getMediaEntrySourceDetails(entry = {}) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    postId: entry.postId || null,
+  }
+}
+
+function getMediaEntryHashMetadata(entry = {}) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    sourcePostId: entry.postId || null,
+    sourceMediaPageUrl: entry.mediaPageUrl || null,
+  }
+}
+
 module.exports = {
   sanitizeToken,
   parseMediaDate,
   classifyMediaFilename,
+  compactUnique,
+  getMediaEntryHashMetadata,
+  getMediaEntryPageUrls,
+  getMediaEntrySeenDetails,
+  getMediaEntrySourceDetails,
+  getMediaEntryUrls,
   normalizeMediaEntry,
   normalizeMediaEntries,
 }

@@ -19,6 +19,11 @@ const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const {
   classifyMediaFilename,
+  getMediaEntryHashMetadata,
+  getMediaEntryPageUrls,
+  getMediaEntrySeenDetails,
+  getMediaEntrySourceDetails,
+  getMediaEntryUrls,
   normalizeMediaEntry,
   normalizeMediaEntries,
 } = require('../scrapyard/mediaEntries')
@@ -650,48 +655,23 @@ function uniqueSeenUrls(values) {
 }
 
 function getEntryMediaUrls(entry) {
-  return uniqueSeenUrls([
-    entry?.mediaUrl,
-    entry?.jsonMediaUrl,
-    entry?.mediaUrls,
-    entry?.sourceUrls,
-  ])
+  return getMediaEntryUrls(entry, { normalizeUrl: normalizeSeenUrl })
 }
 
 function getEntryMediaPageUrls(entry) {
-  return uniqueSeenUrls([entry?.mediaPageUrl, entry?.mediaPageUrls])
+  return getMediaEntryPageUrls(entry, { normalizeUrl: normalizeSeenUrl })
 }
 
 function getEntrySeenDetails(entry) {
-  return {
-    mediaUrl: entry.mediaUrl,
-    mediaUrls: getEntryMediaUrls(entry),
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-  }
+  return getMediaEntrySeenDetails(entry, { normalizeUrl: normalizeSeenUrl })
 }
 
 function getEntrySourceDetails(entry) {
-  return {
-    sourceSite: entry.sourceSite || null,
-    sourceService: entry.sourceService || null,
-    sourceUserId: entry.sourceUserId || null,
-    sourceUsername: entry.sourceUsername || null,
-    sourceSubreddit: entry.sourceSubreddit || null,
-    postId: entry.postId || null,
-  }
+  return getMediaEntrySourceDetails(entry)
 }
 
 function getEntryHashMetadata(entry = {}) {
-  return {
-    sourceSite: entry.sourceSite || null,
-    sourceService: entry.sourceService || null,
-    sourceUserId: entry.sourceUserId || null,
-    sourceUsername: entry.sourceUsername || null,
-    sourceSubreddit: entry.sourceSubreddit || null,
-    sourcePostId: entry.postId || null,
-    sourceMediaPageUrl: entry.mediaPageUrl || null,
-  }
+  return getMediaEntryHashMetadata(entry)
 }
 
 function getMediaSeenIndexPath(modelLogDir) {

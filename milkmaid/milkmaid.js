@@ -65,6 +65,13 @@ const {
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
+const {
+  getMediaEntryHashMetadata,
+  getMediaEntryPageUrls,
+  getMediaEntrySeenDetails,
+  getMediaEntrySourceDetails,
+  getMediaEntryUrls,
+} = require('../scrapyard/mediaEntries')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
@@ -1451,49 +1458,23 @@ function setProgressTotal(total = null) {
 }
 
 function getMilkmaidEntryMediaUrls(entry = {}) {
-  return Array.from(
-    new Set([entry.mediaUrl, entry.mediaUrls].flat(Infinity).filter(Boolean))
-  )
+  return getMediaEntryUrls(entry)
 }
 
 function getMilkmaidEntryMediaPageUrls(entry = {}) {
-  return Array.from(
-    new Set(
-      [entry.mediaPageUrl, entry.mediaPageUrls].flat(Infinity).filter(Boolean)
-    )
-  )
+  return getMediaEntryPageUrls(entry)
 }
 
 function getMilkmaidEntrySeenDetails(entry = {}) {
-  return {
-    mediaUrl: entry.mediaUrl || null,
-    mediaUrls: getMilkmaidEntryMediaUrls(entry),
-    mediaPageUrl: entry.mediaPageUrl || null,
-    mediaPageUrls: getMilkmaidEntryMediaPageUrls(entry),
-  }
+  return getMediaEntrySeenDetails(entry)
 }
 
 function getMilkmaidEntrySourceDetails(entry = {}) {
-  return {
-    sourceSite: entry.sourceSite || null,
-    sourceService: entry.sourceService || null,
-    sourceUserId: entry.sourceUserId || null,
-    sourceUsername: entry.sourceUsername || null,
-    sourceSubreddit: entry.sourceSubreddit || null,
-    postId: entry.postId || null,
-  }
+  return getMediaEntrySourceDetails(entry)
 }
 
 function getMilkmaidEntryHashMetadata(entry = {}) {
-  return {
-    sourceSite: entry.sourceSite || null,
-    sourceService: entry.sourceService || null,
-    sourceUserId: entry.sourceUserId || null,
-    sourceUsername: entry.sourceUsername || null,
-    sourceSubreddit: entry.sourceSubreddit || null,
-    sourcePostId: entry.postId || null,
-    sourceMediaPageUrl: entry.mediaPageUrl || null,
-  }
+  return getMediaEntryHashMetadata(entry)
 }
 
 function recordMilkmaidDuplicate({
