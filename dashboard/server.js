@@ -1,6 +1,7 @@
 'use strict'
 
 const express = require('express')
+const compression = require('compression')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
@@ -254,6 +255,18 @@ function parseCookies(req) {
   }
   return cookies
 }
+
+// gzip JSON responses — /api/users/:name/media for a 4000-item model is
+// ~1.5 MB raw and compresses to ~250 KB. Skip media files and pre-generated
+// thumbnails since those are already image-compressed.
+app.use(compression({
+  filter: (req, res) => {
+    if (req.path.startsWith('/media/') ||
+        req.path.startsWith('/thumb/') ||
+        req.path.startsWith('/thumbnail/')) return false
+    return compression.filter(req, res)
+  },
+}))
 
 app.use(express.urlencoded({ extended: false }))
 
@@ -714,10 +727,30 @@ app.get('/api/users/:username/media', async (req, res) => {
     const { response } = await scanModel(username)
     res.setHeader('Cache-Control', 'no-cache')
     res.json(response)
+    // After responding, kick off background JPEG thumb generation for every
+    // image/gif in this model. By the time the user scrolls past the first
+    // ~200 cards, the rest are likely already cached on disk.
+    setImmediate(() => warmGridThumbs(username, response))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
+
+async function warmGridThumbs(username, items) {
+  const tasks = []
+  for (const item of items) {
+    if (item.type === 'video') continue
+    const dst = thumbDiskPath(username, item.folder, item.filename)
+    if (fs.existsSync(dst)) continue
+    const src = safeSubPath(datasetDir, username, item.folder, item.filename)
+    if (!src || !fs.existsSync(src)) continue
+    tasks.push(thumbLimit(() => generateThumb(src, dst).catch(() => {})))
+  }
+  if (!tasks.length) return
+  console.log(`  Thumbs:    warming ${tasks.length} grid thumbs for ${username}…`)
+  await Promise.all(tasks)
+  console.log(`  Thumbs:    ${tasks.length} grid thumbs ready for ${username} ✓`)
+}
 
 // Small JPEG thumbnail for images and GIFs — lazy-generated, cached to disk
 // under THUMB_DIR/<user>/thumb-<folder>-<filename>.jpg. Used by the home grid

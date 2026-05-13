@@ -1854,12 +1854,15 @@
         return card
       }
 
-      // Renders in chunks of 60 per animation frame so the browser stays
-      // responsive and paints the first cards immediately rather than freezing
-      // until the entire list is built.
+      // Renders the first ~200 cards synchronously for fast first paint, then
+      // appends 200 more whenever the user scrolls within 500px of the bottom.
+      // For a 4000-item model, mobile only creates ~200 DOM nodes upfront
+      // instead of all 4000 — first paint goes from seconds to milliseconds.
       let _renderToken = 0
+      let _scrollObserver = null
       function renderGrid() {
         gridEl.innerHTML = ''
+        if (_scrollObserver) { _scrollObserver.disconnect(); _scrollObserver = null }
 
         if (!filtered.length) {
           noResultsEl.style.display = 'block'
@@ -1867,20 +1870,43 @@
         }
         noResultsEl.style.display = 'none'
 
-        const token = ++_renderToken // invalidates any in-progress render
-        const CHUNK = 60
+        const token = ++_renderToken
+        const INITIAL = 200
+        const BATCH   = 200
         let i = 0
 
-        function renderChunk() {
-          if (_renderToken !== token) return // a newer render started, stop this one
+        const renderBatch = (n) => {
+          if (_renderToken !== token) return
+          const end = Math.min(i + n, filtered.length)
           const frag = document.createDocumentFragment()
-          const end = Math.min(i + CHUNK, filtered.length)
           for (; i < end; i++) frag.appendChild(createCard(filtered[i], i))
           gridEl.appendChild(frag)
-          if (i < filtered.length) requestAnimationFrame(renderChunk)
         }
 
-        requestAnimationFrame(renderChunk)
+        renderBatch(INITIAL)
+        if (i >= filtered.length) return
+
+        // Sentinel sits at the end of the grid; when it enters the viewport
+        // (or gets within 500px) we render the next batch and re-observe.
+        const sentinel = document.createElement('div')
+        sentinel.id = 'grid-sentinel'
+        sentinel.style.cssText = 'grid-column: 1 / -1; height: 1px;'
+        gridEl.appendChild(sentinel)
+
+        _scrollObserver = new IntersectionObserver((entries) => {
+          if (!entries[0].isIntersecting) return
+          if (_renderToken !== token) { _scrollObserver.disconnect(); return }
+          // Re-attach sentinel after the new cards so it stays at the bottom.
+          gridEl.removeChild(sentinel)
+          renderBatch(BATCH)
+          if (i >= filtered.length) {
+            _scrollObserver.disconnect()
+            _scrollObserver = null
+          } else {
+            gridEl.appendChild(sentinel)
+          }
+        }, { root: document.getElementById('grid-container'), rootMargin: '500px' })
+        _scrollObserver.observe(sentinel)
       }
 
       // ─── LIGHTBOX (PhotoSwipe v5) ─────────────────────────────────────────
