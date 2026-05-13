@@ -976,6 +976,57 @@ async function prewarmThumbnails() {
   console.log(`\r  Previews:  ${missing.length} GIFs generated ✓          `)
 }
 
+// Walks the whole dataset and pre-generates any missing JPEG thumb for every
+// image and gif in every model. Runs in the background — never blocks startup
+// or responses. After the first nightly run, mobile visits to any model are
+// served entirely from cached thumbnails. Set DISABLE_GRID_THUMB_PREWARM=1
+// to skip if disk space is tight.
+async function prewarmAllGridThumbs() {
+  if (process.env.DISABLE_GRID_THUMB_PREWARM === '1') {
+    console.log('  Thumbs:    grid prewarm disabled (DISABLE_GRID_THUMB_PREWARM=1)')
+    return
+  }
+  let dirs
+  try { dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true }) }
+  catch { return }
+  const modelDirs = dirs.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+
+  // Collect all (src, dst) pairs first so the progress line is meaningful.
+  const tasks = []
+  for (const d of modelDirs) {
+    const username = d.name
+    for (const folder of ['images', 'gif']) {
+      let files
+      try { files = await fs.promises.readdir(path.join(datasetDir, username, folder)) }
+      catch { continue }
+      for (const file of files) {
+        const ext = path.extname(file).toLowerCase()
+        if (!IMAGE_EXTS_IN.has(ext)) continue
+        const dst = thumbDiskPath(username, folder, file)
+        if (fs.existsSync(dst)) continue
+        tasks.push({ src: path.join(datasetDir, username, folder, file), dst })
+      }
+    }
+  }
+
+  if (!tasks.length) {
+    console.log('  Thumbs:    all grid thumbs cached ✓')
+    return
+  }
+
+  console.log(`  Thumbs:    generating ${tasks.length} grid thumbs across ${modelDirs.length} models…`)
+  const t0 = Date.now()
+  let done = 0
+  await Promise.all(tasks.map((t) => thumbLimit(async () => {
+    await generateThumb(t.src, t.dst).catch(() => {})
+    done++
+    if (done % 100 === 0 || done === tasks.length) {
+      process.stdout.write(`\r  Thumbs:    ${done}/${tasks.length} done`)
+    }
+  })))
+  console.log(`\r  Thumbs:    ${tasks.length} grid thumbs generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `)
+}
+
 // Walks modelStatsCache and pre-generates any missing cover JPEG thumbs so
 // the first home-grid render hits cached files. Cheap — ~16 covers per model.
 async function prewarmCoverThumbs() {
@@ -1053,7 +1104,13 @@ async function start() {
   })
 
   // Cover thumbs first — these block the home grid being fast. Cheap (sharp).
-  prewarmCoverThumbs().catch((err) => console.warn('  Cover thumb prewarm error:', err.message))
+  prewarmCoverThumbs()
+    .catch((err) => console.warn('  Cover thumb prewarm error:', err.message))
+    // Grid thumbs second — once covers are done, walk every image/gif in
+    // every model and pre-generate the small JPEG. After this finishes,
+    // mobile visits to any model are served entirely from disk cache.
+    .then(() => prewarmAllGridThumbs())
+    .catch((err) => console.warn('  Grid thumb prewarm error:', err.message))
 
   // GIF generation runs after the server is up — it's CPU-heavy and not needed
   // for page loads (the media endpoint works without previews being ready).
@@ -1080,6 +1137,8 @@ async function start() {
       catch (err) { console.warn('  Nightly scan error:', err.message) }
       try { await prewarmCoverThumbs() }
       catch (err) { console.warn('  Cover thumb prewarm (nightly) error:', err.message) }
+      try { await prewarmAllGridThumbs() }
+      catch (err) { console.warn('  Grid thumb prewarm (nightly) error:', err.message) }
       try { await prewarmThumbnails() }
       catch (err) { console.warn('  Preview prewarm (nightly) error:', err.message) }
       scheduleNightly()
