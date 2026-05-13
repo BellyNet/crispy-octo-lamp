@@ -12,6 +12,7 @@ const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
+const runLifecycle = require('../scrapyard/runLifecycle')
 const {
   classifyMediaFilename,
   getMediaEntryHashMetadata,
@@ -451,22 +452,12 @@ function moveFileIntoPlace(sourcePath, destinationPath) {
 
 function startRunLog(modelName, inputUrl, folders, keepHistory) {
   runTerminationHandled = false
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const logPath = path.join(folders.logDir, `hoghaul-run-${stamp}.jsonl`)
-  const summaryPath = path.join(
-    folders.logDir,
-    'hoghaul-run-latest-summary.json'
-  )
-  const modelSummaryPath = path.join(folders.base, 'hoghaul-last-run.json')
-  currentRunLog = {
-    stamp,
-    logPath,
-    summaryPath,
-    modelSummaryPath,
+  currentRunLog = runLifecycle.createRunLog({
+    source: 'hoghaul',
     modelName,
     inputUrl,
-    keepHistory: Boolean(keepHistory),
-    startedAt: new Date().toISOString(),
+    folders,
+    keepHistory,
     counters: {
       saved: 0,
       skipped: 0,
@@ -481,95 +472,23 @@ function startRunLog(modelName, inputUrl, folders, keepHistory) {
       lazyExpectedBytes: 0,
       lazyTransferredBytes: 0,
     },
-    errors: [],
-  }
-
-  removeFileIfExists(modelSummaryPath)
-  fs.writeFileSync(
-    modelSummaryPath,
-    JSON.stringify(
-      {
-        startedAt: currentRunLog.startedAt,
-        modelName,
-        inputUrl,
-        status: 'running',
-      },
-      null,
-      2
-    ) + '\n'
-  )
-
-  appendRunEvent('run_started', {
-    modelName,
-    inputUrl,
-    logPath,
+    removeFileIfExists,
   })
 }
 
 function appendRunEvent(type, payload = {}) {
-  if (!currentRunLog) return
-  fs.appendFileSync(
-    currentRunLog.logPath,
-    JSON.stringify({
-      at: new Date().toISOString(),
-      type,
-      ...payload,
-    }) + '\n'
-  )
+  runLifecycle.appendRunEvent(currentRunLog, type, payload)
 }
 
 function recordRunError(category, details = {}) {
-  if (!currentRunLog) return
-  currentRunLog.errors.push({
-    at: new Date().toISOString(),
-    category,
-    ...details,
-  })
+  runLifecycle.recordRunError(currentRunLog, category, details)
 }
 
 function finalizeRunLog(extra = {}) {
-  if (!currentRunLog) return
-
-  const { status = 'finished', ...rest } = extra
-  const finishedAt = new Date().toISOString()
-  const durationMs = Math.max(
-    new Date(finishedAt).getTime() -
-      new Date(currentRunLog.startedAt).getTime(),
-    0
-  )
-  const summary = {
-    startedAt: currentRunLog.startedAt,
-    finishedAt,
-    durationMs,
-    modelName: currentRunLog.modelName,
-    inputUrl: currentRunLog.inputUrl,
-    logPath: currentRunLog.logPath,
-    counters: currentRunLog.counters,
-    transfer: currentRunLog.transfer,
-    errors: currentRunLog.errors,
-    ...rest,
-  }
-
-  fs.writeFileSync(
-    currentRunLog.summaryPath,
-    JSON.stringify(summary, null, 2) + '\n'
-  )
-  fs.writeFileSync(
-    currentRunLog.modelSummaryPath,
-    JSON.stringify(
-      {
-        ...summary,
-        status,
-      },
-      null,
-      2
-    ) + '\n'
-  )
-
-  const shouldKeepHistory =
-    currentRunLog.keepHistory || currentRunLog.errors.length > 0
-  if (!shouldKeepHistory) removeFileIfExists(currentRunLog.logPath)
-  currentRunLog = null
+  currentRunLog = runLifecycle.finalizeRunLog(currentRunLog, extra, {
+    removeFileIfExists,
+    summaryTrailingNewline: true,
+  })
 }
 
 function setExpectedMediaCount(total) {

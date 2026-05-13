@@ -59,6 +59,7 @@ const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
+const runLifecycle = require('../scrapyard/runLifecycle')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const {
   getMediaEntryHashMetadata,
@@ -845,22 +846,11 @@ function existsLocallyOrOnNas(filePath) {
 }
 
 function startRunLog(modelName, inputUrl, folders) {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const logPath = path.join(folders.logDir, `milkmaid-run-${stamp}.jsonl`)
-  const summaryPath = path.join(
-    folders.logDir,
-    'milkmaid-run-latest-summary.json'
-  )
-  const modelSummaryPath = path.join(folders.base, 'milkmaid-last-run.json')
-  currentRunLog = {
-    stamp,
-    logPath,
-    summaryPath,
-    modelSummaryPath,
+  currentRunLog = runLifecycle.createRunLog({
+    source: 'milkmaid',
     modelName,
     inputUrl,
-    keepHistory: false,
-    startedAt: new Date().toISOString(),
+    folders,
     counters: {
       saved: 0,
       duplicates: 0,
@@ -875,94 +865,22 @@ function startRunLog(modelName, inputUrl, folders) {
       lazyExpectedBytes: 0,
       lazyTransferredBytes: 0,
     },
-    errors: [],
-  }
-
-  removeFileIfExists(modelSummaryPath)
-  fs.writeFileSync(
-    modelSummaryPath,
-    JSON.stringify(
-      {
-        startedAt: currentRunLog.startedAt,
-        modelName,
-        inputUrl,
-        status: 'running',
-      },
-      null,
-      2
-    ) + '\n'
-  )
-
-  appendRunEvent('run_started', {
-    modelName,
-    inputUrl,
-    logPath,
+    removeFileIfExists,
   })
 }
 
 function appendRunEvent(type, payload = {}) {
-  if (!currentRunLog) return
-  fs.appendFileSync(
-    currentRunLog.logPath,
-    JSON.stringify({
-      at: new Date().toISOString(),
-      type,
-      ...payload,
-    }) + '\n'
-  )
+  runLifecycle.appendRunEvent(currentRunLog, type, payload)
 }
 
 function recordRunError(category, details = {}) {
-  if (!currentRunLog) return
-  currentRunLog.errors.push({
-    at: new Date().toISOString(),
-    category,
-    ...details,
-  })
+  runLifecycle.recordRunError(currentRunLog, category, details)
 }
 
 function finalizeRunLog(extra = {}) {
-  if (!currentRunLog) return
-
-  const { status = 'finished', ...rest } = extra
-  const finishedAt = new Date().toISOString()
-  const durationMs = Math.max(
-    new Date(finishedAt).getTime() -
-      new Date(currentRunLog.startedAt).getTime(),
-    0
-  )
-  const summary = {
-    startedAt: currentRunLog.startedAt,
-    finishedAt,
-    durationMs,
-    modelName: currentRunLog.modelName,
-    inputUrl: currentRunLog.inputUrl,
-    logPath: currentRunLog.logPath,
-    counters: currentRunLog.counters,
-    transfer: currentRunLog.transfer,
-    errors: currentRunLog.errors,
-    ...rest,
-  }
-
-  fs.writeFileSync(currentRunLog.summaryPath, JSON.stringify(summary, null, 2))
-  fs.writeFileSync(
-    currentRunLog.modelSummaryPath,
-    JSON.stringify(
-      {
-        ...summary,
-        status,
-      },
-      null,
-      2
-    ) + '\n'
-  )
-
-  const shouldKeepHistory =
-    currentRunLog.keepHistory || currentRunLog.errors.length > 0
-  if (!shouldKeepHistory) {
-    removeFileIfExists(currentRunLog.logPath)
-  }
-  currentRunLog = null
+  currentRunLog = runLifecycle.finalizeRunLog(currentRunLog, extra, {
+    removeFileIfExists,
+  })
 }
 
 function getMediaSeenIndexPath(modelLogDir) {
