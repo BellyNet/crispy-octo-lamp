@@ -68,11 +68,10 @@ const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
-  buildStufferDbMediaEntry,
   buildCategoryRunList: buildStufferDbCategoryRunList,
   collectChildCategoryUrls: collectStufferDbChildCategoryUrls,
   extractGalleryPictureUrls,
-  extractMediaPageDetails,
+  fetchStufferDbMediaEntry,
   fetchStufferDBTotalCount: fetchStufferDbTotalCountFromAdapter,
   getBreadcrumbInfo: getStufferDbBreadcrumbInfo,
   getStufferDbCategoryId,
@@ -1681,40 +1680,28 @@ async function scrapeGallery(browser, url, modelName, folders) {
             )
           }
 
-          try {
-            await page.goto(mediaPageUrl, {
-              waitUntil: 'domcontentloaded',
-              timeout: MEDIA_PAGE_TIMEOUT_MS,
-            })
-          } catch (error) {
-            if (!/Navigation timeout/i.test(error.message || '')) {
-              throw error
-            }
-
-            appendRunEvent('media_page_retry', {
-              modelName,
-              mediaPageUrl,
-              attempt: 2,
-              timeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
-              reason: error.message,
-            })
-
-            await sleep(750)
-            await page.goto(mediaPageUrl, {
-              waitUntil: 'domcontentloaded',
-              timeout: MEDIA_PAGE_RETRY_TIMEOUT_MS,
-            })
-          }
-
-          const mediaDetails = await extractMediaPageDetails(page)
-          const mediaEntry = buildStufferDbMediaEntry(
+          const mediaEntry = await fetchStufferDbMediaEntry(
+            page,
+            mediaPageUrl,
             {
               url,
               categoryId: getStufferDbCategoryId(url),
               modelName,
             },
-            mediaPageUrl,
-            mediaDetails
+            {
+              timeoutMs: MEDIA_PAGE_TIMEOUT_MS,
+              retryTimeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+              sleep,
+              onRetry: (error) => {
+                appendRunEvent('media_page_retry', {
+                  modelName,
+                  mediaPageUrl,
+                  attempt: 2,
+                  timeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+                  reason: error.message,
+                })
+              },
+            }
           )
           if (!mediaEntry) return
 

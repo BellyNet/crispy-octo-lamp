@@ -282,6 +282,41 @@ async function extractMediaPageDetails(page) {
   }
 }
 
+async function fetchStufferDbMediaEntry(
+  page,
+  mediaPageUrl,
+  source = {},
+  deps = {}
+) {
+  const normalizedMediaPageUrl = normalizeStufferDbPictureUrl(mediaPageUrl)
+  const waitUntil = deps.waitUntil || 'domcontentloaded'
+  const timeoutMs = deps.timeoutMs || 30000
+  const retryTimeoutMs = deps.retryTimeoutMs || timeoutMs
+
+  try {
+    await page.goto(normalizedMediaPageUrl, {
+      waitUntil,
+      timeout: timeoutMs,
+    })
+  } catch (error) {
+    if (!/Navigation timeout/i.test(error.message || '')) {
+      throw error
+    }
+
+    deps.onRetry?.(error)
+    if (typeof deps.sleep === 'function') {
+      await deps.sleep(deps.retryDelayMs || 750)
+    }
+    await page.goto(normalizedMediaPageUrl, {
+      waitUntil,
+      timeout: retryTimeoutMs,
+    })
+  }
+
+  const mediaDetails = await extractMediaPageDetails(page)
+  return buildStufferDbMediaEntry(source, normalizedMediaPageUrl, mediaDetails)
+}
+
 function buildStufferDbMediaEntry(
   source = {},
   mediaPageUrl,
@@ -325,6 +360,7 @@ module.exports = {
   extractGalleryPictureUrls,
   extractMediaPageDetails,
   extractStufferDbComments,
+  fetchStufferDbMediaEntry,
   fetchStufferDBTotalCount,
   getBreadcrumbInfo,
   getStufferDbCategoryId,
