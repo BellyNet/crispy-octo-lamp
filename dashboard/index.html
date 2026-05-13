@@ -445,6 +445,12 @@
         aspect-ratio: 1;
         display: flex;
         flex-direction: column;
+        /* Skip rendering, layout, and paint for cards outside the viewport.
+           Huge libraries (5000+ cards) no longer pay the full-mount cost
+           on first paint or while scrolling. contain-intrinsic-size keeps
+           the scroll bar honest before the card is actually rendered. */
+        content-visibility: auto;
+        contain-intrinsic-size: 200px 200px;
       }
       .media-card:hover {
         transform: translateY(-2px);
@@ -800,6 +806,8 @@
         overflow: hidden;
         cursor: pointer;
         transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+        content-visibility: auto;
+        contain-intrinsic-size: 240px 320px;
       }
       .home-card:hover {
         transform: translateY(-3px);
@@ -1415,9 +1423,9 @@
             el.loading = 'lazy'
             el.alt = u.name
             el.className = 'home-card-thumb'
-            el.src = (cover.type === 'video' && cover.previewUrl)
-              ? cover.previewUrl
-              : cover.url
+            // Prefer the small JPEG thumbnail. Fall back to the GIF preview
+            // (videos pre-cover-thumbs era) and finally to the source file.
+            el.src = cover.thumbUrl || cover.previewUrl || cover.url
             el.onerror = () => { el.style.opacity = '0.3' }
             if (mediaEl.parentNode === card) card.replaceChild(el, mediaEl)
           }
@@ -1790,9 +1798,17 @@
         } else {
           const img = document.createElement('img')
           img.loading = 'lazy'
-          img.src = item.url
+          // Use the small JPEG thumbnail for grid cards. The lightbox still
+          // loads item.url (the original) when the card is clicked.
+          img.src = item.thumbUrl || item.url
           img.alt = item.filename
-          img.onerror = () => { img.style.opacity = '0.3'; img.alt = '⚠ load error' }
+          img.onerror = () => {
+            // Fall back to the source if the thumb endpoint failed (e.g. sharp
+            // rejected the format) — slower but the card still shows something.
+            if (img.dataset.fallback) { img.style.opacity = '0.3'; img.alt = '⚠ load error'; return }
+            img.dataset.fallback = '1'
+            img.src = item.url
+          }
           thumb.appendChild(img)
         }
 

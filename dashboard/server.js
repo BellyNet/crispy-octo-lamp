@@ -361,6 +361,7 @@ function buildCoverPool(allMedia, max = 16) {
       filename:   m.filename,
       url:        m.url,
       previewUrl: m.previewUrl || null,
+      thumbUrl:   m.thumbUrl   || null,
     })
   }
   return pool
@@ -431,6 +432,11 @@ async function processFileForResponse(username, userDir, item) {
       previewUrl: type === 'video'
         ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
         : null,
+      // Unified thumbnail URL used by every card in the UI. Videos route to
+      // the GIF preview; images and gifs route to the /thumb JPEG endpoint.
+      thumbUrl: type === 'video'
+        ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
+        : `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
     },
     metaUpdated,
   }
@@ -668,6 +674,7 @@ app.get('/api/users', async (_req, res) => {
           type:       cover.type,
           url:        cover.url,
           previewUrl: cover.previewUrl || null,
+          thumbUrl:   cover.thumbUrl   || null,
         } : null,
         earliestMs:    s.earliestMs    || 0,
         latestMs:      s.latestMs      || 0,
@@ -710,6 +717,69 @@ app.get('/api/users/:username/media', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// Small JPEG thumbnail for images and GIFs — lazy-generated, cached to disk
+// under THUMB_DIR/<user>/thumb-<folder>-<filename>.jpg. Used by the home grid
+// covers and the per-model media grid so cards never download full-resolution
+// source files. ~640px max dim, mozjpeg quality 80 — typically 10–40 KB each.
+const THUMB_MAX_DIM = parseInt(process.env.THUMB_MAX_DIM, 10) || 640
+const THUMB_QUALITY = parseInt(process.env.THUMB_QUALITY, 10) || 80
+const thumbLimit = pLimit(parseInt(process.env.THUMB_CONCURRENCY, 10) || 4)
+const _thumbInflight = new Map() // dedupe concurrent requests for the same file
+
+function thumbDiskPath(username, folder, filename) {
+  const stem = path.basename(filename, path.extname(filename))
+  return path.join(THUMB_DIR, username, `thumb-${folder}-${stem}.jpg`)
+}
+
+async function generateThumb(srcPath, dstPath) {
+  await fs.promises.mkdir(path.dirname(dstPath), { recursive: true })
+  const tmp = dstPath + '.tmp.jpg'
+  try {
+    await sharp(srcPath, { failOn: 'none', animated: false })
+      .rotate() // honor EXIF orientation
+      .resize(THUMB_MAX_DIM, THUMB_MAX_DIM, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
+      .toFile(tmp)
+    await fs.promises.rename(tmp, dstPath)
+    return true
+  } catch {
+    try { await fs.promises.unlink(tmp) } catch {}
+    return false
+  }
+}
+
+app.get('/thumb/:username/:folder/:filename', async (req, res) => {
+  const { username, folder, filename } = req.params
+  if (!MEDIA_FOLDERS.includes(folder)) return res.status(403).send('Forbidden')
+  const srcPath = safeSubPath(datasetDir, username, folder, filename)
+  if (!srcPath) return res.status(403).send('Forbidden')
+
+  const dstPath = thumbDiskPath(username, folder, filename)
+  const dstBase = path.basename(dstPath)
+  const dstDir  = path.dirname(dstPath)
+
+  const sendCached = () => {
+    res.setHeader('Cache-Control', IMMUTABLE_CACHE)
+    res.sendFile(dstBase, { root: dstDir }, (err) => {
+      if (err && !res.headersSent) res.status(404).send('Not found')
+    })
+  }
+  if (fs.existsSync(dstPath)) return sendCached()
+  if (!fs.existsSync(srcPath)) return res.status(404).send('Not found')
+
+  // Dedupe — a popular thumbnail request shouldn't trigger N parallel sharp jobs.
+  const key = `${username}/${folder}/${filename}`
+  let job = _thumbInflight.get(key)
+  if (!job) {
+    job = thumbLimit(() => generateThumb(srcPath, dstPath))
+      .finally(() => _thumbInflight.delete(key))
+    _thumbInflight.set(key, job)
+  }
+  const ok = await job
+  if (!ok) return res.status(500).send('Thumb generation failed')
+  sendCached()
 })
 
 // Video preview GIF (generated on demand, cached to disk)
@@ -759,7 +829,12 @@ app.get('/api/users/:username/cover', (req, res) => {
   const pick = pickCoverFor(username, stats.coverPool)
   if (!pick) return res.status(404).json({ error: 'No media' })
   res.setHeader('Cache-Control', 'public, max-age=3600')
-  res.json({ type: pick.type, url: pick.url, previewUrl: pick.previewUrl || null })
+  res.json({
+    type:       pick.type,
+    url:        pick.url,
+    previewUrl: pick.previewUrl || null,
+    thumbUrl:   pick.thumbUrl   || null,
+  })
 })
 
 // ─── SCAN ENDPOINTS ──────────────────────────────────────────────────────────
@@ -868,6 +943,36 @@ async function prewarmThumbnails() {
   console.log(`\r  Previews:  ${missing.length} GIFs generated ✓          `)
 }
 
+// Walks modelStatsCache and pre-generates any missing cover JPEG thumbs so
+// the first home-grid render hits cached files. Cheap — ~16 covers per model.
+async function prewarmCoverThumbs() {
+  const tasks = []
+  for (const [username, stats] of Object.entries(modelStatsCache)) {
+    for (const c of stats.coverPool || []) {
+      if (c.type === 'video') continue // video covers reuse the GIF preview
+      const dst = thumbDiskPath(username, c.folder, c.filename)
+      if (fs.existsSync(dst)) continue
+      const src = safeSubPath(datasetDir, username, c.folder, c.filename)
+      if (!src || !fs.existsSync(src)) continue
+      tasks.push({ src, dst, username })
+    }
+  }
+  if (!tasks.length) {
+    console.log('  Thumbs:    all cover thumbs cached ✓')
+    return
+  }
+  console.log(`  Thumbs:    generating ${tasks.length} cover thumbs…`)
+  let done = 0
+  await Promise.all(tasks.map((t) => thumbLimit(async () => {
+    await generateThumb(t.src, t.dst)
+    done++
+    if (done % 25 === 0 || done === tasks.length) {
+      process.stdout.write(`\r  Thumbs:    ${done}/${tasks.length} done`)
+    }
+  })))
+  console.log(`\r  Thumbs:    ${tasks.length} cover thumbs generated ✓        `)
+}
+
 // ─── INFO ENDPOINT ───────────────────────────────────────────────────────────
 const SERVER_START = new Date().toISOString()
 
@@ -914,6 +1019,9 @@ async function start() {
     console.log(`  Response cache: LRU(${RESPONSE_CACHE_MAX}) in memory + disk\n`)
   })
 
+  // Cover thumbs first — these block the home grid being fast. Cheap (sharp).
+  prewarmCoverThumbs().catch((err) => console.warn('  Cover thumb prewarm error:', err.message))
+
   // GIF generation runs after the server is up — it's CPU-heavy and not needed
   // for page loads (the media endpoint works without previews being ready).
   prewarmThumbnails().catch((err) => console.warn('  Preview prewarm error:', err.message))
@@ -937,6 +1045,8 @@ async function start() {
     setTimeout(async () => {
       try { await scanAll({ force: true, trigger: 'nightly' }) }
       catch (err) { console.warn('  Nightly scan error:', err.message) }
+      try { await prewarmCoverThumbs() }
+      catch (err) { console.warn('  Cover thumb prewarm (nightly) error:', err.message) }
       try { await prewarmThumbnails() }
       catch (err) { console.warn('  Preview prewarm (nightly) error:', err.message) }
       scheduleNightly()
