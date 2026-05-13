@@ -433,6 +433,128 @@ function createMediaSavePipeline(options = {}) {
     }
   }
 
+  async function finalizeVideoFile({
+    modelName,
+    folders,
+    entry,
+    destination,
+    sourcePath = null,
+    moveFileIntoPlace = null,
+    hash = null,
+    hashFileFromPath,
+    getVisualHashFromVideoPath = null,
+    getVisualDuplicationRecord = null,
+    addBitwiseHash,
+    addVisualHash = null,
+    saveBitwiseHashCache = null,
+    saveVisualHashCache = null,
+    removeFileIfExists = null,
+    checkVisualDuplicate = false,
+    duplicateRecordSeen = false,
+    pageMeta = entry.pageMeta,
+  }) {
+    if (sourcePath && typeof moveFileIntoPlace !== 'function') {
+      throw new Error(
+        'finalizeVideoFile requires moveFileIntoPlace for sourcePath'
+      )
+    }
+    if (!hash && typeof hashFileFromPath !== 'function') {
+      throw new Error(
+        'finalizeVideoFile requires hashFileFromPath when hash is not provided'
+      )
+    }
+    if (typeof addBitwiseHash !== 'function') {
+      throw new Error('finalizeVideoFile requires addBitwiseHash')
+    }
+
+    if (sourcePath) {
+      moveFileIntoPlace(sourcePath, destination.finalPath)
+    }
+
+    const stat = fs.statSync(destination.finalPath)
+    const { metadata, recordedDate, fileDate } = await mediaSaver.finalizeVideo(
+      {
+        modelName,
+        bucket: destination.bucket || 'webm',
+        filename: entry.filename,
+        filePath: destination.finalPath,
+        mediaType: 'video',
+        sizeBytes: stat.size,
+        uploadedDate: entry.uploadedDate,
+        pageMeta,
+        entry,
+      }
+    )
+
+    const finalHash = hash || (await hashFileFromPath(destination.finalPath))
+    let visualHash = null
+    if (typeof getVisualHashFromVideoPath === 'function') {
+      visualHash = await getVisualHashFromVideoPath(destination.finalPath)
+    }
+
+    const visualMatch =
+      checkVisualDuplicate &&
+      visualHash &&
+      typeof getVisualDuplicationRecord === 'function'
+        ? getVisualDuplicationRecord(visualHash)
+        : null
+    if (visualMatch?.isDuplicate) {
+      const reason = 'duplicate_visual'
+      recordDuplicate({
+        modelName,
+        folders,
+        entry,
+        destination,
+        reason,
+        extra: {
+          visualHash,
+          activeRefs: visualMatch.activeRefs.slice(0, 5),
+        },
+        savedPath: duplicateRecordSeen ? visualMatch.activeRefs[0] : null,
+        recordSeen: duplicateRecordSeen,
+      })
+      removeFileIfExists?.(destination.finalPath)
+      return {
+        status: 'duplicate',
+        reason,
+        hash: finalHash,
+        visualHash,
+        match: visualMatch,
+        sizeBytes: stat.size,
+      }
+    }
+
+    addBitwiseHash(finalHash, metadata)
+    saveBitwiseHashCache?.()
+    if (visualHash && typeof addVisualHash === 'function') {
+      addVisualHash(visualHash, metadata)
+      saveVisualHashCache?.()
+    }
+
+    const stats = recordSaved({
+      modelName,
+      folders,
+      entry,
+      destination,
+      sizeBytes: stat.size,
+      hash: finalHash,
+      visualHash,
+      kind: 'video',
+    })
+
+    return {
+      status: 'saved',
+      destination,
+      hash: finalHash,
+      visualHash,
+      metadata,
+      recordedDate,
+      fileDate,
+      sizeBytes: stat.size,
+      stats,
+    }
+  }
+
   return {
     getDestination,
     getExistingExtra,
@@ -443,6 +565,7 @@ function createMediaSavePipeline(options = {}) {
     recordMediaSeen,
     recordOutcome,
     recordSaved,
+    finalizeVideoFile,
     saveImageLikeMedia,
   }
 }

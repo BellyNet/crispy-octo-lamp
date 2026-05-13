@@ -1223,49 +1223,29 @@ async function saveVideoMedia(modelName, folders, entry) {
       return
     }
 
-    moveFileIntoPlace(tmpPath, finalPath)
-    const stat = fs.statSync(finalPath)
-    const { metadata } = await hoghaulMediaSaver.finalizeVideo({
-      modelName,
-      bucket: 'webm',
-      filename: entry.filename,
-      filePath: finalPath,
-      mediaType: 'video',
-      sizeBytes: stat.size,
-      uploadedDate: entry.uploadedDate,
-      entry,
-    })
-    let visualHash = await getVisualHashFromVideoPath(finalPath)
-    const visualMatch = visualHash
-      ? getVisualDuplicationRecord(visualHash)
-      : null
-    if (visualMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        visualMatch.activeRefs[0],
-        'duplicate_visual',
-        folders
-      )
-      removeFileIfExists(finalPath)
-      console.log(`Visual dupe: ${entry.filename}`)
-      return
-    }
-
-    addBitwiseHash(hash, metadata)
-    if (visualHash) addVisualHash(visualHash, metadata)
-    saveBitwiseHashCache()
-    saveVisualHashCache()
-
-    hoghaulSavePipeline.recordSaved({
+    const result = await hoghaulSavePipeline.finalizeVideoFile({
       modelName,
       folders,
       entry,
       destination,
-      sizeBytes: stat.size,
+      sourcePath: tmpPath,
+      moveFileIntoPlace,
       hash,
-      visualHash,
-      kind: 'video',
+      getVisualHashFromVideoPath,
+      getVisualDuplicationRecord,
+      addBitwiseHash,
+      addVisualHash,
+      saveBitwiseHashCache,
+      saveVisualHashCache,
+      removeFileIfExists,
+      checkVisualDuplicate: true,
+      duplicateRecordSeen: true,
     })
+
+    if (result.reason === 'duplicate_visual') {
+      console.log(`Visual dupe: ${entry.filename}`)
+      return
+    }
     console.log(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)

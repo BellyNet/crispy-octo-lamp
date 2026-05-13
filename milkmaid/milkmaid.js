@@ -2303,68 +2303,37 @@ async function scrapeGallery(browser, url, modelName, folders) {
                     .join(',')
                 )
               }
-
-              moveFileIntoPlace(tmpPath, finalPath)
-              const recordedDate = await milkmaidMediaSaver.recordVideoDates({
-                modelName,
-                bucket: 'webm',
+              const lazyEntry = {
                 filename,
-                filePath: finalPath,
-                uploadedDate,
-                pageMeta,
-              })
-              const fileDate = milkmaidMediaSaver.applyRecordedTimestamp(
-                finalPath,
-                recordedDate,
-                uploadedDate
-              )
-
-              const finalStat = fs.statSync(finalPath)
-              const finalHash = await hashFileFromPath(finalPath)
-              addBitwiseHash(
-                finalHash,
-                buildHashMetadata(
-                  modelName,
-                  finalPath,
-                  'video',
-                  finalStat.size,
-                  fileDate
-                )
-              )
-              saveBitwiseHashCache()
-
-              const finalVisualHash =
-                await getVisualHashFromVideoPath(finalPath)
-              if (finalVisualHash) {
-                addVisualHash(
-                  finalVisualHash,
-                  buildHashMetadata(
-                    modelName,
-                    finalPath,
-                    'video',
-                    finalStat.size,
-                    fileDate
-                  )
-                )
-                saveVisualHashCache()
-              }
-
-              successCount++
-              currentRunLog && currentRunLog.counters.saved++
-              addRunSavedBytes(finalStat.size)
-              recordSuccessfulSeenMedia(folders.logDir, {
-                relativePath: getDatasetRelativePath(finalPath),
-                filename,
+                kind: 'video',
                 mediaUrl: url,
                 mediaPageUrl,
-              })
-              appendRunEvent('saved_lazy_video', {
+                uploadedDate,
+                pageMeta,
+              }
+              const destination = milkmaidSavePipeline.getDestination({
                 modelName,
-                filename,
-                savedPath: getDatasetRelativePath(finalPath),
-                hash: finalHash,
-                visualHash: finalVisualHash,
+                folders,
+                entry: lazyEntry,
+                kind: 'video',
               })
+              const videoResult = await milkmaidSavePipeline.finalizeVideoFile({
+                modelName,
+                folders,
+                entry: lazyEntry,
+                destination,
+                sourcePath: tmpPath,
+                moveFileIntoPlace,
+                hashFileFromPath,
+                getVisualHashFromVideoPath,
+                addBitwiseHash,
+                addVisualHash,
+                saveBitwiseHashCache,
+                saveVisualHashCache,
+              })
+              const finalStat = { size: videoResult.sizeBytes }
+              const finalHash = videoResult.hash
+              const finalVisualHash = videoResult.visualHash
               const removedQuarantineMirror =
                 removeQuarantineMirrorIfExists(finalPath)
               if (removedQuarantineMirror) {
