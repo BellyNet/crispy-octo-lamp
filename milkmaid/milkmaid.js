@@ -67,12 +67,11 @@ const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const {
   getMediaEntryHashMetadata,
-  getMediaEntryPageUrls,
   getMediaEntrySeenDetails,
   getMediaEntrySourceDetails,
-  getMediaEntryUrls,
 } = require('../scrapyard/mediaEntries')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
+const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
   buildCategoryRunList: buildStufferDbCategoryRunList,
@@ -480,6 +479,27 @@ const milkmaidMediaSaver = createMediaSaver({
   getExtraMetadata: (entry) => getMilkmaidEntryHashMetadata(entry),
   getEventMetadata: (entry) => getMilkmaidEntrySourceDetails(entry),
   getSeenDetails: (entry) => getMilkmaidEntrySeenDetails(entry),
+})
+const milkmaidSavePipeline = createMediaSavePipeline({
+  mediaSaver: milkmaidMediaSaver,
+  appendRunEvent,
+  recordSuccessfulSeenMedia,
+  getSuccessfulSeenMediaMatch,
+  existsLocallyOrOnNas,
+  knownFilenames,
+  isQuarantinedPath,
+  onDuplicate: () => {
+    duplicateCount++
+    if (currentRunLog) currentRunLog.counters.duplicates++
+  },
+  onSaved: ({ stats }) => {
+    successCount++
+    if (currentRunLog) currentRunLog.counters.saved++
+    addRunSavedBytes(stats.savedBytes)
+  },
+  onQueued: () => {
+    if (currentRunLog) currentRunLog.counters.queuedVideos++
+  },
 })
 const duplicateChecker = createDuplicateChecker({
   datasetDir,
@@ -1457,14 +1477,6 @@ function setProgressTotal(total = null) {
   }
 }
 
-function getMilkmaidEntryMediaUrls(entry = {}) {
-  return getMediaEntryUrls(entry)
-}
-
-function getMilkmaidEntryMediaPageUrls(entry = {}) {
-  return getMediaEntryPageUrls(entry)
-}
-
 function getMilkmaidEntrySeenDetails(entry = {}) {
   return getMediaEntrySeenDetails(entry)
 }
@@ -1479,24 +1491,20 @@ function getMilkmaidEntryHashMetadata(entry = {}) {
 
 function recordMilkmaidDuplicate({
   modelName,
+  folders,
   entry,
   destination,
   reason,
   extra = {},
 }) {
-  duplicateCount++
-  if (currentRunLog) currentRunLog.counters.duplicates++
-  appendRunEvent(
+  return milkmaidSavePipeline.recordDuplicate({
+    modelName,
+    folders,
+    entry,
+    destination,
     reason,
-    milkmaidMediaSaver.buildDuplicateEvent({
-      entry,
-      savedPath: destination?.relativePath || null,
-      extra: {
-        modelName,
-        ...extra,
-      },
-    })
-  )
+    extra,
+  })
 }
 
 async function saveStufferDbImageLikeMedia({
@@ -1545,15 +1553,13 @@ async function saveStufferDbImageLikeMedia({
     }
     if (visualHash) addVisualHash(visualHash)
 
-    if (knownFilenames.has(entry.filename) || existsLocallyOrOnNas(finalPath)) {
+    if (milkmaidSavePipeline.isKnownOrExisting(destination, entry)) {
       recordMilkmaidDuplicate({
         modelName,
         entry,
         destination,
         reason: 'skip_existing_image',
-        extra: {
-          quarantinedMirrorExists: isQuarantinedPath(finalPath),
-        },
+        extra: milkmaidSavePipeline.getExistingExtra(destination),
       })
       return logAndProgress(`♻️ Skipped (exists): ${entry.filename}`, true)
     }
@@ -1577,36 +1583,26 @@ async function saveStufferDbImageLikeMedia({
     }
     if (visualHash) addVisualHash(visualHash, metadata)
 
-    knownFilenames.add(entry.filename)
-    successCount++
-    if (currentRunLog) currentRunLog.counters.saved++
-    addRunSavedBytes(buffer.length)
-    recordSuccessfulSeenMedia(
-      folders.logDir,
-      milkmaidMediaSaver.buildSeenRecord(entry, destination)
-    )
-    appendRunEvent(
-      destination.savedEventType,
-      milkmaidMediaSaver.buildSavedEvent({
-        modelName,
-        entry,
-        destination,
-        hash,
-        visualHash,
-      })
-    )
+    milkmaidSavePipeline.recordSaved({
+      modelName,
+      folders,
+      entry,
+      destination,
+      sizeBytes: buffer.length,
+      hash,
+      visualHash,
+      kind,
+    })
     return logAndProgress(`✅ Saved: ${entry.filename}`, true)
   }
 
-  if (knownFilenames.has(entry.filename) || existsLocallyOrOnNas(finalPath)) {
+  if (milkmaidSavePipeline.isKnownOrExisting(destination, entry)) {
     recordMilkmaidDuplicate({
       modelName,
       entry,
       destination,
       reason: 'skip_existing_gif',
-      extra: {
-        quarantinedMirrorExists: isQuarantinedPath(finalPath),
-      },
+      extra: milkmaidSavePipeline.getExistingExtra(destination),
     })
     return logAndProgress(`♻️ Skipped gif (exists): ${entry.filename}`, true)
   }
@@ -1629,38 +1625,26 @@ async function saveStufferDbImageLikeMedia({
     saveBitwiseHashCache()
   }
 
-  knownFilenames.add(entry.filename)
-  successCount++
-  if (currentRunLog) currentRunLog.counters.saved++
-  addRunSavedBytes(buffer.length)
-  recordSuccessfulSeenMedia(
-    folders.logDir,
-    milkmaidMediaSaver.buildSeenRecord(entry, destination)
-  )
-  appendRunEvent(
-    destination.savedEventType,
-    milkmaidMediaSaver.buildSavedEvent({
-      modelName,
-      entry,
-      destination,
-      hash,
-    })
-  )
+  milkmaidSavePipeline.recordSaved({
+    modelName,
+    folders,
+    entry,
+    destination,
+    sizeBytes: buffer.length,
+    hash,
+    kind,
+  })
   return logAndProgress(`Saved gif: ${entry.filename}`, true)
 }
 
 function queueStufferDbVideoMedia({ modelName, folders, entry, destination }) {
-  const { finalPath, tmpPath } = destination
-
-  if (knownFilenames.has(entry.filename) || existsLocallyOrOnNas(finalPath)) {
+  if (milkmaidSavePipeline.isKnownOrExisting(destination, entry)) {
     recordMilkmaidDuplicate({
       modelName,
       entry,
       destination,
       reason: 'skip_existing_video',
-      extra: {
-        quarantinedMirrorExists: isQuarantinedPath(finalPath),
-      },
+      extra: milkmaidSavePipeline.getExistingExtra(destination),
     })
     return logAndProgress(
       `⛔ Skipping mp4 - already handled: ${entry.filename}`,
@@ -1668,20 +1652,13 @@ function queueStufferDbVideoMedia({ modelName, folders, entry, destination }) {
     )
   }
 
-  lazyVideoQueue.push({
-    url: entry.mediaUrl,
-    path: finalPath,
-    tmpPath,
-    filename: entry.filename,
-    uploadedDate: entry.uploadedDate,
-    mediaPageUrl: entry.mediaPageUrl,
-    pageMeta: entry.pageMeta,
+  milkmaidSavePipeline.queueVideo({
+    modelName,
+    folders,
+    entry,
+    destination,
+    queue: lazyVideoQueue,
   })
-  if (currentRunLog) currentRunLog.counters.queuedVideos++
-  appendRunEvent(
-    'queued_lazy_video',
-    milkmaidMediaSaver.buildQueuedEvent({ modelName, entry, destination })
-  )
 
   return logAndProgress(`🐌 Queued lazy video: ${entry.filename}`, true)
 }
@@ -1698,17 +1675,13 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
     return logAndProgress(`🚫 Skipped nuisance asset: ${entry.filename}`, true)
   }
 
-  const destination = milkmaidMediaSaver.getDestination({
+  const destination = milkmaidSavePipeline.getDestination({
     modelName,
     folders,
-    filename: entry.filename,
-    kind: entry.kind,
+    entry,
   })
 
-  appendRunEvent(
-    'media_seen',
-    milkmaidMediaSaver.buildMediaSeenEvent({ modelName, entry, destination })
-  )
+  milkmaidSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
   const permanentSkipMatch = getPermanentSkipMatch({
     relativePath: destination.relativePath,
@@ -1731,11 +1704,7 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
     return logAndProgress(`🛑 Permanent skip: ${entry.filename}`, true)
   }
 
-  const seenMediaMatch = getSuccessfulSeenMediaMatch(
-    folders.logDir,
-    getMilkmaidEntryMediaPageUrls(entry),
-    getMilkmaidEntryMediaUrls(entry)
-  )
+  const seenMediaMatch = milkmaidSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordMilkmaidDuplicate({
       modelName,

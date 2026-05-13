@@ -29,6 +29,7 @@ const {
 } = require('../scrapyard/mediaEntries')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
+const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const { createHttpClient } = require('../scrapyard/httpClient')
 const { createRedgifsClient } = require('../scrapyard/redgifsClient')
@@ -105,6 +106,31 @@ const hoghaulMediaSaver = createMediaSaver({
   getExtraMetadata: (entry) => getEntryHashMetadata(entry),
   getEventMetadata: (entry) => getEntrySourceDetails(entry),
   getSeenDetails: (entry) => getEntrySeenDetails(entry),
+})
+const hoghaulSavePipeline = createMediaSavePipeline({
+  mediaSaver: hoghaulMediaSaver,
+  appendRunEvent,
+  recordSuccessfulSeenMedia,
+  getSuccessfulSeenMediaMatch,
+  existsLocallyOrOnNas,
+  onDuplicate: () => {
+    duplicateCount += 1
+  },
+  onSaved: ({ stats }) => {
+    successCount += 1
+    savedBytes += stats.savedBytes
+    if (currentRunLog) {
+      currentRunLog.transfer.savedBytes += stats.savedBytes
+      currentRunLog.transfer.lazyTransferredBytes += stats.lazyTransferredBytes
+    }
+  },
+  onQueued: () => {
+    queuedVideoCount += 1
+    if (currentRunLog) currentRunLog.counters.queuedVideos += 1
+  },
+  onOutcome: ({ kind, label }) => {
+    noteMediaOutcome(kind, label)
+  },
 })
 const duplicateChecker = createDuplicateChecker({
   datasetDir,
@@ -1054,48 +1080,32 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
 }
 
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
-  duplicateCount += 1
-  appendRunEvent(
-    reason,
-    hoghaulMediaSaver.buildDuplicateEvent({
-      entry,
-      savedPath,
-      extra: extra && typeof extra === 'object' ? extra : {},
-    })
-  )
-  recordSuccessfulSeenMedia(
-    folders.logDir,
-    hoghaulMediaSaver.buildSeenRecord(entry, {
-      savedPath,
+  hoghaulSavePipeline.recordDuplicate({
+    folders,
+    entry,
+    destination: {
       relativePath: savedPath,
       filename: entry.filename,
-    })
-  )
-  noteMediaOutcome(
-    hoghaulMediaSaver.getOutcomeKindForReason(reason),
-    `${reason}: ${entry.filename}`
-  )
+    },
+    reason,
+    extra: extra && typeof extra === 'object' ? extra : {},
+    savedPath,
+    recordSeen: true,
+  })
 }
 
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
-  const destination = hoghaulMediaSaver.getDestination({
+  const destination = hoghaulSavePipeline.getDestination({
     modelName,
     folders,
-    filename: entry.filename,
+    entry,
     kind,
   })
   const { bucket, finalPath, relativePath } = destination
 
-  appendRunEvent(
-    'media_seen',
-    hoghaulMediaSaver.buildMediaSeenEvent({ modelName, entry, destination })
-  )
+  hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
-  const seenMediaMatch = getSuccessfulSeenMediaMatch(
-    folders.logDir,
-    getEntryMediaPageUrls(entry),
-    getEntryMediaUrls(entry)
-  )
+  const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
       entry,
@@ -1107,7 +1117,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
-  if (existsLocallyOrOnNas(finalPath)) {
+  if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
     recordDuplicate(entry, relativePath, `skip_existing_${kind}`, folders)
     console.log(`Exists already: ${entry.filename}`)
     return
@@ -1220,31 +1230,16 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     saveBitwiseHashCache()
     if (visualHash) saveVisualHashCache()
 
-    const stats = hoghaulMediaSaver.buildSavedStats({
+    hoghaulSavePipeline.recordSaved({
+      modelName,
+      folders,
+      entry,
+      destination,
       sizeBytes: buffer.length,
+      hash,
+      visualHash,
       kind,
     })
-    successCount += 1
-    savedBytes += stats.savedBytes
-    if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += stats.savedBytes
-      currentRunLog.transfer.lazyTransferredBytes += stats.lazyTransferredBytes
-    }
-    recordSuccessfulSeenMedia(
-      folders.logDir,
-      hoghaulMediaSaver.buildSeenRecord(entry, destination)
-    )
-    appendRunEvent(
-      destination.savedEventType,
-      hoghaulMediaSaver.buildSavedEvent({
-        modelName,
-        entry,
-        destination,
-        hash,
-        visualHash,
-      })
-    )
-    noteMediaOutcome('saved', `${destination.savedOutcome}: ${entry.filename}`)
     console.log(`Saved ${kind}: ${entry.filename}`)
   } finally {
     releasePendingImageVisualClaim(visualClaimKey)
@@ -1252,24 +1247,17 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
-  const destination = hoghaulMediaSaver.getDestination({
+  const destination = hoghaulSavePipeline.getDestination({
     modelName,
-    filename: entry.filename,
     folders,
+    entry,
     kind: 'video',
   })
   const { finalPath, tmpPath, relativePath } = destination
 
-  appendRunEvent(
-    'media_seen',
-    hoghaulMediaSaver.buildMediaSeenEvent({ modelName, entry, destination })
-  )
+  hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
-  const seenMediaMatch = getSuccessfulSeenMediaMatch(
-    folders.logDir,
-    getEntryMediaPageUrls(entry),
-    getEntryMediaUrls(entry)
-  )
+  const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
       entry,
@@ -1281,18 +1269,18 @@ async function saveVideoMedia(modelName, folders, entry) {
     return
   }
 
-  if (existsLocallyOrOnNas(finalPath)) {
+  if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
     recordDuplicate(entry, relativePath, 'skip_lazy_existing', folders)
     console.log(`Exists already: ${entry.filename}`)
     return
   }
 
-  queuedVideoCount += 1
-  if (currentRunLog) currentRunLog.counters.queuedVideos += 1
-  appendRunEvent(
-    'queued_lazy_video',
-    hoghaulMediaSaver.buildQueuedEvent({ modelName, entry, destination })
-  )
+  hoghaulSavePipeline.queueVideo({
+    modelName,
+    folders,
+    entry,
+    destination,
+  })
 
   try {
     removeFileIfExists(tmpPath)
@@ -1345,31 +1333,16 @@ async function saveVideoMedia(modelName, folders, entry) {
     saveBitwiseHashCache()
     saveVisualHashCache()
 
-    const stats = hoghaulMediaSaver.buildSavedStats({
+    hoghaulSavePipeline.recordSaved({
+      modelName,
+      folders,
+      entry,
+      destination,
       sizeBytes: stat.size,
+      hash,
+      visualHash,
       kind: 'video',
     })
-    successCount += 1
-    savedBytes += stats.savedBytes
-    if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += stats.savedBytes
-      currentRunLog.transfer.lazyTransferredBytes += stats.lazyTransferredBytes
-    }
-    recordSuccessfulSeenMedia(
-      folders.logDir,
-      hoghaulMediaSaver.buildSeenRecord(entry, destination)
-    )
-    appendRunEvent(
-      destination.savedEventType,
-      hoghaulMediaSaver.buildSavedEvent({
-        modelName,
-        entry,
-        destination,
-        hash,
-        visualHash,
-      })
-    )
-    noteMediaOutcome('saved', `${destination.savedOutcome}: ${entry.filename}`)
     console.log(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)
