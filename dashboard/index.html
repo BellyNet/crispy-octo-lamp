@@ -143,63 +143,13 @@
         border-left-color: var(--accent);
         font-weight: 500;
       }
-
-      /* ─── SIDEBAR MODEL PANEL ────────────────────────────────── */
-      #sidebar-model-panel {
-        border-top: 1px solid var(--border);
-        padding: 10px 12px;
-        display: none;
-        flex-direction: column;
-        gap: 8px;
-        flex-shrink: 0;
-      }
-      #sidebar-model-panel.visible {
-        display: flex;
-      }
-      #smp-name {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--text);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      #smp-stats {
-        font-size: 11px;
-        color: var(--muted);
-        line-height: 1.4;
-      }
-      .smp-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        color: var(--muted);
-        text-transform: uppercase;
-        margin-bottom: 4px;
-      }
-      #smp-filter-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-      .smp-filter-btn {
+      .user-item.kbd-focus {
         background: var(--card-bg);
-        border: 1px solid var(--border);
-        color: var(--muted);
-        padding: 3px 9px;
-        border-radius: 20px;
-        cursor: pointer;
-        font-size: 11px;
-        font-weight: 500;
-        transition: all 0.12s;
-        white-space: nowrap;
+        color: var(--text);
+        outline: 1px solid var(--accent-dim);
+        outline-offset: -1px;
       }
-      .smp-filter-btn:hover { border-color: var(--accent); color: var(--text); }
-      .smp-filter-btn.active {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
-      }
+
 
       #sidebar-footer {
         padding: 8px 12px;
@@ -583,28 +533,7 @@
         color: #efa8a8;
       }
 
-      /* ─── EMPTY / LOADING STATE ──────────────────────────────── */
-      #empty-state {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        color: var(--muted);
-        gap: 12px;
-        padding: 40px;
-        text-align: center;
-      }
-      #empty-state svg {
-        opacity: 0.3;
-      }
-      #empty-state p {
-        font-size: 15px;
-      }
-      #empty-state small {
-        font-size: 12px;
-      }
-
+      /* ─── LOADING STATE ──────────────────────────────────────── */
       #loading-indicator {
         display: none;
         align-items: center;
@@ -699,6 +628,12 @@
       .pswp-info-date { font-weight: 500; flex-shrink: 0; }
       .pswp-info-added { font-size: 12px; color: var(--muted); flex-shrink: 0; }
       .pswp-info-src { font-size: 11px; color: var(--muted); font-style: italic; }
+      .pswp-info-meta {
+        font-size: 11px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+      }
       /* Video slide wrapper */
       .pswp-video-wrap {
         width: 100%;
@@ -832,6 +767,18 @@
         overflow: hidden;
         text-overflow: ellipsis;
         margin-bottom: 5px;
+      }
+      .home-card-new {
+        display: inline-block;
+        background: var(--accent);
+        color: #fff;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        vertical-align: middle;
+        margin-left: 2px;
       }
       .home-card-sources {
         display: flex;
@@ -1105,18 +1052,6 @@
       </div>
       <ul id="user-list"></ul>
 
-      <!-- Model info panel — hidden, kept for JS refs -->
-      <div id="sidebar-model-panel" style="display:none">
-        <div id="smp-name"></div>
-        <div id="smp-stats"></div>
-        <div id="smp-filter-row">
-          <button class="smp-filter-btn active" data-type="all">All</button>
-          <button class="smp-filter-btn" data-type="image">Images</button>
-          <button class="smp-filter-btn" data-type="gif">GIFs</button>
-          <button class="smp-filter-btn" data-type="video">Videos</button>
-        </div>
-      </div>
-
       <div id="sidebar-footer"></div>
     </aside>
 
@@ -1201,23 +1136,6 @@
           <div id="home-grid"></div>
         </div>
 
-        <div id="empty-state">
-          <svg
-            width="64"
-            height="64"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <polyline points="21 15 16 10 5 21" />
-          </svg>
-          <p>Select a user from the sidebar</p>
-          <small>Media is sorted by creation date from filename metadata</small>
-        </div>
-
         <div id="loading-indicator">
           <div class="spinner"></div>
           <span>Loading media…</span>
@@ -1239,6 +1157,7 @@
       let activeType = 'all'
       let activeSort = 'asc'
       let homeVisible = false
+      let currentUsername = null
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
       const userListEl = document.getElementById('user-list')
@@ -1246,21 +1165,15 @@
       const userCountEl = document.getElementById('user-count')
       const currentNameEl = document.getElementById('current-user-name')
       const mediaStatsEl = document.getElementById('media-stats')
-      const filterBtns = document.querySelectorAll('.filter-btn')
       const filterSelect = document.getElementById('filter-select')
       const sortSelect = document.getElementById('sort-select')
       const sortBar = document.getElementById('sort-bar')
       const dateRangeEl = document.getElementById('date-range')
       const gridEl = document.getElementById('media-grid')
-      const emptyState = document.getElementById('empty-state')
       const loadingEl = document.getElementById('loading-indicator')
       const noResultsEl = document.getElementById('no-results')
       const homeViewEl = document.getElementById('home-view')
       const homeGridEl = document.getElementById('home-grid')
-      const smpNameEl = document.getElementById('smp-name')
-      const smpStatsEl = document.getElementById('smp-stats')
-      const smpModelPanel = document.getElementById('sidebar-model-panel')
-      const smpFilterBtns = document.querySelectorAll('.smp-filter-btn')
       const homeSizeBtns = document.querySelectorAll('.home-size-btn')
       const homeSortSelect = document.getElementById('home-sort-select')
       let homeSort = 'az'
@@ -1289,6 +1202,22 @@
         })
       }
 
+      function formatFileSize(bytes) {
+        if (!bytes) return ''
+        const units = ['B', 'KB', 'MB', 'GB']
+        let v = bytes, u = 0
+        while (v >= 1024 && u < units.length - 1) { v /= 1024; u++ }
+        return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`
+      }
+
+      function formatDuration(seconds) {
+        if (!seconds || seconds <= 0) return ''
+        const s = Math.round(seconds)
+        const m = Math.floor(s / 60)
+        const ss = String(s % 60).padStart(2, '0')
+        return `${m}:${ss}`
+      }
+
       // ─── USERS ────────────────────────────────────────────────────────────
       let usersData = [] // [{ name, sources }]
 
@@ -1296,10 +1225,44 @@
         const res = await fetch('/api/users')
         usersData = await res.json()
         userCountEl.textContent = usersData.length
+        // First-ever load: stamp every known model with "seen now" so we don't
+        // flood the home grid with NEW badges on first visit. Future additions
+        // / updates after this stamp will show NEW.
+        initLastSeen(usersData)
         renderUserList(usersData)
         // Apply whatever route is in the URL bar. Browsers preserve the hash
         // across refresh, so a deep link / refresh / back button all land here.
         applyHashRoute()
+      }
+
+      // ─── "NEW" TRACKING ───────────────────────────────────────────────────
+      const LAST_SEEN_KEY = 'dashboard-last-seen'
+      function readLastSeen() {
+        try { return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || '{}') } catch { return {} }
+      }
+      function writeLastSeen(map) {
+        try { localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(map)) } catch {}
+      }
+      function initLastSeen(users) {
+        const seen = readLastSeen()
+        const now = Date.now()
+        let changed = false
+        // Stamp models we've never recorded so we don't show NEW on first load.
+        for (const u of users) {
+          if (seen[u.name] == null) { seen[u.name] = now; changed = true }
+        }
+        if (changed) writeLastSeen(seen)
+      }
+      function markSeen(username) {
+        if (!username) return
+        const seen = readLastSeen()
+        seen[username] = Date.now()
+        writeLastSeen(seen)
+      }
+      function isNewModel(u, seen) {
+        const last = seen[u.name]
+        if (last == null) return true // never recorded — treat as new
+        return (u.latestAddedMs || 0) > last
       }
 
       // ─── HASH ROUTING ─────────────────────────────────────────────────────
@@ -1379,15 +1342,14 @@
       // ─── HOME VIEW ────────────────────────────────────────────────────────
       function showHomeView(opts = {}) {
         homeVisible = true
+        currentUsername = null
         document.getElementById('home-btn').classList.add('active')
         homeViewEl.classList.add('visible')
-        emptyState.style.display = 'none'
         loadingEl.style.display = 'none'
         noResultsEl.style.display = 'none'
         gridEl.style.display = 'none'
         sortBar.style.display = 'none'
         currentNameEl.textContent = 'All Models'
-        smpModelPanel.classList.remove('visible')
         filterSelect.style.display = 'none'
         if (mediaStatsEl) mediaStatsEl.textContent = ''
         sourceLinksEl.innerHTML = ''
@@ -1421,6 +1383,7 @@
       function renderHomeGrid() {
         homeGridEl.innerHTML = ''
         const { start: globalStart, end: globalEnd } = getYearRange()
+        const seen = readLastSeen()
 
         // Sort: featured always first, then by selected sort
         const sorted = [...usersData].sort((a, b) => {
@@ -1483,6 +1446,13 @@
           const name = document.createElement('div')
           name.className = 'home-card-name'
           name.textContent = u.name
+          if (isNewModel(u, seen)) {
+            const newPill = document.createElement('span')
+            newPill.className = 'home-card-new'
+            newPill.textContent = 'NEW'
+            name.appendChild(document.createTextNode(' '))
+            name.appendChild(newPill)
+          }
 
           const srcs = document.createElement('div')
           srcs.className = 'home-card-sources'
@@ -1566,6 +1536,75 @@
             ? ''
             : 'none'
         }
+        // Reset highlight when the visible set changes.
+        _kbdIndex = -1
+        applyKbdHighlight()
+      })
+
+      // ─── KEYBOARD NAV (sidebar) ──────────────────────────────────────────
+      // /         focus search
+      // Up/Down   move highlight through visible models
+      // Enter     open the highlighted model
+      // Esc       clear search if focused, else blur
+      let _kbdIndex = -1
+      function visibleUserItems() {
+        return Array.from(userListEl.querySelectorAll('.user-item'))
+          .filter((el) => el.style.display !== 'none')
+      }
+      function applyKbdHighlight() {
+        const items = visibleUserItems()
+        items.forEach((el, i) => el.classList.toggle('kbd-focus', i === _kbdIndex))
+        if (_kbdIndex >= 0 && items[_kbdIndex]) {
+          items[_kbdIndex].scrollIntoView({ block: 'nearest' })
+        }
+      }
+      window.addEventListener('keydown', (e) => {
+        // Don't hijack typing in inputs other than the user-search itself.
+        const t = e.target
+        const inOtherInput = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') && t !== userSearchEl
+        if (inOtherInput) return
+
+        if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
+          if (document.activeElement !== userSearchEl) {
+            e.preventDefault()
+            // Make sure the sidebar is open on mobile so the input is reachable.
+            if (isMobile()) openSidebar()
+            userSearchEl.focus()
+            userSearchEl.select()
+          }
+          return
+        }
+        if (e.key === 'Escape') {
+          if (document.activeElement === userSearchEl) {
+            if (userSearchEl.value) {
+              userSearchEl.value = ''
+              userSearchEl.dispatchEvent(new Event('input'))
+            } else {
+              userSearchEl.blur()
+            }
+          }
+          return
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const items = visibleUserItems()
+          if (!items.length) return
+          // Only intercept arrows if we're in the sidebar context (search focused
+          // or no input focused at all).
+          if (t && t.tagName === 'INPUT' && t !== userSearchEl) return
+          e.preventDefault()
+          _kbdIndex = _kbdIndex < 0
+            ? 0
+            : Math.max(0, Math.min(items.length - 1, _kbdIndex + (e.key === 'ArrowDown' ? 1 : -1)))
+          applyKbdHighlight()
+          return
+        }
+        if (e.key === 'Enter' && _kbdIndex >= 0) {
+          const items = visibleUserItems()
+          if (items[_kbdIndex]) {
+            e.preventDefault()
+            items[_kbdIndex].click()
+          }
+        }
       })
 
       // ─── SOURCE LINKS ─────────────────────────────────────────────────────────────
@@ -1638,15 +1677,20 @@
         const li = liEl || userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
         if (li) li.classList.add('active')
 
+        currentUsername = username
+        markSeen(username)
         currentNameEl.textContent = username
-        smpNameEl.textContent = username
         renderSourceLinks(sources)
-        smpStatsEl.textContent = ''
-        smpModelPanel.classList.add('visible')
+
+        // Restore the user's last sort for this model (defaults to 'asc').
+        let savedSort = 'asc'
+        try { savedSort = localStorage.getItem(`dashboard-sort-${username}`) || 'asc' } catch {}
+        activeSort = savedSort
+        sortSelect.value = savedSort
+
         setActiveType('all')
         filterSelect.style.display = 'block'
         gridEl.innerHTML = ''
-        emptyState.style.display = 'none'
         noResultsEl.style.display = 'none'
         sortBar.style.display = 'none'
         loadingEl.style.display = 'flex'
@@ -1721,39 +1765,26 @@
       // Keep pills + select in sync
       function setActiveType(type) {
         activeType = type
-        filterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
-        smpFilterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
         filterSelect.value = type
       }
-
-      filterBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          setActiveType(btn.dataset.type)
-          applyFilter()
-        })
-      })
 
       filterSelect.addEventListener('change', () => {
         setActiveType(filterSelect.value)
         applyFilter()
       })
 
-      smpFilterBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          setActiveType(btn.dataset.type)
-          applyFilter()
-        })
-      })
-
       sortSelect.addEventListener('change', () => {
         activeSort = sortSelect.value
         applyFilter()
+        // Remember per-model so switching back restores the user's choice.
+        if (currentUsername) {
+          try { localStorage.setItem(`dashboard-sort-${currentUsername}`, activeSort) } catch {}
+        }
       })
 
       function updateStats() {
         if (!allMedia.length) {
           if (mediaStatsEl) mediaStatsEl.textContent = 'No media found'
-          smpStatsEl.textContent = 'No media found'
           return
         }
         const imgs = allMedia.filter((m) => m.type === 'image').length
@@ -1764,16 +1795,10 @@
         if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
         if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
         if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
-        smpStatsEl.textContent = parts.join(' · ')
 
-        // Update filter button + select labels with counts
-        const counts = { all: allMedia.length, image: imgs, gif: gifs, video: vids }
+        // Update filter dropdown labels with counts.
         const labels = { all: `All (${allMedia.length})`, image: imgs ? `Images (${imgs})` : 'Images', gif: gifs ? `GIFs (${gifs})` : 'GIFs', video: vids ? `Videos (${vids})` : 'Videos' }
         for (const [type, label] of Object.entries(labels)) {
-          const btn = document.querySelector(`.filter-btn[data-type="${type}"]`)
-          if (btn) btn.textContent = label
-          const smpBtn = document.querySelector(`.smp-filter-btn[data-type="${type}"]`)
-          if (smpBtn) smpBtn.textContent = label
           const opt = filterSelect.querySelector(`option[value="${type}"]`)
           if (opt) opt.textContent = label
         }
@@ -2049,6 +2074,20 @@
                   nameSpan.className = 'pswp-info-filename'
                   nameSpan.textContent = item.filename
                   el.appendChild(nameSpan)
+
+                  // Compact metadata line: dimensions · duration · file size
+                  const metaBits = []
+                  if (item.width && item.height) metaBits.push(`${item.width}×${item.height}`)
+                  const dur = formatDuration(item.duration)
+                  if (dur) metaBits.push(dur)
+                  const sz = formatFileSize(item.size)
+                  if (sz) metaBits.push(sz)
+                  if (metaBits.length) {
+                    const metaSpan = document.createElement('span')
+                    metaSpan.className = 'pswp-info-meta'
+                    metaSpan.textContent = metaBits.join(' · ')
+                    el.appendChild(metaSpan)
+                  }
 
                   if (item.addedMs) {
                     const addedSpan = document.createElement('span')
