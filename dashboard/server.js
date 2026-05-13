@@ -344,11 +344,24 @@ function computeStatsFromResponse(allMedia) {
 // without holding the full response in memory after scan.
 function buildCoverPool(allMedia, max = 16) {
   if (!allMedia.length) return []
+  // Prefer stills (images/gifs) — videos as home covers stream the whole MP4
+  // and decode audio in every <video> element on the page, which is a disaster
+  // on mobile. We still include them as a fallback for models with no stills,
+  // and ship the GIF preview URL so the client can render them as a thumbnail
+  // instead of a live <video> element.
+  const stills = allMedia.filter((m) => m.type === 'image' || m.type === 'gif')
+  const source = stills.length ? stills : allMedia
   const pool = []
-  const step = Math.max(1, Math.floor(allMedia.length / max))
-  for (let i = 0; i < allMedia.length && pool.length < max; i += step) {
-    const m = allMedia[i]
-    pool.push({ type: m.type, folder: m.folder, filename: m.filename, url: m.url })
+  const step = Math.max(1, Math.floor(source.length / max))
+  for (let i = 0; i < source.length && pool.length < max; i += step) {
+    const m = source[i]
+    pool.push({
+      type:       m.type,
+      folder:     m.folder,
+      filename:   m.filename,
+      url:        m.url,
+      previewUrl: m.previewUrl || null,
+    })
   }
   return pool
 }
@@ -651,7 +664,11 @@ app.get('/api/users', async (_req, res) => {
       return {
         ...u,
         featured:      u.name === featuredModel,
-        cover:         cover ? { type: cover.type, url: cover.url } : null,
+        cover:         cover ? {
+          type:       cover.type,
+          url:        cover.url,
+          previewUrl: cover.previewUrl || null,
+        } : null,
         earliestMs:    s.earliestMs    || 0,
         latestMs:      s.latestMs      || 0,
         latestAddedMs: s.latestAddedMs || 0,
@@ -742,7 +759,7 @@ app.get('/api/users/:username/cover', (req, res) => {
   const pick = pickCoverFor(username, stats.coverPool)
   if (!pick) return res.status(404).json({ error: 'No media' })
   res.setHeader('Cache-Control', 'public, max-age=3600')
-  res.json({ type: pick.type, url: pick.url })
+  res.json({ type: pick.type, url: pick.url, previewUrl: pick.previewUrl || null })
 })
 
 // ─── SCAN ENDPOINTS ──────────────────────────────────────────────────────────

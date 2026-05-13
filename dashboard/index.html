@@ -1406,28 +1406,19 @@
           }
 
           // Cover ships with the user object now — no extra HTTP request.
-          // Falls back to /api/users/:name/cover if the server hasn't computed
-          // a cover yet (first-ever scan in progress for this model).
+          // Always renders as <img> so the home grid never streams full videos
+          // or layers audio across cards. Video covers use the pre-generated
+          // GIF preview (cached on disk by the server).
           const useCover = (cover) => {
             if (!cover) return
-            let el
-            if (cover.type === 'video') {
-              el = document.createElement('video')
-              el.src = cover.url
-              el.autoplay = true
-              el.muted = true
-              el.loop = true
-              el.playsInline = true
-              el.addEventListener('timeupdate', () => {
-                if (el.currentTime > 5) el.currentTime = 0
-              })
-            } else {
-              el = document.createElement('img')
-              el.src = cover.url
-              el.loading = 'lazy'
-              el.alt = u.name
-            }
+            const el = document.createElement('img')
+            el.loading = 'lazy'
+            el.alt = u.name
             el.className = 'home-card-thumb'
+            el.src = (cover.type === 'video' && cover.previewUrl)
+              ? cover.previewUrl
+              : cover.url
+            el.onerror = () => { el.style.opacity = '0.3' }
             if (mediaEl.parentNode === card) card.replaceChild(el, mediaEl)
           }
           if (u.cover) {
@@ -1893,11 +1884,13 @@
         loadPswp().then(PhotoSwipe => {
           const dataSource = filtered.map(item => {
             if (item.type === 'video') {
+              // No autoplay here — PhotoSwipe pre-creates ±1 adjacent slides,
+              // and autoplay on those layers audio across slides. The active
+              // slide is played from the `change` handler below.
               const wrap = document.createElement('div')
               wrap.className = 'pswp-video-wrap'
               const video = document.createElement('video')
               video.controls = true
-              video.autoplay = true
               video.loop = true
               video.playsInline = true
               video.preload = 'metadata'
@@ -1997,6 +1990,31 @@
                 el.classList.toggle('pswp-info-active', on)
               },
             })
+          })
+
+          // Play only the active slide's video; pause and rewind all others.
+          // PhotoSwipe pre-creates ±1 adjacent slides, so without this swiping
+          // quickly past videos layers audio across slides.
+          const syncVideos = () => {
+            const root = pswp.element
+            if (!root) return
+            root.querySelectorAll('.pswp__item video').forEach((v) => {
+              const inActive = v.closest('.pswp__item.pswp__item--current') ||
+                               v.closest('.pswp__item--active')
+              if (inActive) {
+                v.play().catch(() => {})
+              } else {
+                v.pause()
+                try { v.currentTime = 0 } catch {}
+              }
+            })
+          }
+          pswp.on('change', syncVideos)
+          pswp.on('afterInit', syncVideos)
+          pswp.on('close', () => {
+            const root = pswp.element
+            if (!root) return
+            root.querySelectorAll('video').forEach((v) => { v.pause() })
           })
 
           pswp.init()
