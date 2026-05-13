@@ -36,7 +36,7 @@ function parseSourceUrl(inputUrl) {
       if (parts[0] === 'u' && parts.length >= 4) {
         return {
           scraper: 'hoghaul',
-          sourceType: 'coomer',
+          sourceType: 'coomerfans',
           url: parsed.toString(),
           rawName: parts[3],
         }
@@ -44,7 +44,7 @@ function parseSourceUrl(inputUrl) {
       if (parsed.searchParams.get('q')) {
         return {
           scraper: 'hoghaul',
-          sourceType: 'coomer',
+          sourceType: 'coomerfans',
           url: parsed.toString(),
           rawName: parsed.searchParams.get('q'),
         }

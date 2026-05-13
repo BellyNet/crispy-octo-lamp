@@ -10,6 +10,7 @@ const {
   sanitize,
 } = require('./modelRegistry')
 const { parseSourceUrl } = require('./sourceRouter')
+const { runScrape } = require('./scraperRunner')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
@@ -35,10 +36,9 @@ function runNodeScript(scriptPath, args) {
 }
 
 async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
-  const onlyModels = (await ask(
-    rl,
-    'Canonical model filter (comma-separated, blank for all): '
-  )).trim()
+  const onlyModels = (
+    await ask(rl, 'Canonical model filter (comma-separated, blank for all): ')
+  ).trim()
   const startFrom = includeStartFrom
     ? (await ask(rl, 'Start from model (blank for start of queue): ')).trim()
     : ''
@@ -47,8 +47,7 @@ async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
   )
     .trim()
     .toLowerCase()
-  const skipNasSync =
-    skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes'
+  const skipNasSync = skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes'
 
   const options = {
     onlyModels,
@@ -57,30 +56,24 @@ async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
   }
 
   if (includeHoghaul) {
-    options.pages = (await ask(
-      rl,
-      'Pages limit (blank for all pages, accepts 1 or 1-3): '
-    )).trim()
-    options.maxPosts = (await ask(
-      rl,
-      'Max posts per source (blank for all): '
-    )).trim()
-    options.maxFiles = (await ask(
-      rl,
-      'Max files per source (blank for all): '
-    )).trim()
-    options.postConcurrency = (await ask(
-      rl,
-      'Post concurrency (blank for default): '
-    )).trim()
-    options.imageConcurrency = (await ask(
-      rl,
-      'Image concurrency (blank for default): '
-    )).trim()
-    options.videoConcurrency = (await ask(
-      rl,
-      'Video concurrency (blank for default): '
-    )).trim()
+    options.pages = (
+      await ask(rl, 'Pages limit (blank for all pages, accepts 1 or 1-3): ')
+    ).trim()
+    options.maxPosts = (
+      await ask(rl, 'Max posts per source (blank for all): ')
+    ).trim()
+    options.maxFiles = (
+      await ask(rl, 'Max files per source (blank for all): ')
+    ).trim()
+    options.postConcurrency = (
+      await ask(rl, 'Post concurrency (blank for default): ')
+    ).trim()
+    options.imageConcurrency = (
+      await ask(rl, 'Image concurrency (blank for default): ')
+    ).trim()
+    options.videoConcurrency = (
+      await ask(rl, 'Video concurrency (blank for default): ')
+    ).trim()
   }
 
   return options
@@ -111,7 +104,9 @@ async function runSingleUrlFlow(rl) {
   const rawUrl = (await ask(rl, 'Paste source URL: ')).trim()
   const parsed = parseSourceUrl(rawUrl)
   if (!parsed) {
-    console.log('Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Kemono.')
+    console.log(
+      'Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Kemono.'
+    )
     return
   }
 
@@ -124,7 +119,8 @@ async function runSingleUrlFlow(rl) {
   console.log(`Detected source: ${parsed.sourceType}`)
   console.log(`Scraper: ${parsed.scraper}`)
   if (parsed.rawName) console.log(`Detected name: ${parsed.rawName}`)
-  if (suggestedModel) console.log(`Suggested canonical model: ${suggestedModel}`)
+  if (suggestedModel)
+    console.log(`Suggested canonical model: ${suggestedModel}`)
 
   const overridePrompt = suggestedModel
     ? `Canonical model override (Enter to use ${suggestedModel}, type another name for a different/existing model, or "-" for scraper auto-detect): `
@@ -138,42 +134,31 @@ async function runSingleUrlFlow(rl) {
     canonicalOverride = overrideAnswer
   }
 
-  if (parsed.scraper === 'milkmaid') {
-    const args = [parsed.url]
-    appendOption(args, '--model', canonicalOverride)
-    const status = runNodeScript(path.join('milkmaid', 'milkmaid.js'), args)
-    if (status !== 0) {
-      console.log(`Milkmaid exited with status ${status}.`)
-    }
-    return
+  const runOptions = {}
+  if (canonicalOverride) {
+    runOptions.model = canonicalOverride
+  } else if (overrideAnswer === '-') {
+    runOptions['no-model-infer'] = true
   }
 
-  const args = [parsed.url]
-  appendOption(args, '--model', canonicalOverride)
-  const pages = (await ask(
-    rl,
-    'Pages limit for this Hoghaul run (blank for all): '
-  )).trim()
-  appendOption(args, '--pages', pages)
-  const videoConcurrency = (await ask(
-    rl,
-    'Video concurrency (blank for default): '
-  )).trim()
-  appendOption(args, '--video-concurrency', videoConcurrency)
-  const imageConcurrency = (await ask(
-    rl,
-    'Image concurrency (blank for default): '
-  )).trim()
-  appendOption(args, '--image-concurrency', imageConcurrency)
-  const postConcurrency = (await ask(
-    rl,
-    'Post concurrency (blank for default): '
-  )).trim()
-  appendOption(args, '--post-concurrency', postConcurrency)
+  if (parsed.scraper === 'hoghaul') {
+    runOptions.pages = (
+      await ask(rl, 'Pages limit for this Hoghaul run (blank for all): ')
+    ).trim()
+    runOptions['video-concurrency'] = (
+      await ask(rl, 'Video concurrency (blank for default): ')
+    ).trim()
+    runOptions['image-concurrency'] = (
+      await ask(rl, 'Image concurrency (blank for default): ')
+    ).trim()
+    runOptions['post-concurrency'] = (
+      await ask(rl, 'Post concurrency (blank for default): ')
+    ).trim()
+  }
 
-  const status = runNodeScript(path.join('hoghaul', 'hoghaul.js'), args)
+  const status = runScrape(parsed.url, runOptions)
   if (status !== 0) {
-    console.log(`Hoghaul exited with status ${status}.`)
+    console.log(`Scraper exited with status ${status}.`)
   }
 }
 
