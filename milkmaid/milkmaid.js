@@ -67,6 +67,16 @@ const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
+const {
+  buildCategoryRunList: buildStufferDbCategoryRunList,
+  collectChildCategoryUrls: collectStufferDbChildCategoryUrls,
+  extractGalleryPictureUrls,
+  extractMediaPageDetails,
+  getBreadcrumbInfo: getStufferDbBreadcrumbInfo,
+  getStufferDbCategoryId,
+  normalizeStufferDbCategoryUrl,
+  normalizeStufferDbPictureUrl,
+} = require('../scrapyard/sourceAdapters/stufferdb')
 
 function sanitize(name) {
   return String(name || '')
@@ -74,23 +84,6 @@ function sanitize(name) {
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase()
-}
-
-function normalizeStufferDbPictureUrl(inputUrl) {
-  const raw = String(inputUrl || '').trim()
-  if (!raw) return raw
-  if (!/stufferdb\.com/i.test(raw) || !/picture\?\//i.test(raw)) {
-    return raw
-  }
-
-  return raw
-    .replace(
-      /(https?:\/\/(?:www\.)?stufferdb\.com)\/index(?:\.php)?\?\/picture\?\//i,
-      '$1/picture?/'
-    )
-    .replace(/&acs=[^&]+/gi, '')
-    .replace(/&slideshow=?/gi, '')
-    .replace(/[?&=]+$/, '')
 }
 
 function loadModelRegistry(registryPath) {
@@ -376,18 +369,7 @@ async function promptForModelSelection(registryPath, inferredRawName) {
 }
 
 async function getBreadcrumbInfo(page) {
-  return await page.evaluate(() => {
-    const h2 = document.querySelector('.titrePage h2')
-    const anchors = [...(h2?.querySelectorAll('a') || [])].map((a) => ({
-      text: a.textContent?.trim() || '',
-      href: a.href || '',
-    }))
-
-    return {
-      texts: anchors.map((a) => a.text).filter(Boolean),
-      hrefs: anchors.map((a) => a.href).filter(Boolean),
-    }
-  })
+  return getStufferDbBreadcrumbInfo(page)
 }
 
 async function gotoWithTimeoutRetry(
@@ -425,54 +407,35 @@ async function gotoWithTimeoutRetry(
 }
 
 async function collectChildCategoryUrls(browser, parentUrl) {
-  const page = await createScraperPage(browser, {
-    site: 'stufferdb',
-    interceptMedia: true,
+  return collectStufferDbChildCategoryUrls(browser, parentUrl, {
+    createScraperPage,
+    gotoWithTimeoutRetry,
+    categoryPageTimeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
+    categoryPageRetryTimeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+    onRetry: (error) => {
+      appendRunEvent('child_category_page_retry', {
+        parentUrl,
+        timeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+        reason: error.message,
+      })
+    },
   })
-
-  try {
-    await gotoWithTimeoutRetry(page, parentUrl, {
-      waitUntil: 'domcontentloaded',
-      timeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
-      retryTimeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
-      onRetry: (error) => {
-        appendRunEvent('child_category_page_retry', {
-          parentUrl,
-          timeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
-          reason: error.message,
-        })
-      },
-    })
-
-    const candidateUrls = await page.evaluate(() => {
-      const links = [
-        ...document.querySelectorAll(
-          'ul.thumbnailCategories li.album a, li.gdthumb.album a'
-        ),
-      ]
-
-      return [
-        ...new Set(
-          links
-            .map((a) => a.href || '')
-            .filter((href) => href.includes('index?/category/'))
-            .map((href) => href.replace(/&acs=[^&]+/gi, ''))
-        ),
-      ]
-    })
-
-    const parentNormalized = parentUrl.replace(/&acs=[^&]+/gi, '')
-    return candidateUrls.filter((url) => url && url !== parentNormalized)
-  } finally {
-    if (!page.isClosed()) await page.close()
-  }
 }
 
 async function buildCategoryRunList(browser, inputUrl) {
-  const normalizedInput = inputUrl.replace(/&acs=[^&]+/gi, '')
-  const childUrls = await collectChildCategoryUrls(browser, normalizedInput)
-
-  return [...new Set([normalizedInput, ...childUrls])]
+  return buildStufferDbCategoryRunList(browser, inputUrl, {
+    createScraperPage,
+    gotoWithTimeoutRetry,
+    categoryPageTimeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
+    categoryPageRetryTimeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+    onRetry: (error) => {
+      appendRunEvent('child_category_page_retry', {
+        parentUrl: normalizeStufferDbCategoryUrl(inputUrl),
+        timeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+        reason: error.message,
+      })
+    },
+  })
 }
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
@@ -1726,16 +1689,9 @@ async function scrapeGallery(browser, url, modelName, folders) {
         },
       })
 
-      const urls = await page.$$eval('a[href^="picture?/"]', (links) =>
-        links.map((l) => l.href)
-      )
-      const dedupedUrls = [
-        ...new Set(
-          urls
-            .map((mediaPageUrl) => normalizeStufferDbPictureUrl(mediaPageUrl))
-            .filter(Boolean)
-        ),
-      ]
+      const galleryLinks = await extractGalleryPictureUrls(page)
+      const urls = galleryLinks.rawUrls
+      const dedupedUrls = galleryLinks.urls
 
       const total = dedupedUrls.length
 
@@ -1849,39 +1805,19 @@ async function scrapeGallery(browser, url, modelName, folders) {
             })
           }
 
-          const uploadedDateIso = await page.evaluate(() => {
-            const anchor = document.querySelector('#datepost dd a')
-            if (!anchor) return null
-            const text = anchor.textContent?.trim()
-            const match = text.match(/\d{1,2} \w+ \d{4}/)
-            if (!match) return null
-            const date = new Date(match[0])
-            return isNaN(date.getTime()) ? null : date.toISOString()
-          })
+          const mediaDetails = await extractMediaPageDetails(page)
+          const uploadedDateIso = mediaDetails.uploadedDateIso
 
           const uploadedDate = uploadedDateIso
             ? resolveEffectiveFileDate(new Date(uploadedDateIso), null)
             : null
-          const pageMeta = await extractStufferDbComments(page)
+          const pageMeta = mediaDetails.pageMeta
 
-          mediaUrl = await page.evaluate(() => {
-            const video = document.querySelector('video.vjs-tech[src]')
-            const img = document.querySelector('#theMainImage')
-            return video?.src || img?.src || null
-          })
-
+          mediaUrl = mediaDetails.mediaUrl
           if (!mediaUrl) return
 
-          const parsed = new URL(mediaUrl)
-          filename = decodeURIComponent(
-            path.basename(parsed.pathname).split('?')[0]
-          )
-
-          ext = path.extname(filename).toLowerCase()
-          if (ext === '.m4v') {
-            ext = '.mp4'
-            filename = filename.replace(/\.m4v$/i, '.mp4')
-          }
+          filename = mediaDetails.filename
+          ext = mediaDetails.extension
 
           if (isNuisanceMediaAsset(filename, ext)) {
             appendRunEvent('skip_nuisance_media', {
@@ -2275,7 +2211,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
     inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
 
-    const categoryId = inputUrl.match(/category\/?(\d+)/)?.[1]
+    const categoryId = getStufferDbCategoryId(inputUrl)
     if (!categoryId) return logAndProgress('❌ Invalid category URL')
 
     browser = await puppeteer.launch({
