@@ -882,9 +882,11 @@
         position: relative;
         cursor: default;
       }
-      /* activity levels — inactive stays border colour */
-      .yr-cell.lvl-1 { background: #2d4a2d; }
-      .yr-cell.lvl-2 { background: #3a7a3a; }
+      /* activity levels — inactive stays border colour.
+         Tuned for dark UI: lvl-1 stands out from the inactive border
+         (which is #2a2a3a) instead of fading into it. */
+      .yr-cell.lvl-1 { background: #1f5b2a; }
+      .yr-cell.lvl-2 { background: #2f8c3e; }
       .yr-cell.lvl-3 { background: #4caf50; }
       .yr-cell.lvl-4 { background: #76d77a; }
 
@@ -1295,8 +1297,44 @@
         usersData = await res.json()
         userCountEl.textContent = usersData.length
         renderUserList(usersData)
-        showHomeView() // start on the home grid
+        // Apply whatever route is in the URL bar. Browsers preserve the hash
+        // across refresh, so a deep link / refresh / back button all land here.
+        applyHashRoute()
       }
+
+      // ─── HASH ROUTING ─────────────────────────────────────────────────────
+      // #/                → home grid
+      // #/u/<encoded name>→ that model's media view
+      // Updates the URL whenever the user navigates (so browser back works),
+      // and reacts to manual hash changes (paste a link, back/forward button).
+      let _suppressHashChange = false
+      function parseHashRoute() {
+        const raw = (location.hash || '').replace(/^#/, '')
+        const m = raw.match(/^\/u\/(.+)$/)
+        if (m) return { view: 'user', username: decodeURIComponent(m[1]) }
+        return { view: 'home' }
+      }
+      function setHashRoute(target) {
+        const next = target.view === 'user'
+          ? `#/u/${encodeURIComponent(target.username)}`
+          : '#/'
+        if (location.hash === next) return
+        _suppressHashChange = true
+        location.hash = next
+      }
+      function applyHashRoute() {
+        const route = parseHashRoute()
+        if (route.view === 'user') {
+          const u = usersData.find((x) => x.name === route.username)
+          if (u) { selectUser(u, null, { skipHashUpdate: true }); return }
+          // Unknown model — bounce back to home rather than show a broken view.
+        }
+        showHomeView({ skipHashUpdate: true })
+      }
+      window.addEventListener('hashchange', () => {
+        if (_suppressHashChange) { _suppressHashChange = false; return }
+        applyHashRoute()
+      })
 
       // Models whose full media has been loaded — their client-resolved dates are
       // more accurate than the server's fast buildModelStats() scan, so we preserve
@@ -1339,7 +1377,7 @@
       setInterval(refreshUsers, 5 * 60 * 1000)
 
       // ─── HOME VIEW ────────────────────────────────────────────────────────
-      function showHomeView() {
+      function showHomeView(opts = {}) {
         homeVisible = true
         document.getElementById('home-btn').classList.add('active')
         homeViewEl.classList.add('visible')
@@ -1353,6 +1391,7 @@
         filterSelect.style.display = 'none'
         if (mediaStatsEl) mediaStatsEl.textContent = ''
         sourceLinksEl.innerHTML = ''
+        if (!opts.skipHashUpdate) setHashRoute({ view: 'home' })
         renderHomeGrid()
       }
 
@@ -1481,14 +1520,17 @@
             const graph = document.createElement('div')
             graph.className = 'activity-graph'
 
+            // Log scale instead of linear: a year with 5 files visibly lights
+            // up next to a year with 5000, instead of getting flattened to lvl-1.
+            const logMax = Math.log(maxCount + 1)
             for (let yr = globalStart; yr <= globalEnd; yr++) {
               const count = yearCounts[yr] || 0
               const cell  = document.createElement('div')
-              const ratio = count / maxCount
+              const ratio = count > 0 ? Math.log(count + 1) / logMax : 0
               const lvl   = count === 0 ? 0
-                          : ratio < 0.15 ? 1
-                          : ratio < 0.40 ? 2
-                          : ratio < 0.75 ? 3
+                          : ratio < 0.35 ? 1
+                          : ratio < 0.65 ? 2
+                          : ratio < 0.90 ? 3
                           : 4
               cell.className = `yr-cell${lvl > 0 ? ` lvl-${lvl}` : ''}`
               cell.title = count > 0 ? `${yr}: ${count} files` : `${yr}: no files`
@@ -1582,11 +1624,12 @@
         }
       }
 
-      async function selectUser(userObj, liEl) {
+      async function selectUser(userObj, liEl, opts = {}) {
         const username = typeof userObj === 'string' ? userObj : userObj.name
         const sources = typeof userObj === 'object' ? userObj.sources : null
         closeSidebar()
         hideHomeView()
+        if (!opts.skipHashUpdate) setHashRoute({ view: 'user', username })
 
         userListEl
           .querySelectorAll('.user-item')

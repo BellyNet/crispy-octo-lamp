@@ -41,9 +41,15 @@ const metaCache = new MetaCache(THUMB_DIR)
 const RESPONSE_CACHE_DIR = path.join(THUMB_DIR, 'response-cache')
 fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 
+// Bump when the response shape changes meaningfully (new fields, changed date
+// resolution rules, etc.). On-disk caches with an older version are ignored,
+// forcing a rebuild — used by mismatched-cache callers below.
+const RESPONSE_CACHE_VERSION = 2
+
 function loadResponseCacheFromDisk(username) {
   try {
     const data = JSON.parse(fs.readFileSync(path.join(RESPONSE_CACHE_DIR, `${username}.json`), 'utf8'))
+    if (data.version !== RESPONSE_CACHE_VERSION) return null
     if (data.fingerprint && Array.isArray(data.response)) return data
   } catch {}
   return null
@@ -54,7 +60,7 @@ function saveResponseCacheToDisk(username, response, fingerprint) {
     try {
       fs.writeFileSync(
         path.join(RESPONSE_CACHE_DIR, `${username}.json`),
-        JSON.stringify({ fingerprint, response })
+        JSON.stringify({ version: RESPONSE_CACHE_VERSION, fingerprint, response })
       )
     } catch {}
   })
@@ -205,6 +211,7 @@ function isSane(date) {
 // ─── DATE RESOLUTION ──────────────────────────────────────────────────────────
 
 // opts.cachedVideoDate: pre-resolved video date from the metadata cache (skips ffprobe)
+// opts.cachedImageDate: pre-resolved EXIF date from the metadata cache (skips exifr)
 // opts.stat: pre-fetched stat (skips a second stat call for the filesystem fallback)
 async function resolveDateForFile(userDir, folder, filename, filePath, opts = {}) {
   const fromSidecar = mediaDates.resolveDateFromSidecar(
@@ -222,6 +229,15 @@ async function resolveDateForFile(userDir, folder, filename, filePath, opts = {}
       ? opts.cachedVideoDate
       : await mediaDates.extractVideoDateFromFile(filePath)
     if (videoDate) result = { date: videoDate, source: 'mp4' }
+  }
+
+  // EXIF for images — runs after the cached path so the scanner can pass
+  // the already-extracted date in without re-reading the file.
+  if (!result && ['.jpg', '.jpeg'].includes(ext)) {
+    const imageDate = 'cachedImageDate' in opts
+      ? opts.cachedImageDate
+      : await mediaDates.extractImageDateFromFile(filePath)
+    if (imageDate) result = { date: imageDate, source: 'exif' }
   }
 
   if (!result) {
@@ -397,7 +413,7 @@ async function processFileForResponse(username, userDir, item) {
   const stat = await fs.promises.stat(item.filePath).catch(() => null)
   if (!stat) return null
 
-  let width = 0, height = 0, duration = 0, videoDate
+  let width = 0, height = 0, duration = 0, videoDate, imageDate
   let metaUpdated = false
   const hit = metaCache.get(username, item.folder, item.filename, stat)
   if (hit) {
@@ -405,27 +421,42 @@ async function processFileForResponse(username, userDir, item) {
     height = hit.height || 0
     duration = hit.duration || 0
     videoDate = hit.videoDate
+    imageDate = hit.imageDate
+    // Backfill EXIF dates for entries cached before EXIF support landed.
+    // Sentinel: `null` means "tried and got nothing", so we don't retry next scan.
+    if (!isVideo && ['.jpg', '.jpeg'].includes(ext) && imageDate === undefined) {
+      const exifDate = await mediaDates.extractImageDateFromFile(item.filePath).catch(() => null)
+      imageDate = exifDate || null
+      metaCache.set(username, item.folder, item.filename, stat, {
+        width, height, imageDate,
+      })
+      metaUpdated = true
+    }
   } else {
     if (isVideo) {
       const probed = await mediaDates.probeVideoFile(item.filePath).catch(() => ({}))
       duration = probed.duration || 0
       videoDate = probed.videoDate || undefined
     } else if (IMAGE_EXTS_IN.has(ext)) {
-      try {
-        const m = await sharp(item.filePath).metadata()
-        width = m.width || 0; height = m.height || 0
-      } catch {}
+      // sharp metadata and exif parse can run in parallel — both read the file
+      // header. exifr returns null for formats with no EXIF (most PNGs, GIFs).
+      const [m, exifDate] = await Promise.all([
+        sharp(item.filePath).metadata().catch(() => ({})),
+        mediaDates.extractImageDateFromFile(item.filePath).catch(() => null),
+      ])
+      width = m.width || 0; height = m.height || 0
+      imageDate = exifDate || null
     }
     metaCache.set(username, item.folder, item.filename, stat, isVideo
       ? { duration, ...(videoDate !== undefined && { videoDate }) }
-      : { width, height })
+      : { width, height, imageDate })
     metaUpdated = true
   }
 
   const type = getMediaType(item.folder, item.filename)
   const dateMeta = await resolveDateForFile(
     userDir, item.folder, item.filename, item.filePath,
-    { cachedVideoDate: videoDate, stat }
+    { cachedVideoDate: videoDate, cachedImageDate: imageDate, stat }
   )
   return {
     record: {

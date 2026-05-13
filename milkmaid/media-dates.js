@@ -137,6 +137,37 @@ async function extractVideoDateFromFile(filePath) {
   return (await probeVideoFile(filePath)).videoDate
 }
 
+// ─── EXTRACTION: IMAGES (EXIF via exifr) ──────────────────────────────────────
+// Loaded lazily so the module doesn't pay the require() cost on environments
+// that never call this function (e.g. video-only tooling).
+let _exifr = null
+function getExifr() {
+  if (_exifr) return _exifr
+  try { _exifr = require('exifr') } catch { _exifr = false }
+  return _exifr
+}
+
+// Returns ISO date from EXIF DateTimeOriginal / CreateDate / DateTimeDigitized,
+// or null if no usable date is present (or the file isn't a parseable image).
+// Used by the dashboard scan so the activity graph reflects when a photo was
+// actually taken, not when it landed on the NAS.
+async function extractImageDateFromFile(filePath) {
+  const exifr = getExifr()
+  if (!exifr) return null
+  try {
+    const data = await exifr.parse(filePath, {
+      pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized'],
+      translateValues: true,
+    })
+    const raw = data?.DateTimeOriginal || data?.CreateDate || data?.DateTimeDigitized
+    if (!raw) return null
+    const d = raw instanceof Date ? raw : new Date(raw)
+    return isSane(d) ? toISO(d) : null
+  } catch {
+    return null
+  }
+}
+
 // ─── EXTRACTION: FILENAME TIMESTAMP ───────────────────────────────────────────
 function extractFilenameDate(filename) {
   const m = filename.match(/^(\d{14})/)
@@ -311,6 +342,7 @@ module.exports = {
   resolveBestDateRecord,
   extractVideoDateFromFile,
   probeVideoFile,
+  extractImageDateFromFile,
   extractFilenameDate,
   flushAllSidecars,
   findFfprobe,
