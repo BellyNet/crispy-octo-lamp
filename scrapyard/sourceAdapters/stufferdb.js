@@ -1,6 +1,7 @@
 'use strict'
 
 const path = require('path')
+const { normalizeMediaEntry } = require('../mediaEntries')
 
 function normalizeStufferDbPictureUrl(inputUrl) {
   const raw = String(inputUrl || '').trim()
@@ -27,6 +28,10 @@ function normalizeStufferDbCategoryUrl(inputUrl) {
 
 function getStufferDbCategoryId(inputUrl) {
   return String(inputUrl || '').match(/category\/?(\d+)/)?.[1] || null
+}
+
+function getStufferDbPictureId(inputUrl) {
+  return String(inputUrl || '').match(/picture\?\/(\d+)/)?.[1] || null
 }
 
 async function getBreadcrumbInfo(page) {
@@ -277,7 +282,44 @@ async function extractMediaPageDetails(page) {
   }
 }
 
+function buildStufferDbMediaEntry(
+  source = {},
+  mediaPageUrl,
+  mediaDetails = {}
+) {
+  const normalizedMediaPageUrl = normalizeStufferDbPictureUrl(mediaPageUrl)
+  if (!mediaDetails.mediaUrl || !mediaDetails.filename) return null
+
+  return normalizeMediaEntry(
+    {
+      sourceSite: 'stufferdb',
+      sourceService: source.service || 'category',
+      sourceUserId:
+        source.categoryId || getStufferDbCategoryId(source.url) || null,
+      sourceUsername: source.modelName || source.username || null,
+      postId: getStufferDbPictureId(normalizedMediaPageUrl),
+      mediaPageUrl: normalizedMediaPageUrl,
+      mediaPageUrls: [normalizedMediaPageUrl],
+      mediaUrl: mediaDetails.mediaUrl,
+      mediaUrls: [mediaDetails.mediaUrl],
+      sourceUrls: [source.url].filter(Boolean),
+      filename: mediaDetails.filename,
+      originalName: mediaDetails.filename,
+      uploadedDate: mediaDetails.uploadedDateIso,
+      pageMeta: mediaDetails.pageMeta,
+    },
+    {
+      sourceSite: 'stufferdb',
+      sourceService: source.service || 'category',
+      sourceUserId:
+        source.categoryId || getStufferDbCategoryId(source.url) || null,
+      sourceUsername: source.modelName || source.username || null,
+    }
+  )
+}
+
 module.exports = {
+  buildStufferDbMediaEntry,
   buildCategoryRunList,
   collectChildCategoryUrls,
   extractGalleryPictureUrls,
@@ -286,6 +328,7 @@ module.exports = {
   fetchStufferDBTotalCount,
   getBreadcrumbInfo,
   getStufferDbCategoryId,
+  getStufferDbPictureId,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
 }

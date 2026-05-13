@@ -68,10 +68,12 @@ const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
+  buildStufferDbMediaEntry,
   buildCategoryRunList: buildStufferDbCategoryRunList,
   collectChildCategoryUrls: collectStufferDbChildCategoryUrls,
   extractGalleryPictureUrls,
   extractMediaPageDetails,
+  fetchStufferDBTotalCount: fetchStufferDbTotalCountFromAdapter,
   getBreadcrumbInfo: getStufferDbBreadcrumbInfo,
   getStufferDbCategoryId,
   normalizeStufferDbCategoryUrl,
@@ -1323,112 +1325,11 @@ function hashFileFromPath(filePath) {
   })
 }
 
-async function extractStufferDbComments(page) {
-  const commentsHostFrame = page
-    .frames()
-    .find((frame) => frame.url().includes('cmts.stufferdb.com/app'))
-
-  if (!commentsHostFrame) {
-    return { comments: [], commentCount: 0 }
-  }
-
-  try {
-    await commentsHostFrame.waitForSelector(
-      '#comments_list, .comment, .allcomments',
-      {
-        timeout: 5000,
-      }
-    )
-  } catch {
-    return { comments: [], commentCount: 0 }
-  }
-
-  try {
-    return await commentsHostFrame.evaluate(() => {
-      const countText =
-        document.querySelector('.allcomments')?.textContent?.trim() || ''
-      const countMatch = countText.match(/(\d+)/)
-      const commentCount = countMatch ? Number.parseInt(countMatch[1], 10) : 0
-
-      const comments = Array.from(
-        document.querySelectorAll('#comments_list .comment')
-      )
-        .map((commentEl) => {
-          const author =
-            commentEl
-              .querySelector('.comment-top .user-guest, .comment-top .user')
-              ?.textContent?.trim() || null
-          const posted =
-            commentEl
-              .querySelector('.comment-top .date')
-              ?.textContent?.replace(/^•\s*/, '')
-              .trim() || null
-          const spoilerText =
-            commentEl
-              .querySelector('.comment-spoiler-text')
-              ?.textContent?.trim() || ''
-          const mainText =
-            commentEl
-              .querySelector('.comment-text-p, .comment-text, .comment-body')
-              ?.textContent?.trim() || ''
-          const text = [spoilerText, mainText].filter(Boolean).join('\n').trim()
-
-          if (!text) return null
-
-          return {
-            author,
-            posted,
-            text,
-          }
-        })
-        .filter(Boolean)
-
-      return {
-        comments,
-        commentCount: Number.isFinite(commentCount)
-          ? commentCount
-          : comments.length,
-      }
-    })
-  } catch {
-    return { comments: [], commentCount: 0 }
-  }
-}
-
 async function fetchStufferDBTotalCount(browser, url) {
-  const tempPage = await createScraperPage(browser, {
-    site: 'stufferdb',
-    interceptMedia: true,
+  return await fetchStufferDbTotalCountFromAdapter(browser, url, {
+    createScraperPage,
+    logger: console,
   })
-
-  try {
-    await tempPage.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    })
-
-    await tempPage.waitForSelector('span.badge.nb_items', {
-      timeout: 10000,
-    })
-
-    const rawText = await tempPage.$eval(
-      'span.badge.nb_items',
-      (el) => el.textContent || ''
-    )
-    console.log(`🕵️ Raw badge text from ${url}:`, rawText)
-
-    const match = rawText.match(/(\d+)/)
-    const count = match ? parseInt(match[1], 10) : 0
-    console.log(`🔢 Parsed count: ${count}`)
-    return count
-  } catch (err) {
-    const title = await tempPage.title().catch(() => 'unknown')
-    console.log(`⚠️ Could not fetch count for ${url}: ${err.message}`)
-    console.log(`🧙 Page title: ${title}`)
-    return 0
-  } finally {
-    if (!tempPage.isClosed()) await tempPage.close()
-  }
 }
 
 function getVideoDuration(filePath) {
@@ -1806,18 +1707,25 @@ async function scrapeGallery(browser, url, modelName, folders) {
           }
 
           const mediaDetails = await extractMediaPageDetails(page)
-          const uploadedDateIso = mediaDetails.uploadedDateIso
+          const mediaEntry = buildStufferDbMediaEntry(
+            {
+              url,
+              categoryId: getStufferDbCategoryId(url),
+              modelName,
+            },
+            mediaPageUrl,
+            mediaDetails
+          )
+          if (!mediaEntry) return
 
-          const uploadedDate = uploadedDateIso
-            ? resolveEffectiveFileDate(new Date(uploadedDateIso), null)
+          const uploadedDate = mediaEntry.uploadedDate
+            ? resolveEffectiveFileDate(mediaEntry.uploadedDate, null)
             : null
-          const pageMeta = mediaDetails.pageMeta
+          const pageMeta = mediaEntry.pageMeta
 
-          mediaUrl = mediaDetails.mediaUrl
-          if (!mediaUrl) return
-
-          filename = mediaDetails.filename
-          ext = mediaDetails.extension
+          mediaUrl = mediaEntry.mediaUrl
+          filename = mediaEntry.filename
+          ext = mediaEntry.extension
 
           if (isNuisanceMediaAsset(filename, ext)) {
             appendRunEvent('skip_nuisance_media', {
