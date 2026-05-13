@@ -2,7 +2,6 @@
 
 const fs = require('fs')
 const path = require('path')
-const { exec } = require('child_process')
 const { createHash } = require('crypto')
 const minimist = require('minimist')
 const pLimit = require('p-limit')
@@ -10,13 +9,9 @@ const pLimit = require('p-limit')
 const { bannerHoghaul } = require('../banners.js')
 const mediaDates = require('../milkmaid/media-dates.js')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
-const {
-  mergeNasMp4Entries,
-  collectMp4RelativePaths,
-  syncNasMp4IndexToMirror,
-} = require('../scrapyard/nasMp4Index')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
+const { syncModelToNas } = require('../scrapyard/nasSync')
 const {
   classifyMediaFilename,
   getMediaEntryHashMetadata,
@@ -77,6 +72,7 @@ const datasetPaths = createDatasetPaths({
 })
 const rootDir = datasetPaths.rootDir
 const datasetDir = datasetPaths.datasetDir
+const nasDatasetDir = datasetPaths.nasDatasetDir
 const registryPath =
   process.env.HOGHAUL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
 const API_PAGE_SIZE = 50
@@ -1295,22 +1291,6 @@ function hashFileFromPath(filePath) {
   })
 }
 
-function syncToNAS(modelName) {
-  return new Promise((resolve) => {
-    const cmd = `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
-    exec(cmd, (error, stdout, stderr) => {
-      const code = error?.code ?? 0
-      if (code > 3) {
-        console.error(`NAS sync failed with code ${code}: ${stderr || stdout}`)
-        resolve(false)
-      } else {
-        console.log('NAS sync complete.')
-        resolve(true)
-      }
-    })
-  })
-}
-
 async function run(argvInput = process.argv.slice(2)) {
   resetRunState()
   bannerHoghaul()
@@ -1711,14 +1691,7 @@ async function run(argvInput = process.argv.slice(2)) {
   if (skipNasSync) {
     console.log('NAS sync skipped by --skip-nas-sync')
   } else {
-    const nasSyncOk = await syncToNAS(modelName)
-    if (nasSyncOk) {
-      mergeNasMp4Entries(
-        collectMp4RelativePaths(path.join(datasetDir, modelName), datasetDir),
-        datasetDir
-      )
-      syncNasMp4IndexToMirror('Z:\\dataset', datasetDir)
-    }
+    await syncModelToNas({ modelName, datasetDir, nasDatasetDir })
   }
   const runCounters = currentRunLog
     ? {

@@ -56,13 +56,9 @@ const {
   logScrollingMessage,
 } = require('../stuffinglogger')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
-const {
-  mergeNasMp4Entries,
-  collectMp4RelativePaths,
-  syncNasMp4IndexToMirror,
-} = require('../scrapyard/nasMp4Index')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
+const { syncModelToNas } = require('../scrapyard/nasSync')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const {
   getMediaEntryHashMetadata,
@@ -471,6 +467,7 @@ const datasetPaths = createDatasetPaths({
 const rootDir = datasetPaths.rootDir
 const slopvaultRoot = datasetPaths.slopvaultRoot
 const datasetDir = datasetPaths.datasetDir
+const nasDatasetDir = datasetPaths.nasDatasetDir
 const milkmaidMediaSaver = createMediaSaver({
   datasetDir,
   source: 'milkmaid',
@@ -2508,20 +2505,13 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
     if (skipNasSync) {
       console.log('⏭️ NAS sync skipped by --skip-nas-sync')
     } else {
-      const nasSync = await runShellCommand(
-        `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
-      )
-
-      if (!nasSync.ok && nasSync.code > 3) {
-        console.error('❌ NAS sync failed with code', nasSync.code)
-      } else {
-        mergeNasMp4Entries(
-          collectMp4RelativePaths(path.join(datasetDir, modelName), datasetDir),
-          datasetDir
-        )
-        syncNasMp4IndexToMirror('Z:\\dataset', datasetDir)
-        console.log('✅ NAS sync complete.')
-      }
+      await syncModelToNas({
+        modelName,
+        datasetDir,
+        nasDatasetDir,
+        successMessage: '✅ NAS sync complete.',
+        failurePrefix: '❌ NAS sync failed with code',
+      })
     }
 
     console.log(
