@@ -113,14 +113,16 @@ const hoghaulSavePipeline = createMediaSavePipeline({
   onSaved: ({ stats }) => {
     successCount += 1
     savedBytes += stats.savedBytes
-    if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += stats.savedBytes
-      currentRunLog.transfer.lazyTransferredBytes += stats.lazyTransferredBytes
-    }
+    runLifecycle.addRunTransfer(currentRunLog, 'savedBytes', stats.savedBytes)
+    runLifecycle.addRunTransfer(
+      currentRunLog,
+      'lazyTransferredBytes',
+      stats.lazyTransferredBytes
+    )
   },
   onQueued: () => {
     queuedVideoCount += 1
-    if (currentRunLog) currentRunLog.counters.queuedVideos += 1
+    runLifecycle.incrementRunCounter(currentRunLog, 'queuedVideos')
   },
   onOutcome: ({ kind, label }) => {
     noteMediaOutcome(kind, label)
@@ -492,20 +494,23 @@ function finalizeRunLog(extra = {}) {
 }
 
 function setExpectedMediaCount(total) {
-  if (!currentRunLog) return
-  currentRunLog.counters.expectedMedia =
+  runLifecycle.setRunCounter(
+    currentRunLog,
+    'expectedMedia',
     Number.isFinite(total) && total >= 0 ? total : 0
+  )
 }
 
 function logRunProgress(context = '') {
-  if (!currentRunLog) return
+  const counters = runLifecycle.getRunCounters(currentRunLog)
+  if (!counters) return
 
-  const processed = currentRunLog.counters.processed || 0
-  const expected = currentRunLog.counters.expectedMedia || 0
-  const saved = currentRunLog.counters.saved || 0
-  const skipped = currentRunLog.counters.skipped || 0
-  const duplicates = currentRunLog.counters.duplicates || 0
-  const failures = currentRunLog.counters.failures || 0
+  const processed = counters.processed || 0
+  const expected = counters.expectedMedia || 0
+  const saved = counters.saved || 0
+  const skipped = counters.skipped || 0
+  const duplicates = counters.duplicates || 0
+  const failures = counters.failures || 0
   const remaining = Math.max(expected - processed, 0)
   const percent = formatPercent(processed, expected)
   const suffix = context ? ` :: ${context}` : ''
@@ -518,16 +523,7 @@ function logRunProgress(context = '') {
 function noteMediaOutcome(kind, context = '') {
   if (!currentRunLog) return
 
-  currentRunLog.counters.processed += 1
-  if (kind === 'saved') {
-    currentRunLog.counters.saved += 1
-  } else if (kind === 'skipped') {
-    currentRunLog.counters.skipped += 1
-  } else if (kind === 'duplicate') {
-    currentRunLog.counters.duplicates += 1
-  } else if (kind === 'failed') {
-    currentRunLog.counters.failures += 1
-  }
+  runLifecycle.noteMediaOutcome(currentRunLog, kind)
 
   logRunProgress(context)
 }
@@ -1612,14 +1608,15 @@ async function run(argvInput = process.argv.slice(2)) {
   } else {
     await syncModelToNas({ modelName, datasetDir, nasDatasetDir })
   }
-  const runCounters = currentRunLog
+  const counters = runLifecycle.getRunCounters(currentRunLog)
+  const runCounters = counters
     ? {
-        processed: currentRunLog.counters.processed || 0,
-        expectedMedia: currentRunLog.counters.expectedMedia || 0,
-        saved: currentRunLog.counters.saved || 0,
-        skipped: currentRunLog.counters.skipped || 0,
-        duplicates: currentRunLog.counters.duplicates || 0,
-        failures: currentRunLog.counters.failures || 0,
+        processed: counters.processed || 0,
+        expectedMedia: counters.expectedMedia || 0,
+        saved: counters.saved || 0,
+        skipped: counters.skipped || 0,
+        duplicates: counters.duplicates || 0,
+        failures: counters.failures || 0,
       }
     : null
   finalizeRunLog({

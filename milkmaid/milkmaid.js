@@ -487,15 +487,15 @@ const milkmaidSavePipeline = createMediaSavePipeline({
   isQuarantinedPath,
   onDuplicate: () => {
     duplicateCount++
-    if (currentRunLog) currentRunLog.counters.duplicates++
+    runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
   },
   onSaved: ({ stats }) => {
     successCount++
-    if (currentRunLog) currentRunLog.counters.saved++
+    runLifecycle.incrementRunCounter(currentRunLog, 'saved')
     addRunSavedBytes(stats.savedBytes)
   },
   onQueued: () => {
-    if (currentRunLog) currentRunLog.counters.queuedVideos++
+    runLifecycle.incrementRunCounter(currentRunLog, 'queuedVideos')
   },
 })
 const duplicateChecker = createDuplicateChecker({
@@ -564,28 +564,23 @@ function resetRunState() {
 }
 
 function addRunSavedBytes(bytes) {
-  if (!currentRunLog) return
-  currentRunLog.transfer.savedBytes += Number(bytes) || 0
+  runLifecycle.addRunTransfer(currentRunLog, 'savedBytes', bytes)
 }
 
 function addRunFailedBytes(bytes) {
-  if (!currentRunLog) return
-  currentRunLog.transfer.failedBytes += Number(bytes) || 0
+  runLifecycle.addRunTransfer(currentRunLog, 'failedBytes', bytes)
 }
 
 function addRunFailedLazyVideoBytes(bytes) {
-  if (!currentRunLog) return
-  currentRunLog.transfer.failedLazyVideoBytes += Number(bytes) || 0
+  runLifecycle.addRunTransfer(currentRunLog, 'failedLazyVideoBytes', bytes)
 }
 
 function setRunLazyExpectedBytes(bytes) {
-  if (!currentRunLog) return
-  currentRunLog.transfer.lazyExpectedBytes = Number(bytes) || 0
+  runLifecycle.setRunTransfer(currentRunLog, 'lazyExpectedBytes', bytes)
 }
 
 function setRunLazyTransferredBytes(bytes) {
-  if (!currentRunLog) return
-  currentRunLog.transfer.lazyTransferredBytes = Number(bytes) || 0
+  runLifecycle.setRunTransfer(currentRunLog, 'lazyTransferredBytes', bytes)
 }
 
 function getIncompleteDirs(modelName) {
@@ -1673,7 +1668,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           })
           if (permanentSkipPageMatch) {
             duplicateCount++
-            currentRunLog && currentRunLog.counters.duplicates++
+            runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
             appendRunEvent('skip_permanent', {
               modelName,
               filename: null,
@@ -1697,7 +1692,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           )
           if (seenMediaPageMatch) {
             duplicateCount++
-            currentRunLog && currentRunLog.counters.duplicates++
+            runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
             appendRunEvent('skip_seen_media', {
               modelName,
               filename: null,
@@ -1748,7 +1743,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           })
         } catch (err) {
           errorCount++
-          currentRunLog && currentRunLog.counters.failures++
+          runLifecycle.incrementRunCounter(currentRunLog, 'failures')
           recordRunError('media_error', {
             modelName,
             mediaPageUrl,
@@ -2010,7 +2005,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
               existsLocallyOrOnNas(finalPath)
             ) {
               duplicateCount++
-              currentRunLog && currentRunLog.counters.duplicates++
+              runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
               appendRunEvent('skip_lazy_existing', {
                 modelName,
                 filename,
@@ -2305,7 +2300,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
               logAndProgress(`✅ Saved lazy video: ${filename}`)
             } catch (err) {
               errorCount++
-              currentRunLog && currentRunLog.counters.failures++
+              runLifecycle.incrementRunCounter(currentRunLog, 'failures')
               addRunFailedBytes(bytesDownloadedForFile)
               addRunFailedLazyVideoBytes(bytesDownloadedForFile)
               const relativePath = getDatasetRelativePath(finalPath)

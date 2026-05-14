@@ -85,6 +85,46 @@ function recordRunError(runLog, category, details = {}) {
   })
 }
 
+function incrementRunCounter(runLog, name, delta = 1) {
+  if (!runLog?.counters || !name) return
+  runLog.counters[name] =
+    Number(runLog.counters[name] || 0) + (Number(delta) || 0)
+}
+
+function setRunCounter(runLog, name, value) {
+  if (!runLog?.counters || !name) return
+  runLog.counters[name] = Number(value) || 0
+}
+
+function addRunTransfer(runLog, name, bytes) {
+  if (!runLog?.transfer || !name) return
+  runLog.transfer[name] =
+    Number(runLog.transfer[name] || 0) + (Number(bytes) || 0)
+}
+
+function setRunTransfer(runLog, name, bytes) {
+  if (!runLog?.transfer || !name) return
+  runLog.transfer[name] = Number(bytes) || 0
+}
+
+function getRunCounters(runLog) {
+  return runLog?.counters ? { ...runLog.counters } : null
+}
+
+function noteMediaOutcome(runLog, kind) {
+  if (!runLog) return
+  incrementRunCounter(runLog, 'processed')
+  if (kind === 'saved') {
+    incrementRunCounter(runLog, 'saved')
+  } else if (kind === 'skipped') {
+    incrementRunCounter(runLog, 'skipped')
+  } else if (kind === 'duplicate') {
+    incrementRunCounter(runLog, 'duplicates')
+  } else if (kind === 'failed') {
+    incrementRunCounter(runLog, 'failures')
+  }
+}
+
 function finalizeRunLog(runLog, extra = {}, options = {}) {
   if (!runLog) return null
 
@@ -134,8 +174,14 @@ function finalizeRunLog(runLog, extra = {}, options = {}) {
 }
 
 module.exports = {
+  addRunTransfer,
   appendRunEvent,
   createRunLog,
   finalizeRunLog,
+  getRunCounters,
+  incrementRunCounter,
+  noteMediaOutcome,
   recordRunError,
+  setRunCounter,
+  setRunTransfer,
 }
