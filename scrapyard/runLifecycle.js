@@ -111,6 +111,44 @@ function getRunCounters(runLog) {
   return runLog?.counters ? { ...runLog.counters } : null
 }
 
+function formatPercent(numerator, denominator) {
+  if (!Number.isFinite(denominator) || denominator <= 0) return '0.0'
+  return ((numerator / denominator) * 100).toFixed(1)
+}
+
+function getRunProgressStats(runLog, fallback = {}) {
+  const counters = getRunCounters(runLog) || {}
+  const processed = Number(counters.processed ?? fallback.processed ?? 0) || 0
+  const expectedMedia =
+    Number(counters.expectedMedia ?? fallback.expectedMedia ?? 0) || 0
+  const saved = Number(counters.saved ?? fallback.saved ?? 0) || 0
+  const skipped = Number(counters.skipped ?? fallback.skipped ?? 0) || 0
+  const duplicates =
+    Number(counters.duplicates ?? fallback.duplicates ?? 0) || 0
+  const failures = Number(counters.failures ?? fallback.failures ?? 0) || 0
+  const remaining = Math.max(expectedMedia - processed, 0)
+
+  return {
+    processed,
+    expectedMedia,
+    saved,
+    skipped,
+    duplicates,
+    failures,
+    remaining,
+    percent: formatPercent(processed, expectedMedia),
+  }
+}
+
+function formatRunProgressLine(stats, context = '') {
+  const suffix = context ? ` :: ${context}` : ''
+  return `Progress: ${stats.processed}/${stats.expectedMedia} (${stats.percent}%) | saved ${stats.saved} | skipped ${stats.skipped} | dupes ${stats.duplicates} | failed ${stats.failures} | remaining ${stats.remaining}${suffix}`
+}
+
+function formatRunSummaryLine(stats) {
+  return `Done: ${stats.processed}/${stats.expectedMedia} processed | saved ${stats.saved} | skipped ${stats.skipped} | dupes ${stats.duplicates} | failed ${stats.failures}`
+}
+
 function noteMediaOutcome(runLog, kind) {
   if (!runLog) return
   incrementRunCounter(runLog, 'processed')
@@ -178,7 +216,10 @@ module.exports = {
   appendRunEvent,
   createRunLog,
   finalizeRunLog,
+  formatRunProgressLine,
+  formatRunSummaryLine,
   getRunCounters,
+  getRunProgressStats,
   incrementRunCounter,
   noteMediaOutcome,
   recordRunError,

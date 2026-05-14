@@ -167,11 +167,6 @@ function resetRunState() {
   runTerminationHandled = false
 }
 
-function formatPercent(numerator, denominator) {
-  if (!Number.isFinite(denominator) || denominator <= 0) return '0.0'
-  return ((numerator / denominator) * 100).toFixed(1)
-}
-
 function sanitize(name) {
   return String(name || '')
     .replace(/[^a-z0-9_-]/gi, '_')
@@ -502,21 +497,12 @@ function setExpectedMediaCount(total) {
 }
 
 function logRunProgress(context = '') {
-  const counters = runLifecycle.getRunCounters(currentRunLog)
-  if (!counters) return
-
-  const processed = counters.processed || 0
-  const expected = counters.expectedMedia || 0
-  const saved = counters.saved || 0
-  const skipped = counters.skipped || 0
-  const duplicates = counters.duplicates || 0
-  const failures = counters.failures || 0
-  const remaining = Math.max(expected - processed, 0)
-  const percent = formatPercent(processed, expected)
-  const suffix = context ? ` :: ${context}` : ''
-
+  if (!currentRunLog) return
   console.log(
-    `Progress: ${processed}/${expected} (${percent}%) | saved ${saved} | skipped ${skipped} | dupes ${duplicates} | failed ${failures} | remaining ${remaining}${suffix}`
+    runLifecycle.formatRunProgressLine(
+      runLifecycle.getRunProgressStats(currentRunLog),
+      context
+    )
   )
 }
 
@@ -1608,17 +1594,13 @@ async function run(argvInput = process.argv.slice(2)) {
   } else {
     await syncModelToNas({ modelName, datasetDir, nasDatasetDir })
   }
-  const counters = runLifecycle.getRunCounters(currentRunLog)
-  const runCounters = counters
-    ? {
-        processed: counters.processed || 0,
-        expectedMedia: counters.expectedMedia || 0,
-        saved: counters.saved || 0,
-        skipped: counters.skipped || 0,
-        duplicates: counters.duplicates || 0,
-        failures: counters.failures || 0,
-      }
-    : null
+  const runStats = runLifecycle.getRunProgressStats(currentRunLog, {
+    processed: selectedMedia.length,
+    expectedMedia: selectedMedia.length,
+    saved: successCount,
+    duplicates: duplicateCount,
+    failures: errorCount,
+  })
   finalizeRunLog({
     successCount,
     duplicateCount,
@@ -1630,9 +1612,7 @@ async function run(argvInput = process.argv.slice(2)) {
     sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
   })
 
-  console.log(
-    `Done: ${runCounters?.processed ?? selectedMedia.length}/${runCounters?.expectedMedia ?? selectedMedia.length} processed | saved ${runCounters?.saved ?? successCount} | skipped ${runCounters?.skipped ?? 0} | dupes ${runCounters?.duplicates ?? duplicateCount} | failed ${runCounters?.failures ?? errorCount}`
-  )
+  console.log(runLifecycle.formatRunSummaryLine(runStats))
   console.log(getCompletionLine())
   return 0
 }
