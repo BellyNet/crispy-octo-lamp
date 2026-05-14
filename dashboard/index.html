@@ -653,6 +653,74 @@
         .pswp-info-filename { order: 3; width: 100%; white-space: normal; }
       }
 
+      /* ─── CAPTION SIDEBAR (desktop) ─────────────────────────── */
+      /* Right-side panel inside the lightbox; visible on wide screens only.
+         On narrow viewports the caption goes into the info panel instead. */
+      .pswp__pswp-caption {
+        position: absolute;
+        top: 44px;
+        right: 0;
+        bottom: 0;
+        width: 360px;
+        padding: 18px 22px;
+        background: rgba(10, 10, 15, 0.85);
+        backdrop-filter: blur(10px);
+        border-left: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.55;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        z-index: 1050;
+        transform: translateX(100%);
+        transition: transform 0.22s ease;
+      }
+      .pswp__pswp-caption.pswp-caption-visible {
+        transform: translateX(0);
+      }
+      .pswp__pswp-caption-empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .pswp__pswp-caption-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      /* Caption button — same look as the info button */
+      .pswp__pswp-caption-button svg {
+        opacity: 0.75;
+        transition: opacity 0.15s;
+      }
+      .pswp__pswp-caption-button:hover svg,
+      .pswp__pswp-caption-button.pswp-caption-active svg {
+        opacity: 1;
+      }
+      .pswp__pswp-caption-button.pswp-caption-active {
+        color: var(--accent);
+      }
+      @media (max-width: 900px) {
+        /* No room for a sidebar — caption falls back to the info panel. */
+        .pswp__pswp-caption { display: none; }
+      }
+      /* Caption inside the info panel (mobile). */
+      .pswp-info-caption {
+        order: 4;
+        width: 100%;
+        white-space: pre-wrap;
+        font-size: 12px;
+        color: var(--text);
+        opacity: 0.9;
+        line-height: 1.5;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        margin-top: 4px;
+      }
+
       /* ─── NO-RESULTS ─────────────────────────────────────────── */
       #no-results {
         display: none;
@@ -2026,6 +2094,23 @@
           })
 
           let infoPanelEl = null
+          let captionPanelEl = null
+
+          // Caption fetch cache for this lightbox instance — keyed by item URL.
+          // Avoids re-fetching when the user swipes back and forth.
+          const _captionCache = new Map()
+          async function loadCaption(item) {
+            if (!item || !item.hasCaption) return null
+            if (_captionCache.has(item.url)) return _captionCache.get(item.url)
+            try {
+              const r = await fetch(`/api/caption/${encodeURIComponent(currentUsername || '')}/${item.folder}/${encodeURIComponent(item.filename)}`)
+              if (!r.ok) { _captionCache.set(item.url, null); return null }
+              const data = await r.json()
+              const txt = (data && typeof data.text === 'string') ? data.text : null
+              _captionCache.set(item.url, txt)
+              return txt
+            } catch { _captionCache.set(item.url, null); return null }
+          }
 
           // All UI registration happens inside uiRegister — pswp.ui is guaranteed
           // to exist here (set in _createMainStructure before ui.init fires this event).
@@ -2095,9 +2180,82 @@
                     addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
                     el.appendChild(addedSpan)
                   }
+
+                  // Caption (mobile only — desktop has the dedicated sidebar).
+                  // Stamped synchronously with the rest of the panel, then filled
+                  // in once the fetch resolves. Guarded against stale slide updates.
+                  if (item.hasCaption && window.matchMedia('(max-width: 900px)').matches) {
+                    const capSpan = document.createElement('span')
+                    capSpan.className = 'pswp-info-caption'
+                    capSpan.textContent = '…'
+                    el.appendChild(capSpan)
+                    const idxAtStart = pswp.currIndex
+                    loadCaption(item).then((text) => {
+                      if (pswp.currIndex !== idxAtStart) return
+                      capSpan.textContent = text || ''
+                      if (!text) capSpan.remove()
+                    })
+                  }
                 }
                 pswp.on('change', update)
                 update()
+              },
+            })
+
+            // Caption sidebar — desktop only (≥901px). Toggleable via the
+            // dedicated button below; defaults to visible so captions are
+            // immediately readable when present.
+            pswp.ui.registerElement({
+              name:     'pswp-caption',
+              appendTo: 'root',
+              onInit(el) {
+                captionPanelEl = el
+                el.classList.add('pswp-caption-visible') // visible by default
+                const update = async () => {
+                  const item = filtered[pswp.currIndex]
+                  if (!item) return
+                  el.replaceChildren()
+                  const label = document.createElement('div')
+                  label.className = 'pswp__pswp-caption-label'
+                  label.textContent = 'Caption'
+                  el.appendChild(label)
+                  const body = document.createElement('div')
+                  el.appendChild(body)
+                  if (!item.hasCaption) {
+                    body.className = 'pswp__pswp-caption-empty'
+                    body.textContent = 'No caption file'
+                    return
+                  }
+                  body.textContent = 'Loading…'
+                  body.className = 'pswp__pswp-caption-empty'
+                  const idxAtStart = pswp.currIndex
+                  const text = await loadCaption(item)
+                  if (pswp.currIndex !== idxAtStart) return
+                  if (text) {
+                    body.className = ''
+                    body.textContent = text
+                  } else {
+                    body.className = 'pswp__pswp-caption-empty'
+                    body.textContent = 'No caption file'
+                  }
+                }
+                pswp.on('change', update)
+                update()
+              },
+            })
+
+            // Caption toggle button — only meaningful on desktop, but harmless on
+            // mobile (where the sidebar is hidden via CSS).
+            pswp.ui.registerElement({
+              name:     'pswp-caption-button',
+              order:    8,
+              isButton: true,
+              title:    'Caption',
+              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><line x1="5.5" y1="9" x2="14.5" y2="9"/><line x1="5.5" y1="12" x2="11" y2="12"/></svg>',
+              onClick(e, el) {
+                if (!captionPanelEl) return
+                const on = captionPanelEl.classList.toggle('pswp-caption-visible')
+                el.classList.toggle('pswp-caption-active', on)
               },
             })
 

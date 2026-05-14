@@ -44,7 +44,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 2
+const RESPONSE_CACHE_VERSION = 3
 
 function loadResponseCacheFromDisk(username) {
   try {
@@ -406,6 +406,18 @@ function pickCoverFor(username, pool) {
   return pool[Math.abs(h) % pool.length]
 }
 
+// LoRA-style caption sidecar: same stem as the image but `.txt` next to it.
+// e.g. images/foo.jpg → images/foo.txt
+const CAPTION_MAX_BYTES = 64 * 1024
+function captionPathFor(userDir, folder, filename) {
+  const stem = filename.slice(0, filename.length - path.extname(filename).length)
+  return path.join(userDir, folder, `${stem}.txt`)
+}
+function hasCaptionFile(userDir, folder, filename) {
+  try { return fs.statSync(captionPathFor(userDir, folder, filename)).isFile() }
+  catch { return false }
+}
+
 // Build the full response record for a single file. Reuses metaCache when valid.
 async function processFileForResponse(username, userDir, item) {
   const ext = path.extname(item.filename).toLowerCase()
@@ -481,6 +493,10 @@ async function processFileForResponse(username, userDir, item) {
       thumbUrl: type === 'video'
         ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
         : `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+      // True iff a same-stem .txt sidecar exists next to this file (LoRA
+      // training caption). The full text is fetched on-demand from /api/caption
+      // so the per-model response doesn't balloon for large datasets.
+      hasCaption: type !== 'video' && hasCaptionFile(userDir, item.folder, item.filename),
     },
     metaUpdated,
   }
@@ -782,6 +798,42 @@ async function warmGridThumbs(username, items) {
   await Promise.all(tasks)
   console.log(`  Thumbs:    ${tasks.length} grid thumbs ready for ${username} ✓`)
 }
+
+// Caption sidecar — returns the text of <stem>.txt next to the image. Used
+// by the lightbox to show LoRA captions alongside the image. Capped at
+// CAPTION_MAX_BYTES so a runaway file can't OOM the server.
+app.get('/api/caption/:username/:folder/:filename', async (req, res) => {
+  const { username, folder, filename } = req.params
+  if (!MEDIA_FOLDERS.includes(folder)) return res.status(403).send('Forbidden')
+  const userDir = safeSubPath(datasetDir, username)
+  if (!userDir) return res.status(403).send('Forbidden')
+  const capPath = captionPathFor(userDir, folder, filename)
+  // Guard: ensure the resolved caption path stays inside the user dir, in case
+  // an unusual filename containing path separators slipped through.
+  if (!capPath.startsWith(path.resolve(userDir) + path.sep)) {
+    return res.status(403).send('Forbidden')
+  }
+  let stat
+  try { stat = await fs.promises.stat(capPath) }
+  catch { return res.status(404).json({ error: 'No caption' }) }
+  if (!stat.isFile()) return res.status(404).json({ error: 'No caption' })
+
+  // ETag based on mtime+size so edits in-place are picked up.
+  const etag = `W/"${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end()
+    return
+  }
+  try {
+    const buf = await fs.promises.readFile(capPath, { encoding: 'utf8' })
+    const text = buf.length > CAPTION_MAX_BYTES ? buf.slice(0, CAPTION_MAX_BYTES) : buf
+    res.setHeader('ETag', etag)
+    res.setHeader('Cache-Control', 'no-cache')
+    res.json({ text, truncated: buf.length > CAPTION_MAX_BYTES })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
 
 // Small JPEG thumbnail for images and GIFs — lazy-generated, cached to disk
 // under THUMB_DIR/<user>/thumb-<folder>-<filename>.jpg. Used by the home grid
