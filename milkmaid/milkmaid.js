@@ -848,10 +848,13 @@ function startRunLog(modelName, inputUrl, folders) {
     folders,
     counters: {
       saved: 0,
+      skipped: 0,
       duplicates: 0,
       queuedVideos: 0,
       convertedGifs: 0,
       failures: 0,
+      processed: 0,
+      expectedMedia: 0,
     },
     transfer: {
       savedBytes: 0,
@@ -1355,11 +1358,13 @@ function resetProgressCounter(total = null) {
   if (typeof total === 'number' && !Number.isNaN(total)) {
     global.totalSearchTotal = Math.max(total, 1)
   }
+  syncScrapeProgressCounters()
 }
 
 function logAndProgress(message, increment = false) {
   if (increment) {
     completedTotal++
+    syncScrapeProgressCounters()
   }
 
   logScrollingMessage(message)
@@ -1393,10 +1398,17 @@ function logAndProgress(message, increment = false) {
 }
 
 function getScrapeStatsLine() {
+  const stats = runLifecycle.getRunProgressStats(currentRunLog, {
+    processed: completedTotal,
+    expectedMedia: global.totalSearchTotal || 1,
+    saved: successCount,
+    duplicates: duplicateCount,
+    failures: errorCount,
+  })
   const parts = [
-    `${successCount} saved`,
-    `${duplicateCount} dupes`,
-    `${errorCount} errors`,
+    `${stats.saved} saved`,
+    `${stats.duplicates} dupes`,
+    `${stats.failures} errors`,
   ]
 
   if (lazyVideoQueue.length > 0) {
@@ -1410,6 +1422,16 @@ function setProgressTotal(total = null) {
   if (typeof total === 'number' && !Number.isNaN(total)) {
     global.totalSearchTotal = Math.max(total, 1)
   }
+  syncScrapeProgressCounters()
+}
+
+function syncScrapeProgressCounters() {
+  runLifecycle.setRunCounter(currentRunLog, 'processed', completedTotal)
+  runLifecycle.setRunCounter(
+    currentRunLog,
+    'expectedMedia',
+    global.totalSearchTotal || 1
+  )
 }
 
 function getMilkmaidEntrySeenDetails(entry = {}) {
@@ -2427,8 +2449,15 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       })
     }
 
+    const finalStats = runLifecycle.getRunProgressStats(currentRunLog, {
+      processed: completedTotal,
+      expectedMedia: global.totalSearchTotal || 1,
+      saved: successCount,
+      duplicates: duplicateCount,
+      failures: errorCount,
+    })
     console.log(
-      `🎉 Done: ${successCount} saved, ${duplicateCount} dupes, ${errorCount} errors`
+      `🎉 Done: ${finalStats.saved} saved, ${finalStats.duplicates} dupes, ${finalStats.failures} errors`
     )
     return 0
   } catch (err) {
