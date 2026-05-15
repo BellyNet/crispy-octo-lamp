@@ -6,7 +6,6 @@ const { exec, spawn } = require('child_process')
 const { createHash } = require('crypto')
 const https = require('https')
 const http = require('http')
-const minimist = require('minimist')
 const pLimit = require('p-limit')
 const limit = pLimit(8)
 const lazyLimit = pLimit(4)
@@ -23,6 +22,10 @@ const LAZY_IDLE_TIMEOUT_MS = 30000
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
 const mediaDates = require('./media-dates.js')
+const {
+  normalizeMilkmaidRunOptions,
+  parseMilkmaidArgs: parseCliArgs,
+} = require('../scrapyard/scraperOptions')
 
 // Helpers
 const { createScraperPage } = require('../scrapyard/pageHelpers')
@@ -294,36 +297,6 @@ function extractModelNameFromBreadcrumb(anchors) {
   }
 
   return last
-}
-
-function parseCliArgs(argv) {
-  const args = minimist(argv, {
-    string: ['model'],
-    boolean: ['review-errors', 'skip-nas-sync', 'keep-history'],
-    alias: {
-      m: 'model',
-    },
-  })
-
-  return {
-    inputUrl: args._[0] || '',
-    modelOverride: sanitize(args.model || ''),
-    reviewErrors: Boolean(args['review-errors']),
-    skipNasSync: Boolean(args['skip-nas-sync']),
-    keepHistory: Boolean(args['keep-history']),
-  }
-}
-
-function normalizeMilkmaidRunOptions(input = process.argv.slice(2)) {
-  if (Array.isArray(input)) return parseCliArgs(input)
-
-  return {
-    inputUrl: input.inputUrl || input.url || '',
-    modelOverride: sanitize(input.modelOverride || input.model || ''),
-    reviewErrors: Boolean(input.reviewErrors || input['review-errors']),
-    skipNasSync: Boolean(input.skipNasSync || input['skip-nas-sync']),
-    keepHistory: Boolean(input.keepHistory || input['keep-history']),
-  }
 }
 
 function askQuestion(prompt) {

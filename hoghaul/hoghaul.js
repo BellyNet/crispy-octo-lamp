@@ -3,7 +3,6 @@
 const fs = require('fs')
 const path = require('path')
 const { createHash } = require('crypto')
-const minimist = require('minimist')
 const pLimit = require('p-limit')
 
 const { bannerHoghaul } = require('../banners.js')
@@ -13,6 +12,10 @@ const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
 const runLifecycle = require('../scrapyard/runLifecycle')
+const {
+  normalizeHoghaulRunOptions,
+  parseHoghaulArgs,
+} = require('../scrapyard/scraperOptions')
 const {
   classifyMediaFilename,
   getMediaEntryHashMetadata,
@@ -765,14 +768,6 @@ function parsePageRange(value) {
   return { startPage: 0, endPage: pageCount - 1 }
 }
 
-function isTruthyFlag(value) {
-  if (value === true) return true
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-  return ['1', 'true', 'yes'].includes(normalized)
-}
-
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
@@ -1192,167 +1187,14 @@ function hashFileFromPath(filePath) {
   })
 }
 
-function parseHoghaulArgs(argvInput = process.argv.slice(2)) {
-  return minimist(argvInput, {
-    string: [
-      'pages',
-      'model',
-      'max-posts',
-      'max-files',
-      'cookie',
-      'cookie-file',
-      'browser-executable',
-      'browser-profile',
-      'browser-connect',
-      'browser-validate-ms',
-      'post-concurrency',
-      'image-concurrency',
-      'video-concurrency',
-    ],
-    boolean: [
-      'dry-run',
-      'preflight',
-      'skip-nas-sync',
-      'track-source',
-      'keep-history',
-      'browser-media',
-      'browser-headless',
-      'headless',
-    ],
-    alias: {
-      model: 'm',
-    },
-    default: {
-      'browser-media': true,
-    },
-  })
-}
-
-function getRunOption(argv, camelName, dashName, envName) {
-  if (argv?.[camelName] !== undefined) return argv[camelName]
-  if (dashName && argv?.[dashName] !== undefined) return argv[dashName]
-  if (envName) return process.env[envName]
-  return undefined
-}
-
-function normalizeHoghaulRunOptions(input = process.argv.slice(2)) {
-  const argv = Array.isArray(input)
-    ? parseHoghaulArgs(input)
-    : {
-        _: [],
-        ...(input || {}),
-      }
-  const inputUrl =
-    argv._.find((arg) => /^https?:\/\//i.test(arg)) ||
-    argv.inputUrl ||
-    argv.url ||
-    ''
-  const dryRun =
-    Boolean(getRunOption(argv, 'dryRun', 'dry-run')) ||
-    isTruthyFlag(process.env.npm_config_dry_run)
-  const preflight =
-    Boolean(argv.preflight) || isTruthyFlag(process.env.npm_config_preflight)
-  const skipNasSync =
-    Boolean(getRunOption(argv, 'skipNasSync', 'skip-nas-sync')) ||
-    isTruthyFlag(process.env.npm_config_skip_nas_sync)
-  const trackSource =
-    Boolean(getRunOption(argv, 'trackSource', 'track-source')) ||
-    isTruthyFlag(process.env.npm_config_track_source)
-  const keepHistory =
-    Boolean(getRunOption(argv, 'keepHistory', 'keep-history')) ||
-    isTruthyFlag(process.env.npm_config_keep_history)
-  const browserMedia = getRunOption(argv, 'browserMedia', 'browser-media')
-  const useBrowserMedia =
-    browserMedia !== false &&
-    !isTruthyFlag(process.env.npm_config_no_browser_media)
-  const browserHeadless =
-    Boolean(argv.headless) ||
-    Boolean(getRunOption(argv, 'browserHeadless', 'browser-headless')) ||
-    isTruthyFlag(process.env.npm_config_headless) ||
-    isTruthyFlag(process.env.HOGHAUL_BROWSER_HEADLESS)
-  const browserOptions = {
-    browserExecutable:
-      getRunOption(argv, 'browserExecutable', 'browser-executable') ||
-      process.env.npm_config_browser_executable ||
-      process.env.HOGHAUL_BROWSER_EXECUTABLE,
-    browserProfile:
-      getRunOption(argv, 'browserProfile', 'browser-profile') ||
-      process.env.npm_config_browser_profile ||
-      process.env.HOGHAUL_BROWSER_PROFILE,
-    browserConnect:
-      getRunOption(argv, 'browserConnect', 'browser-connect') ||
-      process.env.npm_config_browser_connect ||
-      process.env.HOGHAUL_BROWSER_CONNECT,
-    cookieHeader:
-      getRunOption(argv, 'cookie', 'cookie') ||
-      process.env.npm_config_cookie ||
-      process.env.HOGHAUL_COOKIE,
-    cookieFile:
-      getRunOption(argv, 'cookieFile', 'cookie-file') ||
-      process.env.npm_config_cookie_file ||
-      process.env.HOGHAUL_COOKIE_FILE,
-    headless: browserHeadless,
-    timeoutMs: REQUEST_TIMEOUT_MS,
-    validateMs:
-      Number.parseInt(
-        getRunOption(argv, 'browserValidateMs', 'browser-validate-ms') ||
-          process.env.npm_config_browser_validate_ms ||
-          process.env.HOGHAUL_BROWSER_VALIDATE_MS ||
-          '0',
-        10
-      ) || 0,
-  }
-
-  return {
-    inputUrl,
-    model: getRunOption(argv, 'model', 'model', 'npm_config_model'),
-    dryRun,
-    preflight,
-    skipNasSync,
-    trackSource,
-    keepHistory,
-    useBrowserMedia,
-    browserOptions,
-    pages: getRunOption(argv, 'pages', 'pages', 'npm_config_pages'),
-    maxPosts: getRunOption(
-      argv,
-      'maxPosts',
-      'max-posts',
-      'npm_config_max_posts'
-    ),
-    maxFiles: getRunOption(
-      argv,
-      'maxFiles',
-      'max-files',
-      'npm_config_max_files'
-    ),
-    postConcurrency: getRunOption(
-      argv,
-      'postConcurrency',
-      'post-concurrency',
-      'npm_config_post_concurrency'
-    ),
-    imageConcurrency: getRunOption(
-      argv,
-      'imageConcurrency',
-      'image-concurrency',
-      'npm_config_image_concurrency'
-    ),
-    videoConcurrency: getRunOption(
-      argv,
-      'videoConcurrency',
-      'video-concurrency',
-      'npm_config_video_concurrency'
-    ),
-  }
-}
-
 async function run(argvInput = process.argv.slice(2)) {
   resetRunState()
   bannerHoghaul()
   installProcessTerminationHandlers()
 
-  const runOptions = normalizeHoghaulRunOptions(argvInput)
+  const runOptions = normalizeHoghaulRunOptions(argvInput, {
+    requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  })
   const {
     inputUrl,
     model,

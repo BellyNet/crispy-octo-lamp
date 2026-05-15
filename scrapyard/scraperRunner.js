@@ -2,7 +2,6 @@
 
 const path = require('path')
 const fs = require('fs')
-const minimist = require('minimist')
 
 const {
   loadModelRegistry,
@@ -14,50 +13,16 @@ const {
   getScraperScript,
   describeSource,
 } = require('./sourceRouter')
+const {
+  getOption,
+  isTruthy,
+  normalizeHoghaulRunOptions,
+  normalizeMilkmaidRunOptions,
+  parseRunnerArgs,
+} = require('./scraperOptions')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
-
-const STRING_OPTIONS = [
-  'model',
-  'pages',
-  'max-posts',
-  'max-files',
-  'post-concurrency',
-  'image-concurrency',
-  'video-concurrency',
-  'cookie',
-  'cookie-file',
-  'browser-executable',
-  'browser-profile',
-  'browser-connect',
-  'browser-validate-ms',
-  'only-models',
-  'models',
-  'start-from',
-  'limit',
-  'delay-ms',
-  'source',
-  'host-contains',
-  'registry',
-  'log-dir',
-]
-
-const BOOLEAN_OPTIONS = [
-  'dry-run',
-  'preflight',
-  'skip-nas-sync',
-  'track-source',
-  'keep-history',
-  'browser-media',
-  'browser-headless',
-  'headless',
-  'review-errors',
-  'no-model-infer',
-  'stop-on-error',
-  'with-repair',
-  'help',
-]
 
 function printHelp() {
   console.log(`Usage: npm run scrape -- <source-url> [options]
@@ -89,23 +54,6 @@ Options:
 `)
 }
 
-function parseRunnerArgs(argvInput = process.argv.slice(2)) {
-  if (Array.isArray(argvInput)) {
-    return minimist(argvInput, {
-      string: STRING_OPTIONS,
-      boolean: BOOLEAN_OPTIONS,
-      alias: {
-        m: 'model',
-        h: 'help',
-      },
-    })
-  }
-  return {
-    _: [],
-    ...(argvInput || {}),
-  }
-}
-
 function appendOption(args, flag, value) {
   if (value === undefined || value === null || value === '') return
   args.push(flag, String(value))
@@ -113,22 +61,6 @@ function appendOption(args, flag, value) {
 
 function appendBoolean(args, flag, value) {
   if (value === true) args.push(flag)
-}
-
-function isTruthy(value) {
-  return (
-    value === true ||
-    value === 'true' ||
-    value === '1' ||
-    value === 1 ||
-    value === 'yes'
-  )
-}
-
-function getOption(argv, name) {
-  if (argv?.[name] !== undefined) return argv[name]
-  const envName = `npm_config_${String(name).replace(/-/g, '_')}`
-  return process.env[envName]
 }
 
 function normalizeList(value) {
@@ -269,34 +201,17 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
   }
 
   if (parsedSource.scraper === 'milkmaid') {
-    return {
+    return normalizeMilkmaidRunOptions({
+      ...argv,
       ...sharedOptions,
-      reviewErrors: Boolean(argv['review-errors']),
-    }
+    })
   }
 
   if (parsedSource.scraper === 'hoghaul') {
-    return {
+    return normalizeHoghaulRunOptions({
+      ...argv,
       ...sharedOptions,
-      pages: argv.pages,
-      maxPosts: argv['max-posts'],
-      maxFiles: argv['max-files'],
-      postConcurrency: argv['post-concurrency'],
-      imageConcurrency: argv['image-concurrency'],
-      videoConcurrency: argv['video-concurrency'],
-      cookie: argv.cookie,
-      cookieFile: argv['cookie-file'],
-      browserExecutable: argv['browser-executable'],
-      browserProfile: argv['browser-profile'],
-      browserConnect: argv['browser-connect'],
-      browserValidateMs: argv['browser-validate-ms'],
-      dryRun: Boolean(argv['dry-run']),
-      preflight: Boolean(argv.preflight),
-      trackSource: Boolean(argv['track-source']),
-      browserMedia: argv['browser-media'],
-      browserHeadless: Boolean(argv['browser-headless'] || argv.headless),
-      headless: Boolean(argv.headless),
-    }
+    })
   }
 
   return sharedOptions
