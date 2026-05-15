@@ -314,6 +314,18 @@ function parseCliArgs(argv) {
   }
 }
 
+function normalizeMilkmaidRunOptions(input = process.argv.slice(2)) {
+  if (Array.isArray(input)) return parseCliArgs(input)
+
+  return {
+    inputUrl: input.inputUrl || input.url || '',
+    modelOverride: sanitize(input.modelOverride || input.model || ''),
+    reviewErrors: Boolean(input.reviewErrors || input['review-errors']),
+    skipNasSync: Boolean(input.skipNasSync || input['skip-nas-sync']),
+    keepHistory: Boolean(input.keepHistory || input['keep-history']),
+  }
+}
+
 function askQuestion(prompt) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({
@@ -1837,7 +1849,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       reviewErrors,
       skipNasSync,
       keepHistory,
-    } = parseCliArgs(argvInput)
+    } = normalizeMilkmaidRunOptions(argvInput)
     let inputUrl = initialInputUrl
     if (!inputUrl || !inputUrl.includes('/category/')) {
       logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
@@ -2500,13 +2512,20 @@ async function runMilkmaidCli(argvInput = process.argv.slice(2)) {
 }
 
 module.exports = {
+  normalizeMilkmaidRunOptions,
   parseCliArgs,
   runMilkmaidScrape,
   runMilkmaidCli,
 }
 
 if (require.main === module) {
-  runMilkmaidCli().then((code) => {
-    process.exitCode = code
-  })
+  const { runScraperCli } = require('../scrapyard/scraperRunner')
+  runScraperCli()
+    .then((code) => {
+      process.exitCode = code
+    })
+    .catch((err) => {
+      console.error(`Scraper runner failed: ${err.stack || err.message}`)
+      process.exitCode = 1
+    })
 }

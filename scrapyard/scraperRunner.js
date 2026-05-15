@@ -181,15 +181,15 @@ async function runInteractiveLauncher() {
   return 0
 }
 
-async function runInProcessScraper(parsedSource, args) {
+async function runInProcessScraper(parsedSource, options) {
   if (parsedSource.scraper === 'milkmaid') {
-    const { runMilkmaidCli } = require('../milkmaid/milkmaid')
-    return runMilkmaidCli(args)
+    const { runMilkmaidScrape } = require('../milkmaid/milkmaid')
+    return runMilkmaidScrape(options)
   }
 
   if (parsedSource.scraper === 'hoghaul') {
-    const { runHoghaulCli } = require('../hoghaul/hoghaul')
-    return runHoghaulCli(args)
+    const { runHoghaulScrape } = require('../hoghaul/hoghaul')
+    return runHoghaulScrape(options)
   }
 
   throw new Error(`No in-process scraper is registered for ${parsedSource}`)
@@ -237,6 +237,12 @@ function appendMilkmaidOptions(args, argv) {
   appendBoolean(args, '--review-errors', argv['review-errors'])
 }
 
+function getRunnerModelName(parsedSource, argv) {
+  return argv['no-model-infer']
+    ? ''
+    : inferCanonicalModel(parsedSource, argv.model)
+}
+
 function buildScraperArgs(parsedSource, argvInput = {}) {
   const argv = parseRunnerArgs(argvInput)
   const args = [parsedSource.url]
@@ -249,6 +255,51 @@ function buildScraperArgs(parsedSource, argvInput = {}) {
   }
 
   return args
+}
+
+function buildScraperOptions(parsedSource, argvInput = {}) {
+  const argv = parseRunnerArgs(argvInput)
+  const modelName = getRunnerModelName(parsedSource, argv)
+  const sharedOptions = {
+    inputUrl: parsedSource.url,
+    model: modelName,
+    modelOverride: modelName,
+    skipNasSync: Boolean(argv['skip-nas-sync']),
+    keepHistory: Boolean(argv['keep-history']),
+  }
+
+  if (parsedSource.scraper === 'milkmaid') {
+    return {
+      ...sharedOptions,
+      reviewErrors: Boolean(argv['review-errors']),
+    }
+  }
+
+  if (parsedSource.scraper === 'hoghaul') {
+    return {
+      ...sharedOptions,
+      pages: argv.pages,
+      maxPosts: argv['max-posts'],
+      maxFiles: argv['max-files'],
+      postConcurrency: argv['post-concurrency'],
+      imageConcurrency: argv['image-concurrency'],
+      videoConcurrency: argv['video-concurrency'],
+      cookie: argv.cookie,
+      cookieFile: argv['cookie-file'],
+      browserExecutable: argv['browser-executable'],
+      browserProfile: argv['browser-profile'],
+      browserConnect: argv['browser-connect'],
+      browserValidateMs: argv['browser-validate-ms'],
+      dryRun: Boolean(argv['dry-run']),
+      preflight: Boolean(argv.preflight),
+      trackSource: Boolean(argv['track-source']),
+      browserMedia: argv['browser-media'],
+      browserHeadless: Boolean(argv['browser-headless'] || argv.headless),
+      headless: Boolean(argv.headless),
+    }
+  }
+
+  return sharedOptions
 }
 
 async function runScrape(inputUrl, argvInput = {}, deps = {}) {
@@ -279,7 +330,10 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   if (deps.runCommand) {
     return runCommand(scriptPath, args, { log })
   }
-  return runInProcessScraper(parsedSource, args)
+  return runInProcessScraper(
+    parsedSource,
+    buildScraperOptions(parsedSource, argv)
+  )
 }
 
 function loadRegistry(registryFile = registryPath) {
@@ -931,6 +985,7 @@ module.exports = {
   runNodeScript,
   inferCanonicalModel,
   buildScraperArgs,
+  buildScraperOptions,
   runScrape,
   runSourceBatch,
   runStufferDbBatch,

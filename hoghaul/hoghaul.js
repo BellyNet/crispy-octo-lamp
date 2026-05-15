@@ -1192,12 +1192,8 @@ function hashFileFromPath(filePath) {
   })
 }
 
-async function run(argvInput = process.argv.slice(2)) {
-  resetRunState()
-  bannerHoghaul()
-  installProcessTerminationHandlers()
-
-  const argv = minimist(argvInput, {
+function parseHoghaulArgs(argvInput = process.argv.slice(2)) {
+  return minimist(argvInput, {
     string: [
       'pages',
       'model',
@@ -1230,60 +1226,144 @@ async function run(argvInput = process.argv.slice(2)) {
       'browser-media': true,
     },
   })
-  const inputUrl = argv._.find((arg) => /^https?:\/\//i.test(arg))
+}
+
+function getRunOption(argv, camelName, dashName, envName) {
+  if (argv?.[camelName] !== undefined) return argv[camelName]
+  if (dashName && argv?.[dashName] !== undefined) return argv[dashName]
+  if (envName) return process.env[envName]
+  return undefined
+}
+
+function normalizeHoghaulRunOptions(input = process.argv.slice(2)) {
+  const argv = Array.isArray(input)
+    ? parseHoghaulArgs(input)
+    : {
+        _: [],
+        ...(input || {}),
+      }
+  const inputUrl =
+    argv._.find((arg) => /^https?:\/\//i.test(arg)) ||
+    argv.inputUrl ||
+    argv.url ||
+    ''
   const dryRun =
-    argv['dry-run'] === true || isTruthyFlag(process.env.npm_config_dry_run)
+    Boolean(getRunOption(argv, 'dryRun', 'dry-run')) ||
+    isTruthyFlag(process.env.npm_config_dry_run)
   const preflight =
-    argv.preflight === true || isTruthyFlag(process.env.npm_config_preflight)
+    Boolean(argv.preflight) || isTruthyFlag(process.env.npm_config_preflight)
   const skipNasSync =
-    argv['skip-nas-sync'] === true ||
+    Boolean(getRunOption(argv, 'skipNasSync', 'skip-nas-sync')) ||
     isTruthyFlag(process.env.npm_config_skip_nas_sync)
   const trackSource =
-    argv['track-source'] === true ||
+    Boolean(getRunOption(argv, 'trackSource', 'track-source')) ||
     isTruthyFlag(process.env.npm_config_track_source)
   const keepHistory =
-    argv['keep-history'] === true ||
+    Boolean(getRunOption(argv, 'keepHistory', 'keep-history')) ||
     isTruthyFlag(process.env.npm_config_keep_history)
-  let useBrowserMedia =
-    argv['browser-media'] !== false &&
+  const browserMedia = getRunOption(argv, 'browserMedia', 'browser-media')
+  const useBrowserMedia =
+    browserMedia !== false &&
     !isTruthyFlag(process.env.npm_config_no_browser_media)
   const browserHeadless =
-    argv.headless === true ||
-    argv['browser-headless'] === true ||
+    Boolean(argv.headless) ||
+    Boolean(getRunOption(argv, 'browserHeadless', 'browser-headless')) ||
     isTruthyFlag(process.env.npm_config_headless) ||
     isTruthyFlag(process.env.HOGHAUL_BROWSER_HEADLESS)
   const browserOptions = {
     browserExecutable:
-      argv['browser-executable'] ||
+      getRunOption(argv, 'browserExecutable', 'browser-executable') ||
       process.env.npm_config_browser_executable ||
       process.env.HOGHAUL_BROWSER_EXECUTABLE,
     browserProfile:
-      argv['browser-profile'] ||
+      getRunOption(argv, 'browserProfile', 'browser-profile') ||
       process.env.npm_config_browser_profile ||
       process.env.HOGHAUL_BROWSER_PROFILE,
     browserConnect:
-      argv['browser-connect'] ||
+      getRunOption(argv, 'browserConnect', 'browser-connect') ||
       process.env.npm_config_browser_connect ||
       process.env.HOGHAUL_BROWSER_CONNECT,
     cookieHeader:
-      argv.cookie ||
+      getRunOption(argv, 'cookie', 'cookie') ||
       process.env.npm_config_cookie ||
       process.env.HOGHAUL_COOKIE,
     cookieFile:
-      argv['cookie-file'] ||
+      getRunOption(argv, 'cookieFile', 'cookie-file') ||
       process.env.npm_config_cookie_file ||
       process.env.HOGHAUL_COOKIE_FILE,
     headless: browserHeadless,
     timeoutMs: REQUEST_TIMEOUT_MS,
     validateMs:
       Number.parseInt(
-        argv['browser-validate-ms'] ||
+        getRunOption(argv, 'browserValidateMs', 'browser-validate-ms') ||
           process.env.npm_config_browser_validate_ms ||
           process.env.HOGHAUL_BROWSER_VALIDATE_MS ||
           '0',
         10
       ) || 0,
   }
+
+  return {
+    inputUrl,
+    model: getRunOption(argv, 'model', 'model', 'npm_config_model'),
+    dryRun,
+    preflight,
+    skipNasSync,
+    trackSource,
+    keepHistory,
+    useBrowserMedia,
+    browserOptions,
+    pages: getRunOption(argv, 'pages', 'pages', 'npm_config_pages'),
+    maxPosts: getRunOption(
+      argv,
+      'maxPosts',
+      'max-posts',
+      'npm_config_max_posts'
+    ),
+    maxFiles: getRunOption(
+      argv,
+      'maxFiles',
+      'max-files',
+      'npm_config_max_files'
+    ),
+    postConcurrency: getRunOption(
+      argv,
+      'postConcurrency',
+      'post-concurrency',
+      'npm_config_post_concurrency'
+    ),
+    imageConcurrency: getRunOption(
+      argv,
+      'imageConcurrency',
+      'image-concurrency',
+      'npm_config_image_concurrency'
+    ),
+    videoConcurrency: getRunOption(
+      argv,
+      'videoConcurrency',
+      'video-concurrency',
+      'npm_config_video_concurrency'
+    ),
+  }
+}
+
+async function run(argvInput = process.argv.slice(2)) {
+  resetRunState()
+  bannerHoghaul()
+  installProcessTerminationHandlers()
+
+  const runOptions = normalizeHoghaulRunOptions(argvInput)
+  const {
+    inputUrl,
+    model,
+    dryRun,
+    preflight,
+    skipNasSync,
+    trackSource,
+    keepHistory,
+    browserOptions,
+  } = runOptions
+  let useBrowserMedia = runOptions.useBrowserMedia
   if (!inputUrl) {
     console.error(
       'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
@@ -1299,30 +1379,19 @@ async function run(argvInput = process.argv.slice(2)) {
     useBrowserMedia = false
   }
   const imageConcurrency = parsePositiveInteger(
-    argv['image-concurrency'] ||
-      process.env.npm_config_image_concurrency ||
-      process.env.HOGHAUL_IMAGE_CONCURRENCY,
+    runOptions.imageConcurrency || process.env.HOGHAUL_IMAGE_CONCURRENCY,
     source.site === 'coomerfans' ? 3 : 6
   )
   const postConcurrency = parsePositiveInteger(
-    argv['post-concurrency'] ||
-      process.env.npm_config_post_concurrency ||
-      process.env.HOGHAUL_POST_CONCURRENCY,
+    runOptions.postConcurrency || process.env.HOGHAUL_POST_CONCURRENCY,
     source.site === 'coomerfans' ? 8 : 1
   )
   const videoConcurrency = parsePositiveInteger(
-    argv['video-concurrency'] ||
-      process.env.npm_config_video_concurrency ||
-      process.env.HOGHAUL_VIDEO_CONCURRENCY,
+    runOptions.videoConcurrency || process.env.HOGHAUL_VIDEO_CONCURRENCY,
     6
   )
-  const { startPage, endPage } = parsePageRange(
-    argv.pages || process.env.npm_config_pages
-  )
-  const maxPosts = Number.parseInt(
-    argv['max-posts'] || process.env.npm_config_max_posts,
-    10
-  )
+  const { startPage, endPage } = parsePageRange(runOptions.pages)
+  const maxPosts = Number.parseInt(runOptions.maxPosts, 10)
 
   if (preflight) {
     let report
@@ -1342,11 +1411,7 @@ async function run(argvInput = process.argv.slice(2)) {
       `Newest post: ${report.newest ? report.newest.toISOString() : 'unknown'}`
     )
     if (trackSource) {
-      registerSourceForRun(
-        source,
-        inputUrl,
-        argv.model || process.env.npm_config_model
-      )
+      registerSourceForRun(source, inputUrl, model)
     }
     console.log('No API key or Authorization header was used.')
     return 0
@@ -1371,10 +1436,7 @@ async function run(argvInput = process.argv.slice(2)) {
   )
   const sourceDeduped = dedupeMediaEntries(mediaEntries)
   let selectedMediaSourceDuplicateCount = sourceDeduped.duplicateCount
-  const maxFiles = Number.parseInt(
-    argv['max-files'] || process.env.npm_config_max_files,
-    10
-  )
+  const maxFiles = Number.parseInt(runOptions.maxFiles, 10)
   let selectedMedia =
     Number.isFinite(maxFiles) && maxFiles > 0
       ? sourceDeduped.entries.slice(0, maxFiles)
@@ -1390,12 +1452,8 @@ async function run(argvInput = process.argv.slice(2)) {
       .filter(Boolean)
       .sort((a, b) => b.getTime() - a.getTime())[0]
     const modelNamePreview = trackSource
-      ? registerSourceForRun(
-          source,
-          inputUrl,
-          argv.model || process.env.npm_config_model
-        )
-      : sanitize(argv.model || source.rawName)
+      ? registerSourceForRun(source, inputUrl, model)
+      : sanitize(model || source.rawName)
     console.log(
       `Resolved ${source.site}/${source.service}/${source.userId} -> ${modelNamePreview}: ${selectedPosts.length} posts, ${selectedMedia.length} media files`
     )
@@ -1411,11 +1469,7 @@ async function run(argvInput = process.argv.slice(2)) {
     return 0
   }
 
-  const modelName = registerSourceForRun(
-    source,
-    inputUrl,
-    argv.model || process.env.npm_config_model
-  )
+  const modelName = registerSourceForRun(source, inputUrl, model)
   const folders = createModelFolders(modelName)
 
   console.log(
@@ -1636,13 +1690,21 @@ async function runHoghaulCli(argvInput = process.argv.slice(2)) {
 }
 
 module.exports = {
+  normalizeHoghaulRunOptions,
+  parseHoghaulArgs,
   parseSourceUrl,
   runHoghaulScrape: run,
   runHoghaulCli,
 }
 
 if (require.main === module) {
-  runHoghaulCli().then((code) => {
-    process.exitCode = code
-  })
+  const { runScraperCli } = require('../scrapyard/scraperRunner')
+  runScraperCli()
+    .then((code) => {
+      process.exitCode = code
+    })
+    .catch((err) => {
+      console.error(`Scraper runner failed: ${err.stack || err.message}`)
+      process.exitCode = 1
+    })
 }
