@@ -389,7 +389,7 @@ function buildSourceBatchOptions(argv) {
 }
 
 function printSourceBatchHelp() {
-  console.log(`Usage: node hoghaul/run-source-batch.js --source=<coomer|kemono> [options]
+  console.log(`Usage: node scrapyard/run-source-batch.js --source=<coomer|kemono> [options]
 
 Options:
   --source <name>             Registry source key to run (required).
@@ -795,7 +795,7 @@ function writeStufferReport(report, latestReportPath, latestTextPath) {
 }
 
 function printStufferBatchHelp() {
-  console.log(`Usage: node milkmaid/update-stufferdb-models.js [options]
+  console.log(`Usage: node scrapyard/run-stufferdb-batch.js [options]
 
 Options:
   [start-from]           Optional positional shorthand for --start-from.
