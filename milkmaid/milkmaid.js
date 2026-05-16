@@ -21,7 +21,7 @@ const LAZY_REQUEST_TIMEOUT_MS = 30000
 const LAZY_IDLE_TIMEOUT_MS = 30000
 
 const { bannerMilkmaid } = require('../banners.js') // adjust path if needed
-const mediaDates = require('./media-dates.js')
+const mediaDates = require('../scrapyard/mediaDates')
 const {
   normalizeMilkmaidRunOptions,
   parseMilkmaidArgs: parseCliArgs,

@@ -6,7 +6,7 @@ const { createHash } = require('crypto')
 const pLimit = require('p-limit')
 
 const { bannerHoghaul } = require('../banners.js')
-const mediaDates = require('../milkmaid/media-dates.js')
+const mediaDates = require('../scrapyard/mediaDates')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
