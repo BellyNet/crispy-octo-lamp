@@ -12,6 +12,9 @@ const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
 const runLifecycle = require('../scrapyard/runLifecycle')
 const {
+  parseHoghaulSourceUrl: parseSourceUrl,
+} = require('../scrapyard/sourceRouter')
+const {
   sanitize,
   resolveAndTrackSourceModel,
 } = require('../scrapyard/modelRegistry')
@@ -439,90 +442,6 @@ async function fetchJson(url) {
 
 async function fetchHtml(url) {
   return httpClient.fetchHtml(url)
-}
-
-function parseSourceUrl(inputUrl) {
-  const parsed = new URL(inputUrl)
-  const host = parsed.hostname.toLowerCase()
-  const site = host.includes('coomerfans')
-    ? 'coomerfans'
-    : host.includes('coomer')
-      ? 'coomer'
-      : host.includes('kemono')
-        ? 'kemono'
-        : host.endsWith('reddit.com')
-          ? 'reddit'
-          : null
-  if (!site) throw new Error(`Unsupported Hoghaul host: ${parsed.hostname}`)
-
-  const parts = parsed.pathname.split('/').filter(Boolean)
-
-  if (site === 'reddit') {
-    if (parts[0]?.toLowerCase() === 'user' && parts[1]) {
-      const username = parts[1].replace(/^u_/, '')
-      return {
-        inputUrl,
-        origin: 'https://www.reddit.com',
-        site,
-        service: 'submitted',
-        userId: username,
-        username,
-        rawName: sanitize(username),
-      }
-    }
-
-    throw new Error(
-      'Expected a Reddit user URL like /user/name/submitted or /user/name'
-    )
-  }
-
-  if (site === 'coomerfans') {
-    if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
-      return {
-        inputUrl,
-        origin: parsed.origin,
-        site,
-        service: parts[1],
-        userId: parts[2],
-        rawName: sanitize(parts[3]),
-      }
-    }
-
-    const queryName = parsed.searchParams.get('q')
-    if (queryName) {
-      return {
-        inputUrl,
-        origin: parsed.origin,
-        site,
-        service: 'onlyfans',
-        userId: null,
-        rawName: sanitize(queryName),
-      }
-    }
-
-    throw new Error(
-      'Expected a CoomerFans URL like /u/onlyfans/id/name or /?q=name'
-    )
-  }
-
-  const userIndex = parts.indexOf('user')
-  const service = parts[0]
-  const userId = userIndex >= 0 ? parts[userIndex + 1] : null
-
-  if (!service || !userId) {
-    throw new Error(
-      'Expected a creator URL like /onlyfans/user/name or /patreon/user/id'
-    )
-  }
-
-  return {
-    inputUrl,
-    origin: parsed.origin,
-    site,
-    service,
-    userId,
-    rawName: sanitize(userId),
-  }
 }
 
 function parsePageRange(value) {
