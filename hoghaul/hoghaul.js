@@ -33,6 +33,10 @@ const mediaFileRecords = require('../scrapyard/mediaFileRecords')
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
+const {
+  moveFileIntoPlace,
+  removeFileIfExists,
+} = require('../scrapyard/fileOps')
 const { createHttpClient } = require('../scrapyard/httpClient')
 const { createRedgifsClient } = require('../scrapyard/redgifsClient')
 const {
@@ -224,23 +228,6 @@ function existsLocallyOrOnNas(filePath) {
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
-}
-
-function removeFileIfExists(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return false
-  fs.unlinkSync(filePath)
-  return true
-}
-
-function moveFileIntoPlace(sourcePath, destinationPath) {
-  fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
-  try {
-    fs.renameSync(sourcePath, destinationPath)
-  } catch (err) {
-    if (err.code !== 'EXDEV') throw err
-    fs.copyFileSync(sourcePath, destinationPath)
-    fs.unlinkSync(sourcePath)
-  }
 }
 
 function startRunLog(modelName, inputUrl, folders, keepHistory) {

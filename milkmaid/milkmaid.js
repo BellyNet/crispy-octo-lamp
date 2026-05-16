@@ -78,6 +78,10 @@ const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
+  moveFileIntoPlace,
+  removeFileIfExists,
+} = require('../scrapyard/fileOps')
+const {
   buildCategoryRunList: buildStufferDbCategoryRunList,
   collectChildCategoryUrls: collectStufferDbChildCategoryUrls,
   extractGalleryPictureUrls,
@@ -1011,24 +1015,6 @@ function convertShortMp4ToGif(inputPath, outputPath) {
     const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=15,scale=480:-1:flags=lanczos" "${outputPath}"`
     exec(cmd, (err) => (err ? reject(err) : resolve()))
   })
-}
-
-function moveFileIntoPlace(sourcePath, destinationPath) {
-  fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
-
-  try {
-    fs.renameSync(sourcePath, destinationPath)
-  } catch (err) {
-    if (err.code !== 'EXDEV') throw err
-    fs.copyFileSync(sourcePath, destinationPath)
-    fs.unlinkSync(sourcePath)
-  }
-}
-
-function removeFileIfExists(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return false
-  fs.unlinkSync(filePath)
-  return true
 }
 
 function cleanupEmptyParentDirs(startPath, stopPath) {
