@@ -58,12 +58,17 @@ const {
   getMilestoneBucket,
   logScrollingMessage,
 } = require('../stuffinglogger')
-const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
 const runLifecycle = require('../scrapyard/runLifecycle')
 const mediaFileRecords = require('../scrapyard/mediaFileRecords')
+const {
+  sanitize,
+  loadModelRegistry,
+  findCanonicalModelName,
+  resolveAndTrackModel: resolveAndTrackRegistryModel,
+} = require('../scrapyard/modelRegistry')
 const {
   getMediaEntryHashMetadata,
   getMediaEntrySeenDetails,
@@ -83,187 +88,6 @@ const {
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
 } = require('../scrapyard/sourceAdapters/stufferdb')
-
-function sanitize(name) {
-  return String(name || '')
-    .replace(/[^a-z0-9_\-]/gi, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase()
-}
-
-function loadModelRegistry(registryPath) {
-  if (!fs.existsSync(registryPath)) {
-    const emptyRegistry = {}
-    writeRepoJsonFileSync(registryPath, emptyRegistry)
-    return emptyRegistry
-  }
-
-  try {
-    const raw = fs.readFileSync(registryPath, 'utf-8').trim()
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch (err) {
-    console.warn(
-      `⚠️ Could not parse model registry at ${registryPath}: ${err.message}`
-    )
-    return {}
-  }
-}
-
-function saveModelRegistry(registryPath, registry) {
-  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry))
-}
-
-function sortStringValues(values) {
-  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
-    a.localeCompare(b)
-  )
-}
-
-function sortSourceEntries(sources) {
-  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
-    const left =
-      String(a?.discoveredAs || '') ||
-      String(a?.userId || '') ||
-      String(a?.categoryId || '') ||
-      String(a?.url || '')
-    const right =
-      String(b?.discoveredAs || '') ||
-      String(b?.userId || '') ||
-      String(b?.categoryId || '') ||
-      String(b?.url || '')
-    return left.localeCompare(right)
-  })
-}
-
-function sortSourcesObject(sources) {
-  return Object.fromEntries(
-    Object.entries(sources && typeof sources === 'object' ? sources : {})
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([sourceName, entries]) => [sourceName, sortSourceEntries(entries)])
-  )
-}
-
-function sortModelRegistry(registry) {
-  return Object.fromEntries(
-    Object.entries(registry || {})
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([canonicalName, entry]) => [
-        canonicalName,
-        {
-          aliases: sortStringValues(entry?.aliases),
-          sources: sortSourcesObject(entry?.sources),
-        },
-      ])
-  )
-}
-
-function ensureModelEntryShape(entry, canonicalName) {
-  const aliasSet = new Set(
-    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
-  )
-
-  if (canonicalName) aliasSet.add(canonicalName)
-
-  const existingSources =
-    entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
-  const nextSources = Object.fromEntries(
-    Object.entries(existingSources).map(([sourceName, sources]) => [
-      sourceName,
-      Array.isArray(sources) ? [...sources] : [],
-    ])
-  )
-  if (!Array.isArray(nextSources.stufferdb)) nextSources.stufferdb = []
-
-  return {
-    aliases: Array.from(aliasSet),
-    sources: nextSources,
-  }
-}
-
-function findCanonicalModelName(registry, rawName) {
-  const normalizedRaw = sanitize(rawName)
-  if (!normalizedRaw) return null
-
-  for (const [canonicalName, entry] of Object.entries(registry)) {
-    if (sanitize(canonicalName) === normalizedRaw) return canonicalName
-
-    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) {
-      return canonicalName
-    }
-  }
-
-  return null
-}
-
-function upsertStufferSource(entry, sourceUrl, rawName) {
-  const cleanedUrl = String(sourceUrl || '').replace(/&acs=[^&]+/gi, '')
-  const categoryId = cleanedUrl.match(/category\/?(\d+)/)?.[1] || null
-  const now = new Date().toISOString()
-
-  if (!entry.sources) entry.sources = {}
-  if (!Array.isArray(entry.sources.stufferdb)) entry.sources.stufferdb = []
-
-  const sourceIndex = entry.sources.stufferdb.findIndex(
-    (source) =>
-      source?.url === cleanedUrl ||
-      (categoryId && source?.categoryId === categoryId)
-  )
-
-  const nextSource = {
-    url: cleanedUrl,
-    categoryId,
-    discoveredAs: rawName,
-    lastCheckedAt: now,
-  }
-
-  if (sourceIndex >= 0) {
-    entry.sources.stufferdb[sourceIndex] = {
-      ...entry.sources.stufferdb[sourceIndex],
-      ...nextSource,
-    }
-  } else {
-    entry.sources.stufferdb.push(nextSource)
-  }
-}
-
-function resolveAndTrackModel(
-  registryPath,
-  rawName,
-  sourceUrl,
-  canonicalOverride
-) {
-  const registry = loadModelRegistry(registryPath)
-  const cleanedRawName = sanitize(rawName) || 'unknown_cow'
-  const cleanedCanonicalOverride = sanitize(canonicalOverride)
-  const existingCanonical = cleanedCanonicalOverride
-    ? findCanonicalModelName(registry, cleanedCanonicalOverride)
-    : findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName =
-    existingCanonical || cleanedCanonicalOverride || cleanedRawName
-
-  registry[canonicalName] = ensureModelEntryShape(
-    registry[canonicalName],
-    canonicalName
-  )
-
-  const aliases = registry[canonicalName].aliases
-  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
-    aliases.push(cleanedRawName)
-  }
-
-  registry[canonicalName].aliases = Array.from(
-    new Set(aliases.filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b))
-
-  upsertStufferSource(registry[canonicalName], sourceUrl, cleanedRawName)
-  saveModelRegistry(registryPath, registry)
-
-  return canonicalName
-}
 
 function extractModelNameFromBreadcrumb(anchors) {
   const genericFolderNames = new Set([
@@ -1876,11 +1700,13 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       )
     }
 
-    modelName = resolveAndTrackModel(
+    modelName = resolveAndTrackRegistryModel(
       aliasMapPath,
       rawName,
+      'stufferdb',
       inputUrl,
-      canonicalModelName
+      canonicalModelName,
+      { unknownName: 'unknown_cow' }
     )
 
     const folders = createModelFolders(modelName)

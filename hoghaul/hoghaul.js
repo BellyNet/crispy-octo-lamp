@@ -7,11 +7,14 @@ const pLimit = require('p-limit')
 
 const { bannerHoghaul } = require('../banners.js')
 const mediaDates = require('../scrapyard/mediaDates')
-const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
 const runLifecycle = require('../scrapyard/runLifecycle')
+const {
+  sanitize,
+  resolveAndTrackSourceModel,
+} = require('../scrapyard/modelRegistry')
 const {
   normalizeHoghaulRunOptions,
   parseHoghaulArgs,
@@ -170,226 +173,16 @@ function resetRunState() {
   runTerminationHandled = false
 }
 
-function sanitize(name) {
-  return String(name || '')
-    .replace(/[^a-z0-9_-]/gi, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase()
-}
-
-function sortStringValues(values) {
-  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
-    a.localeCompare(b)
-  )
-}
-
-function sortSourceList(sources) {
-  return Array.isArray(sources) ? sources : []
-}
-
-function sortModelRegistry(registry) {
-  return Object.fromEntries(
-    Object.entries(registry || {}).map(([canonicalName, entry]) => {
-      const sources =
-        entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
-      return [
-        canonicalName,
-        {
-          aliases: sortStringValues(entry?.aliases),
-          sources: Object.fromEntries(
-            Object.entries(sources).map(([key, value]) => [
-              key,
-              sortSourceList(value),
-            ])
-          ),
-        },
-      ]
-    })
-  )
-}
-
-function loadModelRegistry() {
-  if (!fs.existsSync(registryPath)) {
-    writeRepoJsonFileSync(registryPath, {})
-    return {}
-  }
-
-  try {
-    const raw = fs.readFileSync(registryPath, 'utf8').trim()
-    return raw ? JSON.parse(raw) : {}
-  } catch (err) {
-    console.warn(`Could not parse ${registryPath}: ${err.message}`)
-    return {}
-  }
-}
-
-function saveModelRegistry(registry) {
-  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry))
-}
-
-function ensureModelEntryShape(entry, canonicalName) {
-  const aliasSet = new Set(
-    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
-  )
-  if (canonicalName) aliasSet.add(canonicalName)
-
-  return {
-    aliases: Array.from(aliasSet),
-    sources:
-      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {},
-  }
-}
-
-function findCanonicalModelName(registry, rawName) {
-  const normalizedRaw = sanitize(rawName)
-  if (!normalizedRaw) return null
-
-  for (const [canonicalName, entry] of Object.entries(registry)) {
-    if (sanitize(canonicalName) === normalizedRaw) return canonicalName
-    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) {
-      return canonicalName
-    }
-  }
-
-  return null
-}
-
-function getSourceRegistryKey(site) {
-  return site === 'coomerfans' ? 'coomer' : site
-}
-
-function findCanonicalModelNameBySource(registry, sourceInfo) {
-  const normalizedUrl = String(sourceInfo?.inputUrl || '').trim()
-  const normalizedSite = String(
-    getSourceRegistryKey(String(sourceInfo?.site || '').trim())
-  ).trim()
-  const normalizedService = String(sourceInfo?.service || '').trim()
-  const normalizedUserId = String(sourceInfo?.userId || '').trim()
-  const normalizedUsername = sanitize(sourceInfo?.username)
-
-  for (const [canonicalName, entry] of Object.entries(registry || {})) {
-    const sources =
-      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
-
-    for (const [siteKey, sourceList] of Object.entries(sources)) {
-      if (normalizedSite && siteKey !== normalizedSite) continue
-
-      for (const source of Array.isArray(sourceList) ? sourceList : []) {
-        const sourceUrl = String(source?.url || '').trim()
-        const sourceService = String(source?.service || '').trim()
-        const sourceUserId = String(source?.userId || '').trim()
-        const sourceUsername = sanitize(source?.username)
-
-        if (normalizedUrl && sourceUrl === normalizedUrl) {
-          return canonicalName
-        }
-
-        if (
-          normalizedService &&
-          normalizedUserId &&
-          sourceService === normalizedService &&
-          sourceUserId === normalizedUserId
-        ) {
-          return canonicalName
-        }
-
-        if (
-          normalizedSite === 'reddit' &&
-          normalizedUsername &&
-          sourceUsername === normalizedUsername
-        ) {
-          return canonicalName
-        }
-      }
-    }
-  }
-
-  return null
-}
-
-function upsertHoghaulSource(entry, sourceInfo) {
-  const sourceKey = getSourceRegistryKey(sourceInfo.site)
-  const now = new Date().toISOString()
-  if (!entry.sources) entry.sources = {}
-  if (!Array.isArray(entry.sources[sourceKey])) entry.sources[sourceKey] = []
-
-  const sourceIndex = entry.sources[sourceKey].findIndex(
-    (source) =>
-      source?.url === sourceInfo.inputUrl ||
-      (source?.service === sourceInfo.service &&
-        source?.userId === sourceInfo.userId) ||
-      (sourceInfo.site === 'reddit' &&
-        source?.username &&
-        sanitize(source.username) === sanitize(sourceInfo.username))
-  )
-
-  const nextSource = {
-    url: sourceInfo.inputUrl,
-    service: sourceInfo.service,
-    userId: sourceInfo.userId,
-    username: sourceInfo.username || null,
-    discoveredAs: sourceInfo.rawName,
-    lastCheckedAt: now,
-  }
-
-  if (sourceIndex >= 0) {
-    entry.sources[sourceKey][sourceIndex] = {
-      ...entry.sources[sourceKey][sourceIndex],
-      ...nextSource,
-    }
-  } else {
-    entry.sources[sourceKey].push(nextSource)
-  }
-}
-
-function resolveAndTrackModel(rawName, sourceInfo, canonicalOverride) {
-  const registry = loadModelRegistry()
-  const cleanedRawName = sanitize(rawName) || 'unknown_model'
-  const cleanedOverride = sanitize(canonicalOverride)
-  const existingCanonicalBySource = findCanonicalModelNameBySource(
-    registry,
-    sourceInfo
-  )
-  const existingCanonical = cleanedOverride
-    ? findCanonicalModelName(registry, cleanedOverride)
-    : existingCanonicalBySource ||
-      findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName =
-    existingCanonical ||
-    existingCanonicalBySource ||
-    cleanedOverride ||
-    cleanedRawName
-
-  registry[canonicalName] = ensureModelEntryShape(
-    registry[canonicalName],
-    canonicalName
-  )
-
-  const aliases = registry[canonicalName].aliases
-  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
-    aliases.push(cleanedRawName)
-  }
-  registry[canonicalName].aliases = sortStringValues(aliases)
-
-  upsertHoghaulSource(registry[canonicalName], {
-    ...sourceInfo,
-    rawName: cleanedRawName,
-  })
-  saveModelRegistry(registry)
-
-  return canonicalName
-}
-
 function registerSourceForRun(source, inputUrl, canonicalOverride) {
-  const modelName = resolveAndTrackModel(
+  const modelName = resolveAndTrackSourceModel(
+    registryPath,
     source.rawName,
     {
       ...source,
       inputUrl,
     },
-    canonicalOverride
+    canonicalOverride,
+    { unknownName: 'unknown_model' }
   )
   console.log(
     `Registered source in model_aliases.json: ${source.site}/${source.service}/${source.userId} -> ${modelName}`
