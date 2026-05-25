@@ -3,6 +3,7 @@
 const assert = require('assert')
 
 const {
+  applyScrapePositionalFallback,
   buildRepairArgs,
   buildScraperOptions,
   buildSyncArgs,
@@ -99,6 +100,42 @@ async function main() {
   assert.strictEqual(redditOptions.useBrowserMedia, false)
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
+
+  const fallbackArgs = applyScrapePositionalFallback(reddit.url, {
+    _: [reddit.url, 'abigailgray256', '1', '5'],
+    model: 'true',
+    pages: 'true',
+    'max-posts': 'true',
+    'dry-run': true,
+    'skip-nas-sync': true,
+  })
+  assert.strictEqual(fallbackArgs.model, 'abigailgray256')
+  assert.strictEqual(fallbackArgs.pages, '1')
+  assert.strictEqual(fallbackArgs['max-posts'], '5')
+
+  let fallbackCommand = null
+  const fallbackStatus = await runScrape(reddit.url, fallbackArgs, {
+    log: () => {},
+    error: (message) => {
+      throw new Error(message)
+    },
+    runCommand: (scriptPath, args) => {
+      fallbackCommand = { scriptPath, args }
+      return 0
+    },
+  })
+  assert.strictEqual(fallbackStatus, 0)
+  assert.deepStrictEqual(fallbackCommand.args, [
+    reddit.url,
+    '--model',
+    'abigailgray256',
+    '--skip-nas-sync',
+    '--pages',
+    '1',
+    '--max-posts',
+    '5',
+    '--dry-run',
+  ])
 
   assert.deepStrictEqual(
     buildRepairArgs({

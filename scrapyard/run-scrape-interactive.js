@@ -82,6 +82,148 @@ function toRunnerBatchOptions(options) {
   }
 }
 
+function findModelByAlias(registry, rawModel) {
+  const cleaned = sanitize(rawModel)
+  if (!cleaned) return null
+  const canonical = findCanonicalModelName(registry, cleaned)
+  if (canonical) return canonical
+  return registry?.[cleaned] ? cleaned : null
+}
+
+function getSourceLabel(sourceKey, url) {
+  const parsed = parseSourceUrl(url)
+  if (!parsed) return sourceKey
+  if (parsed.sourceType === 'coomerfans') return 'coomerfans'
+  return parsed.sourceType || sourceKey
+}
+
+function collectModelSources(entry) {
+  const targets = []
+  const sources =
+    entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+
+  for (const [sourceKey, sourceList] of Object.entries(sources)) {
+    for (const source of Array.isArray(sourceList) ? sourceList : []) {
+      const url = String(source?.url || '').trim()
+      if (!url) continue
+      targets.push({
+        sourceKey,
+        url,
+        label: getSourceLabel(sourceKey, url),
+      })
+    }
+  }
+
+  return targets
+}
+
+function selectModelSources(targets, answer) {
+  const cleaned = String(answer || 'all')
+    .trim()
+    .toLowerCase()
+  if (!cleaned || cleaned === 'all') return targets
+
+  const index = Number.parseInt(cleaned, 10)
+  if (Number.isFinite(index) && index >= 1 && index <= targets.length) {
+    return [targets[index - 1]]
+  }
+
+  const filters = new Set(cleaned.split(',').map((part) => part.trim()))
+  return targets.filter((target) => filters.has(target.label))
+}
+
+async function askHoghaulOptions(rl) {
+  return {
+    pages: (
+      await ask(rl, 'Pages limit for Hoghaul sources (blank for all): ')
+    ).trim(),
+    'max-posts': (
+      await ask(rl, 'Max posts per Hoghaul source (blank for all): ')
+    ).trim(),
+    'max-files': (
+      await ask(rl, 'Max files per Hoghaul source (blank for all): ')
+    ).trim(),
+    'post-concurrency': (
+      await ask(rl, 'Post concurrency (blank for default): ')
+    ).trim(),
+    'image-concurrency': (
+      await ask(rl, 'Image concurrency (blank for default): ')
+    ).trim(),
+    'video-concurrency': (
+      await ask(rl, 'Video concurrency (blank for default): ')
+    ).trim(),
+  }
+}
+
+async function runModelAliasFlow(rl) {
+  const rawModel = (await ask(rl, 'Model or alias: ')).trim()
+  const registry = loadModelRegistry(registryPath)
+  const canonicalModel = findModelByAlias(registry, rawModel)
+
+  if (!canonicalModel) {
+    console.log(`No registry entry found for ${rawModel}.`)
+    return
+  }
+
+  const targets = collectModelSources(registry[canonicalModel])
+  if (!targets.length) {
+    console.log(`${canonicalModel} has no saved sources in the registry.`)
+    return
+  }
+
+  console.log('')
+  console.log(`Sources for ${canonicalModel}:`)
+  targets.forEach((target, index) => {
+    console.log(`${index + 1}. ${target.label}: ${target.url}`)
+  })
+
+  const sourceAnswer = await ask(
+    rl,
+    'Source to run: all, stufferdb, reddit, coomer, coomerfans, kemono, or number [all]: '
+  )
+  const selectedTargets = selectModelSources(targets, sourceAnswer)
+  if (!selectedTargets.length) {
+    console.log('No sources matched that selection.')
+    return
+  }
+
+  const dryRunAnswer = (await ask(rl, 'Dry run? [y/N]: ')).trim().toLowerCase()
+  const skipNasSyncAnswer = (
+    await ask(rl, 'Skip NAS sync for this run? [y/N]: ')
+  )
+    .trim()
+    .toLowerCase()
+
+  const sharedOptions = {
+    model: canonicalModel,
+    'dry-run': dryRunAnswer === 'y' || dryRunAnswer === 'yes',
+    'skip-nas-sync': skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
+  }
+  const includesHoghaul = selectedTargets.some(
+    (target) => parseSourceUrl(target.url)?.scraper === 'hoghaul'
+  )
+  const hoghaulOptions = includesHoghaul ? await askHoghaulOptions(rl) : {}
+
+  for (let index = 0; index < selectedTargets.length; index += 1) {
+    const target = selectedTargets[index]
+    const parsed = parseSourceUrl(target.url)
+    const runOptions = {
+      ...sharedOptions,
+      ...(parsed?.scraper === 'hoghaul' ? hoghaulOptions : {}),
+    }
+
+    console.log('')
+    console.log(
+      `[${index + 1}/${selectedTargets.length}] ${canonicalModel} -> ${target.label}`
+    )
+    const status = await runScrape(target.url, runOptions)
+    if (status !== 0) {
+      console.log(`Scraper exited with status ${status}.`)
+      return
+    }
+  }
+}
+
 async function runSingleUrlFlow(rl) {
   const rawUrl = (await ask(rl, 'Paste source URL: ')).trim()
   const parsed = parseSourceUrl(rawUrl)
@@ -211,14 +353,15 @@ async function main() {
       console.log('2. Update all StufferDB models')
       console.log('3. Update all Coomer models')
       console.log('4. Update all Kemono models')
-      console.log('5. Paste one source URL and run it')
-      console.log('6. Repair models')
-      console.log('7. Sync dataset/NAS')
-      console.log('8. Quit')
+      console.log('5. Run a model/alias from registry')
+      console.log('6. Paste one source URL and run it')
+      console.log('7. Repair models')
+      console.log('8. Sync dataset/NAS')
+      console.log('9. Quit')
 
       const choice = (await ask(rl, '\nPick an option: ')).trim()
 
-      if (choice === '8' || /^q(?:uit)?$/i.test(choice)) {
+      if (choice === '9' || /^q(?:uit)?$/i.test(choice)) {
         console.log('Done.')
         break
       }
@@ -260,21 +403,26 @@ async function main() {
       }
 
       if (choice === '5') {
-        await runSingleUrlFlow(rl)
+        await runModelAliasFlow(rl)
         continue
       }
 
       if (choice === '6') {
-        await runRepairFlow(rl)
+        await runSingleUrlFlow(rl)
         continue
       }
 
       if (choice === '7') {
+        await runRepairFlow(rl)
+        continue
+      }
+
+      if (choice === '8') {
         await runSyncFlow(rl)
         continue
       }
 
-      console.log('Please choose 1-8.')
+      console.log('Please choose 1-9.')
     }
   } finally {
     rl.close()

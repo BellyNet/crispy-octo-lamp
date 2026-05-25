@@ -211,43 +211,79 @@ function inferCanonicalModel(parsedSource, explicitModel) {
 }
 
 function appendSharedOptions(args, parsedSource, argv) {
-  const modelName = argv['no-model-infer']
+  const modelName = isTruthy(getOption(argv, 'no-model-infer'))
     ? ''
-    : inferCanonicalModel(parsedSource, argv.model)
+    : inferCanonicalModel(parsedSource, getOption(argv, 'model'))
   appendOption(args, '--model', modelName)
-  appendBoolean(args, '--skip-nas-sync', argv['skip-nas-sync'])
-  appendBoolean(args, '--keep-history', argv['keep-history'])
+  appendBoolean(
+    args,
+    '--skip-nas-sync',
+    isTruthy(getOption(argv, 'skip-nas-sync'))
+  )
+  appendBoolean(
+    args,
+    '--keep-history',
+    isTruthy(getOption(argv, 'keep-history'))
+  )
 }
 
 function appendHoghaulOptions(args, argv) {
-  appendOption(args, '--pages', argv.pages)
-  appendOption(args, '--max-posts', argv['max-posts'])
-  appendOption(args, '--max-files', argv['max-files'])
-  appendOption(args, '--post-concurrency', argv['post-concurrency'])
-  appendOption(args, '--image-concurrency', argv['image-concurrency'])
-  appendOption(args, '--video-concurrency', argv['video-concurrency'])
-  appendOption(args, '--cookie', argv.cookie)
-  appendOption(args, '--cookie-file', argv['cookie-file'])
-  appendOption(args, '--browser-executable', argv['browser-executable'])
-  appendOption(args, '--browser-profile', argv['browser-profile'])
-  appendOption(args, '--browser-connect', argv['browser-connect'])
-  appendOption(args, '--browser-validate-ms', argv['browser-validate-ms'])
-  appendBoolean(args, '--dry-run', argv['dry-run'])
-  appendBoolean(args, '--preflight', argv.preflight)
-  appendBoolean(args, '--track-source', argv['track-source'])
-  appendBoolean(args, '--browser-headless', argv['browser-headless'])
-  appendBoolean(args, '--headless', argv.headless)
-  appendOptionalBoolean(args, 'browser-media', argv['browser-media'])
+  appendOption(args, '--pages', getOption(argv, 'pages'))
+  appendOption(args, '--max-posts', getOption(argv, 'max-posts'))
+  appendOption(args, '--max-files', getOption(argv, 'max-files'))
+  appendOption(args, '--post-concurrency', getOption(argv, 'post-concurrency'))
+  appendOption(
+    args,
+    '--image-concurrency',
+    getOption(argv, 'image-concurrency')
+  )
+  appendOption(
+    args,
+    '--video-concurrency',
+    getOption(argv, 'video-concurrency')
+  )
+  appendOption(args, '--cookie', getOption(argv, 'cookie'))
+  appendOption(args, '--cookie-file', getOption(argv, 'cookie-file'))
+  appendOption(
+    args,
+    '--browser-executable',
+    getOption(argv, 'browser-executable')
+  )
+  appendOption(args, '--browser-profile', getOption(argv, 'browser-profile'))
+  appendOption(args, '--browser-connect', getOption(argv, 'browser-connect'))
+  appendOption(
+    args,
+    '--browser-validate-ms',
+    getOption(argv, 'browser-validate-ms')
+  )
+  appendBoolean(args, '--dry-run', isTruthy(getOption(argv, 'dry-run')))
+  appendBoolean(args, '--preflight', isTruthy(getOption(argv, 'preflight')))
+  appendBoolean(
+    args,
+    '--track-source',
+    isTruthy(getOption(argv, 'track-source'))
+  )
+  appendBoolean(
+    args,
+    '--browser-headless',
+    isTruthy(getOption(argv, 'browser-headless'))
+  )
+  appendBoolean(args, '--headless', isTruthy(getOption(argv, 'headless')))
+  appendOptionalBoolean(args, 'browser-media', getOption(argv, 'browser-media'))
 }
 
 function appendMilkmaidOptions(args, argv) {
-  appendBoolean(args, '--review-errors', argv['review-errors'])
+  appendBoolean(
+    args,
+    '--review-errors',
+    isTruthy(getOption(argv, 'review-errors'))
+  )
 }
 
 function getRunnerModelName(parsedSource, argv) {
-  return argv['no-model-infer']
+  return isTruthy(getOption(argv, 'no-model-infer'))
     ? ''
-    : inferCanonicalModel(parsedSource, argv.model)
+    : inferCanonicalModel(parsedSource, getOption(argv, 'model'))
 }
 
 function buildScraperArgs(parsedSource, argvInput = {}) {
@@ -271,14 +307,15 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
     inputUrl: parsedSource.url,
     model: modelName,
     modelOverride: modelName,
-    skipNasSync: Boolean(argv['skip-nas-sync']),
-    keepHistory: Boolean(argv['keep-history']),
+    skipNasSync: isTruthy(getOption(argv, 'skip-nas-sync')),
+    keepHistory: isTruthy(getOption(argv, 'keep-history')),
   }
 
   if (parsedSource.scraper === 'milkmaid') {
     return normalizeMilkmaidRunOptions({
       ...argv,
       ...sharedOptions,
+      reviewErrors: isTruthy(getOption(argv, 'review-errors')),
     })
   }
 
@@ -286,16 +323,66 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
     return normalizeHoghaulRunOptions({
       ...argv,
       ...sharedOptions,
+      pages: getOption(argv, 'pages'),
+      maxPosts: getOption(argv, 'max-posts'),
+      maxFiles: getOption(argv, 'max-files'),
+      postConcurrency: getOption(argv, 'post-concurrency'),
+      imageConcurrency: getOption(argv, 'image-concurrency'),
+      videoConcurrency: getOption(argv, 'video-concurrency'),
+      cookie: getOption(argv, 'cookie'),
+      cookieFile: getOption(argv, 'cookie-file'),
+      browserExecutable: getOption(argv, 'browser-executable'),
+      browserProfile: getOption(argv, 'browser-profile'),
+      browserConnect: getOption(argv, 'browser-connect'),
+      browserValidateMs: getOption(argv, 'browser-validate-ms'),
+      dryRun: isTruthy(getOption(argv, 'dry-run')),
+      preflight: isTruthy(getOption(argv, 'preflight')),
+      trackSource: isTruthy(getOption(argv, 'track-source')),
+      browserMedia: getOption(argv, 'browser-media'),
+      browserHeadless: isTruthy(getOption(argv, 'browser-headless')),
+      headless: isTruthy(getOption(argv, 'headless')),
     })
   }
 
   return sharedOptions
 }
 
+function applyScrapePositionalFallback(inputUrl, argvInput = {}) {
+  const argv = parseRunnerArgs(argvInput)
+  const positionals = Array.isArray(argv._) ? argv._ : []
+  if (positionals.length <= 1) return argv
+
+  const extras = positionals.slice(1).filter((value) => {
+    const text = String(value || '').trim()
+    return text && !/^https?:\/\//i.test(text)
+  })
+  if (!extras.length) return argv
+
+  const next = {
+    ...argv,
+    _: [inputUrl],
+  }
+  const hasMeaningfulValue = (name) => {
+    const value = getOption(next, name)
+    if (value === undefined || value === null || value === '') return false
+    return value !== true && value !== 'true'
+  }
+  const consume = (name) => {
+    if (hasMeaningfulValue(name) || extras.length === 0) return
+    next[name] = extras.shift()
+  }
+
+  consume('model')
+  consume('pages')
+  consume('max-posts')
+  consume('max-files')
+  return next
+}
+
 async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   const log = deps.log || console.log
   const error = deps.error || console.error
-  const argv = parseRunnerArgs(argvInput)
+  const argv = applyScrapePositionalFallback(inputUrl, argvInput)
   const parsedSource = parseSourceUrl(inputUrl)
   if (!parsedSource) {
     error(
@@ -1011,6 +1098,7 @@ module.exports = {
   inferCanonicalModel,
   buildScraperArgs,
   buildScraperOptions,
+  applyScrapePositionalFallback,
   buildRepairArgs,
   buildSyncArgs,
   runScrape,
