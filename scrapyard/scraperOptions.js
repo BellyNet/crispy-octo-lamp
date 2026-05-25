@@ -48,12 +48,19 @@ const RUNNER_STRING_OPTIONS = [
   'host-contains',
   'registry',
   'log-dir',
+  'dataset-root',
+  'nas-dataset-root',
+  'cleanup-mp4',
+  'cleanup-gif-mp4',
 ]
 
 const RUNNER_BOOLEAN_OPTIONS = [
   'no-model-infer',
   'stop-on-error',
   'with-repair',
+  'scrape',
+  'push',
+  'pull',
   'help',
 ]
 

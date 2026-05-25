@@ -10,9 +10,11 @@ const {
 const { parseSourceUrl } = require('./sourceRouter')
 const {
   runAllSourceUpdates,
+  runRepair,
   runScrape,
   runSourceBatch,
   runStufferDbBatch,
+  runSync,
 } = require('./scraperRunner')
 
 const registryPath = require('./scraperRunner').registryPath
@@ -142,6 +144,59 @@ async function runSingleUrlFlow(rl) {
   }
 }
 
+async function runRepairFlow(rl) {
+  const model = (await ask(rl, 'Model to repair (blank for all): ')).trim()
+  const models = model
+    ? ''
+    : (await ask(rl, 'Models filter (comma-separated, blank for all): ')).trim()
+  const startFrom = model
+    ? ''
+    : (await ask(rl, 'Start from model (blank for start of queue): ')).trim()
+  const scrapeAnswer = (
+    await ask(rl, 'Re-scrape sources during repair? [y/N]: ')
+  )
+    .trim()
+    .toLowerCase()
+  const skipNasSyncAnswer = (
+    await ask(rl, 'Skip NAS sync after repair? [y/N]: ')
+  )
+    .trim()
+    .toLowerCase()
+
+  await runRepair({
+    model,
+    models,
+    'start-from': startFrom,
+    scrape: scrapeAnswer === 'y' || scrapeAnswer === 'yes',
+    'skip-nas-sync': skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
+  })
+}
+
+async function runSyncFlow(rl) {
+  const mode = (await ask(rl, 'Sync mode: push, pull, or model? [push]: '))
+    .trim()
+    .toLowerCase()
+  const options = {}
+  if (!mode || mode === 'push') {
+    options.push = true
+    const cleanupAnswer = (
+      await ask(rl, 'Remove mirrored local MP4s after push? [y/N]: ')
+    )
+      .trim()
+      .toLowerCase()
+    if (cleanupAnswer === 'y' || cleanupAnswer === 'yes') {
+      options['cleanup-mp4'] = 'true'
+    }
+  } else if (mode === 'pull') {
+    options.pull = true
+  } else {
+    options.model =
+      mode === 'model' ? (await ask(rl, 'Model to sync: ')).trim() : mode
+  }
+
+  await runSync(options)
+}
+
 async function main() {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -157,11 +212,13 @@ async function main() {
       console.log('3. Update all Coomer models')
       console.log('4. Update all Kemono models')
       console.log('5. Paste one source URL and run it')
-      console.log('6. Quit')
+      console.log('6. Repair models')
+      console.log('7. Sync dataset/NAS')
+      console.log('8. Quit')
 
       const choice = (await ask(rl, '\nPick an option: ')).trim()
 
-      if (choice === '6' || /^q(?:uit)?$/i.test(choice)) {
+      if (choice === '8' || /^q(?:uit)?$/i.test(choice)) {
         console.log('Done.')
         break
       }
@@ -207,7 +264,17 @@ async function main() {
         continue
       }
 
-      console.log('Please choose 1-6.')
+      if (choice === '6') {
+        await runRepairFlow(rl)
+        continue
+      }
+
+      if (choice === '7') {
+        await runSyncFlow(rl)
+        continue
+      }
+
+      console.log('Please choose 1-8.')
     }
   } finally {
     rl.close()

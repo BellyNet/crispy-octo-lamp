@@ -25,7 +25,12 @@ const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
 
 function printHelp() {
-  console.log(`Usage: npm run scrape -- <source-url> [options]
+  console.log(`Usage:
+  npm run scrape -- <source-url> [options]
+  npm run scrape -- scrape <source-url> [options]
+  npm run scrape -- update <all|stufferdb|coomer|kemono> [options]
+  npm run scrape -- repair [options]
+  npm run scrape -- sync <--push|--pull|--model <name>> [options]
 
 Runs the unified scraper launcher for one StufferDB, Reddit, Coomer, CoomerFans, or Kemono URL.
 With no URL, opens the interactive scrape launcher.
@@ -50,6 +55,20 @@ Options:
   --browser-profile <path>         Hoghaul browser profile path.
   --browser-connect <url>          Hoghaul browser debug endpoint.
   --browser-validate-ms <ms>       Hoghaul browser validation timeout.
+
+Repair options:
+  --model <name>                   Repair one model only.
+  --models <a,b,c>                 Repair selected models.
+  --start-from <name>              Start from this model.
+  --limit <n>                      Limit selected models.
+  --scrape                         Repair runner also re-scrapes sources.
+
+Sync options:
+  --push                           Push local dataset to NAS.
+  --pull                           Pull NAS dataset to local.
+  --model <name>                   Sync one model to NAS.
+  --cleanup-mp4=true               Remove mirrored local MP4s after push.
+  --cleanup-gif-mp4=true           Remove GIF-derived MP4s after push.
   --help                           Show this help.
 `)
 }
@@ -105,6 +124,62 @@ function runScriptResult(scriptPath, args, label) {
     label,
     command: `node ${scriptPath} ${args.join(' ')}`.trim(),
   }
+}
+
+function buildRepairArgs(argvInput = {}) {
+  const argv = parseRunnerArgs(argvInput)
+  const args = []
+  for (const name of [
+    'model',
+    'models',
+    'start-from',
+    'limit',
+    'registry',
+    'log-dir',
+    'dataset-root',
+    'nas-dataset-root',
+  ]) {
+    appendOption(args, `--${name}`, getOption(argv, name))
+  }
+  appendBoolean(
+    args,
+    '--stop-on-error',
+    isTruthy(getOption(argv, 'stop-on-error'))
+  )
+  appendBoolean(args, '--scrape', isTruthy(getOption(argv, 'scrape')))
+  appendBoolean(
+    args,
+    '--skip-nas-sync',
+    isTruthy(getOption(argv, 'skip-nas-sync'))
+  )
+  appendBoolean(args, '--help', isTruthy(getOption(argv, 'help')))
+  return args
+}
+
+function buildSyncArgs(argvInput = {}) {
+  const argv = parseRunnerArgs(argvInput)
+  const args = []
+  appendBoolean(args, '--push', isTruthy(getOption(argv, 'push')))
+  appendBoolean(args, '--pull', isTruthy(getOption(argv, 'pull')))
+  appendOption(args, '--model', getOption(argv, 'model'))
+  appendOption(args, '--cleanup-mp4', getOption(argv, 'cleanup-mp4'))
+  appendOption(args, '--cleanup-gif-mp4', getOption(argv, 'cleanup-gif-mp4'))
+  appendBoolean(args, '--help', isTruthy(getOption(argv, 'help')))
+  return args
+}
+
+function runRepair(argvInput = {}) {
+  return runNodeScript(
+    path.join('milkmaid', 'repair-stufferdb-models.js'),
+    buildRepairArgs(argvInput)
+  )
+}
+
+function runSync(argvInput = {}) {
+  return runNodeScript(
+    path.join('scrapyard', 'sync.js'),
+    buildSyncArgs(argvInput)
+  )
 }
 
 async function runInteractiveLauncher() {
@@ -875,6 +950,41 @@ async function runAllSourceUpdates(argvInput = {}) {
 }
 
 async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
+  const rawArgs = Array.isArray(argvInput) ? argvInput : []
+  const command = String(rawArgs[0] || '')
+    .trim()
+    .toLowerCase()
+
+  if (command === 'scrape') {
+    const scrapeArgs = rawArgs.slice(1)
+    const argv = parseRunnerArgs(scrapeArgs)
+    const inputUrl = argv._[0]
+    if (!inputUrl) {
+      printHelp()
+      return 1
+    }
+    return runScrape(inputUrl, argv, deps)
+  }
+
+  if (command === 'repair') return runRepair(rawArgs.slice(1))
+  if (command === 'sync') return runSync(rawArgs.slice(1))
+
+  if (command === 'update') {
+    const updateArgs = rawArgs.slice(2)
+    const target = String(rawArgs[1] || 'all')
+      .trim()
+      .toLowerCase()
+    if (target === 'all') return runAllSourceUpdates(updateArgs)
+    if (target === 'stufferdb' || target === 'stuffer') {
+      return runStufferDbBatch(updateArgs)
+    }
+    if (target === 'coomer' || target === 'kemono') {
+      return runSourceBatch(target, updateArgs)
+    }
+    printHelp()
+    return 1
+  }
+
   const argv = parseRunnerArgs(argvInput)
 
   if (argv.help) {
@@ -901,7 +1011,11 @@ module.exports = {
   inferCanonicalModel,
   buildScraperArgs,
   buildScraperOptions,
+  buildRepairArgs,
+  buildSyncArgs,
   runScrape,
+  runRepair,
+  runSync,
   runSourceBatch,
   runStufferDbBatch,
   runAllSourceUpdates,
