@@ -1,9 +1,8 @@
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const imghash = require('imghash')
-const sharp = require('sharp')
 const { createHash } = require('crypto')
 const { createHashStore } = require('./hashStore')
 
@@ -34,29 +33,36 @@ function saveVisualHashCache() {
 
 async function getVisualHashFromBuffer(buffer) {
   const hash = createHash('md5').update(buffer).digest('hex')
-  const tmpPath = path.join(tmpDir, `vh_${hash}.jpg`)
-  const ffmpegInputPath = path.join(tmpDir, `vh_${hash}_src.jpg`)
-  const ffmpegOutputPath = path.join(tmpDir, `vh_${hash}_ffmpeg.png`)
+  const nonce = `${process.pid}_${Date.now()}_${Math.random()
+    .toString(16)
+    .slice(2)}`
+  const inputPath = path.join(tmpDir, `vh_${hash}_${nonce}_src`)
+  const outputPath = path.join(tmpDir, `vh_${hash}_${nonce}.json`)
 
   try {
-    await sharp(buffer).resize(512).jpeg({ quality: 95 }).toFile(tmpPath)
-    const visualHash = await imghash.hash(tmpPath, 16, 'hex')
-    unlinkIfExists(tmpPath)
-    return visualHash
-  } catch (err) {
-    try {
-      unlinkIfExists(tmpPath)
-      fs.writeFileSync(ffmpegInputPath, buffer)
-      await normalizeImageWithFfmpeg(ffmpegInputPath, ffmpegOutputPath)
-      const visualHash = await imghash.hash(ffmpegOutputPath, 16, 'hex')
-      unlinkIfExists(ffmpegInputPath)
-      unlinkIfExists(ffmpegOutputPath)
-      return visualHash
-    } catch {
-      unlinkIfExists(ffmpegInputPath)
-      unlinkIfExists(ffmpegOutputPath)
-      return null
-    }
+    fs.writeFileSync(inputPath, buffer)
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(__dirname, 'visualHashWorker.js'),
+        'image',
+        inputPath,
+        outputPath,
+      ],
+      {
+        cwd: path.join(__dirname, '..'),
+        stdio: 'ignore',
+        timeout: 60000,
+      }
+    )
+    if (result.status !== 0 || !fs.existsSync(outputPath)) return null
+    const payload = JSON.parse(fs.readFileSync(outputPath, 'utf8'))
+    return String(payload.hash || '').trim() || null
+  } catch {
+    return null
+  } finally {
+    unlinkIfExists(inputPath)
+    unlinkIfExists(outputPath)
   }
 }
 

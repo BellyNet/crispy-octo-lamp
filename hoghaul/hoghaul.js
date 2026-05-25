@@ -1225,8 +1225,7 @@ module.exports = {
 }
 
 if (require.main === module) {
-  const { runScraperCli } = require('../scrapyard/scraperRunner')
-  runScraperCli()
+  runHoghaulCli()
     .then((code) => {
       process.exitCode = code
     })

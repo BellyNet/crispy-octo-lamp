@@ -53,19 +53,7 @@ function createRunLog({
   }
 
   removeFileIfExists(modelSummaryPath)
-  fs.writeFileSync(
-    modelSummaryPath,
-    JSON.stringify(
-      {
-        startedAt: runLog.startedAt,
-        modelName,
-        inputUrl,
-        status: 'running',
-      },
-      null,
-      2
-    ) + '\n'
-  )
+  writeRunSnapshot(runLog)
 
   appendRunEvent(runLog, 'run_started', {
     modelName,
@@ -83,6 +71,7 @@ function recordRunError(runLog, category, details = {}) {
     category,
     ...details,
   })
+  writeRunSnapshot(runLog)
 }
 
 function incrementRunCounter(runLog, name, delta = 1) {
@@ -94,6 +83,7 @@ function incrementRunCounter(runLog, name, delta = 1) {
 function setRunCounter(runLog, name, value) {
   if (!runLog?.counters || !name) return
   runLog.counters[name] = Number(value) || 0
+  writeRunSnapshot(runLog)
 }
 
 function addRunTransfer(runLog, name, bytes) {
@@ -105,6 +95,28 @@ function addRunTransfer(runLog, name, bytes) {
 function setRunTransfer(runLog, name, bytes) {
   if (!runLog?.transfer || !name) return
   runLog.transfer[name] = Number(bytes) || 0
+  writeRunSnapshot(runLog)
+}
+
+function writeRunSnapshot(runLog, extra = {}) {
+  if (!runLog?.modelSummaryPath) return
+  const { status = 'running', ...rest } = extra
+  const summary = {
+    startedAt: runLog.startedAt,
+    updatedAt: new Date().toISOString(),
+    modelName: runLog.modelName,
+    inputUrl: runLog.inputUrl,
+    logPath: runLog.logPath,
+    counters: runLog.counters,
+    transfer: runLog.transfer,
+    errors: runLog.errors,
+    ...rest,
+    status,
+  }
+  fs.writeFileSync(
+    runLog.modelSummaryPath,
+    JSON.stringify(summary, null, 2) + '\n'
+  )
 }
 
 function getRunCounters(runLog) {
@@ -118,6 +130,7 @@ function formatPercent(numerator, denominator) {
 
 function getRunProgressStats(runLog, fallback = {}) {
   const counters = getRunCounters(runLog) || {}
+  const transfer = runLog?.transfer || fallback.transfer || {}
   const processed = Number(counters.processed ?? fallback.processed ?? 0) || 0
   const expectedMedia =
     Number(counters.expectedMedia ?? fallback.expectedMedia ?? 0) || 0
@@ -126,6 +139,8 @@ function getRunProgressStats(runLog, fallback = {}) {
   const duplicates =
     Number(counters.duplicates ?? fallback.duplicates ?? 0) || 0
   const failures = Number(counters.failures ?? fallback.failures ?? 0) || 0
+  const savedBytes =
+    Number(transfer.savedBytes ?? fallback.savedBytes ?? 0) || 0
   const remaining = Math.max(expectedMedia - processed, 0)
 
   return {
@@ -135,9 +150,18 @@ function getRunProgressStats(runLog, fallback = {}) {
     skipped,
     duplicates,
     failures,
+    savedBytes,
     remaining,
     percent: formatPercent(processed, expectedMedia),
   }
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(2)} MB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${value} B`
 }
 
 function formatRunProgressLine(stats, context = '') {
@@ -146,7 +170,7 @@ function formatRunProgressLine(stats, context = '') {
 }
 
 function formatRunSummaryLine(stats) {
-  return `Done: ${stats.processed}/${stats.expectedMedia} processed | saved ${stats.saved} | skipped ${stats.skipped} | dupes ${stats.duplicates} | failed ${stats.failures}`
+  return `Done: ${stats.processed}/${stats.expectedMedia} processed | downloaded ${stats.saved} (${formatBytes(stats.savedBytes)}) | skipped ${stats.skipped} | dupes ${stats.duplicates} | failed ${stats.failures}`
 }
 
 function noteMediaOutcome(runLog, kind) {
@@ -161,6 +185,7 @@ function noteMediaOutcome(runLog, kind) {
   } else if (kind === 'failed') {
     incrementRunCounter(runLog, 'failures')
   }
+  writeRunSnapshot(runLog)
 }
 
 function finalizeRunLog(runLog, extra = {}, options = {}) {
@@ -225,4 +250,6 @@ module.exports = {
   recordRunError,
   setRunCounter,
   setRunTransfer,
+  writeRunSnapshot,
+  formatBytes,
 }

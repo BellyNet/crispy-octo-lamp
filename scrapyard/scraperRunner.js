@@ -20,6 +20,7 @@ const {
   normalizeMilkmaidRunOptions,
   parseRunnerArgs,
 } = require('./scraperOptions')
+const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
@@ -109,6 +110,15 @@ function runNodeScript(scriptPath, args, { log = console.log } = {}) {
   log('')
   log(`Running: node ${scriptPath} ${args.join(' ')}`.trim())
   log('')
+  const result = spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd: rootDir,
+    stdio: 'inherit',
+  })
+  return result.status ?? 1
+}
+
+function runNodeScriptQuiet(scriptPath, args) {
+  const { spawnSync } = require('child_process')
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: rootDir,
     stdio: 'inherit',
@@ -347,6 +357,70 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
   return sharedOptions
 }
 
+function getModelRunSummaryPath(modelName, source = 'milkmaid') {
+  return path.join(
+    process.env.APPDATA || '',
+    '.slopvault',
+    'dataset',
+    modelName,
+    `${source}-last-run.json`
+  )
+}
+
+function readModelRunSummary(modelName, source = 'milkmaid') {
+  const summaryPath = getModelRunSummaryPath(modelName, source)
+  if (!fs.existsSync(summaryPath)) return null
+
+  try {
+    return JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
+  } catch (err) {
+    return {
+      parseError: err.message,
+    }
+  }
+}
+
+function getStatsFromRunSummary(summary) {
+  if (!summary || summary.parseError) return null
+  return runLifecycle.getRunProgressStats(
+    {
+      counters: summary.counters || {},
+      transfer: summary.transfer || {},
+    },
+    {
+      processed: summary.mediaCount,
+      expectedMedia: summary.mediaCount,
+      saved: summary.successCount,
+      duplicates: summary.duplicateCount,
+      failures: summary.errorCount,
+      transfer: summary.transfer || {},
+    }
+  )
+}
+
+function printRecoveredRunSummary(summary, { log = console.log } = {}) {
+  const stats = getStatsFromRunSummary(summary)
+  if (!stats) return
+
+  log('')
+  log(
+    'Hoghaul ended before a normal run_finished event; recovered latest counters:'
+  )
+  log(runLifecycle.formatRunSummaryLine(stats))
+  if (summary.logPath) log(`Run log: ${summary.logPath}`)
+}
+
+function runHoghaulScript(scriptPath, args, parsedSource, argv, { log } = {}) {
+  const modelName = getRunnerModelName(parsedSource, argv)
+  const code = runNodeScriptQuiet(scriptPath, args)
+  const summary = modelName ? readModelRunSummary(modelName, 'hoghaul') : null
+  if (summary?.status === 'running') {
+    printRecoveredRunSummary(summary, { log })
+    return code === 0 ? 1 : code
+  }
+  return code
+}
+
 function applyScrapePositionalFallback(inputUrl, argvInput = {}) {
   const argv = parseRunnerArgs(argvInput)
   const positionals = Array.isArray(argv._) ? argv._ : []
@@ -406,6 +480,9 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   const args = buildScraperArgs(parsedSource, argv)
   if (deps.runCommand) {
     return runCommand(scriptPath, args, { log })
+  }
+  if (parsedSource.scraper === 'hoghaul') {
+    return runHoghaulScript(scriptPath, args, parsedSource, argv, { log })
   }
   return runInProcessScraper(
     parsedSource,
@@ -615,26 +692,11 @@ function selectStufferQueue(queue, argv) {
 }
 
 function getLastRunSummaryPath(modelName) {
-  return path.join(
-    process.env.APPDATA || '',
-    '.slopvault',
-    'dataset',
-    modelName,
-    'milkmaid-last-run.json'
-  )
+  return getModelRunSummaryPath(modelName, 'milkmaid')
 }
 
 function readLastRunSummary(modelName) {
-  const summaryPath = getLastRunSummaryPath(modelName)
-  if (!fs.existsSync(summaryPath)) return null
-
-  try {
-    return JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
-  } catch (err) {
-    return {
-      parseError: err.message,
-    }
-  }
+  return readModelRunSummary(modelName, 'milkmaid')
 }
 
 function summarizeScrapeRuns(scrapeRuns) {
