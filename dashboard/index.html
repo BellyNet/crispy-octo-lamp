@@ -203,8 +203,51 @@
         font-size: 12px;
         color: var(--muted);
         margin-top: 2px;
-        display: block;
+        display: inline;
       }
+      #stats-toggle {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 11px;
+        cursor: pointer;
+        padding: 0 4px;
+        line-height: 1;
+        margin-left: 2px;
+        transition: color 0.15s;
+      }
+      #stats-toggle:hover { color: var(--accent); }
+
+      /* Slide-down details panel under the header — collapsed by default. */
+      #stats-details {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.25s ease, margin-top 0.25s ease;
+      }
+      #stats-details.open {
+        max-height: 220px;
+        margin-top: 6px;
+      }
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 4px 16px;
+        padding: 8px 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 11px;
+        line-height: 1.6;
+        font-variant-numeric: tabular-nums;
+      }
+      .stats-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .stats-label { color: var(--muted); }
+      .stats-value { color: var(--text); }
 
       #filters {
         display: flex;
@@ -966,6 +1009,16 @@
         flex-wrap: wrap;
         gap: 3px;
       }
+      .home-card-size {
+        margin-top: 4px;
+        font-size: 10px;
+        color: var(--muted);
+        opacity: 0.85;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .home-src-dot {
         font-size: 9px;
         font-weight: 700;
@@ -1307,7 +1360,9 @@
         <div id="header-left">
           <h1 id="current-user-name">All Models</h1>
           <span id="media-stats"></span>
+          <button id="stats-toggle" title="Show details" aria-label="Show details" style="display:none">▾</button>
           <div id="source-links"></div>
+          <div id="stats-details"></div>
         </div>
         <select
           id="filter-select"
@@ -1650,6 +1705,10 @@
         sortBar.style.display = 'none'
         currentNameEl.textContent = 'All Models'
         filterSelect.style.display = 'none'
+        const st = document.getElementById('stats-toggle')
+        if (st) st.style.display = 'none'
+        const sd = document.getElementById('stats-details')
+        if (sd) { sd.classList.remove('open'); sd.innerHTML = '' }
         if (mediaStatsEl) mediaStatsEl.textContent = ''
         sourceLinksEl.innerHTML = ''
         if (!opts.skipHashUpdate) setHashRoute({ view: 'home' })
@@ -1810,6 +1869,20 @@
 
           body.appendChild(name)
           body.appendChild(srcs)
+
+          // Folder size + file count — small muted line, helps eyeball which
+          // models are eating disk and how big each is.
+          if (u.fileCount || u.totalBytes) {
+            const sizeLine = document.createElement('div')
+            sizeLine.className = 'home-card-size'
+            const fc = u.fileCount || 0
+            const sz = formatFileSize(u.totalBytes || 0)
+            const parts = []
+            if (sz) parts.push(sz)
+            parts.push(`${fc.toLocaleString()} file${fc === 1 ? '' : 's'}`)
+            sizeLine.textContent = parts.join(' · ')
+            body.appendChild(sizeLine)
+          }
 
           // Activity graph — GitHub-style year cells
           {
@@ -2064,6 +2137,7 @@
 
         setActiveType('all')
         filterSelect.style.display = 'block'
+        document.getElementById('stats-toggle').style.display = ''
         gridEl.innerHTML = ''
         noResultsEl.style.display = 'none'
         sortBar.style.display = 'none'
@@ -2176,18 +2250,29 @@
       function updateStats() {
         if (!allMedia.length) {
           if (mediaStatsEl) mediaStatsEl.textContent = 'No media found'
+          updateStatsDetails(null)
           return
         }
-        const imgs = allMedia.filter((m) => m.type === 'image').length
-        const gifs = allMedia.filter((m) => m.type === 'gif').length
-        const vids = allMedia.filter((m) => m.type === 'video').length
-        const flagged = allMedia.filter((m) => m.flagged).length
+        let imgs = 0, gifs = 0, vids = 0, flagged = 0, captioned = 0
+        let sizeImgs = 0, sizeGifs = 0, sizeVids = 0
+        for (const m of allMedia) {
+          const sz = m.size || 0
+          if (m.type === 'image') { imgs++; sizeImgs += sz }
+          else if (m.type === 'gif') { gifs++; sizeGifs += sz }
+          else if (m.type === 'video') { vids++; sizeVids += sz }
+          if (m.flagged) flagged++
+          if (m.hasCaption) captioned++
+        }
+        const totalSize = sizeImgs + sizeGifs + sizeVids
         const parts = []
+        if (totalSize) parts.push(formatFileSize(totalSize))
         if (imgs) parts.push(`${imgs} image${imgs !== 1 ? 's' : ''}`)
         if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
         if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
         if (flagged) parts.push(`${flagged} flagged`)
         if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
+
+        updateStatsDetails({ imgs, gifs, vids, flagged, captioned, sizeImgs, sizeGifs, sizeVids, totalSize })
 
         // Update filter dropdown labels with counts.
         const labels = {
@@ -2204,6 +2289,28 @@
         // Hide the Flagged option when nothing is flagged — keeps the menu clean.
         const flaggedOpt = filterSelect.querySelector('option[value="flagged"]')
         if (flaggedOpt) flaggedOpt.hidden = flagged === 0
+      }
+
+      // Populates the slide-down details panel under the header. Built lazily —
+      // panel is hidden by default and only rendered when the user expands it.
+      function updateStatsDetails(s) {
+        const panel = document.getElementById('stats-details')
+        if (!panel) return
+        if (!s) { panel.innerHTML = ''; return }
+        const row = (label, value) => `<div class="stats-row"><span class="stats-label">${label}</span><span class="stats-value">${value}</span></div>`
+        const pct = (n, d) => d ? Math.round((n / d) * 100) + '%' : '—'
+        const total = allMedia.length
+        panel.innerHTML = `
+          <div class="stats-grid">
+            ${row('Total size', formatFileSize(s.totalSize) || '—')}
+            ${row('Files',       total.toLocaleString())}
+            ${row('Images',     `${s.imgs.toLocaleString()} · ${formatFileSize(s.sizeImgs) || '0'}`)}
+            ${row('GIFs',       `${s.gifs.toLocaleString()} · ${formatFileSize(s.sizeGifs) || '0'}`)}
+            ${row('Videos',     `${s.vids.toLocaleString()} · ${formatFileSize(s.sizeVids) || '0'}`)}
+            ${row('Captioned',  `${s.captioned.toLocaleString()} (${pct(s.captioned, total)})`)}
+            ${row('Flagged',    `${s.flagged.toLocaleString()}${s.flagged ? ` (${pct(s.flagged, total)})` : ''}`)}
+          </div>
+        `
       }
 
       function updateDateRange() {
@@ -2845,6 +2952,15 @@
       homeShuffleBtn.addEventListener('click', () => {
         reshuffleHome()
         renderHomeGrid()
+      })
+
+      // Stats expand/collapse — toggles the slide-down panel under the header.
+      const statsToggleBtn = document.getElementById('stats-toggle')
+      statsToggleBtn.addEventListener('click', () => {
+        const panel = document.getElementById('stats-details')
+        const open = panel.classList.toggle('open')
+        statsToggleBtn.textContent = open ? '▴' : '▾'
+        statsToggleBtn.title = open ? 'Hide details' : 'Show details'
       })
 
       homeSizeBtns.forEach((btn) => {

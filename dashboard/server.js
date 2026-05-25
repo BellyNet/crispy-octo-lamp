@@ -420,7 +420,11 @@ const modelLimit = pLimit(parseInt(process.env.SCAN_MODEL_CONCURRENCY, 10) || 8)
 function computeStatsFromResponse(allMedia) {
   let earliestMs = Infinity,
     latestMs = 0,
-    latestAddedMs = 0
+    latestAddedMs = 0,
+    totalBytes = 0,
+    bytesImages = 0,
+    bytesGifs = 0,
+    bytesVideos = 0
   const yearCounts = {}
   for (const m of allMedia) {
     if (m.addedMs > latestAddedMs) latestAddedMs = m.addedMs
@@ -433,6 +437,11 @@ function computeStatsFromResponse(allMedia) {
       const yr = new Date(dateMs).getFullYear()
       if (yr >= 1990 && yr <= 2035) yearCounts[yr] = (yearCounts[yr] || 0) + 1
     }
+    const sz = m.size || 0
+    totalBytes += sz
+    if      (m.type === 'image') bytesImages += sz
+    else if (m.type === 'gif')   bytesGifs   += sz
+    else if (m.type === 'video') bytesVideos += sz
   }
   return {
     earliestMs: earliestMs === Infinity ? 0 : earliestMs,
@@ -440,6 +449,10 @@ function computeStatsFromResponse(allMedia) {
     latestAddedMs,
     fileCount: allMedia.length,
     yearCounts,
+    totalBytes,
+    bytesImages,
+    bytesGifs,
+    bytesVideos,
   }
 }
 
@@ -913,6 +926,10 @@ app.get('/api/users', async (_req, res) => {
           latestAddedMs: s.latestAddedMs || 0,
           fileCount: s.fileCount || 0,
           yearCounts: s.yearCounts || {},
+          totalBytes:   s.totalBytes   || 0,
+          bytesImages:  s.bytesImages  || 0,
+          bytesGifs:    s.bytesGifs    || 0,
+          bytesVideos:  s.bytesVideos  || 0,
         }
       })
     )
