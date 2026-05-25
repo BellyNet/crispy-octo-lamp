@@ -18,6 +18,7 @@
     "format": "prettier . --write",
     "start": "node scrapyard/run-scrape.js",
     "scrape": "node scrapyard/run-scrape.js",
+    "test:unified-scraper": "node scrapyard/smokeUnifiedScraper.js",
     "hoghaul": "node scrapyard/run-scrape.js",
     "hoghaul:all-coomerfans": "node scrapyard/run-source-batch.js --source=coomer --host-contains=coomerfans.com",
     "hoghaul:all-coomer": "node scrapyard/run-source-batch.js --source=coomer",
