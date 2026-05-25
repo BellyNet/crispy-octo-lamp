@@ -192,6 +192,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
   const posts = []
   let page = options.startPage || 0
   const postLimit = pLimit(options.postConcurrency || 1)
+  const seenPostIds = new Set()
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -203,10 +204,14 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     const postLinks = parseCoomerFansPostLinks(source, html)
     if (postLinks.length === 0) break
 
+    const newPostLinks = postLinks.filter((post) => !seenPostIds.has(post.id))
+    if (newPostLinks.length === 0) break
+    for (const post of newPostLinks) seenPostIds.add(post.id)
+
     const selectedPostLinks =
       Number.isFinite(options.maxPosts) && options.maxPosts > 0
-        ? postLinks.slice(0, Math.max(options.maxPosts - posts.length, 0))
-        : postLinks
+        ? newPostLinks.slice(0, Math.max(options.maxPosts - posts.length, 0))
+        : newPostLinks
 
     const pagePosts = await Promise.all(
       selectedPostLinks.map((post) =>
@@ -238,7 +243,6 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       break
     }
 
-    if (!html.includes(`?page=${pageNumber + 1}`)) break
     page += 1
   }
 

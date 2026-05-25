@@ -142,8 +142,8 @@ const hoghaulSavePipeline = createMediaSavePipeline({
     queuedVideoCount += 1
     runLifecycle.incrementRunCounter(currentRunLog, 'queuedVideos')
   },
-  onOutcome: ({ kind, label }) => {
-    noteMediaOutcome(kind, label)
+  onOutcome: ({ kind }) => {
+    noteMediaOutcome(kind)
   },
 })
 const duplicateChecker = createDuplicateChecker({
@@ -353,6 +353,13 @@ function installProcessTerminationHandlers() {
     finalizeAbortedRun(
       'interrupted',
       'Process exited before Hoghaul completed normally'
+    )
+  })
+
+  process.on('exit', (code) => {
+    finalizeAbortedRun(
+      code === 0 ? 'interrupted' : 'failed',
+      `Process exited before Hoghaul completed normally (code ${code})`
     )
   })
 
@@ -731,11 +738,10 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
       'skip_seen_media',
       folders
     )
-    console.log(`Seen already: ${entry.filename}`)
     return
   }
 
-  const result = await hoghaulSavePipeline.saveImageLikeMedia({
+  await hoghaulSavePipeline.saveImageLikeMedia({
     modelName,
     folders,
     entry,
@@ -759,33 +765,6 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     pendingVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
     saveVisualHashCacheOnSave: true,
   })
-
-  if (result.reason?.startsWith('skip_existing_')) {
-    logScrollingMessage(`Exists already: ${entry.filename}`)
-    return
-  }
-  if (result.reason === 'duplicate_bitwise') {
-    logScrollingMessage(`Bitwise dupe: ${entry.filename}`)
-    return
-  }
-  if (result.reason === 'duplicate_visual') {
-    logScrollingMessage(`Visual dupe: ${entry.filename}`)
-    return
-  }
-  if (result.reason === 'duplicate_visual_fuzzy') {
-    logScrollingMessage(
-      `Fuzzy visual dupe (${result.match.distance}): ${entry.filename}`
-    )
-    return
-  }
-  if (result.reason === 'duplicate_visual_pending') {
-    logScrollingMessage(
-      `Pending visual dupe (${result.match.distance}): ${entry.filename}`
-    )
-    return
-  }
-
-  logScrollingMessage(`Saved ${kind}: ${entry.filename}`)
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
@@ -795,7 +774,7 @@ async function saveVideoMedia(modelName, folders, entry) {
     entry,
     kind: 'video',
   })
-  const { finalPath, tmpPath, relativePath } = destination
+  const { tmpPath, relativePath } = destination
 
   hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
@@ -807,13 +786,11 @@ async function saveVideoMedia(modelName, folders, entry) {
       'skip_seen_media',
       folders
     )
-    logScrollingMessage(`Seen already: ${entry.filename}`)
     return
   }
 
   if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
     recordDuplicate(entry, relativePath, 'skip_lazy_existing', folders)
-    logScrollingMessage(`Exists already: ${entry.filename}`)
     return
   }
 
@@ -838,7 +815,6 @@ async function saveVideoMedia(modelName, folders, entry) {
         folders
       )
       removeFileIfExists(tmpPath)
-      logScrollingMessage(`Bitwise dupe: ${entry.filename}`)
       return
     }
 
@@ -862,10 +838,8 @@ async function saveVideoMedia(modelName, folders, entry) {
     })
 
     if (result.reason === 'duplicate_visual') {
-      logScrollingMessage(`Visual dupe: ${entry.filename}`)
       return
     }
-    logScrollingMessage(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)
     errorCount += 1
@@ -1131,10 +1105,7 @@ async function run(argvInput = process.argv.slice(2)) {
         ...getEntrySourceDetails(normalizedEntry),
         extension: classification.ext,
       })
-      noteMediaOutcome(
-        'skipped',
-        `skip_unknown_media: ${normalizedEntry.filename}`
-      )
+      noteMediaOutcome('skipped')
       continue
     }
     if (classification.kind === 'video') {
