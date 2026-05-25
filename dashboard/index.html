@@ -1202,13 +1202,13 @@
         <div id="home-view">
           <div id="home-sort-bar">
             <select id="home-sort-select" aria-label="Sort models">
+              <option value="random" selected>Random ↻</option>
               <option value="az">A → Z</option>
               <option value="oldest-media">Oldest media first</option>
               <option value="newest-media">Newest media first</option>
               <option value="recently-added">Recently added</option>
-              <option value="random">Random ↻</option>
             </select>
-            <button id="home-shuffle-btn" title="Reshuffle" aria-label="Reshuffle" style="display:none">
+            <button id="home-shuffle-btn" title="Reshuffle" aria-label="Reshuffle">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="16 3 21 3 21 8"/>
                 <line x1="4" y1="20" x2="21" y2="3"/>
@@ -1267,7 +1267,7 @@
       const homeGridEl = document.getElementById('home-grid')
       const homeSizeBtns = document.querySelectorAll('.home-size-btn')
       const homeSortSelect = document.getElementById('home-sort-select')
-      let homeSort = 'az'
+      let homeSort = 'random'
 
       // ─── HELPERS ──────────────────────────────────────────────────────────
       function formatDate(iso) {
@@ -1491,10 +1491,16 @@
         const seen = readLastSeen()
         if (homeSort === 'random' && !_homeRandomOrder) reshuffleHome()
 
-        // Sort: featured always first, then by selected sort
+        // Sort order: featured → NEW models → everything else.
+        // Within each tier we honor the selected sort. NEW models are sorted
+        // by latestAddedMs desc so the freshest content is genuinely first.
         const sorted = [...usersData].sort((a, b) => {
           if (a.featured && !b.featured) return -1
           if (b.featured && !a.featured) return 1
+          const aNew = isNewModel(a, seen) ? 1 : 0
+          const bNew = isNewModel(b, seen) ? 1 : 0
+          if (aNew !== bNew) return bNew - aNew                     // new first
+          if (aNew && bNew) return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
           if (homeSort === 'oldest-media') return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
           if (homeSort === 'newest-media') return (b.latestMs || 0) - (a.latestMs || 0)
           if (homeSort === 'recently-added') return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
