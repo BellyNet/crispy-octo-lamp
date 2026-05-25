@@ -887,8 +887,7 @@ async function saveVideoMedia(modelName, folders, entry) {
         error: err,
       })
     )
-    noteMediaOutcome('failed', `video_error: ${entry.filename}`)
-    logScrollingMessage(`Failed video: ${entry.filename} - ${err.message}`)
+    noteMediaOutcome('failed')
   }
 }
 
@@ -1179,8 +1178,7 @@ async function run(argvInput = process.argv.slice(2)) {
             ...getEntrySourceDetails(entry),
             error: err.message,
           })
-          noteMediaOutcome('failed', `media_error: ${entry.filename}`)
-          console.log(`Failed media: ${entry.filename} - ${err.message}`)
+          noteMediaOutcome('failed')
         }
       })
     )

@@ -966,7 +966,7 @@ function downloadBufferWithProgress(mediaUrl, onProgress) {
         res.on('data', (chunk) => {
           downloadedBytes += chunk.length
           chunks.push(chunk)
-          if (onProgress && totalBytes > 0) {
+          if (typeof onProgress === 'function' && totalBytes > 0) {
             const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1)
             const speed = (
               downloadedBytes /

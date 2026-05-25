@@ -43,41 +43,82 @@ async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
     skipNasSync,
   }
 
-  if (includeHoghaul) {
-    options.pages = (
-      await ask(rl, 'Pages limit (blank for all pages, accepts 1 or 1-3): ')
-    ).trim()
-    options.maxPosts = (
-      await ask(rl, 'Max posts per source (blank for all): ')
-    ).trim()
-    options.maxFiles = (
-      await ask(rl, 'Max files per source (blank for all): ')
-    ).trim()
-    options.postConcurrency = (
-      await ask(rl, 'Post concurrency (blank for default): ')
-    ).trim()
-    options.imageConcurrency = (
-      await ask(rl, 'Image concurrency (blank for default): ')
-    ).trim()
-    options.videoConcurrency = (
-      await ask(rl, 'Video concurrency (blank for default): ')
-    ).trim()
-  }
+  if (includeHoghaul) options.includeSessionHoghaul = true
 
   return options
 }
 
-function toRunnerBatchOptions(options) {
+const HOGHAUL_SESSION_OPTIONS = [
+  ['pages', 'Pages limit'],
+  ['maxPosts', 'Max posts per source'],
+  ['maxFiles', 'Max files per source'],
+  ['postConcurrency', 'Post concurrency'],
+  ['imageConcurrency', 'Image concurrency'],
+  ['videoConcurrency', 'Video concurrency'],
+]
+
+function createSessionOptions() {
+  return {
+    hoghaul: Object.fromEntries(
+      HOGHAUL_SESSION_OPTIONS.map(([name]) => [name, ''])
+    ),
+  }
+}
+
+function toHoghaulRunnerOptions(sessionOptions = {}) {
+  const hoghaul = sessionOptions.hoghaul || {}
+  return {
+    pages: hoghaul.pages,
+    'max-posts': hoghaul.maxPosts,
+    'max-files': hoghaul.maxFiles,
+    'post-concurrency': hoghaul.postConcurrency,
+    'image-concurrency': hoghaul.imageConcurrency,
+    'video-concurrency': hoghaul.videoConcurrency,
+  }
+}
+
+function pruneBlankOptions(options) {
+  return Object.fromEntries(
+    Object.entries(options || {}).filter(([, value]) => {
+      return value !== undefined && value !== null && value !== ''
+    })
+  )
+}
+
+function formatHoghaulSessionOptions(sessionOptions = {}) {
+  const hoghaul = sessionOptions.hoghaul || {}
+  const parts = HOGHAUL_SESSION_OPTIONS.map(([name, label]) => {
+    const value = String(hoghaul[name] || '').trim()
+    return `${label}: ${value || 'default'}`
+  })
+  return parts.join(' | ')
+}
+
+async function updateSessionOptionsFlow(rl, sessionOptions) {
+  console.log('')
+  console.log('Current Hoghaul session options:')
+  console.log(formatHoghaulSessionOptions(sessionOptions))
+  console.log('')
+  console.log(
+    'Leave a field blank to use the default for the rest of this menu session.'
+  )
+
+  for (const [name, label] of HOGHAUL_SESSION_OPTIONS) {
+    sessionOptions.hoghaul[name] = (
+      await ask(rl, `${label} [${sessionOptions.hoghaul[name] || 'default'}]: `)
+    ).trim()
+  }
+}
+
+function toRunnerBatchOptions(options, sessionOptions = {}) {
+  const sessionHoghaulOptions = options.includeSessionHoghaul
+    ? toHoghaulRunnerOptions(sessionOptions)
+    : {}
   return {
     'only-models': options.onlyModels,
     models: options.onlyModels,
     'start-from': options.startFrom,
-    pages: options.pages,
-    'max-posts': options.maxPosts,
-    'max-files': options.maxFiles,
-    'post-concurrency': options.postConcurrency,
-    'image-concurrency': options.imageConcurrency,
-    'video-concurrency': options.videoConcurrency,
+    ...sessionHoghaulOptions,
     'skip-nas-sync': options.skipNasSync,
   }
 }
@@ -132,30 +173,7 @@ function selectModelSources(targets, answer) {
   return targets.filter((target) => filters.has(target.label))
 }
 
-async function askHoghaulOptions(rl) {
-  return {
-    pages: (
-      await ask(rl, 'Pages limit for Hoghaul sources (blank for all): ')
-    ).trim(),
-    'max-posts': (
-      await ask(rl, 'Max posts per Hoghaul source (blank for all): ')
-    ).trim(),
-    'max-files': (
-      await ask(rl, 'Max files per Hoghaul source (blank for all): ')
-    ).trim(),
-    'post-concurrency': (
-      await ask(rl, 'Post concurrency (blank for default): ')
-    ).trim(),
-    'image-concurrency': (
-      await ask(rl, 'Image concurrency (blank for default): ')
-    ).trim(),
-    'video-concurrency': (
-      await ask(rl, 'Video concurrency (blank for default): ')
-    ).trim(),
-  }
-}
-
-async function runModelAliasFlow(rl) {
+async function runModelAliasFlow(rl, sessionOptions) {
   const rawModel = (await ask(rl, 'Model or alias: ')).trim()
   const registry = loadModelRegistry(registryPath)
   const canonicalModel = findModelByAlias(registry, rawModel)
@@ -199,10 +217,9 @@ async function runModelAliasFlow(rl) {
     'dry-run': dryRunAnswer === 'y' || dryRunAnswer === 'yes',
     'skip-nas-sync': skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
   }
-  const includesHoghaul = selectedTargets.some(
-    (target) => parseSourceUrl(target.url)?.scraper === 'hoghaul'
+  const hoghaulOptions = pruneBlankOptions(
+    toHoghaulRunnerOptions(sessionOptions)
   )
-  const hoghaulOptions = includesHoghaul ? await askHoghaulOptions(rl) : {}
 
   for (let index = 0; index < selectedTargets.length; index += 1) {
     const target = selectedTargets[index]
@@ -224,7 +241,7 @@ async function runModelAliasFlow(rl) {
   }
 }
 
-async function runSingleUrlFlow(rl) {
+async function runSingleUrlFlow(rl, sessionOptions) {
   const rawUrl = (await ask(rl, 'Paste source URL: ')).trim()
   const parsed = parseSourceUrl(rawUrl)
   if (!parsed) {
@@ -266,18 +283,10 @@ async function runSingleUrlFlow(rl) {
   }
 
   if (parsed.scraper === 'hoghaul') {
-    runOptions.pages = (
-      await ask(rl, 'Pages limit for this Hoghaul run (blank for all): ')
-    ).trim()
-    runOptions['video-concurrency'] = (
-      await ask(rl, 'Video concurrency (blank for default): ')
-    ).trim()
-    runOptions['image-concurrency'] = (
-      await ask(rl, 'Image concurrency (blank for default): ')
-    ).trim()
-    runOptions['post-concurrency'] = (
-      await ask(rl, 'Post concurrency (blank for default): ')
-    ).trim()
+    Object.assign(
+      runOptions,
+      pruneBlankOptions(toHoghaulRunnerOptions(sessionOptions))
+    )
   }
 
   const status = await runScrape(parsed.url, runOptions)
@@ -344,6 +353,7 @@ async function main() {
     input: process.stdin,
     output: process.stdout,
   })
+  const sessionOptions = createSessionOptions()
 
   try {
     while (true) {
@@ -353,15 +363,19 @@ async function main() {
       console.log('2. Update all StufferDB models')
       console.log('3. Update all Coomer models')
       console.log('4. Update all Kemono models')
-      console.log('5. Run a model/alias from registry')
-      console.log('6. Paste one source URL and run it')
-      console.log('7. Repair models')
-      console.log('8. Sync dataset/NAS')
-      console.log('9. Quit')
+      console.log('5. Set session Hoghaul options')
+      console.log('6. Run a model/alias from registry')
+      console.log('7. Paste one source URL and run it')
+      console.log('8. Repair models')
+      console.log('9. Sync dataset/NAS')
+      console.log('10. Quit')
+      console.log(
+        `Hoghaul session: ${formatHoghaulSessionOptions(sessionOptions)}`
+      )
 
       const choice = (await ask(rl, '\nPick an option: ')).trim()
 
-      if (choice === '9' || /^q(?:uit)?$/i.test(choice)) {
+      if (choice === '10' || /^q(?:uit)?$/i.test(choice)) {
         console.log('Done.')
         break
       }
@@ -371,7 +385,7 @@ async function main() {
           includeStartFrom: true,
           includeHoghaul: true,
         })
-        await runAllSourceUpdates(toRunnerBatchOptions(options))
+        await runAllSourceUpdates(toRunnerBatchOptions(options, sessionOptions))
         continue
       }
 
@@ -380,7 +394,7 @@ async function main() {
           includeStartFrom: true,
           includeHoghaul: false,
         })
-        await runStufferDbBatch(toRunnerBatchOptions(options))
+        await runStufferDbBatch(toRunnerBatchOptions(options, sessionOptions))
         continue
       }
 
@@ -389,7 +403,10 @@ async function main() {
           includeStartFrom: false,
           includeHoghaul: true,
         })
-        await runSourceBatch('coomer', toRunnerBatchOptions(options))
+        await runSourceBatch(
+          'coomer',
+          toRunnerBatchOptions(options, sessionOptions)
+        )
         continue
       }
 
@@ -398,31 +415,39 @@ async function main() {
           includeStartFrom: false,
           includeHoghaul: true,
         })
-        await runSourceBatch('kemono', toRunnerBatchOptions(options))
+        await runSourceBatch(
+          'kemono',
+          toRunnerBatchOptions(options, sessionOptions)
+        )
         continue
       }
 
       if (choice === '5') {
-        await runModelAliasFlow(rl)
+        await updateSessionOptionsFlow(rl, sessionOptions)
         continue
       }
 
       if (choice === '6') {
-        await runSingleUrlFlow(rl)
+        await runModelAliasFlow(rl, sessionOptions)
         continue
       }
 
       if (choice === '7') {
-        await runRepairFlow(rl)
+        await runSingleUrlFlow(rl, sessionOptions)
         continue
       }
 
       if (choice === '8') {
+        await runRepairFlow(rl)
+        continue
+      }
+
+      if (choice === '9') {
         await runSyncFlow(rl)
         continue
       }
 
-      console.log('Please choose 1-9.')
+      console.log('Please choose 1-10.')
     }
   } finally {
     rl.close()

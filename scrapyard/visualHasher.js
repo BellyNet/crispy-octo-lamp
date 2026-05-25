@@ -41,32 +41,29 @@ async function getVisualHashFromBuffer(buffer) {
   try {
     await sharp(buffer).resize(512).jpeg({ quality: 95 }).toFile(tmpPath)
     const visualHash = await imghash.hash(tmpPath, 16, 'hex')
-    fs.unlinkSync(tmpPath)
+    unlinkIfExists(tmpPath)
     return visualHash
   } catch (err) {
     try {
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      unlinkIfExists(tmpPath)
       fs.writeFileSync(ffmpegInputPath, buffer)
       await normalizeImageWithFfmpeg(ffmpegInputPath, ffmpegOutputPath)
       const visualHash = await imghash.hash(ffmpegOutputPath, 16, 'hex')
-      fs.unlinkSync(ffmpegInputPath)
-      fs.unlinkSync(ffmpegOutputPath)
+      unlinkIfExists(ffmpegInputPath)
+      unlinkIfExists(ffmpegOutputPath)
       return visualHash
-    } catch (fallbackErr) {
-      console.warn(
-        `Failed visual hash: ${compactErrorMessage(err)}; ffmpeg fallback failed: ${compactErrorMessage(fallbackErr)}`
-      )
-      if (fs.existsSync(ffmpegInputPath)) fs.unlinkSync(ffmpegInputPath)
-      if (fs.existsSync(ffmpegOutputPath)) fs.unlinkSync(ffmpegOutputPath)
+    } catch {
+      unlinkIfExists(ffmpegInputPath)
+      unlinkIfExists(ffmpegOutputPath)
       return null
     }
   }
 }
 
-function compactErrorMessage(error) {
-  return String(error?.message || error || '')
-    .replace(/\s+/g, ' ')
-    .trim()
+function unlinkIfExists(filePath) {
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+  } catch {}
 }
 
 async function getVideoFrameHashesFromPath(videoPath, options = {}) {
