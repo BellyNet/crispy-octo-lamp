@@ -167,6 +167,16 @@ function createMediaSavePipeline(options = {}) {
         filename: entry.filename,
         uploadedDate: entry.uploadedDate,
         mediaPageUrl: entry.mediaPageUrl,
+        mediaUrls: entry.mediaUrls,
+        mediaPageUrls: entry.mediaPageUrls,
+        sourceSite: entry.sourceSite,
+        sourceService: entry.sourceService,
+        sourceUserId: entry.sourceUserId,
+        sourceUsername: entry.sourceUsername,
+        sourceSubreddit: entry.sourceSubreddit,
+        postId: entry.postId,
+        title: entry.title,
+        originalName: entry.originalName,
         pageMeta: entry.pageMeta,
         ...queueItem,
       })
@@ -417,6 +427,10 @@ function createMediaSavePipeline(options = {}) {
         hash,
         visualHash,
         kind,
+        extra: {
+          recordedDate,
+          fileDate: fileDate ? fileDate.toISOString() : null,
+        },
       })
       return {
         status: 'saved',
@@ -540,6 +554,10 @@ function createMediaSavePipeline(options = {}) {
       hash: finalHash,
       visualHash,
       kind: 'video',
+      extra: {
+        recordedDate,
+        fileDate: fileDate ? fileDate.toISOString() : null,
+      },
     })
 
     return {

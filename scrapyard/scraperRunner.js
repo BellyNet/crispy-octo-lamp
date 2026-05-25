@@ -24,12 +24,13 @@ const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
+const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb']
 
 function printHelp() {
   console.log(`Usage:
   npm run scrape -- <source-url> [options]
   npm run scrape -- scrape <source-url> [options]
-  npm run scrape -- update <all|stufferdb|coomer|kemono> [options]
+  npm run scrape -- update <all|stufferdb|reddit|coomer|coomerfans|kemono> [options]
   npm run scrape -- repair [options]
   npm run scrape -- sync <--push|--pull|--model <name>> [options]
 
@@ -515,6 +516,87 @@ function collectSourceTargets(registry, sourceKey, modelFilter, hostContains) {
   }
 
   return targets
+}
+
+function getSourceLabel(sourceKey, url) {
+  const parsed = parseSourceUrl(url)
+  if (!parsed) return sourceKey
+  if (parsed.sourceType === 'coomerfans') return 'coomerfans'
+  return parsed.sourceType || sourceKey
+}
+
+function normalizeRegistrySourceUrls(sourceList) {
+  return (Array.isArray(sourceList) ? sourceList : [])
+    .map((source) => String(source?.url || '').trim())
+    .filter(Boolean)
+}
+
+function getOrderedSourceKeys(sources = {}) {
+  const sourceKeys = Object.keys(sources || {})
+  const known = ALL_SOURCE_ORDER.filter((sourceKey) =>
+    sourceKeys.includes(sourceKey)
+  )
+  const extra = sourceKeys
+    .filter((sourceKey) => !ALL_SOURCE_ORDER.includes(sourceKey))
+    .sort((left, right) => left.localeCompare(right))
+  return [...known, ...extra]
+}
+
+function buildAllSourceQueue(registry) {
+  return Object.entries(registry || {})
+    .map(([model, entry]) => {
+      const sources =
+        entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+      const targets = []
+
+      for (const sourceKey of getOrderedSourceKeys(sources)) {
+        for (const url of normalizeRegistrySourceUrls(sources[sourceKey])) {
+          targets.push({
+            sourceKey,
+            url,
+            label: getSourceLabel(sourceKey, url),
+          })
+        }
+      }
+
+      return {
+        model,
+        sources: targets,
+      }
+    })
+    .filter((item) => item.sources.length > 0)
+    .sort((left, right) => left.model.localeCompare(right.model))
+}
+
+function selectAllSourceQueue(queue, argv) {
+  let next = queue
+  const singleModel = getOption(argv, 'model')
+    ? String(getOption(argv, 'model')).trim()
+    : null
+  const explicitModels = String(
+    getOption(argv, 'models') || getOption(argv, 'only-models') || ''
+  )
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const startFrom = getOption(argv, 'start-from')
+    ? String(getOption(argv, 'start-from')).trim()
+    : null
+  const limit = Math.max(Number.parseInt(getOption(argv, 'limit'), 10) || 0, 0)
+
+  if (singleModel) next = next.filter((item) => item.model === singleModel)
+
+  if (explicitModels.length) {
+    const wanted = new Set(explicitModels)
+    next = next.filter((item) => wanted.has(item.model))
+  }
+
+  if (startFrom) {
+    next = next.filter((item) => item.model.localeCompare(startFrom) >= 0)
+  }
+
+  if (limit > 0) next = next.slice(0, limit)
+  return next
 }
 
 function buildSourceBatchOptions(argv) {
@@ -1041,24 +1123,176 @@ async function runStufferDbBatch(argvInput = {}) {
 function printAllSourcesHelp() {
   console.log(`Usage: node scrapyard/run-all-source-updates.js [options]
 
-Runs all StufferDB, Coomer, and Kemono model sources in sequence.
+Runs every selected model source before moving to the next model.
+Registered Reddit, Kemono, Coomer/CoomerFans, and StufferDB sources are included.
 
 Options:
+  --model <name>              Update one model only.
   --only-models <a,b,c>       Limit to canonical model names.
-  --start-from <name>         Start StufferDB from this canonical model name.
-  --limit <n>                 Limit StufferDB queue size.
-  --pages <n|a-b>             Limit Coomer/Kemono pages.
-  --max-posts <n>             Limit Coomer/Kemono posts per source.
-  --max-files <n>             Limit Coomer/Kemono media files per source.
+  --start-from <name>         Start from this canonical model name.
+  --limit <n>                 Limit selected model count.
+  --pages <n|a-b>             Limit Hoghaul pages.
+  --max-posts <n>             Limit Hoghaul posts per source.
+  --max-files <n>             Limit Hoghaul media files per source.
   --post-concurrency <n>      Post fetch concurrency.
   --image-concurrency <n>     Image/gif concurrency.
   --video-concurrency <n>     Video concurrency.
-  --delay-ms <n>              Delay between Coomer/Kemono models.
-  --dry-run                   Dry run Coomer/Kemono.
+  --delay-ms <n>              Delay between source runs.
+  --dry-run                   Dry run Hoghaul sources.
   --skip-nas-sync             Skip NAS sync.
-  --stop-on-error             Stop when StufferDB updater hits a failure.
+  --stop-on-error             Stop when a source run fails.
   --help                      Show this help.
 `)
+}
+
+function buildAllSourceRunOptions(argv, modelName, parsedSource) {
+  const options = {
+    model: modelName,
+  }
+
+  const keepHistory = !(
+    getOption(argv, 'keep-history') === false ||
+    getOption(argv, 'keep-history') === 'false'
+  )
+  if (keepHistory) options['keep-history'] = true
+  if (isTruthy(getOption(argv, 'skip-nas-sync'))) {
+    options['skip-nas-sync'] = true
+  }
+
+  if (parsedSource?.scraper !== 'hoghaul') return options
+
+  return {
+    ...options,
+    ...buildSourceBatchOptions(argv),
+  }
+}
+
+function summarizeSourceRunSummary(summary) {
+  const stats = getStatsFromRunSummary(summary)
+  return {
+    status: summary?.status || null,
+    saved: Number(stats?.saved || summary?.successCount || 0),
+    duplicates: Number(stats?.duplicates || summary?.duplicateCount || 0),
+    errors: Number(stats?.failures || summary?.errorCount || 0),
+    processed: Number(stats?.processed || summary?.mediaCount || 0),
+    expectedMedia: Number(stats?.expectedMedia || summary?.mediaCount || 0),
+    savedBytes: Number(stats?.savedBytes || 0),
+    finishedAt: summary?.finishedAt || summary?.updatedAt || null,
+    logPath: summary?.logPath || null,
+  }
+}
+
+async function runAllSourceModelUpdate(item, context = {}) {
+  const { argv, stopOnError } = context
+  const result = {
+    model: item.model,
+    startedAt: new Date().toISOString(),
+    sources: item.sources,
+    runs: [],
+    finishedAt: null,
+  }
+
+  for (let index = 0; index < item.sources.length; index += 1) {
+    const source = item.sources[index]
+    const parsedSource = parseSourceUrl(source.url)
+    const sourceLabel = source.label || source.sourceKey
+
+    console.log('')
+    console.log(
+      `  [${index + 1}/${item.sources.length}] ${item.model} -> ${sourceLabel}: ${source.url}`
+    )
+
+    if (!parsedSource) {
+      const run = {
+        ok: false,
+        code: 1,
+        sourceKey: source.sourceKey,
+        label: sourceLabel,
+        url: source.url,
+        error: 'Unrecognized source URL',
+      }
+      result.runs.push(run)
+      if (stopOnError) break
+      continue
+    }
+
+    const code = await runScrape(
+      source.url,
+      buildAllSourceRunOptions(argv, item.model, parsedSource)
+    )
+    const summary = readModelRunSummary(item.model, parsedSource.scraper)
+    const run = {
+      ok: code === 0,
+      code,
+      scraper: parsedSource.scraper,
+      sourceType: parsedSource.sourceType,
+      sourceKey: source.sourceKey,
+      label: sourceLabel,
+      url: source.url,
+      summary: summarizeSourceRunSummary(summary),
+    }
+    result.runs.push(run)
+
+    if (code !== 0 && stopOnError) break
+  }
+
+  result.finishedAt = new Date().toISOString()
+  return result
+}
+
+function calculateAllSourceTotals(results) {
+  return results.reduce(
+    (totals, result) => {
+      for (const run of result.runs || []) {
+        totals.runs += 1
+        if (!run.ok) totals.failures += 1
+        totals.saved += Number(run.summary?.saved || 0)
+        totals.duplicates += Number(run.summary?.duplicates || 0)
+        totals.errors += Number(run.summary?.errors || 0)
+        totals.processed += Number(run.summary?.processed || 0)
+        totals.expectedMedia += Number(run.summary?.expectedMedia || 0)
+        totals.savedBytes += Number(run.summary?.savedBytes || 0)
+      }
+      return totals
+    },
+    {
+      runs: 0,
+      failures: 0,
+      saved: 0,
+      duplicates: 0,
+      errors: 0,
+      processed: 0,
+      expectedMedia: 0,
+      savedBytes: 0,
+    }
+  )
+}
+
+function writeAllSourceReport(report, latestReportPath, latestTextPath) {
+  report.totals = calculateAllSourceTotals(report.results)
+  fs.writeFileSync(latestReportPath, JSON.stringify(report, null, 2))
+
+  const lines = [
+    `Generated: ${report.generatedAt}`,
+    `Registry: ${report.registryPath}`,
+    `Selected models: ${report.selectedModels}`,
+    `Totals: models=${report.results.length} runs=${report.totals.runs} saved=${report.totals.saved} dupes=${report.totals.duplicates} errors=${report.totals.errors} failures=${report.totals.failures} bytes=${runLifecycle.formatBytes(report.totals.savedBytes)}`,
+    '',
+  ]
+
+  for (const item of report.results) {
+    const failedRuns = item.runs.filter((run) => !run.ok).length
+    lines.push(
+      `${item.model} :: sources=${item.runs.length}/${item.sources.length} :: ${failedRuns ? 'fail' : 'ok'}`
+    )
+    for (const run of item.runs) {
+      lines.push(
+        `  ${run.label}: saved=${run.summary.saved} dupes=${run.summary.duplicates} errors=${run.summary.errors} status=${run.summary.status || 'unknown'}`
+      )
+    }
+  }
+
+  fs.writeFileSync(latestTextPath, lines.join('\n') + '\n')
 }
 
 async function runAllSourceUpdates(argvInput = {}) {
@@ -1068,34 +1302,70 @@ async function runAllSourceUpdates(argvInput = {}) {
     return 0
   }
 
-  console.log('Running StufferDB batch...')
-  const stufferStatus = await runStufferDbBatch({
-    models: getOption(argv, 'only-models'),
-    'start-from': getOption(argv, 'start-from'),
-    limit: getOption(argv, 'limit'),
-    'stop-on-error': isTruthy(getOption(argv, 'stop-on-error')),
-  })
-  if (stufferStatus !== 0) return stufferStatus
+  const allRegistryPath = path.resolve(
+    String(getOption(argv, 'registry') || registryPath)
+  )
+  const logDir = path.resolve(
+    String(
+      getOption(argv, 'log-dir') ||
+        path.join(rootDir, 'tmp', 'update-all-sources')
+    )
+  )
+  const latestReportPath = path.join(logDir, 'update-all-sources-latest.json')
+  const latestTextPath = path.join(logDir, 'update-all-sources-latest.txt')
+  fs.mkdirSync(logDir, { recursive: true })
 
-  const sourceOptions = {
-    'only-models': getOption(argv, 'only-models'),
-    pages: getOption(argv, 'pages'),
-    'max-posts': getOption(argv, 'max-posts'),
-    'max-files': getOption(argv, 'max-files'),
-    'post-concurrency': getOption(argv, 'post-concurrency'),
-    'image-concurrency': getOption(argv, 'image-concurrency'),
-    'video-concurrency': getOption(argv, 'video-concurrency'),
-    'delay-ms': getOption(argv, 'delay-ms'),
-    'dry-run': isTruthy(getOption(argv, 'dry-run')),
-    'skip-nas-sync': isTruthy(getOption(argv, 'skip-nas-sync')),
+  const registry = loadRegistry(allRegistryPath)
+  const queue = buildAllSourceQueue(registry)
+  const selectedQueue = selectAllSourceQueue(queue, argv)
+  const stopOnError = isTruthy(getOption(argv, 'stop-on-error'))
+  const delayMs = Number.parseInt(getOption(argv, 'delay-ms'), 10) || 0
+  const report = {
+    generatedAt: new Date().toISOString(),
+    registryPath: allRegistryPath,
+    totalModelsInRegistry: queue.length,
+    selectedModels: selectedQueue.length,
+    stopOnError,
+    totals: {},
+    results: [],
   }
 
-  console.log('\nRunning Coomer batch...')
-  const coomerStatus = await runSourceBatch('coomer', sourceOptions)
-  if (coomerStatus !== 0) return coomerStatus
+  console.log(
+    `All-source update queue: ${selectedQueue.length} model(s) selected from ${queue.length} with saved sources`
+  )
 
-  console.log('\nRunning Kemono batch...')
-  return runSourceBatch('kemono', sourceOptions)
+  for (let index = 0; index < selectedQueue.length; index += 1) {
+    const item = selectedQueue[index]
+    console.log('')
+    console.log(
+      `[${index + 1}/${selectedQueue.length}] Updating ${item.model} from ${item.sources.length} source(s)`
+    )
+
+    const result = await runAllSourceModelUpdate(item, {
+      argv,
+      stopOnError,
+    })
+    report.results.push(result)
+    writeAllSourceReport(report, latestReportPath, latestTextPath)
+
+    const failed = result.runs.some((run) => !run.ok)
+    if (stopOnError && failed) {
+      console.log('Stopping on first error because --stop-on-error was set.')
+      break
+    }
+
+    if (delayMs > 0 && index < selectedQueue.length - 1) {
+      await sleep(delayMs)
+    }
+  }
+
+  writeAllSourceReport(report, latestReportPath, latestTextPath)
+  console.log('')
+  console.log(`Latest report: ${latestReportPath}`)
+
+  return report.results.some((result) => result.runs.some((run) => !run.ok))
+    ? 1
+    : 0
 }
 
 async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
@@ -1127,7 +1397,13 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
     if (target === 'stufferdb' || target === 'stuffer') {
       return runStufferDbBatch(updateArgs)
     }
-    if (target === 'coomer' || target === 'kemono') {
+    if (target === 'coomerfans') {
+      return runSourceBatch('coomer', {
+        ...parseRunnerArgs(updateArgs),
+        'host-contains': 'coomerfans.com',
+      })
+    }
+    if (target === 'coomer' || target === 'kemono' || target === 'reddit') {
       return runSourceBatch(target, updateArgs)
     }
     printHelp()
@@ -1158,6 +1434,7 @@ module.exports = {
   appendBoolean,
   runNodeScript,
   inferCanonicalModel,
+  buildAllSourceQueue,
   buildScraperArgs,
   buildScraperOptions,
   applyScrapePositionalFallback,

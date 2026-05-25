@@ -97,7 +97,8 @@ function parseSourceUrl(inputUrl) {
     const parsed = new URL(String(inputUrl || '').trim())
     const host = parsed.hostname.toLowerCase()
 
-    if (host.includes('stufferdb')) {
+    if (host.includes('stufferdb') || host.includes('stufferai')) {
+      parsed.hostname = 'stufferdb.com'
       return {
         scraper: 'milkmaid',
         sourceType: 'stufferdb',

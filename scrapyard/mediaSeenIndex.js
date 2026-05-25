@@ -2,11 +2,22 @@
 
 const fs = require('fs')
 const path = require('path')
+const { isLikelyMediaUrl } = require('./mediaEntries')
 
 function defaultNormalizeSeenUrl(url) {
   return String(url || '')
     .trim()
     .replace(/&acs=[^&]+/gi, '')
+}
+
+function normalizeIsoDate(value) {
+  if (value instanceof Date && !isNaN(value.getTime()))
+    return value.toISOString()
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value)
+    if (!isNaN(parsed.getTime())) return parsed.toISOString()
+  }
+  return null
 }
 
 function createMediaSeenIndex(options = {}) {
@@ -37,6 +48,10 @@ function createMediaSeenIndex(options = {}) {
           .filter(Boolean)
       )
     )
+  }
+
+  function uniqueSeenMediaUrls(values) {
+    return uniqueSeenUrls(values).filter((url) => isLikelyMediaUrl(url))
   }
 
   function getMediaSeenIndexPath(modelLogDir) {
@@ -116,7 +131,7 @@ function createMediaSeenIndex(options = {}) {
     const mediaPageUrls = uniqueSeenUrls(
       Array.isArray(mediaPageUrl) ? mediaPageUrl : [mediaPageUrl]
     )
-    const mediaUrls = uniqueSeenUrls(
+    const mediaUrls = uniqueSeenMediaUrls(
       Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]
     )
 
@@ -149,7 +164,7 @@ function createMediaSeenIndex(options = {}) {
       details.mediaPageUrl,
       details.mediaPageUrls,
     ])
-    const mediaUrls = uniqueSeenUrls([details.mediaUrl, details.mediaUrls])
+    const mediaUrls = uniqueSeenMediaUrls([details.mediaUrl, details.mediaUrls])
     const status = String(details.status || 'saved').trim() || 'saved'
     const recordedAt = new Date().toISOString()
     const payload = {
@@ -159,6 +174,13 @@ function createMediaSeenIndex(options = {}) {
       mediaUrls,
       mediaPageUrl: mediaPageUrls[0] || null,
       mediaPageUrls,
+      sourceSite: details.sourceSite || null,
+      sourceService: details.sourceService || null,
+      sourceUserId: details.sourceUserId || null,
+      sourceUsername: details.sourceUsername || null,
+      sourceSubreddit: details.sourceSubreddit || null,
+      postId: details.postId || details.sourcePostId || null,
+      uploadedDate: normalizeIsoDate(details.uploadedDate),
       status,
       recordedAt,
     }
@@ -217,6 +239,7 @@ function createMediaSeenIndex(options = {}) {
 
   return {
     uniqueSeenUrls,
+    uniqueSeenMediaUrls,
     getMediaSeenIndexPath,
     loadMediaSeenIndex,
     saveMediaSeenIndex,

@@ -89,6 +89,7 @@ const {
   fetchStufferDBTotalCount: fetchStufferDbTotalCountFromAdapter,
   getBreadcrumbInfo: getStufferDbBreadcrumbInfo,
   getStufferDbCategoryId,
+  gotoStufferDbWithFallback,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
 } = require('../scrapyard/sourceAdapters/stufferdb')
@@ -199,11 +200,30 @@ async function gotoWithTimeoutRetry(
     onRetry = null,
   } = {}
 ) {
+  const useStufferDbFallback =
+    /https?:\/\/(?:www\.)?stuffer(?:db|ai)\.com/i.test(String(url || ''))
+
   try {
-    await page.goto(url, {
-      waitUntil,
-      timeout: timeoutMs,
-    })
+    if (useStufferDbFallback) {
+      await gotoStufferDbWithFallback(
+        page,
+        url,
+        {
+          waitUntil,
+          timeout: timeoutMs,
+        },
+        {
+          onFallbackAttempt: (details) => {
+            if (typeof onRetry === 'function') onRetry(details.error)
+          },
+        }
+      )
+    } else {
+      await page.goto(url, {
+        waitUntil,
+        timeout: timeoutMs,
+      })
+    }
     return
   } catch (error) {
     if (!/Navigation timeout/i.test(error.message || '')) {
@@ -215,10 +235,17 @@ async function gotoWithTimeoutRetry(
     }
 
     await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
-    await page.goto(url, {
-      waitUntil,
-      timeout: retryTimeoutMs ?? timeoutMs,
-    })
+    if (useStufferDbFallback) {
+      await gotoStufferDbWithFallback(page, url, {
+        waitUntil,
+        timeout: retryTimeoutMs ?? timeoutMs,
+      })
+    } else {
+      await page.goto(url, {
+        waitUntil,
+        timeout: retryTimeoutMs ?? timeoutMs,
+      })
+    }
   }
 }
 
@@ -1616,6 +1643,94 @@ async function scrapeGallery(browser, url, modelName, folders) {
   }
 }
 
+async function scrapeDirectPicture(browser, mediaPageUrl, modelName, folders) {
+  const page = await createScraperPage(browser, {
+    site: 'stufferdb',
+    interceptMedia: false,
+  })
+  const normalizedMediaPageUrl = normalizeStufferDbPictureUrl(mediaPageUrl)
+  const categoryId = getStufferDbCategoryId(normalizedMediaPageUrl)
+  const sourceUrl = categoryId
+    ? `https://stufferdb.com/index?/category/${categoryId}`
+    : normalizedMediaPageUrl
+
+  process.stdout.write('\n')
+  logProgress(completedTotal, global.totalSearchTotal || 1, {
+    bottomText: getScrapeStatsLine(),
+  })
+
+  try {
+    const seenMediaPageMatch = getSuccessfulSeenMediaMatch(
+      folders.logDir,
+      normalizedMediaPageUrl,
+      null
+    )
+    if (seenMediaPageMatch) {
+      duplicateCount++
+      runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+      appendRunEvent('skip_seen_media', {
+        modelName,
+        filename: null,
+        mediaUrl: seenMediaPageMatch.sourceUrl || null,
+        mediaPageUrl: normalizedMediaPageUrl,
+        matchType: seenMediaPageMatch.matchType,
+        savedPath: seenMediaPageMatch.relativePath,
+        preNavigation: true,
+      })
+      return logAndProgress(
+        `Seen page skip (${seenMediaPageMatch.matchType}): ${normalizedMediaPageUrl}`,
+        true
+      )
+    }
+
+    const mediaEntry = await fetchStufferDbMediaEntry(
+      page,
+      normalizedMediaPageUrl,
+      {
+        url: sourceUrl,
+        categoryId,
+        modelName,
+      },
+      {
+        timeoutMs: MEDIA_PAGE_TIMEOUT_MS,
+        retryTimeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+        sleep,
+        onRetry: (error) => {
+          appendRunEvent('media_page_retry', {
+            modelName,
+            mediaPageUrl: normalizedMediaPageUrl,
+            attempt: 2,
+            timeoutMs: MEDIA_PAGE_RETRY_TIMEOUT_MS,
+            reason: error.message,
+          })
+        },
+      }
+    )
+
+    if (!mediaEntry) {
+      errorCount++
+      runLifecycle.incrementRunCounter(currentRunLog, 'failures')
+      appendRunEvent('media_error', {
+        modelName,
+        mediaPageUrl: normalizedMediaPageUrl,
+        error: 'No media found on page',
+      })
+      return logAndProgress(`No media found: ${normalizedMediaPageUrl}`, true)
+    }
+
+    await saveStufferDbMediaEntry({
+      modelName,
+      folders,
+      entry: mediaEntry,
+    })
+  } finally {
+    readline.clearLine(process.stdout, 0)
+    readline.cursorTo(process.stdout, 0)
+    logAndProgress(getCompletionLine())
+    await page.close()
+  }
+}
+
 async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
   resetRunState()
   bannerMilkmaid()
@@ -1634,12 +1749,19 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       keepHistory,
     } = normalizeMilkmaidRunOptions(argvInput)
     let inputUrl = initialInputUrl
-    if (!inputUrl || !inputUrl.includes('/category/')) {
+    if (
+      !inputUrl ||
+      (!inputUrl.includes('/category/') && !/picture\?\//i.test(inputUrl))
+    ) {
       logAndProgress('⚠️  Usage: node milkmaid.js <gallery-url>')
       return 1
     }
 
     inputUrl = inputUrl.replace(/&acs=[^&]+/i, '')
+    const isDirectPictureRun = /picture\?\//i.test(inputUrl)
+    inputUrl = isDirectPictureRun
+      ? normalizeStufferDbPictureUrl(inputUrl)
+      : normalizeStufferDbCategoryUrl(inputUrl)
 
     const categoryId = getStufferDbCategoryId(inputUrl)
     if (!categoryId) {
@@ -1658,7 +1780,18 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       site: 'stufferdb',
       interceptMedia: true,
     })
-    await tempPage.goto(inputUrl, { waitUntil: 'domcontentloaded' })
+    await gotoWithTimeoutRetry(tempPage, inputUrl, {
+      waitUntil: 'domcontentloaded',
+      timeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
+      retryTimeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+      onRetry: (error) => {
+        appendRunEvent('initial_page_retry', {
+          inputUrl,
+          timeoutMs: CATEGORY_PAGE_RETRY_TIMEOUT_MS,
+          reason: error.message,
+        })
+      },
+    })
 
     loadVisualHashCache()
     loadBitwiseHashCache()
@@ -1696,53 +1829,67 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
     )
 
     const folders = createModelFolders(modelName)
-
-    const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
-    categoryRunList = await buildCategoryRunList(browser, plainUrl)
     startRunLog(modelName, inputUrl, folders)
     if (currentRunLog) {
       currentRunLog.keepHistory = keepHistory
     }
-    appendRunEvent('category_run_list_built', {
-      modelName,
-      categoryUrls: categoryRunList,
-      inferredRawName,
-      canonicalModelName,
-      modelOverride: modelOverride || null,
-    })
 
-    console.log(`🗂️ Category run list for ${modelName}:`)
-    for (const categoryUrl of categoryRunList) {
-      console.log(`   - ${categoryUrl}`)
-    }
+    if (isDirectPictureRun) {
+      combinedTotal = 1
+      resetProgressCounter(combinedTotal)
+      appendRunEvent('direct_picture_run_built', {
+        modelName,
+        mediaPageUrl: inputUrl,
+        inferredRawName,
+        canonicalModelName,
+        modelOverride: modelOverride || null,
+      })
+      console.log(`Direct picture scrape for ${modelName}: ${inputUrl}`)
+      await scrapeDirectPicture(browser, inputUrl, modelName, folders)
+    } else {
+      const plainUrl = `https://stufferdb.com/index?/category/${categoryId}`
+      categoryRunList = await buildCategoryRunList(browser, plainUrl)
+      appendRunEvent('category_run_list_built', {
+        modelName,
+        categoryUrls: categoryRunList,
+        inferredRawName,
+        canonicalModelName,
+        modelOverride: modelOverride || null,
+      })
 
-    console.log('🔍 Prefetching total counts...')
-    const categoryCounts = await Promise.all(
-      categoryRunList.map((categoryUrl) =>
-        fetchStufferDBTotalCount(browser, categoryUrl)
-      )
-    )
+      console.log(`🗂️ Category run list for ${modelName}:`)
+      for (const categoryUrl of categoryRunList) {
+        console.log(`   - ${categoryUrl}`)
+      }
 
-    combinedTotal =
-      categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
-
-    resetProgressCounter(combinedTotal)
-
-    console.log(`📊 Combined media total: ${combinedTotal}`)
-    console.log(`💦 Starting scrape for ${modelName}`)
-
-    for (let i = 0; i < categoryRunList.length; i++) {
-      const categoryUrl = categoryRunList[i]
-      const categoryTotal = categoryCounts[i] || 0
-
-      setProgressTotal(Math.max(global.totalSearchTotal || 1, combinedTotal))
-
-      logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
-      logScrollingMessage(
-        `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
+      console.log('🔍 Prefetching total counts...')
+      const categoryCounts = await Promise.all(
+        categoryRunList.map((categoryUrl) =>
+          fetchStufferDBTotalCount(browser, categoryUrl)
+        )
       )
 
-      await scrapeGallery(browser, categoryUrl, modelName, folders)
+      combinedTotal =
+        categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
+
+      resetProgressCounter(combinedTotal)
+
+      console.log(`📊 Combined media total: ${combinedTotal}`)
+      console.log(`💦 Starting scrape for ${modelName}`)
+
+      for (let i = 0; i < categoryRunList.length; i++) {
+        const categoryUrl = categoryRunList[i]
+        const categoryTotal = categoryCounts[i] || 0
+
+        setProgressTotal(Math.max(global.totalSearchTotal || 1, combinedTotal))
+
+        logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
+        logScrollingMessage(
+          `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
+        )
+
+        await scrapeGallery(browser, categoryUrl, modelName, folders)
+      }
     }
 
     logAndProgress('🧮 Scrape complete')
@@ -1814,6 +1961,16 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
             filename,
             uploadedDate,
             mediaPageUrl,
+            mediaUrls,
+            mediaPageUrls,
+            sourceSite,
+            sourceService,
+            sourceUserId,
+            sourceUsername,
+            sourceSubreddit,
+            postId,
+            title,
+            originalName,
             pageMeta,
           },
           i
@@ -2069,7 +2226,17 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
                 filename,
                 kind: 'video',
                 mediaUrl: url,
+                mediaUrls,
                 mediaPageUrl,
+                mediaPageUrls,
+                sourceSite,
+                sourceService,
+                sourceUserId,
+                sourceUsername,
+                sourceSubreddit,
+                postId,
+                title,
+                originalName,
                 uploadedDate,
                 pageMeta,
               }

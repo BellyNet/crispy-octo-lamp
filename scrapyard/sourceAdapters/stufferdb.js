@@ -3,8 +3,31 @@
 const path = require('path')
 const { normalizeMediaEntry } = require('../mediaEntries')
 
+function normalizeStufferDbHost(inputUrl) {
+  return String(inputUrl || '')
+    .trim()
+    .replace(/&amp;/gi, '&')
+    .replace(/https?:\/\/(?:www\.)?stufferai\.com/i, 'https://stufferdb.com')
+    .replace(/https?:\/\/(?:www\.)?stufferdb\.com/i, 'https://stufferdb.com')
+}
+
+function getStufferDbMirrorUrl(inputUrl) {
+  const normalized = normalizeStufferDbHost(inputUrl)
+  if (!normalized) return null
+  return normalized.replace(
+    /^https?:\/\/(?:www\.)?stufferdb\.com/i,
+    'https://stufferai.com'
+  )
+}
+
+function getStufferDbFallbackUrls(inputUrl) {
+  const primary = normalizeStufferDbHost(inputUrl)
+  const mirror = getStufferDbMirrorUrl(primary)
+  return [...new Set([primary, mirror].filter(Boolean))]
+}
+
 function normalizeStufferDbPictureUrl(inputUrl) {
-  const raw = String(inputUrl || '').trim()
+  const raw = normalizeStufferDbHost(inputUrl)
   if (!raw) return raw
   if (!/stufferdb\.com/i.test(raw) || !/picture\?\//i.test(raw)) {
     return raw
@@ -20,10 +43,41 @@ function normalizeStufferDbPictureUrl(inputUrl) {
     .replace(/[?&=]+$/, '')
 }
 
+async function gotoStufferDbWithFallback(
+  page,
+  inputUrl,
+  options = {},
+  deps = {}
+) {
+  const urls = getStufferDbFallbackUrls(inputUrl)
+  let lastError = null
+
+  for (let index = 0; index < urls.length; index += 1) {
+    const url = urls[index]
+    try {
+      const response = await page.goto(url, options)
+      if (index > 0)
+        deps.onFallback?.({ primaryUrl: urls[0], fallbackUrl: url })
+      return { url, response, usedFallback: index > 0 }
+    } catch (error) {
+      lastError = error
+      if (index === 0) {
+        deps.onFallbackAttempt?.({
+          primaryUrl: urls[0],
+          fallbackUrl: urls[1] || null,
+          error,
+        })
+      }
+    }
+  }
+
+  throw lastError || new Error(`Could not load ${inputUrl}`)
+}
+
 function normalizeStufferDbCategoryUrl(inputUrl) {
-  return String(inputUrl || '')
-    .trim()
+  return normalizeStufferDbHost(inputUrl)
     .replace(/&acs=[^&]+/gi, '')
+    .replace(/[?&=]+$/, '')
 }
 
 function getStufferDbCategoryId(inputUrl) {
@@ -118,10 +172,18 @@ async function fetchStufferDBTotalCount(browser, url, deps = {}) {
   })
 
   try {
-    await tempPage.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: deps.timeoutMs || 30000,
-    })
+    await gotoStufferDbWithFallback(
+      tempPage,
+      url,
+      {
+        waitUntil: 'domcontentloaded',
+        timeout: deps.timeoutMs || 30000,
+      },
+      {
+        onFallbackAttempt: deps.onFallbackAttempt,
+        onFallback: deps.onFallback,
+      }
+    )
 
     await tempPage.waitForSelector('span.badge.nb_items', {
       timeout: deps.selectorTimeoutMs || 10000,
@@ -294,10 +356,18 @@ async function fetchStufferDbMediaEntry(
   const retryTimeoutMs = deps.retryTimeoutMs || timeoutMs
 
   try {
-    await page.goto(normalizedMediaPageUrl, {
-      waitUntil,
-      timeout: timeoutMs,
-    })
+    await gotoStufferDbWithFallback(
+      page,
+      normalizedMediaPageUrl,
+      {
+        waitUntil,
+        timeout: timeoutMs,
+      },
+      {
+        onFallbackAttempt: deps.onFallbackAttempt,
+        onFallback: deps.onFallback,
+      }
+    )
   } catch (error) {
     if (!/Navigation timeout/i.test(error.message || '')) {
       throw error
@@ -307,10 +377,18 @@ async function fetchStufferDbMediaEntry(
     if (typeof deps.sleep === 'function') {
       await deps.sleep(deps.retryDelayMs || 750)
     }
-    await page.goto(normalizedMediaPageUrl, {
-      waitUntil,
-      timeout: retryTimeoutMs,
-    })
+    await gotoStufferDbWithFallback(
+      page,
+      normalizedMediaPageUrl,
+      {
+        waitUntil,
+        timeout: retryTimeoutMs,
+      },
+      {
+        onFallbackAttempt: deps.onFallbackAttempt,
+        onFallback: deps.onFallback,
+      }
+    )
   }
 
   const mediaDetails = await extractMediaPageDetails(page)
@@ -323,6 +401,9 @@ function buildStufferDbMediaEntry(
   mediaDetails = {}
 ) {
   const normalizedMediaPageUrl = normalizeStufferDbPictureUrl(mediaPageUrl)
+  const sourceUrl = source.url
+    ? normalizeStufferDbCategoryUrl(source.url)
+    : null
   if (!mediaDetails.mediaUrl || !mediaDetails.filename) return null
 
   return normalizeMediaEntry(
@@ -330,14 +411,14 @@ function buildStufferDbMediaEntry(
       sourceSite: 'stufferdb',
       sourceService: source.service || 'category',
       sourceUserId:
-        source.categoryId || getStufferDbCategoryId(source.url) || null,
+        source.categoryId || getStufferDbCategoryId(sourceUrl) || null,
       sourceUsername: source.modelName || source.username || null,
       postId: getStufferDbPictureId(normalizedMediaPageUrl),
       mediaPageUrl: normalizedMediaPageUrl,
       mediaPageUrls: [normalizedMediaPageUrl],
       mediaUrl: mediaDetails.mediaUrl,
       mediaUrls: [mediaDetails.mediaUrl],
-      sourceUrls: [source.url].filter(Boolean),
+      sourceUrls: [sourceUrl].filter(Boolean),
       filename: mediaDetails.filename,
       originalName: mediaDetails.filename,
       uploadedDate: mediaDetails.uploadedDateIso,
@@ -347,7 +428,7 @@ function buildStufferDbMediaEntry(
       sourceSite: 'stufferdb',
       sourceService: source.service || 'category',
       sourceUserId:
-        source.categoryId || getStufferDbCategoryId(source.url) || null,
+        source.categoryId || getStufferDbCategoryId(sourceUrl) || null,
       sourceUsername: source.modelName || source.username || null,
     }
   )
@@ -362,9 +443,13 @@ module.exports = {
   extractStufferDbComments,
   fetchStufferDbMediaEntry,
   fetchStufferDBTotalCount,
+  getStufferDbFallbackUrls,
   getBreadcrumbInfo,
+  getStufferDbMirrorUrl,
   getStufferDbCategoryId,
   getStufferDbPictureId,
+  gotoStufferDbWithFallback,
+  normalizeStufferDbHost,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
 }

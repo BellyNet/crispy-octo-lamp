@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
+const { isLikelyMediaUrl } = require('../scrapyard/mediaEntries')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -48,7 +49,6 @@ const SAVE_EVENT_TYPES = new Set([
   'skip_existing_gif',
   'skip_existing_video',
   'skip_lazy_existing',
-  'skip_seen_media',
 ])
 
 main().catch((err) => {
@@ -204,13 +204,24 @@ function consumeRunLog(logPath, modelName, index) {
     if (event.type === 'media_seen') {
       const candidate = {
         mediaPageUrl: normalizeUrl(event.mediaPageUrl),
-        mediaUrl: normalizeUrl(event.mediaUrl),
+        mediaUrl: normalizeMediaUrl(event.mediaUrl),
         filename: String(event.filename || '').trim() || null,
+        sourceSite: event.sourceSite || null,
+        sourceService: event.sourceService || null,
+        sourceUserId: event.sourceUserId || null,
+        sourceUsername: event.sourceUsername || null,
+        sourceSubreddit: event.sourceSubreddit || null,
+        postId: event.postId || null,
+        uploadedDate: normalizeIsoDate(event.uploadedDate),
       }
       if (candidate.filename) {
         seenByFilename.set(candidate.filename, candidate)
       }
-      const savedPathGuess = buildSavedPathGuess(modelName, event.filename, event.extension)
+      const savedPathGuess = buildSavedPathGuess(
+        modelName,
+        event.filename,
+        event.extension
+      )
       if (savedPathGuess) {
         seenBySavedPath.set(savedPathGuess, candidate)
       }
@@ -220,7 +231,9 @@ function consumeRunLog(logPath, modelName, index) {
     if (!SAVE_EVENT_TYPES.has(event.type)) continue
 
     const relativePath = normalizeRelativePath(event.savedPath)
-    const filename = String(event.filename || path.basename(relativePath || '')).trim()
+    const filename = String(
+      event.filename || path.basename(relativePath || '')
+    ).trim()
     const candidate =
       (relativePath && seenBySavedPath.get(relativePath)) ||
       (filename && seenByFilename.get(filename)) ||
@@ -236,6 +249,13 @@ function consumeRunLog(logPath, modelName, index) {
       mediaUrl: candidate.mediaUrl || null,
       mediaPageUrl: candidate.mediaPageUrl || null,
       savedAt: event.at || null,
+      sourceSite: candidate.sourceSite || null,
+      sourceService: candidate.sourceService || null,
+      sourceUserId: candidate.sourceUserId || null,
+      sourceUsername: candidate.sourceUsername || null,
+      sourceSubreddit: candidate.sourceSubreddit || null,
+      postId: candidate.postId || null,
+      uploadedDate: candidate.uploadedDate || null,
     }
 
     if (payload.mediaPageUrl) {
@@ -276,6 +296,21 @@ function normalizeUrl(value) {
   return String(value || '')
     .trim()
     .replace(/&slideshow=$/, '')
+}
+
+function normalizeMediaUrl(value) {
+  const normalized = normalizeUrl(value)
+  return isLikelyMediaUrl(normalized) ? normalized : null
+}
+
+function normalizeIsoDate(value) {
+  if (value instanceof Date && !isNaN(value.getTime()))
+    return value.toISOString()
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value)
+    if (!isNaN(parsed.getTime())) return parsed.toISOString()
+  }
+  return null
 }
 
 function countUniqueRecords(index) {

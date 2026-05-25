@@ -4,6 +4,7 @@ const assert = require('assert')
 
 const {
   applyScrapePositionalFallback,
+  buildAllSourceQueue,
   buildRepairArgs,
   buildScraperOptions,
   buildSyncArgs,
@@ -11,6 +12,17 @@ const {
   runScraperCli,
 } = require('./scraperRunner')
 const { parseSourceUrl } = require('./sourceRouter')
+const {
+  getMediaEntrySeenDetails,
+  getMediaEntryUrls,
+  isLikelyMediaUrl,
+  normalizeMediaEntry,
+} = require('./mediaEntries')
+const {
+  getStufferDbFallbackUrls,
+  normalizeStufferDbCategoryUrl,
+  normalizeStufferDbPictureUrl,
+} = require('./sourceAdapters/stufferdb')
 
 async function withConsoleSilenced(callback) {
   const originalLog = console.log
@@ -85,6 +97,82 @@ async function main() {
     sourceType: 'stufferdb',
     rawName: null,
   })
+  const stufferAi = await assertRouted(
+    'https://stufferai.com/picture?/659098/category/8586',
+    {
+      scraper: 'milkmaid',
+      sourceType: 'stufferdb',
+      rawName: null,
+    }
+  )
+  assert.strictEqual(
+    stufferAi.url,
+    'https://stufferdb.com/picture?/659098/category/8586'
+  )
+  assert.deepStrictEqual(
+    getStufferDbFallbackUrls('https://stufferai.com/index?/category/8586'),
+    [
+      'https://stufferdb.com/index?/category/8586',
+      'https://stufferai.com/index?/category/8586',
+    ]
+  )
+  assert.strictEqual(
+    normalizeStufferDbPictureUrl(
+      'https://stufferai.com/index?/picture?/659098/category/8586&amp;slideshow='
+    ),
+    'https://stufferdb.com/picture?/659098/category/8586'
+  )
+  assert.strictEqual(
+    normalizeStufferDbCategoryUrl(
+      'https://stufferai.com/index?/category/8586&acs=123'
+    ),
+    'https://stufferdb.com/index?/category/8586'
+  )
+
+  const stufferEntry = normalizeMediaEntry({
+    filename: '20260517215133-b0e8b25b-la.jpg',
+    mediaUrl:
+      'https://cdn.stufferdb.com/_data/i/upload/2026/05/17/20260517215133-b0e8b25b-la.jpg',
+    mediaUrls: [
+      'https://cdn.stufferdb.com/_data/i/upload/2026/05/17/20260517215133-b0e8b25b-la.jpg',
+    ],
+    sourceUrls: ['https://stufferdb.com/index?/category/8586'],
+    mediaPageUrl: 'https://stufferdb.com/picture?/659098/category/8586',
+  })
+  assert.strictEqual(
+    isLikelyMediaUrl('https://stufferdb.com/index?/category/8586'),
+    false
+  )
+  assert.deepStrictEqual(getMediaEntryUrls(stufferEntry), [
+    'https://cdn.stufferdb.com/_data/i/upload/2026/05/17/20260517215133-b0e8b25b-la.jpg',
+  ])
+  assert.deepStrictEqual(getMediaEntrySeenDetails(stufferEntry).mediaUrls, [
+    'https://cdn.stufferdb.com/_data/i/upload/2026/05/17/20260517215133-b0e8b25b-la.jpg',
+  ])
+
+  const allSourceQueue = buildAllSourceQueue({
+    beta_model: {
+      sources: {
+        stufferdb: [{ url: 'https://stufferdb.com/index?/category/2' }],
+      },
+    },
+    alpha_model: {
+      sources: {
+        coomer: [{ url: 'https://coomerfans.com/u/onlyfans/123/alpha_model' }],
+        reddit: [{ url: 'https://www.reddit.com/user/alpha_model/submitted/' }],
+        kemono: [{ url: 'https://kemono.su/patreon/user/456' }],
+        stufferdb: [{ url: 'https://stufferdb.com/index?/category/1' }],
+      },
+    },
+  })
+  assert.deepStrictEqual(
+    allSourceQueue.map((item) => item.model),
+    ['alpha_model', 'beta_model']
+  )
+  assert.deepStrictEqual(
+    allSourceQueue[0].sources.map((source) => source.label),
+    ['reddit', 'kemono', 'coomerfans', 'stufferdb']
+  )
 
   const redditOptions = buildScraperOptions(reddit, {
     model: 'abigailgray256',

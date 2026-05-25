@@ -359,7 +359,9 @@ async function main() {
     while (true) {
       console.log('')
       console.log('Scrape Launcher')
-      console.log('1. Update all models (StufferDB + Coomer + Kemono)')
+      console.log(
+        '1. Update all models (model-by-model: Reddit + Kemono + Coomer/CoomerFans + StufferDB)'
+      )
       console.log('2. Update all StufferDB models')
       console.log('3. Update all Coomer models')
       console.log('4. Update all Kemono models')

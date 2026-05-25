@@ -48,6 +48,32 @@ function compactUnique(
   )
 }
 
+function isLikelyMediaUrl(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return false
+
+  let parsed
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return false
+  }
+
+  const pathname = decodeURIComponent(parsed.pathname || '').toLowerCase()
+  if (
+    /\.(?:jpe?g|png|webp|gif|bmp|avif|mp4|m4v|webm|mov)(?:$|[?#])/i.test(
+      `${pathname}${parsed.search || ''}`
+    )
+  ) {
+    return true
+  }
+
+  return (
+    /\b(?:cdn|media|preview|thumb|image|video)\b/i.test(parsed.hostname) &&
+    !/(?:\/index(?:\.php)?\?\/|\/picture\?\/|\/category\/)/i.test(raw)
+  )
+}
+
 function normalizeMediaEntry(entry, options = {}) {
   if (!entry || typeof entry !== 'object') return null
 
@@ -90,10 +116,13 @@ function normalizeMediaEntries(entries, options = {}) {
 }
 
 function getMediaEntryUrls(entry = {}, options = {}) {
-  return compactUnique(
-    [entry.mediaUrl, entry.jsonMediaUrl, entry.mediaUrls, entry.sourceUrls],
+  const urls = compactUnique(
+    [entry.mediaUrl, entry.jsonMediaUrl, entry.mediaUrls],
     options.normalizeUrl
   )
+  return options.filterMediaUrls === false
+    ? urls
+    : urls.filter((url) => isLikelyMediaUrl(url))
 }
 
 function getMediaEntryPageUrls(entry = {}, options = {}) {
@@ -145,6 +174,7 @@ module.exports = {
   getMediaEntrySeenDetails,
   getMediaEntrySourceDetails,
   getMediaEntryUrls,
+  isLikelyMediaUrl,
   normalizeMediaEntry,
   normalizeMediaEntries,
 }

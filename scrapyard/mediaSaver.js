@@ -104,6 +104,7 @@ function createMediaSaver({
     buffer,
     uploadedDate,
     pageMeta,
+    entry,
   }) {
     return mediaDates.recordImageDates(
       getModelDir(modelName),
@@ -111,7 +112,8 @@ function createMediaSaver({
       filename,
       buffer,
       uploadedDate,
-      pageMeta
+      pageMeta,
+      getMediaDateSourceMeta(entry)
     )
   }
 
@@ -122,6 +124,7 @@ function createMediaSaver({
     filePath,
     uploadedDate,
     pageMeta,
+    entry,
   }) {
     return mediaDates.recordVideoDates(
       getModelDir(modelName),
@@ -129,7 +132,8 @@ function createMediaSaver({
       filename,
       filePath,
       uploadedDate,
-      pageMeta
+      pageMeta,
+      getMediaDateSourceMeta(entry)
     )
   }
 
@@ -169,6 +173,8 @@ function createMediaSaver({
       relativePath: destination.relativePath,
       filename: destination.filename || entry?.filename || null,
       ...getSeenDetails(entry),
+      ...getEventMetadata(entry),
+      uploadedDate: toIsoOrNull(entry?.uploadedDate),
       ...extra,
     }
   }
@@ -178,6 +184,7 @@ function createMediaSaver({
       modelName,
       ...getSeenDetails(entry),
       ...getEventMetadata(entry),
+      uploadedDate: toIsoOrNull(entry?.uploadedDate),
       filename: destination.filename,
       extension: destination.extension,
       bucket: destination.bucket,
@@ -274,6 +281,7 @@ function createMediaSaver({
       buffer,
       uploadedDate,
       pageMeta,
+      entry,
     })
     const fileDate = applyRecordedTimestamp(
       absolutePath,
@@ -312,6 +320,7 @@ function createMediaSaver({
       filePath,
       uploadedDate,
       pageMeta,
+      entry,
     })
     const fileDate = applyRecordedTimestamp(
       filePath,
@@ -350,6 +359,31 @@ function createMediaSaver({
     finalizeImage,
     finalizeVideo,
   }
+}
+
+function getMediaDateSourceMeta(entry = {}) {
+  return {
+    sourceSite: entry.sourceSite || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    sourceSubreddit: entry.sourceSubreddit || null,
+    postId: entry.postId || null,
+    title: entry.title || null,
+    originalName: entry.originalName || null,
+    mediaPageUrl: entry.mediaPageUrl || null,
+    mediaUrl: entry.mediaUrl || null,
+  }
+}
+
+function toIsoOrNull(value) {
+  if (value instanceof Date && !isNaN(value.getTime()))
+    return value.toISOString()
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value)
+    if (!isNaN(parsed.getTime())) return parsed.toISOString()
+  }
+  return null
 }
 
 function getDefaultSeenDetails(entry = {}) {

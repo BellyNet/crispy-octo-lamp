@@ -8,11 +8,22 @@
  *
  * Sidecar format:
  *   {
- *     "__version": 3,
+ *     "__version": 4,
  *     "images/filename.jpg": {
  *       "video":    "ISO" | null,   // ffprobe container creation_time (videos only)
+ *       "image":    "ISO" | null,   // embedded EXIF creation date (images only)
  *       "filename": "ISO" | null,   // 14-digit timestamp prefix in filename
- *       "uploaded": "ISO" | null,   // mtime set by milkmaid = platform upload date
+ *       "uploaded": "ISO" | null,   // platform/source upload date
+ *       "resolved": {
+ *         "date": "ISO" | null,
+ *         "source": "mp4" | "image" | "filename" | "uploaded" | null
+ *       },
+ *       "source": {
+ *         "site": "string" | null,
+ *         "postId": "string" | null,
+ *         "mediaPageUrl": "string" | null,
+ *         "mediaUrl": "string" | null
+ *       },
  *       "comments": [
  *         {
  *           "author": "string" | null,
@@ -35,7 +46,7 @@ const { promisify } = require('util')
 
 const execFileAsync = promisify(execFile)
 
-const SIDECAR_VERSION = 3
+const SIDECAR_VERSION = 4
 const SIDECAR_FILENAME = '.media-dates.json'
 
 // ─── FFPROBE ──────────────────────────────────────────────────────────────────
@@ -169,6 +180,24 @@ async function extractImageDateFromFile(filePath) {
   }
 }
 
+async function extractImageDateFromBuffer(buffer) {
+  const exifr = getExifr()
+  if (!exifr || !buffer) return null
+  try {
+    const data = await exifr.parse(buffer, {
+      pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized'],
+      translateValues: true,
+    })
+    const raw =
+      data?.DateTimeOriginal || data?.CreateDate || data?.DateTimeDigitized
+    if (!raw) return null
+    const date = raw instanceof Date ? raw : new Date(raw)
+    return isSane(date) ? toISO(date) : null
+  } catch {
+    return null
+  }
+}
+
 // ─── EXTRACTION: FILENAME TIMESTAMP ───────────────────────────────────────────
 function extractFilenameDate(filename) {
   const m = filename.match(/^(\d{14})/)
@@ -222,6 +251,26 @@ function normalizeComments(comments) {
     .filter((comment) => comment.text)
 }
 
+function normalizeSourceMeta(sourceMeta) {
+  if (!sourceMeta || typeof sourceMeta !== 'object') return null
+
+  const normalized = {
+    site: sourceMeta.site || sourceMeta.sourceSite || null,
+    service: sourceMeta.service || sourceMeta.sourceService || null,
+    userId: sourceMeta.userId || sourceMeta.sourceUserId || null,
+    username: sourceMeta.username || sourceMeta.sourceUsername || null,
+    subreddit: sourceMeta.subreddit || sourceMeta.sourceSubreddit || null,
+    postId: sourceMeta.postId || sourceMeta.sourcePostId || null,
+    title: sourceMeta.title || null,
+    originalName: sourceMeta.originalName || null,
+    mediaPageUrl:
+      sourceMeta.mediaPageUrl || sourceMeta.sourceMediaPageUrl || null,
+    mediaUrl: sourceMeta.mediaUrl || null,
+  }
+
+  return Object.values(normalized).some(Boolean) ? normalized : null
+}
+
 function flushSidecar(userDir) {
   const entry = _sidecars.get(userDir)
   if (!entry || !entry.dirty) return
@@ -244,6 +293,7 @@ function resolveBestDateRecord(record) {
     return { date: null, source: null }
   }
   if (record.video) return { date: record.video, source: 'mp4' }
+  if (record.image) return { date: record.image, source: 'image' }
   if (record.filename) return { date: record.filename, source: 'filename' }
   if (record.uploaded) return { date: record.uploaded, source: 'uploaded' }
   return { date: null, source: null }
@@ -255,7 +305,8 @@ async function recordImageDates(
   filename,
   buffer,
   uploadedDate,
-  pageMeta = null
+  pageMeta = null,
+  sourceMeta = null
 ) {
   const entry = loadSidecar(userDir)
   const key = `${folder}/${filename}`
@@ -264,13 +315,17 @@ async function recordImageDates(
       ? entry.data[key]
       : null
   const comments = normalizeComments(pageMeta?.comments)
+  const imageDate = await extractImageDateFromBuffer(buffer)
+  const source = normalizeSourceMeta(sourceMeta)
 
   const nextRecord = {
     ...(existingRecord || {}),
     video: existingRecord?.video || null,
+    image: existingRecord?.image || imageDate || null,
     filename: existingRecord?.filename || extractFilenameDate(filename) || null,
     uploaded:
       existingRecord?.uploaded || (uploadedDate ? toISO(uploadedDate) : null),
+    source: source || existingRecord?.source || null,
     comments: comments.length ? comments : existingRecord?.comments || [],
     commentCount:
       typeof pageMeta?.commentCount === 'number'
@@ -279,9 +334,10 @@ async function recordImageDates(
           ? existingRecord.comments.length
           : comments.length || null,
   }
+  nextRecord.resolved = resolveBestDateRecord(nextRecord)
   entry.data[key] = nextRecord
   scheduleSidecarFlush(userDir)
-  return resolveBestDateRecord(nextRecord)
+  return nextRecord.resolved
 }
 
 async function recordVideoDates(
@@ -290,7 +346,8 @@ async function recordVideoDates(
   filename,
   filePath,
   uploadedDate,
-  pageMeta = null
+  pageMeta = null,
+  sourceMeta = null
 ) {
   const entry = loadSidecar(userDir)
   const key = `${folder}/${filename}`
@@ -304,13 +361,16 @@ async function recordVideoDates(
     Promise.resolve(extractFilenameDate(filename)),
   ])
   const comments = normalizeComments(pageMeta?.comments)
+  const source = normalizeSourceMeta(sourceMeta)
 
   const nextRecord = {
     ...(existingRecord || {}),
     video: existingRecord?.video || video || null,
+    image: existingRecord?.image || null,
     filename: existingRecord?.filename || filenameDate || null,
     uploaded:
       existingRecord?.uploaded || (uploadedDate ? toISO(uploadedDate) : null),
+    source: source || existingRecord?.source || null,
     comments: comments.length ? comments : existingRecord?.comments || [],
     commentCount:
       typeof pageMeta?.commentCount === 'number'
@@ -319,9 +379,10 @@ async function recordVideoDates(
           ? existingRecord.comments.length
           : comments.length || null,
   }
+  nextRecord.resolved = resolveBestDateRecord(nextRecord)
   entry.data[key] = nextRecord
   scheduleSidecarFlush(userDir)
-  return resolveBestDateRecord(nextRecord)
+  return nextRecord.resolved
 }
 
 function resolveDateFromSidecar(userDir, folder, filename) {
@@ -342,6 +403,7 @@ module.exports = {
   resolveDateFromSidecar,
   resolveBestDateRecord,
   extractVideoDateFromFile,
+  extractImageDateFromBuffer,
   probeVideoFile,
   extractImageDateFromFile,
   extractFilenameDate,
