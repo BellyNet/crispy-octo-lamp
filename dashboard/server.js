@@ -1143,14 +1143,50 @@ async function prewarmCoverThumbs() {
 // ─── INFO ENDPOINT ───────────────────────────────────────────────────────────
 const SERVER_START = new Date().toISOString()
 
-app.get('/api/info', (_req, res) => {
-  let registryMtime = null
+// Registry "last changed" tracker. mtime alone is unreliable: robocopy /XO
+// can skip a file if its dest is newer, and git checkout sometimes leaves
+// the local mtime older than the remote copy. Hash-based detection survives
+// both. State is persisted so the timestamp stays meaningful across restarts.
+const REGISTRY_STATE_FILE = path.join(THUMB_DIR, 'registry-state.json')
+let _registryState = { hash: null, lastChanged: null }
+try { _registryState = JSON.parse(fs.readFileSync(REGISTRY_STATE_FILE, 'utf8')) } catch {}
+let _registryLastCheckMs = 0
+
+function refreshRegistryState() {
+  // Throttle hashing — model_aliases.json is small but /api/info gets polled
+  // every 5 minutes by every open tab. 30s is plenty fresh.
+  const now = Date.now()
+  if (now - _registryLastCheckMs < 30 * 1000 && _registryState.lastChanged) {
+    return _registryState.lastChanged
+  }
+  _registryLastCheckMs = now
+
   try {
-    registryMtime = fs.statSync(registryPath).mtime.toISOString()
+    const content = fs.readFileSync(registryPath)
+    const hash = crypto.createHash('sha256').update(content).digest('hex')
+    if (_registryState.hash !== hash) {
+      // Content actually changed. Prefer the file's mtime when it looks
+      // sensible (newer than our previous record); otherwise stamp "now".
+      const stat = fs.statSync(registryPath)
+      const prevMs = _registryState.lastChanged
+        ? new Date(_registryState.lastChanged).getTime()
+        : 0
+      const useMtime = stat.mtimeMs > prevMs && stat.mtimeMs <= now + 5000
+      _registryState = {
+        hash,
+        lastChanged: (useMtime ? stat.mtime : new Date(now)).toISOString(),
+      }
+      try { fs.writeFileSync(REGISTRY_STATE_FILE, JSON.stringify(_registryState)) } catch {}
+    }
   } catch {}
+  return _registryState.lastChanged
+}
+
+app.get('/api/info', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache')
   res.json({
     startedAt: SERVER_START,
-    registryUpdatedAt: registryMtime,
+    registryUpdatedAt: refreshRegistryState(),
     scan: { lastTickAt: scanState.lastTickAt, lastFullScanAt: scanState.lastFullScanAt },
   })
 })

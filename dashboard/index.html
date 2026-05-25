@@ -784,6 +784,19 @@
         background-color: var(--card-bg);
       }
       #home-sort-select:hover { border-color: var(--accent); }
+      #home-shuffle-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      #home-shuffle-btn:hover { color: var(--accent); border-color: var(--accent); }
       .home-size-btn {
         background: none;
         border: none;
@@ -1193,7 +1206,17 @@
               <option value="oldest-media">Oldest media first</option>
               <option value="newest-media">Newest media first</option>
               <option value="recently-added">Recently added</option>
+              <option value="random">Random ↻</option>
             </select>
+            <button id="home-shuffle-btn" title="Reshuffle" aria-label="Reshuffle" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 3 21 3 21 8"/>
+                <line x1="4" y1="20" x2="21" y2="3"/>
+                <polyline points="21 16 21 21 16 21"/>
+                <line x1="15" y1="15" x2="21" y2="21"/>
+                <line x1="4" y1="4" x2="9" y2="9"/>
+              </svg>
+            </button>
             <div class="sort-bar-right">
               <span class="sort-label">Card</span>
               <button class="home-size-btn active" data-home-size="small">S</button>
@@ -1448,10 +1471,25 @@
         return { start: minYear === Infinity ? maxYear : minYear, end: maxYear }
       }
 
+      // Held in memory across renders so Random stays stable while navigating
+      // (clicking into a model and back doesn't reshuffle). The shuffle button
+      // and re-selecting Random both regenerate it.
+      let _homeRandomOrder = null
+      function reshuffleHome() {
+        const names = usersData.map((u) => u.name)
+        // Fisher-Yates
+        for (let i = names.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [names[i], names[j]] = [names[j], names[i]]
+        }
+        _homeRandomOrder = new Map(names.map((n, i) => [n, i]))
+      }
+
       function renderHomeGrid() {
         homeGridEl.innerHTML = ''
         const { start: globalStart, end: globalEnd } = getYearRange()
         const seen = readLastSeen()
+        if (homeSort === 'random' && !_homeRandomOrder) reshuffleHome()
 
         // Sort: featured always first, then by selected sort
         const sorted = [...usersData].sort((a, b) => {
@@ -1460,6 +1498,9 @@
           if (homeSort === 'oldest-media') return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
           if (homeSort === 'newest-media') return (b.latestMs || 0) - (a.latestMs || 0)
           if (homeSort === 'recently-added') return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
+          if (homeSort === 'random') {
+            return (_homeRandomOrder.get(a.name) ?? 9e9) - (_homeRandomOrder.get(b.name) ?? 9e9)
+          }
           return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
         })
 
@@ -2202,9 +2243,10 @@
               },
             })
 
-            // Caption sidebar — desktop only (≥901px). Toggleable via the
-            // dedicated button below; defaults to visible so captions are
-            // immediately readable when present.
+            // Caption sidebar — desktop only (≥901px). Hidden entirely when the
+            // current slide has no caption so the media gets the full viewport.
+            // The toggle button (below) also hides itself in that case.
+            let captionBtnEl = null
             pswp.ui.registerElement({
               name:     'pswp-caption',
               appendTo: 'root',
@@ -2214,20 +2256,32 @@
                 const update = async () => {
                   const item = filtered[pswp.currIndex]
                   if (!item) return
+                  // No caption: hide the panel and the button. Media is full-bleed.
+                  if (!item.hasCaption) {
+                    el.classList.remove('pswp-caption-visible')
+                    el.style.display = 'none'
+                    el.replaceChildren()
+                    if (captionBtnEl) {
+                      captionBtnEl.style.display = 'none'
+                      captionBtnEl.classList.remove('pswp-caption-active')
+                    }
+                    return
+                  }
+                  // Has a caption: show the button, render the panel.
+                  if (captionBtnEl) captionBtnEl.style.display = ''
+                  el.style.display = ''
+                  el.classList.add('pswp-caption-visible')
+                  if (captionBtnEl) captionBtnEl.classList.add('pswp-caption-active')
+
                   el.replaceChildren()
                   const label = document.createElement('div')
                   label.className = 'pswp__pswp-caption-label'
                   label.textContent = 'Caption'
                   el.appendChild(label)
                   const body = document.createElement('div')
-                  el.appendChild(body)
-                  if (!item.hasCaption) {
-                    body.className = 'pswp__pswp-caption-empty'
-                    body.textContent = 'No caption file'
-                    return
-                  }
                   body.textContent = 'Loading…'
                   body.className = 'pswp__pswp-caption-empty'
+                  el.appendChild(body)
                   const idxAtStart = pswp.currIndex
                   const text = await loadCaption(item)
                   if (pswp.currIndex !== idxAtStart) return
@@ -2235,8 +2289,14 @@
                     body.className = ''
                     body.textContent = text
                   } else {
-                    body.className = 'pswp__pswp-caption-empty'
-                    body.textContent = 'No caption file'
+                    // hasCaption was true but fetch failed — keep panel hidden
+                    // rather than showing a broken empty state.
+                    el.classList.remove('pswp-caption-visible')
+                    el.style.display = 'none'
+                    if (captionBtnEl) {
+                      captionBtnEl.style.display = 'none'
+                      captionBtnEl.classList.remove('pswp-caption-active')
+                    }
                   }
                 }
                 pswp.on('change', update)
@@ -2245,13 +2305,15 @@
             })
 
             // Caption toggle button — only meaningful on desktop, but harmless on
-            // mobile (where the sidebar is hidden via CSS).
+            // mobile (where the sidebar is hidden via CSS). Hidden by the panel's
+            // update() handler whenever the current slide has no caption.
             pswp.ui.registerElement({
               name:     'pswp-caption-button',
               order:    8,
               isButton: true,
               title:    'Caption',
               html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><line x1="5.5" y1="9" x2="14.5" y2="9"/><line x1="5.5" y1="12" x2="11" y2="12"/></svg>',
+              onInit(el) { captionBtnEl = el },
               onClick(e, el) {
                 if (!captionPanelEl) return
                 const on = captionPanelEl.classList.toggle('pswp-caption-visible')
@@ -2328,8 +2390,21 @@
       const HOME_CARD_SIZES = { small: '140px', medium: '200px', large: '280px' }
       const HOME_MOBILE_COLS = { small: 3, medium: 2, large: 1 }
 
+      const homeShuffleBtn = document.getElementById('home-shuffle-btn')
       homeSortSelect.addEventListener('change', () => {
         homeSort = homeSortSelect.value
+        if (homeSort === 'random') {
+          // Re-picking Random always re-shuffles, so a second click gives a
+          // fresh order even if you were already on Random.
+          reshuffleHome()
+          homeShuffleBtn.style.display = ''
+        } else {
+          homeShuffleBtn.style.display = 'none'
+        }
+        renderHomeGrid()
+      })
+      homeShuffleBtn.addEventListener('click', () => {
+        reshuffleHome()
         renderHomeGrid()
       })
 
