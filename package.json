@@ -64,6 +64,8 @@
     "backfill:exif": "node milkmaid/backfill-exif-dates.js",
     "cleanup:gif-derived-mp4s": "node scrapyard/removeGifDerivedMp4s.js",
     "cleanup:mirrored-mp4s": "node scrapyard/removeMirroredMp4s.js",
+    "cleanup:flagged": "node scrapyard/cleanupFlaggedFiles.js",
+    "cleanup:flagged:apply": "node scrapyard/cleanupFlaggedFiles.js --apply",
     "rebuild:nas-mp4-index": "node scrapyard/rebuildNasMp4Index.js"
   },
   "dependencies": {
