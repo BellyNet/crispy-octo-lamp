@@ -411,6 +411,31 @@
         border-color: var(--accent);
         box-shadow: 0 4px 20px rgba(124, 108, 252, 0.2);
       }
+      .media-card.flagged {
+        border-color: #c64646;
+        box-shadow: 0 0 0 1px #c64646 inset;
+      }
+      .media-card.flagged:hover {
+        border-color: #ff6868;
+        box-shadow: 0 0 0 1px #ff6868 inset, 0 4px 20px rgba(255, 100, 100, 0.25);
+      }
+      .media-card.flagged .card-thumb img,
+      .media-card.flagged .card-thumb video {
+        opacity: 0.55;
+      }
+      .card-flag-ribbon {
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        background: #c64646;
+        color: #fff;
+        font-size: 10px;
+        line-height: 1;
+        padding: 3px 5px;
+        border-radius: 4px;
+        z-index: 2;
+        pointer-events: none;
+      }
       .media-card:hover .card-overlay {
         opacity: 1;
       }
@@ -655,6 +680,16 @@
         font-variant-numeric: tabular-nums;
         flex-shrink: 0;
       }
+      .pswp-info-flagged {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        background: #c64646;
+        color: #fff;
+        padding: 2px 6px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
       /* Video slide wrapper */
       .pswp-video-wrap {
         width: 100%;
@@ -720,6 +755,19 @@
         text-transform: uppercase;
         margin-bottom: 8px;
       }
+      /* Flag-for-deletion button */
+      .pswp__pswp-flag-button svg {
+        opacity: 0.75;
+        transition: opacity 0.15s;
+      }
+      .pswp__pswp-flag-button:hover svg { opacity: 1; }
+      .pswp__pswp-flag-button.pswp-flag-active {
+        color: #ff6868;
+      }
+      .pswp__pswp-flag-button.pswp-flag-active svg {
+        opacity: 1;
+      }
+
       /* Caption button — same look as the info button */
       .pswp__pswp-caption-button svg {
         opacity: 0.75;
@@ -1270,6 +1318,7 @@
           <option value="image">Images</option>
           <option value="gif">GIFs</option>
           <option value="video">Videos</option>
+          <option value="flagged">Flagged</option>
         </select>
         <button id="rescan-btn" title="Rescan all models" aria-label="Rescan">
           <svg
@@ -2068,9 +2117,9 @@
       // ─── FILTER + SORT ────────────────────────────────────────────────────
       function applyFilter() {
         filtered =
-          activeType === 'all'
-            ? [...allMedia]
-            : allMedia.filter((m) => m.type === activeType)
+          activeType === 'all'      ? [...allMedia]
+          : activeType === 'flagged' ? allMedia.filter((m) => m.flagged)
+                                     : allMedia.filter((m) => m.type === activeType)
 
         // Sort by real media date, falling back to added-to-disk date as last resort
         const effectiveDate = (m) => m.mediaDateMs || m.addedMs
@@ -2132,10 +2181,12 @@
         const imgs = allMedia.filter((m) => m.type === 'image').length
         const gifs = allMedia.filter((m) => m.type === 'gif').length
         const vids = allMedia.filter((m) => m.type === 'video').length
+        const flagged = allMedia.filter((m) => m.flagged).length
         const parts = []
         if (imgs) parts.push(`${imgs} image${imgs !== 1 ? 's' : ''}`)
         if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
         if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
+        if (flagged) parts.push(`${flagged} flagged`)
         if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
 
         // Update filter dropdown labels with counts.
@@ -2144,11 +2195,15 @@
           image: imgs ? `Images (${imgs})` : 'Images',
           gif: gifs ? `GIFs (${gifs})` : 'GIFs',
           video: vids ? `Videos (${vids})` : 'Videos',
+          flagged: flagged ? `Flagged (${flagged})` : 'Flagged',
         }
         for (const [type, label] of Object.entries(labels)) {
           const opt = filterSelect.querySelector(`option[value="${type}"]`)
           if (opt) opt.textContent = label
         }
+        // Hide the Flagged option when nothing is flagged — keeps the menu clean.
+        const flaggedOpt = filterSelect.querySelector('option[value="flagged"]')
+        if (flaggedOpt) flaggedOpt.hidden = flagged === 0
       }
 
       function updateDateRange() {
@@ -2198,8 +2253,15 @@
 
       function createCard(item, i) {
         const card = document.createElement('div')
-        card.className = 'media-card'
+        card.className = 'media-card' + (item.flagged ? ' flagged' : '')
         card.dataset.index = i
+        if (item.flagged) {
+          const ribbon = document.createElement('div')
+          ribbon.className = 'card-flag-ribbon'
+          ribbon.title = 'Flagged for deletion'
+          ribbon.textContent = '🚩'
+          card.appendChild(ribbon)
+        }
 
         const thumb = document.createElement('div')
         thumb.className = 'card-thumb'
@@ -2470,6 +2532,13 @@
                     item.type === 'image' ? 'img' : item.type
                   el.appendChild(typeBadge)
 
+                  if (item.flagged) {
+                    const fb = document.createElement('span')
+                    fb.className = 'pswp-info-flagged'
+                    fb.textContent = 'FLAGGED'
+                    el.appendChild(fb)
+                  }
+
                   const dateSpan = document.createElement('span')
                   dateSpan.className = 'pswp-info-date'
                   dateSpan.textContent = formatDate(item.date)
@@ -2613,6 +2682,70 @@
                   'pswp-caption-visible'
                 )
                 el.classList.toggle('pswp-caption-active', on)
+              },
+            })
+
+            // Flag-for-deletion toggle. POSTs to /api/users/:user/flag, updates
+            // the in-memory item, refreshes the card's red ribbon in the grid.
+            let flagBtnEl = null
+            const refreshFlagBtn = () => {
+              const item = filtered[pswp.currIndex]
+              if (!item || !flagBtnEl) return
+              flagBtnEl.classList.toggle('pswp-flag-active', !!item.flagged)
+              flagBtnEl.title = item.flagged ? 'Unflag (was marked for deletion)' : 'Flag for deletion'
+            }
+            pswp.ui.registerElement({
+              name:     'pswp-flag-button',
+              order:    7,
+              isButton: true,
+              title:    'Flag for deletion',
+              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="2" x2="5" y2="18"/><path d="M5 3.5h10l-2 3 2 3H5"/></svg>',
+              onInit(el) {
+                flagBtnEl = el
+                refreshFlagBtn()
+                pswp.on('change', refreshFlagBtn)
+              },
+              async onClick(e, el) {
+                const item = filtered[pswp.currIndex]
+                if (!item || !currentUsername) return
+                const next = !item.flagged
+                el.disabled = true
+                try {
+                  const r = await fetch(
+                    `/api/users/${encodeURIComponent(currentUsername)}/flag`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ folder: item.folder, filename: item.filename, flagged: next }),
+                    }
+                  )
+                  if (!r.ok) throw new Error('flag failed')
+                  item.flagged = next
+                  // Patch the underlying allMedia entry too (filtered may be a copy).
+                  const src = allMedia.find((m) => m.folder === item.folder && m.filename === item.filename)
+                  if (src) src.flagged = next
+                  // Refresh the affected card in the grid without re-rendering everything.
+                  const card = gridEl.querySelector(`.media-card[data-index="${pswp.currIndex}"]`)
+                  if (card) {
+                    card.classList.toggle('flagged', next)
+                    let ribbon = card.querySelector('.card-flag-ribbon')
+                    if (next && !ribbon) {
+                      ribbon = document.createElement('div')
+                      ribbon.className = 'card-flag-ribbon'
+                      ribbon.title = 'Flagged for deletion'
+                      ribbon.textContent = '🚩'
+                      card.appendChild(ribbon)
+                    } else if (!next && ribbon) {
+                      ribbon.remove()
+                    }
+                  }
+                  refreshFlagBtn()
+                  updateStats()
+                } catch {
+                  // Soft fail — the next reload from the server will reconcile.
+                } finally {
+                  el.disabled = false
+                }
               },
             })
 

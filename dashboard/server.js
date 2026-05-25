@@ -44,7 +44,29 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 3
+const RESPONSE_CACHE_VERSION = 4
+
+// ─── DELETION FLAGS ────────────────────────────────────────────────────────
+// Per-model sidecar lists files the user has flagged for deletion via the
+// dashboard. Lives at dataset/<user>/.dashboard-flags.json so the cleanup
+// script in the main repo can read it without going through the API.
+// Shape: { "<folder>/<filename>": { flagged: true, addedAt: ISO } }
+const FLAGS_FILENAME = '.dashboard-flags.json'
+function flagsPathFor(userDir) {
+  return path.join(userDir, FLAGS_FILENAME)
+}
+function readFlagsForUser(userDir) {
+  try {
+    const data = JSON.parse(fs.readFileSync(flagsPathFor(userDir), 'utf8'))
+    return data && typeof data === 'object' && data.flags ? data : { flags: {} }
+  } catch { return { flags: {} } }
+}
+function writeFlagsForUser(userDir, data) {
+  const p = flagsPathFor(userDir)
+  const tmp = p + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2))
+  fs.renameSync(tmp, p)
+}
 
 function loadResponseCacheFromDisk(username) {
   try {
@@ -322,6 +344,7 @@ app.use(
 )
 
 app.use(express.urlencoded({ extended: false }))
+app.use(express.json({ limit: '32kb' }))
 
 app.post('/auth', (req, res) => {
   if (req.body.password === PASSWORD) {
@@ -653,6 +676,13 @@ async function scanModel(username, { force = false } = {}) {
     )
   ).filter(Boolean)
 
+  // Stamp `flagged` onto each item from the user's sidecar. Read once, applied
+  // in O(n) — far cheaper than re-reading the sidecar per file.
+  const flagsData = readFlagsForUser(userDir)
+  for (const m of allMedia) {
+    m.flagged = !!(flagsData.flags && flagsData.flags[`${m.folder}/${m.filename}`])
+  }
+
   allMedia.sort(
     (a, b) => (a.mediaDateMs || a.addedMs) - (b.mediaDateMs || b.addedMs)
   )
@@ -907,6 +937,15 @@ async function getMediaFingerprint(userDir) {
   } catch {
     fp._sidecar = 0
   }
+  // Flag sidecar — when the user toggles a flag this mtime changes, so the
+  // next fingerprint tick rescans and picks up the new `flagged` values.
+  try {
+    fp._flags = (
+      await fs.promises.stat(path.join(userDir, FLAGS_FILENAME))
+    ).mtimeMs
+  } catch {
+    fp._flags = 0
+  }
   return fp
 }
 
@@ -932,6 +971,60 @@ app.get('/api/users/:username/media', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// Toggle a deletion flag on a specific file. Body: { folder, filename, flagged }
+// Updates the sidecar AND the in-memory + disk response caches in place so the
+// UI sees the change without waiting for a full rescan.
+app.post('/api/users/:username/flag', async (req, res) => {
+  const username = req.params.username
+  const userDir = safeSubPath(datasetDir, username)
+  if (!userDir) return res.status(403).json({ error: 'Forbidden' })
+
+  const { folder, filename } = req.body || {}
+  const flagged = !!(req.body && req.body.flagged)
+  if (!folder || !filename || !MEDIA_FOLDERS.includes(folder)) {
+    return res.status(400).json({ error: 'folder + filename required' })
+  }
+  // Confirm the file actually exists — refuse to flag arbitrary paths.
+  const filePath = safeSubPath(datasetDir, username, folder, filename)
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' })
+  }
+
+  // 1. Update the sidecar (source of truth).
+  const data = readFlagsForUser(userDir)
+  data.flags = data.flags || {}
+  const key = `${folder}/${filename}`
+  if (flagged) {
+    if (!data.flags[key]) data.flags[key] = { flagged: true, addedAt: new Date().toISOString() }
+  } else {
+    delete data.flags[key]
+  }
+  try { writeFlagsForUser(userDir, data) }
+  catch (err) { return res.status(500).json({ error: err.message }) }
+
+  // 2. Patch the response caches in place so the next read reflects the change
+  //    without a full rescan. The sidecar mtime is also in the fingerprint, so
+  //    even if these mutations are missed somehow, the next tick will resync.
+  const patchItem = (response) => {
+    const it = response && response.find((m) => m.folder === folder && m.filename === filename)
+    if (it) it.flagged = flagged
+  }
+  const memHit = mediaResponseCache.get(username)
+  if (memHit) patchItem(memHit.response)
+  try {
+    const diskFile = path.join(RESPONSE_CACHE_DIR, `${username}.json`)
+    if (fs.existsSync(diskFile)) {
+      const disk = JSON.parse(fs.readFileSync(diskFile, 'utf8'))
+      if (Array.isArray(disk.response)) {
+        patchItem(disk.response)
+        fs.writeFileSync(diskFile, JSON.stringify(disk))
+      }
+    }
+  } catch {}
+
+  res.json({ ok: true, flagged })
 })
 
 async function warmGridThumbs(username, items) {
