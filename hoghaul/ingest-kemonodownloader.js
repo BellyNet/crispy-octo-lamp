@@ -39,7 +39,7 @@ const {
   addBitwiseHash,
 } = require('../scrapyard/bitwiseHasher')
 
-const mediaDates = require('../milkmaid/media-dates.js')
+const mediaDates = require('../scrapyard/mediaDates')
 const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────

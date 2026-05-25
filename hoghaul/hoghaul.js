@@ -2,28 +2,64 @@
 
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
-const http = require('http')
-const https = require('https')
-const zlib = require('zlib')
-const { exec } = require('child_process')
 const { createHash } = require('crypto')
-const minimist = require('minimist')
 const pLimit = require('p-limit')
-const puppeteer = require('puppeteer-extra')
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-
-puppeteer.use(StealthPlugin())
 
 const { bannerHoghaul } = require('../banners.js')
-const mediaDates = require('../milkmaid/media-dates.js')
-const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
+const mediaDates = require('../scrapyard/mediaDates')
+const { createDatasetPaths } = require('../scrapyard/datasetPaths')
+const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
+const { syncModelToNas } = require('../scrapyard/nasSync')
+const runLifecycle = require('../scrapyard/runLifecycle')
 const {
-  hasNasMp4RelativePath,
-  mergeNasMp4Entries,
-  collectMp4RelativePaths,
-  syncNasMp4IndexToMirror,
-} = require('../scrapyard/nasMp4Index')
+  parseHoghaulSourceUrl: parseSourceUrl,
+} = require('../scrapyard/sourceRouter')
+const {
+  sanitize,
+  resolveAndTrackSourceModel,
+} = require('../scrapyard/modelRegistry')
+const {
+  normalizeHoghaulRunOptions,
+  parseHoghaulArgs,
+} = require('../scrapyard/scraperOptions')
+const {
+  classifyMediaFilename,
+  getMediaEntryHashMetadata,
+  getMediaEntryPageUrls,
+  getMediaEntrySeenDetails,
+  getMediaEntrySourceDetails,
+  getMediaEntryUrls,
+  normalizeMediaEntry,
+  normalizeMediaEntries,
+} = require('../scrapyard/mediaEntries')
+const mediaFileRecords = require('../scrapyard/mediaFileRecords')
+const { createMediaSaver } = require('../scrapyard/mediaSaver')
+const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
+const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
+const {
+  moveFileIntoPlace,
+  removeFileIfExists,
+} = require('../scrapyard/fileOps')
+const { createHttpClient } = require('../scrapyard/httpClient')
+const { createRedgifsClient } = require('../scrapyard/redgifsClient')
+const {
+  createBrowserMediaDownloader: createSharedBrowserMediaDownloader,
+  getDefaultBrowserProfileDir,
+} = require('../scrapyard/browserMediaDownloader')
+const {
+  fetchCoomerKemonoPosts,
+  getMediaEntriesFromPost: getCoomerKemonoMediaEntriesFromPost,
+  preflightCoomerKemonoSource,
+  resolveKemonoCreatorIdForJson: resolveSharedKemonoCreatorIdForJson,
+} = require('../scrapyard/sourceAdapters/coomerKemono')
+const {
+  fetchRedditPosts: fetchRedditAdapterPosts,
+  preflightRedditSource: preflightRedditAdapterSource,
+} = require('../scrapyard/sourceAdapters/reddit')
+const {
+  fetchCoomerFansPosts: fetchCoomerFansAdapterPosts,
+  preflightCoomerFansSource,
+} = require('../scrapyard/sourceAdapters/coomerFans')
 const {
   loadVisualHashCache,
   saveVisualHashCache,
@@ -49,271 +85,116 @@ const {
   resetProgressBar,
 } = require('../stuffinglogger')
 
-bannerHoghaul()
-installProcessTerminationHandlers()
-
-const rootDir = path.join(__dirname, '..')
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
-const datasetDir = path.join(slopvaultRoot, 'dataset')
-const quarantineDatasetDir = path.join(slopvaultRoot, 'quarantine', 'dataset')
-const nasDatasetDir = path.resolve(
-  String(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
-)
-const registryPath = path.join(rootDir, 'model_aliases.json')
+const datasetPaths = createDatasetPaths({
+  rootDir: path.join(__dirname, '..'),
+  repairCanUseNasMirror: true,
+})
+const rootDir = datasetPaths.rootDir
+const datasetDir = datasetPaths.datasetDir
+const nasDatasetDir = datasetPaths.nasDatasetDir
+const registryPath =
+  process.env.HOGHAUL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
 const API_PAGE_SIZE = 50
 const REDDIT_PAGE_SIZE = 100
 const API_ACCEPT_HEADER = 'text/css'
 const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
-
-const REDGIFS_TEMP_AUTH_URL = 'https://api.redgifs.com/v2/auth/temporary'
-const REDGIFS_GIF_API_BASE = 'https://api.redgifs.com/v2/gifs'
+const httpClient = createHttpClient({ timeoutMs: REQUEST_TIMEOUT_MS })
+const requestBuffer = httpClient.requestBuffer
+const redgifsClient = createRedgifsClient({ requestBuffer })
 
 let currentRunLog = null
-let mediaSeenIndexCache = null
+const sharedMediaSeenIndex = createMediaSeenIndex({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  normalizeUrl: (url) => normalizeSeenUrl(htmlDecode(url)),
+  matchOrder: ['media_url', 'media_page_url'],
+  pageMatchRequiresNoMediaUrl: true,
+})
+const hoghaulMediaSaver = createMediaSaver({
+  datasetDir,
+  source: 'hoghaul',
+  mediaDates,
+  getExtraMetadata: (entry) => getEntryHashMetadata(entry),
+  getEventMetadata: (entry) => getEntrySourceDetails(entry),
+  getSeenDetails: (entry) => getEntrySeenDetails(entry),
+})
+const hoghaulSavePipeline = createMediaSavePipeline({
+  mediaSaver: hoghaulMediaSaver,
+  appendRunEvent,
+  recordSuccessfulSeenMedia,
+  getSuccessfulSeenMediaMatch,
+  existsLocallyOrOnNas,
+  onDuplicate: () => {
+    duplicateCount += 1
+  },
+  onSaved: ({ stats }) => {
+    successCount += 1
+    savedBytes += stats.savedBytes
+    runLifecycle.addRunTransfer(currentRunLog, 'savedBytes', stats.savedBytes)
+    runLifecycle.addRunTransfer(
+      currentRunLog,
+      'lazyTransferredBytes',
+      stats.lazyTransferredBytes
+    )
+  },
+  onQueued: () => {
+    queuedVideoCount += 1
+    runLifecycle.incrementRunCounter(currentRunLog, 'queuedVideos')
+  },
+  onOutcome: ({ kind, label }) => {
+    noteMediaOutcome(kind, label)
+  },
+})
+const duplicateChecker = createDuplicateChecker({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) => existsLocallyOrOnNas(filePath),
+  getBitwiseHashRecord,
+  isBitwiseDupe,
+  getVisualHashRecord,
+  isVisualDupe,
+  getVisualHashEntries,
+  getVisualHashDistance,
+})
+const {
+  getBitwiseDuplicationRecord,
+  getVisualDuplicationRecord,
+  getFuzzyVisualDuplicationRecord,
+  getPendingImageVisualDuplicate,
+  reservePendingImageVisualClaim,
+  releasePendingImageVisualClaim,
+} = duplicateChecker
 let successCount = 0
 let duplicateCount = 0
 let errorCount = 0
 let queuedVideoCount = 0
 let savedBytes = 0
 let browserMediaDownloader = null
-let redgifsAuth = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
-const pendingImageVisualClaims = new Map()
 let runTerminationHandled = false
+let processTerminationHandlersInstalled = false
 
-function isSkipReason(reason) {
-  return String(reason || '').startsWith('skip_')
-}
-
-function formatPercent(numerator, denominator) {
-  if (!Number.isFinite(denominator) || denominator <= 0) return '0.0'
-  return ((numerator / denominator) * 100).toFixed(1)
-}
-
-function sanitize(name) {
-  return String(name || '')
-    .replace(/[^a-z0-9_-]/gi, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase()
-}
-
-function sortStringValues(values) {
-  return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
-    a.localeCompare(b)
-  )
-}
-
-function sortSourceList(sources) {
-  return Array.isArray(sources) ? sources : []
-}
-
-function sortModelRegistry(registry) {
-  return Object.fromEntries(
-    Object.entries(registry || {}).map(([canonicalName, entry]) => {
-      const sources =
-        entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
-      return [
-        canonicalName,
-        {
-          aliases: sortStringValues(entry?.aliases),
-          sources: Object.fromEntries(
-            Object.entries(sources).map(([key, value]) => [
-              key,
-              sortSourceList(value),
-            ])
-          ),
-        },
-      ]
-    })
-  )
-}
-
-function loadModelRegistry() {
-  if (!fs.existsSync(registryPath)) {
-    writeRepoJsonFileSync(registryPath, {})
-    return {}
-  }
-
-  try {
-    const raw = fs.readFileSync(registryPath, 'utf8').trim()
-    return raw ? JSON.parse(raw) : {}
-  } catch (err) {
-    console.warn(`Could not parse ${registryPath}: ${err.message}`)
-    return {}
-  }
-}
-
-function saveModelRegistry(registry) {
-  writeRepoJsonFileSync(registryPath, sortModelRegistry(registry))
-}
-
-function ensureModelEntryShape(entry, canonicalName) {
-  const aliasSet = new Set(
-    Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
-  )
-  if (canonicalName) aliasSet.add(canonicalName)
-
-  return {
-    aliases: Array.from(aliasSet),
-    sources:
-      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {},
-  }
-}
-
-function findCanonicalModelName(registry, rawName) {
-  const normalizedRaw = sanitize(rawName)
-  if (!normalizedRaw) return null
-
-  for (const [canonicalName, entry] of Object.entries(registry)) {
-    if (sanitize(canonicalName) === normalizedRaw) return canonicalName
-    const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
-    if (aliases.some((alias) => sanitize(alias) === normalizedRaw)) {
-      return canonicalName
-    }
-  }
-
-  return null
-}
-
-function getSourceRegistryKey(site) {
-  return site === 'coomerfans' ? 'coomer' : site
-}
-
-function findCanonicalModelNameBySource(registry, sourceInfo) {
-  const normalizedUrl = String(sourceInfo?.inputUrl || '').trim()
-  const normalizedSite = String(
-    getSourceRegistryKey(String(sourceInfo?.site || '').trim())
-  ).trim()
-  const normalizedService = String(sourceInfo?.service || '').trim()
-  const normalizedUserId = String(sourceInfo?.userId || '').trim()
-  const normalizedUsername = sanitize(sourceInfo?.username)
-
-  for (const [canonicalName, entry] of Object.entries(registry || {})) {
-    const sources =
-      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
-
-    for (const [siteKey, sourceList] of Object.entries(sources)) {
-      if (normalizedSite && siteKey !== normalizedSite) continue
-
-      for (const source of Array.isArray(sourceList) ? sourceList : []) {
-        const sourceUrl = String(source?.url || '').trim()
-        const sourceService = String(source?.service || '').trim()
-        const sourceUserId = String(source?.userId || '').trim()
-        const sourceUsername = sanitize(source?.username)
-
-        if (normalizedUrl && sourceUrl === normalizedUrl) {
-          return canonicalName
-        }
-
-        if (
-          normalizedService &&
-          normalizedUserId &&
-          sourceService === normalizedService &&
-          sourceUserId === normalizedUserId
-        ) {
-          return canonicalName
-        }
-
-        if (
-          normalizedSite === 'reddit' &&
-          normalizedUsername &&
-          sourceUsername === normalizedUsername
-        ) {
-          return canonicalName
-        }
-      }
-    }
-  }
-
-  return null
-}
-
-function upsertHoghaulSource(entry, sourceInfo) {
-  const sourceKey = getSourceRegistryKey(sourceInfo.site)
-  const now = new Date().toISOString()
-  if (!entry.sources) entry.sources = {}
-  if (!Array.isArray(entry.sources[sourceKey])) entry.sources[sourceKey] = []
-
-  const sourceIndex = entry.sources[sourceKey].findIndex(
-    (source) =>
-      source?.url === sourceInfo.inputUrl ||
-      (source?.service === sourceInfo.service &&
-        source?.userId === sourceInfo.userId) ||
-      (sourceInfo.site === 'reddit' &&
-        source?.username &&
-        sanitize(source.username) === sanitize(sourceInfo.username))
-  )
-
-  const nextSource = {
-    url: sourceInfo.inputUrl,
-    service: sourceInfo.service,
-    userId: sourceInfo.userId,
-    username: sourceInfo.username || null,
-    discoveredAs: sourceInfo.rawName,
-    lastCheckedAt: now,
-  }
-
-  if (sourceIndex >= 0) {
-    entry.sources[sourceKey][sourceIndex] = {
-      ...entry.sources[sourceKey][sourceIndex],
-      ...nextSource,
-    }
-  } else {
-    entry.sources[sourceKey].push(nextSource)
-  }
-}
-
-function resolveAndTrackModel(rawName, sourceInfo, canonicalOverride) {
-  const registry = loadModelRegistry()
-  const cleanedRawName = sanitize(rawName) || 'unknown_model'
-  const cleanedOverride = sanitize(canonicalOverride)
-  const existingCanonicalBySource = findCanonicalModelNameBySource(
-    registry,
-    sourceInfo
-  )
-  const existingCanonical = cleanedOverride
-    ? findCanonicalModelName(registry, cleanedOverride)
-    : existingCanonicalBySource ||
-      findCanonicalModelName(registry, cleanedRawName)
-  const canonicalName =
-    existingCanonical ||
-    existingCanonicalBySource ||
-    cleanedOverride ||
-    cleanedRawName
-
-  registry[canonicalName] = ensureModelEntryShape(
-    registry[canonicalName],
-    canonicalName
-  )
-
-  const aliases = registry[canonicalName].aliases
-  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
-    aliases.push(cleanedRawName)
-  }
-  registry[canonicalName].aliases = sortStringValues(aliases)
-
-  upsertHoghaulSource(registry[canonicalName], {
-    ...sourceInfo,
-    rawName: cleanedRawName,
-  })
-  saveModelRegistry(registry)
-
-  return canonicalName
+function resetRunState() {
+  currentRunLog = null
+  successCount = 0
+  duplicateCount = 0
+  errorCount = 0
+  queuedVideoCount = 0
+  savedBytes = 0
+  browserMediaDownloader = null
+  runTerminationHandled = false
 }
 
 function registerSourceForRun(source, inputUrl, canonicalOverride) {
-  const modelName = resolveAndTrackModel(
+  const modelName = resolveAndTrackSourceModel(
+    registryPath,
     source.rawName,
     {
       ...source,
       inputUrl,
     },
-    canonicalOverride
+    canonicalOverride,
+    { unknownName: 'unknown_model' }
   )
   console.log(
     `Registered source in model_aliases.json: ${source.site}/${source.service}/${source.userId} -> ${modelName}`
@@ -322,270 +203,49 @@ function registerSourceForRun(source, inputUrl, canonicalOverride) {
 }
 
 function createModelFolders(modelName) {
-  const base = path.join(datasetDir, modelName)
-  const images = path.join(base, 'images')
-  const logDir = path.join(base, 'log')
-  const incompleteVideoDir = path.join(
-    rootDir,
-    'incomplete',
-    modelName,
-    'videos'
-  )
-
-  fs.mkdirSync(images, { recursive: true })
-  fs.mkdirSync(logDir, { recursive: true })
-  fs.mkdirSync(incompleteVideoDir, { recursive: true })
-
-  return {
-    base,
-    images,
-    logDir,
-    incompleteVideoDir,
-    createGifFolder: () => {
-      const gifPath = path.join(base, 'gif')
-      fs.mkdirSync(gifPath, { recursive: true })
-      return gifPath
-    },
-    createWebmFolder: () => {
-      const webmPath = path.join(base, 'webm')
-      fs.mkdirSync(webmPath, { recursive: true })
-      return webmPath
-    },
-  }
+  return datasetPaths.createModelFolders(modelName)
 }
 
 function getDatasetRelativePath(filePath) {
-  return path.relative(datasetDir, filePath).replace(/\\/g, '/')
+  return datasetPaths.getDatasetRelativePath(filePath)
 }
 
 function getQuarantineMirrorPath(filePath) {
-  return path.join(
-    quarantineDatasetDir,
-    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
-  )
+  return datasetPaths.getQuarantineMirrorPath(filePath)
 }
 
 function getNasMirrorPath(filePath) {
-  return path.join(
-    nasDatasetDir,
-    getDatasetRelativePath(filePath).replace(/\//g, path.sep)
-  )
+  return datasetPaths.getNasMirrorPath(filePath)
 }
 
 function isQuarantinedPath(filePath) {
-  return fs.existsSync(getQuarantineMirrorPath(filePath))
+  return datasetPaths.isQuarantinedPath(filePath)
 }
 
 function existsForRepair(filePath) {
-  if (fs.existsSync(filePath)) return !isQuarantinedPath(filePath)
-  return fs.existsSync(getNasMirrorPath(filePath))
+  return datasetPaths.existsForRepair(filePath)
 }
 
 function existsAtExactPath(filePath) {
-  return fs.existsSync(filePath)
+  return datasetPaths.existsAtExactPath(filePath)
 }
 
 function existsLocallyOrOnNas(filePath) {
-  if (existsAtExactPath(filePath)) return true
-  if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4')
-    return false
-  return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
-}
-
-function getRecordRefs(record) {
-  return Array.isArray(record?.refs)
-    ? record.refs
-        .map((ref) => String(ref || '').replace(/\\/g, '/'))
-        .filter(Boolean)
-    : []
-}
-
-function getActiveRecordRefs(record) {
-  return getRecordRefs(record).filter((relativePath) =>
-    existsLocallyOrOnNas(
-      path.join(datasetDir, relativePath.replace(/\//g, path.sep))
-    )
-  )
-}
-
-function getBitwiseDuplicationRecord(hash) {
-  const record = getBitwiseHashRecord(hash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isBitwiseDupe(hash),
-  }
-}
-
-function getVisualDuplicationRecord(visualHash) {
-  const record = getVisualHashRecord(visualHash)
-  const activeRefs = getActiveRecordRefs(record)
-  return {
-    record,
-    activeRefs,
-    isDuplicate: activeRefs.length > 0 && isVisualDupe(visualHash),
-  }
-}
-
-function isSameModelRef(modelName, relativePath) {
-  return String(relativePath || '').startsWith(`${modelName}/`)
-}
-
-function getFuzzyVisualDuplicationRecord(modelName, visualHash, maxDistance) {
-  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
-    return null
-  }
-
-  let bestMatch = null
-  for (const entry of getVisualHashEntries()) {
-    const candidateHash = String(entry?.hash || '')
-    const distance = getVisualHashDistance(visualHash, candidateHash)
-    if (distance === null || distance > maxDistance) continue
-
-    const activeRefs = getActiveRecordRefs(entry).filter((relativePath) =>
-      isSameModelRef(modelName, relativePath)
-    )
-    if (activeRefs.length === 0) continue
-
-    if (
-      !bestMatch ||
-      distance < bestMatch.distance ||
-      (distance === bestMatch.distance &&
-        candidateHash.localeCompare(bestMatch.matchedHash) < 0)
-    ) {
-      bestMatch = {
-        record: entry,
-        activeRefs,
-        distance,
-        matchedHash: candidateHash,
-        isDuplicate: true,
-      }
-    }
-  }
-
-  return bestMatch
-}
-
-function getPendingImageVisualDuplicate(modelName, visualHash, maxDistance) {
-  if (!visualHash || !Number.isFinite(maxDistance) || maxDistance < 0) {
-    return null
-  }
-
-  let bestMatch = null
-  for (const claim of pendingImageVisualClaims.values()) {
-    if (!claim || claim.modelName !== modelName) continue
-    const distance = getVisualHashDistance(visualHash, claim.visualHash)
-    if (distance === null || distance > maxDistance) continue
-    if (
-      !bestMatch ||
-      distance < bestMatch.distance ||
-      (distance === bestMatch.distance &&
-        claim.relativePath.localeCompare(bestMatch.activeRefs[0]) < 0)
-    ) {
-      bestMatch = {
-        activeRefs: [claim.relativePath],
-        distance,
-        matchedHash: claim.visualHash,
-        isDuplicate: true,
-      }
-    }
-  }
-
-  return bestMatch
-}
-
-function reservePendingImageVisualClaim(modelName, relativePath, visualHash) {
-  const claimKey = `${modelName}:${relativePath}`
-  pendingImageVisualClaims.set(claimKey, {
-    modelName,
-    relativePath,
-    visualHash,
-  })
-  return claimKey
-}
-
-function releasePendingImageVisualClaim(claimKey) {
-  if (!claimKey) return
-  pendingImageVisualClaims.delete(claimKey)
-}
-
-function buildHashMetadata(
-  modelName,
-  absolutePath,
-  mediaType,
-  sizeBytes,
-  uploadedDate
-) {
-  return {
-    root: 'dataset',
-    model: modelName,
-    bucket: path.basename(path.dirname(absolutePath)),
-    relativePath: getDatasetRelativePath(absolutePath),
-    filename: path.basename(absolutePath),
-    mediaType,
-    sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
-    modifiedAt: uploadedDate?.toISOString?.() || null,
-    source: 'hoghaul',
-  }
+  return datasetPaths.existsLocallyOrOnNas(filePath)
 }
 
 function parseResolvedDate(date) {
-  if (date instanceof Date && !isNaN(date.getTime())) return date
-  if (typeof date === 'string') {
-    const parsed = new Date(date)
-    if (!isNaN(parsed.getTime())) return parsed
-  }
-  return null
-}
-
-function resolveEffectiveFileDate(date) {
-  const parsed = parseResolvedDate(date)
-  return parsed || new Date()
-}
-
-function applyFileTimestamp(filePath, date) {
-  const effectiveDate = resolveEffectiveFileDate(date)
-  const ts = effectiveDate.getTime() / 1000
-  fs.utimesSync(filePath, ts, ts)
-  return effectiveDate
-}
-
-function removeFileIfExists(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return false
-  fs.unlinkSync(filePath)
-  return true
-}
-
-function moveFileIntoPlace(sourcePath, destinationPath) {
-  fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
-  try {
-    fs.renameSync(sourcePath, destinationPath)
-  } catch (err) {
-    if (err.code !== 'EXDEV') throw err
-    fs.copyFileSync(sourcePath, destinationPath)
-    fs.unlinkSync(sourcePath)
-  }
+  return mediaFileRecords.parseResolvedDate(date)
 }
 
 function startRunLog(modelName, inputUrl, folders, keepHistory) {
   runTerminationHandled = false
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const logPath = path.join(folders.logDir, `hoghaul-run-${stamp}.jsonl`)
-  const summaryPath = path.join(
-    folders.logDir,
-    'hoghaul-run-latest-summary.json'
-  )
-  const modelSummaryPath = path.join(folders.base, 'hoghaul-last-run.json')
-  currentRunLog = {
-    stamp,
-    logPath,
-    summaryPath,
-    modelSummaryPath,
+  currentRunLog = runLifecycle.createRunLog({
+    source: 'hoghaul',
     modelName,
     inputUrl,
-    keepHistory: Boolean(keepHistory),
-    startedAt: new Date().toISOString(),
+    folders,
+    keepHistory,
     counters: {
       saved: 0,
       skipped: 0,
@@ -600,101 +260,31 @@ function startRunLog(modelName, inputUrl, folders, keepHistory) {
       lazyExpectedBytes: 0,
       lazyTransferredBytes: 0,
     },
-    errors: [],
-  }
-
-  removeFileIfExists(modelSummaryPath)
-  fs.writeFileSync(
-    modelSummaryPath,
-    JSON.stringify(
-      {
-        startedAt: currentRunLog.startedAt,
-        modelName,
-        inputUrl,
-        status: 'running',
-      },
-      null,
-      2
-    ) + '\n'
-  )
-
-  appendRunEvent('run_started', {
-    modelName,
-    inputUrl,
-    logPath,
+    removeFileIfExists,
   })
 }
 
 function appendRunEvent(type, payload = {}) {
-  if (!currentRunLog) return
-  fs.appendFileSync(
-    currentRunLog.logPath,
-    JSON.stringify({
-      at: new Date().toISOString(),
-      type,
-      ...payload,
-    }) + '\n'
-  )
+  runLifecycle.appendRunEvent(currentRunLog, type, payload)
 }
 
 function recordRunError(category, details = {}) {
-  if (!currentRunLog) return
-  currentRunLog.errors.push({
-    at: new Date().toISOString(),
-    category,
-    ...details,
-  })
+  runLifecycle.recordRunError(currentRunLog, category, details)
 }
 
 function finalizeRunLog(extra = {}) {
-  if (!currentRunLog) return
-
-  const { status = 'finished', ...rest } = extra
-  const finishedAt = new Date().toISOString()
-  const durationMs = Math.max(
-    new Date(finishedAt).getTime() -
-      new Date(currentRunLog.startedAt).getTime(),
-    0
-  )
-  const summary = {
-    startedAt: currentRunLog.startedAt,
-    finishedAt,
-    durationMs,
-    modelName: currentRunLog.modelName,
-    inputUrl: currentRunLog.inputUrl,
-    logPath: currentRunLog.logPath,
-    counters: currentRunLog.counters,
-    transfer: currentRunLog.transfer,
-    errors: currentRunLog.errors,
-    ...rest,
-  }
-
-  fs.writeFileSync(
-    currentRunLog.summaryPath,
-    JSON.stringify(summary, null, 2) + '\n'
-  )
-  fs.writeFileSync(
-    currentRunLog.modelSummaryPath,
-    JSON.stringify(
-      {
-        ...summary,
-        status,
-      },
-      null,
-      2
-    ) + '\n'
-  )
-
-  const shouldKeepHistory =
-    currentRunLog.keepHistory || currentRunLog.errors.length > 0
-  if (!shouldKeepHistory) removeFileIfExists(currentRunLog.logPath)
-  currentRunLog = null
+  currentRunLog = runLifecycle.finalizeRunLog(currentRunLog, extra, {
+    removeFileIfExists,
+    summaryTrailingNewline: true,
+  })
 }
 
 function setExpectedMediaCount(total) {
-  if (!currentRunLog) return
-  currentRunLog.counters.expectedMedia =
+  runLifecycle.setRunCounter(
+    currentRunLog,
+    'expectedMedia',
     Number.isFinite(total) && total >= 0 ? total : 0
+  )
   resetProgressBar(null, 'scrape')
   logRunProgress()
 }
@@ -702,39 +292,26 @@ function setExpectedMediaCount(total) {
 function logRunProgress(context = '') {
   if (!currentRunLog) return
 
-  const processed = currentRunLog.counters.processed || 0
-  const expected = currentRunLog.counters.expectedMedia || 0
-  const saved = currentRunLog.counters.saved || 0
-  const skipped = currentRunLog.counters.skipped || 0
-  const duplicates = currentRunLog.counters.duplicates || 0
-  const failures = currentRunLog.counters.failures || 0
-  const remaining = Math.max(expected - processed, 0)
+  const stats = runLifecycle.getRunProgressStats(currentRunLog)
   const bottomText = [
-    `processed ${processed}/${expected}`,
-    `saved ${saved}`,
-    `skipped ${skipped}`,
-    `dupes ${duplicates}`,
-    `failed ${failures}`,
-    `remaining ${remaining}`,
+    `processed ${stats.processed}/${stats.expectedMedia}`,
+    `saved ${stats.saved}`,
+    `skipped ${stats.skipped}`,
+    `dupes ${stats.duplicates}`,
+    `failed ${stats.failures}`,
+    `remaining ${stats.remaining}`,
   ].join(' | ')
 
   if (context) logScrollingMessage(context)
-  logProgress(processed, Math.max(expected, 1), { bottomText })
+  logProgress(stats.processed, Math.max(stats.expectedMedia, 1), {
+    bottomText,
+  })
 }
 
 function noteMediaOutcome(kind, context = '') {
   if (!currentRunLog) return
 
-  currentRunLog.counters.processed += 1
-  if (kind === 'saved') {
-    currentRunLog.counters.saved += 1
-  } else if (kind === 'skipped') {
-    currentRunLog.counters.skipped += 1
-  } else if (kind === 'duplicate') {
-    currentRunLog.counters.duplicates += 1
-  } else if (kind === 'failed') {
-    currentRunLog.counters.failures += 1
-  }
+  runLifecycle.noteMediaOutcome(currentRunLog, kind)
 
   logRunProgress(context)
 }
@@ -769,6 +346,9 @@ function finalizeAbortedRun(status, error) {
 }
 
 function installProcessTerminationHandlers() {
+  if (processTerminationHandlersInstalled) return
+  processTerminationHandlersInstalled = true
+
   process.on('beforeExit', () => {
     finalizeAbortedRun(
       'interrupted',
@@ -808,611 +388,55 @@ function normalizeSeenUrl(url) {
 }
 
 function uniqueSeenUrls(values) {
-  return Array.from(
-    new Set(
-      values
-        .flat(Infinity)
-        .map((url) => normalizeSeenUrl(htmlDecode(url)))
-        .filter(Boolean)
-    )
-  )
+  return sharedMediaSeenIndex.uniqueSeenUrls(values)
 }
 
 function getEntryMediaUrls(entry) {
-  return uniqueSeenUrls([
-    entry?.mediaUrl,
-    entry?.jsonMediaUrl,
-    entry?.mediaUrls,
-    entry?.sourceUrls,
-  ])
+  return getMediaEntryUrls(entry, { normalizeUrl: normalizeSeenUrl })
 }
 
 function getEntryMediaPageUrls(entry) {
-  return uniqueSeenUrls([entry?.mediaPageUrl, entry?.mediaPageUrls])
+  return getMediaEntryPageUrls(entry, { normalizeUrl: normalizeSeenUrl })
 }
 
 function getEntrySeenDetails(entry) {
-  return {
-    mediaUrl: entry.mediaUrl,
-    mediaUrls: getEntryMediaUrls(entry),
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-  }
+  return getMediaEntrySeenDetails(entry, { normalizeUrl: normalizeSeenUrl })
+}
+
+function getEntrySourceDetails(entry) {
+  return getMediaEntrySourceDetails(entry)
+}
+
+function getEntryHashMetadata(entry = {}) {
+  return getMediaEntryHashMetadata(entry)
 }
 
 function getMediaSeenIndexPath(modelLogDir) {
-  return path.join(modelLogDir, 'milkmaid-seen-media-index.json')
+  return sharedMediaSeenIndex.getMediaSeenIndexPath(modelLogDir)
 }
 
 function loadMediaSeenIndex(modelLogDir) {
-  const indexPath = getMediaSeenIndexPath(modelLogDir)
-  if (mediaSeenIndexCache?.indexPath === indexPath)
-    return mediaSeenIndexCache.data
-
-  let parsed = {}
-  if (fs.existsSync(indexPath)) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
-    } catch (err) {
-      console.warn(
-        `Could not parse media seen index at ${indexPath}: ${err.message}`
-      )
-    }
-  }
-
-  const data = {
-    version: 1,
-    updatedAt: parsed?.updatedAt || null,
-    mediaPageUrls:
-      parsed?.mediaPageUrls && typeof parsed.mediaPageUrls === 'object'
-        ? parsed.mediaPageUrls
-        : {},
-    mediaUrls:
-      parsed?.mediaUrls && typeof parsed.mediaUrls === 'object'
-        ? parsed.mediaUrls
-        : {},
-  }
-  mediaSeenIndexCache = { indexPath, data }
-  return data
+  return sharedMediaSeenIndex.loadMediaSeenIndex(modelLogDir)
 }
 
 function saveMediaSeenIndex(modelLogDir, data) {
-  const indexPath = getMediaSeenIndexPath(modelLogDir)
-  data.updatedAt = new Date().toISOString()
-  fs.writeFileSync(indexPath, JSON.stringify(data, null, 2) + '\n')
-  mediaSeenIndexCache = { indexPath, data }
+  return sharedMediaSeenIndex.saveMediaSeenIndex(modelLogDir, data)
 }
 
 function getActiveMediaSeenRecord(modelLogDir, entry) {
-  if (!entry?.relativePath) return null
-  const absolutePath = path.join(
-    datasetDir,
-    String(entry.relativePath).replace(/\//g, path.sep)
-  )
-  if (!existsLocallyOrOnNas(absolutePath)) return null
-  return {
-    ...entry,
-    absolutePath,
-  }
+  return sharedMediaSeenIndex.getActiveMediaSeenRecord(entry)
 }
 
 function getSuccessfulSeenMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
-  const index = loadMediaSeenIndex(modelLogDir)
-  const mediaPageUrls = uniqueSeenUrls(
-    Array.isArray(mediaPageUrl) ? mediaPageUrl : [mediaPageUrl]
+  return sharedMediaSeenIndex.getSuccessfulSeenMediaMatch(
+    modelLogDir,
+    mediaPageUrl,
+    mediaUrl
   )
-  const mediaUrls = uniqueSeenUrls(
-    Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]
-  )
-
-  for (const normalizedMediaUrl of mediaUrls) {
-    const mediaEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaUrls[normalizedMediaUrl]
-    )
-    if (mediaEntry) return { matchType: 'media_url', ...mediaEntry }
-  }
-
-  if (mediaUrls.length > 0) return null
-
-  for (const normalizedMediaPageUrl of mediaPageUrls) {
-    const pageEntry = getActiveMediaSeenRecord(
-      modelLogDir,
-      index.mediaPageUrls[normalizedMediaPageUrl]
-    )
-    if (pageEntry) return { matchType: 'media_page_url', ...pageEntry }
-  }
-
-  return null
 }
 
 function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
-  const relativePath = String(details.relativePath || '').trim()
-  if (!relativePath) return
-
-  const index = loadMediaSeenIndex(modelLogDir)
-  const mediaPageUrls = uniqueSeenUrls([
-    details.mediaPageUrl,
-    details.mediaPageUrls,
-  ])
-  const mediaUrls = uniqueSeenUrls([details.mediaUrl, details.mediaUrls])
-  const payload = {
-    relativePath,
-    filename: details.filename || path.basename(relativePath),
-    mediaUrl: mediaUrls[0] || null,
-    mediaUrls,
-    mediaPageUrl: mediaPageUrls[0] || null,
-    mediaPageUrls,
-    savedAt: new Date().toISOString(),
-  }
-
-  let changed = false
-  for (const normalizedMediaPageUrl of mediaPageUrls) {
-    if (
-      index.mediaPageUrls[normalizedMediaPageUrl]?.relativePath !== relativePath
-    ) {
-      index.mediaPageUrls[normalizedMediaPageUrl] = payload
-      changed = true
-    }
-  }
-  for (const normalizedMediaUrl of mediaUrls) {
-    if (index.mediaUrls[normalizedMediaUrl]?.relativePath !== relativePath) {
-      index.mediaUrls[normalizedMediaUrl] = payload
-      changed = true
-    }
-  }
-
-  if (changed) saveMediaSeenIndex(modelLogDir, index)
-}
-
-function decodeBody(buffer, headers) {
-  const encoding = String(headers['content-encoding'] || '').toLowerCase()
-  if (encoding.includes('br')) return zlib.brotliDecompressSync(buffer)
-  if (encoding.includes('gzip')) return zlib.gunzipSync(buffer)
-  if (encoding.includes('deflate')) return zlib.inflateSync(buffer)
-  return buffer
-}
-
-function requestBuffer(url, options = {}) {
-  const {
-    method = 'GET',
-    headers = {},
-    timeoutMs = REQUEST_TIMEOUT_MS,
-    maxRedirects = 5,
-    onProgress = null,
-  } = options
-
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url)
-    const client = parsed.protocol === 'https:' ? https : http
-    const req = client.request(
-      parsed,
-      {
-        method,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          ...headers,
-        },
-      },
-      (res) => {
-        const statusCode = res.statusCode || 0
-        const redirect = res.headers.location
-        if (
-          [301, 302, 303, 307, 308].includes(statusCode) &&
-          redirect &&
-          maxRedirects > 0
-        ) {
-          res.resume()
-          const nextUrl = new URL(redirect, url).toString()
-          requestBuffer(nextUrl, {
-            method: statusCode === 303 ? 'GET' : method,
-            headers,
-            timeoutMs,
-            maxRedirects: maxRedirects - 1,
-            onProgress,
-          }).then(resolve, reject)
-          return
-        }
-
-        if (statusCode < 200 || statusCode >= 300) {
-          const chunks = []
-          res.on('data', (chunk) => chunks.push(chunk))
-          res.on('end', () => {
-            const raw = Buffer.concat(chunks)
-            let body
-            try {
-              body = decodeBody(raw, res.headers).toString('utf8')
-            } catch {
-              body = raw.toString('utf8')
-            }
-            body = body.replace(/\s+/g, ' ').trim().slice(0, 500)
-            reject(new Error(`HTTP ${statusCode}: ${body}`))
-          })
-          return
-        }
-
-        if (method === 'HEAD') {
-          res.resume()
-          resolve({
-            buffer: Buffer.alloc(0),
-            headers: res.headers,
-            statusCode,
-            url,
-          })
-          return
-        }
-
-        const chunks = []
-        let downloadedBytes = 0
-        const totalBytes = Number.parseInt(
-          res.headers['content-length'] || '0',
-          10
-        )
-        const startedAt = Date.now()
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length
-          chunks.push(chunk)
-          if (onProgress) {
-            onProgress({
-              downloadedBytes,
-              totalBytes,
-              chunkBytes: chunk.length,
-              elapsedMs: Date.now() - startedAt,
-            })
-          }
-        })
-        res.on('end', () => {
-          const raw = Buffer.concat(chunks)
-          resolve({
-            buffer: decodeBody(raw, res.headers),
-            headers: res.headers,
-            statusCode,
-            url,
-          })
-        })
-      }
-    )
-
-    req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`Request timed out after ${timeoutMs}ms`))
-    })
-    req.on('error', (err) => {
-      const message =
-        err?.message ||
-        err?.code ||
-        `Request failed for ${new URL(url).hostname}`
-      reject(new Error(message))
-    })
-    req.end()
-  })
-}
-
-function expandWindowsEnvVars(value) {
-  return String(value || '').replace(/%([^%]+)%/g, (_, name) => {
-    return process.env[name] || process.env[name.toUpperCase()] || ''
-  })
-}
-
-function existingPathFromCandidates(candidates) {
-  for (const candidate of candidates.filter(Boolean)) {
-    const expanded = expandWindowsEnvVars(candidate)
-    if (expanded && fs.existsSync(expanded)) return expanded
-  }
-  return null
-}
-
-function getDefaultBrowserExecutablePath() {
-  return existingPathFromCandidates([
-    process.env.HOGHAUL_BROWSER_EXECUTABLE,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    '%LOCALAPPDATA%\\Yandex\\YandexBrowser\\Application\\browser.exe',
-    '%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe',
-    '%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe',
-    '%PROGRAMFILES(X86)%\\Google\\Chrome\\Application\\chrome.exe',
-    '%LOCALAPPDATA%\\Microsoft\\Edge\\Application\\msedge.exe',
-    '%PROGRAMFILES(X86)%\\Microsoft\\Edge\\Application\\msedge.exe',
-    '%PROGRAMFILES%\\Microsoft\\Edge\\Application\\msedge.exe',
-  ])
-}
-
-function getDefaultBrowserProfileDir(sourceSite) {
-  return path.join(slopvaultRoot, 'hoghaul-browser-profile', sourceSite)
-}
-
-function normalizeCookieDomain(hostname) {
-  const lower = String(hostname || '').toLowerCase()
-  const parts = lower.split('.').filter(Boolean)
-  return `.${parts.slice(-2).join('.')}`
-}
-
-function parseCookieHeader(cookieHeader, sourceUrl) {
-  const parsedUrl = new URL(sourceUrl)
-  const domain = normalizeCookieDomain(parsedUrl.hostname)
-  return String(cookieHeader || '')
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const equalsIndex = part.indexOf('=')
-      if (equalsIndex <= 0) return null
-      return {
-        name: part.slice(0, equalsIndex).trim(),
-        value: part.slice(equalsIndex + 1).trim(),
-        domain,
-        path: '/',
-      }
-    })
-    .filter((cookie) => cookie?.name)
-}
-
-function parseNetscapeCookieFile(raw) {
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'))
-    .map((line) => {
-      const parts = line.split('\t')
-      if (parts.length < 7) return null
-      const [domain, , pathValue, secure, expires, name, value] = parts
-      return {
-        domain,
-        path: pathValue || '/',
-        secure: /^true$/i.test(secure),
-        expires: Number.parseInt(expires, 10) || undefined,
-        name,
-        value,
-      }
-    })
-    .filter((cookie) => cookie?.name)
-}
-
-function normalizeCookieJson(parsed, sourceUrl) {
-  const parsedUrl = new URL(sourceUrl)
-  const fallbackDomain = normalizeCookieDomain(parsedUrl.hostname)
-  const cookies = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(parsed?.cookies)
-      ? parsed.cookies
-      : Object.entries(parsed || {}).map(([name, value]) => ({ name, value }))
-
-  return cookies
-    .map((cookie) => {
-      if (!cookie?.name || cookie.value === undefined) return null
-      const normalized = {
-        name: String(cookie.name),
-        value: String(cookie.value),
-        domain: cookie.domain || fallbackDomain,
-        path: cookie.path || '/',
-      }
-      if (cookie.expires || cookie.expirationDate) {
-        normalized.expires = Math.floor(cookie.expires || cookie.expirationDate)
-      }
-      if (cookie.secure !== undefined)
-        normalized.secure = Boolean(cookie.secure)
-      if (cookie.httpOnly !== undefined)
-        normalized.httpOnly = Boolean(cookie.httpOnly)
-      if (cookie.sameSite) normalized.sameSite = cookie.sameSite
-      return normalized
-    })
-    .filter(Boolean)
-}
-
-function loadCookiesFromFile(cookieFile, sourceUrl) {
-  const expanded = expandWindowsEnvVars(cookieFile)
-  if (!expanded || !fs.existsSync(expanded)) {
-    throw new Error(`Cookie file does not exist: ${cookieFile}`)
-  }
-
-  const raw = fs.readFileSync(expanded, 'utf8').trim()
-  if (!raw) return []
-  if (raw.startsWith('{') || raw.startsWith('[')) {
-    return normalizeCookieJson(JSON.parse(raw), sourceUrl)
-  }
-  return parseNetscapeCookieFile(raw)
-}
-
-function getBrowserCookieList(sourceUrl, options) {
-  const cookies = []
-  if (options.cookieHeader) {
-    cookies.push(...parseCookieHeader(options.cookieHeader, sourceUrl))
-  }
-  if (options.cookieFile) {
-    cookies.push(...loadCookiesFromFile(options.cookieFile, sourceUrl))
-  }
-  return cookies
-}
-
-async function createBrowserMediaDownloader(source, options) {
-  let browser = null
-  let shouldCloseBrowser = true
-  if (options.browserConnect) {
-    const browserWSEndpoint = /^https?:\/\//i.test(options.browserConnect)
-      ? await getBrowserWebSocketEndpoint(options.browserConnect)
-      : options.browserConnect
-    console.log(`Browser media mode: connected browser (${browserWSEndpoint})`)
-    browser = await puppeteer.connect({ browserWSEndpoint })
-    shouldCloseBrowser = false
-  }
-
-  const executablePath =
-    options.browserExecutable || getDefaultBrowserExecutablePath()
-  const userDataDir =
-    options.browserProfile || getDefaultBrowserProfileDir(source.site)
-  const headless = options.headless ? 'new' : false
-  if (!browser) {
-    fs.mkdirSync(userDataDir, { recursive: true })
-
-    const launchOptions = {
-      headless,
-      userDataDir,
-      defaultViewport: null,
-      args: [
-        '--ignore-certificate-errors',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-extensions',
-      ],
-      ignoreHTTPSErrors: true,
-    }
-    if (executablePath) launchOptions.executablePath = executablePath
-
-    console.log(
-      `Browser media mode: ${executablePath || 'bundled Chromium'} (${headless ? 'headless' : 'headful'})`
-    )
-    console.log(`Browser profile: ${userDataDir}`)
-
-    browser = await puppeteer.launch(launchOptions)
-  }
-  const cookies = getBrowserCookieList(source.inputUrl, options)
-  if (cookies.length) {
-    const cookiePage = await browser.newPage()
-    await cookiePage.setCookie(...cookies)
-    await cookiePage.close()
-    console.log(
-      `Loaded ${cookies.length} browser cookie(s) for media requests.`
-    )
-  }
-
-  const warmupPage = await browser.newPage()
-  await warmupPage.setExtraHTTPHeaders({
-    'Accept-Language': 'en-US,en;q=0.9',
-  })
-  await warmupPage
-    .goto(source.inputUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: options.timeoutMs,
-    })
-    .catch((err) => {
-      appendRunEvent('browser_warmup_warning', {
-        url: source.inputUrl,
-        error: err.message,
-      })
-      console.warn(`Browser warmup warning: ${err.message}`)
-    })
-  if (options.validateMs > 0) {
-    console.log(
-      `Browser validation pause: ${Math.round(options.validateMs / 1000)}s. Use the opened browser window to pass any site check.`
-    )
-    await new Promise((resolve) => setTimeout(resolve, options.validateMs))
-  }
-
-  async function getCookieHeaderFor(mediaUrl) {
-    const cookiesForRequest = await warmupPage
-      .cookies(source.inputUrl, mediaUrl)
-      .catch(() => [])
-    const browserCookieHeader = cookiesForRequest
-      .map((cookie) => `${cookie.name}=${cookie.value}`)
-      .join('; ')
-    return [options.cookieHeader, browserCookieHeader]
-      .filter(Boolean)
-      .join('; ')
-  }
-
-  return {
-    async download(mediaUrl, entry = {}) {
-      const cookieHeader = await getCookieHeaderFor(mediaUrl)
-      try {
-        const response = await requestBuffer(mediaUrl, {
-          timeoutMs: options.timeoutMs,
-          headers: {
-            Accept: '*/*',
-            Referer: entry.mediaPageUrl || source.inputUrl,
-            ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-          },
-        })
-        return response.buffer
-      } catch (err) {
-        appendRunEvent('browser_cookie_http_error', {
-          mediaUrl,
-          mediaPageUrl: entry.mediaPageUrl,
-          error: err.message,
-          hadCookieHeader: Boolean(cookieHeader),
-        })
-      }
-
-      const page = await browser.newPage()
-      try {
-        await page.setExtraHTTPHeaders({
-          Accept: '*/*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          Referer: entry.mediaPageUrl || source.inputUrl,
-        })
-        const response = await page.goto(mediaUrl, {
-          waitUntil: 'load',
-          timeout: options.timeoutMs,
-        })
-        if (!response) throw new Error('Browser returned no response')
-        const status = response.status()
-        if (status < 200 || status >= 300) {
-          throw new Error(`Browser HTTP ${status}`)
-        }
-        return await response.buffer()
-      } finally {
-        await page.close().catch(() => {})
-      }
-    },
-    async extractPostMediaUrls(postPageUrl) {
-      const page = await browser.newPage()
-      try {
-        await page.setExtraHTTPHeaders({
-          'Accept-Language': 'en-US,en;q=0.9',
-          Referer: source.inputUrl,
-        })
-        await page.goto(postPageUrl, {
-          waitUntil: 'domcontentloaded',
-          timeout: options.timeoutMs,
-        })
-        await page
-          .waitForSelector(
-            'a.fileThumb.image-link, a.post__attachment-link[href], video source[src]',
-            { timeout: 10000 }
-          )
-          .catch(() => {})
-        return await page.evaluate(() => {
-          return Array.from(
-            document.querySelectorAll(
-              'a.fileThumb.image-link, a.post__attachment-link[href], video source[src]'
-            )
-          )
-            .map((el) => {
-              const value =
-                el.href ||
-                el.src ||
-                el.getAttribute('href') ||
-                el.getAttribute('src') ||
-                ''
-              if (!value) return null
-              return new URL(value, location.href).toString()
-            })
-            .filter(Boolean)
-        })
-      } finally {
-        await page.close().catch(() => {})
-      }
-    },
-    async close() {
-      await warmupPage.close().catch(() => {})
-      if (shouldCloseBrowser) {
-        await browser.close().catch(() => {})
-      } else {
-        browser.disconnect()
-      }
-    },
-  }
-}
-
-async function getBrowserWebSocketEndpoint(connectValue) {
-  const versionUrl = new URL('/json/version', connectValue).toString()
-  const response = await requestBuffer(versionUrl, {
-    headers: { Accept: 'application/json' },
-  })
-  const version = JSON.parse(response.buffer.toString('utf8'))
-  if (!version.webSocketDebuggerUrl) {
-    throw new Error(`No webSocketDebuggerUrl found at ${versionUrl}`)
-  }
-  return version.webSocketDebuggerUrl
+  return sharedMediaSeenIndex.recordSuccessfulSeenMedia(modelLogDir, details)
 }
 
 async function closeBrowserMediaDownloader() {
@@ -1425,222 +449,15 @@ async function closeBrowserMediaDownloader() {
 async function fetchJson(url) {
   const parsed = new URL(url)
   const isReddit = parsed.hostname.toLowerCase().endsWith('reddit.com')
-  const response = await requestBuffer(url, {
+  return httpClient.fetchJson(url, {
     headers: {
       Accept: isReddit ? 'application/json' : API_ACCEPT_HEADER,
     },
   })
-  const body = response.buffer.toString('utf8')
-  return {
-    data: JSON.parse(body),
-    byteLength: response.buffer.length,
-    url,
-  }
 }
 
 async function fetchHtml(url) {
-  const response = await requestBuffer(url, {
-    headers: {
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-  })
-  return {
-    html: response.buffer.toString('utf8'),
-    byteLength: response.buffer.length,
-    url,
-  }
-}
-
-async function fetchRedgifsJson(url) {
-  const token = await getRedgifsToken()
-  const response = await requestBuffer(url, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-  })
-  return JSON.parse(response.buffer.toString('utf8'))
-}
-
-async function getRedgifsToken() {
-  if (redgifsAuth?.token && redgifsAuth.expiresAt > Date.now() + 60000) {
-    return redgifsAuth.token
-  }
-
-  const response = await requestBuffer(REDGIFS_TEMP_AUTH_URL, {
-    headers: {
-      Accept: 'application/json',
-    },
-  })
-  const data = JSON.parse(response.buffer.toString('utf8'))
-  if (!data?.token) throw new Error('RedGIFs temporary auth returned no token')
-
-  redgifsAuth = {
-    token: data.token,
-    expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-  }
-  return redgifsAuth.token
-}
-
-function parseRedgifsId(url) {
-  try {
-    const parsed = new URL(url)
-    const host = parsed.hostname.toLowerCase()
-    if (!host.includes('redgifs.com')) return null
-    const parts = parsed.pathname.split('/').filter(Boolean)
-    const markerIndex = parts.findIndex((part) =>
-      ['watch', 'ifr', 'iframe'].includes(part.toLowerCase())
-    )
-    const rawId =
-      markerIndex >= 0 ? parts[markerIndex + 1] : parts[parts.length - 1]
-    return sanitize(rawId)
-  } catch {
-    return null
-  }
-}
-
-async function resolveRedgifsEntry(source, post, redgifsUrl, uploadedDate) {
-  const id = parseRedgifsId(redgifsUrl)
-  if (!id) return null
-
-  const data = await fetchRedgifsJson(
-    `${REDGIFS_GIF_API_BASE}/${encodeURIComponent(id)}`
-  )
-  const gif = data?.gif
-  const mediaUrl = gif?.urls?.hd || gif?.urls?.sd
-  if (!mediaUrl) return null
-
-  const canonicalRedgifsUrl = id ? `https://www.redgifs.com/watch/${id}` : null
-  const filename = `${source.rawName}_reddit_${post.id}_redgifs_${id}${
-    path.extname(new URL(mediaUrl).pathname) || '.mp4'
-  }`
-  const createDateSeconds = Number(gif.createDate)
-  const createdDate =
-    Number.isFinite(createDateSeconds) && createDateSeconds > 0
-      ? new Date(createDateSeconds * 1000)
-      : uploadedDate
-
-  return {
-    postId: String(post.id || ''),
-    title: post.title || null,
-    mediaPageUrl: getPostPageUrl(source, post),
-    mediaPageUrls: getRedditMediaPageUrls(source, post),
-    mediaUrl,
-    mediaUrls: uniqueSeenUrls([mediaUrl, gif?.urls?.hd, gif?.urls?.sd]),
-    sourceUrls: uniqueSeenUrls([
-      redgifsUrl,
-      canonicalRedgifsUrl,
-      getRedditPostLinkedUrls(source, post),
-    ]),
-    filename,
-    originalName: id,
-    uploadedDate: parseResolvedDate(createdDate) || uploadedDate,
-  }
-}
-
-function normalizeCreatorName(value) {
-  return String(value || '')
-    .trim()
-    .replace(/^@+/, '')
-    .toLowerCase()
-}
-
-async function findCreatorIdByName(origin, service, creatorName) {
-  const { data: creators } = await fetchJson(`${origin}/api/v1/creators`)
-  if (!Array.isArray(creators)) return null
-
-  const normalizedName = normalizeCreatorName(creatorName)
-  const hit = creators.find(
-    (creator) =>
-      creator?.service === service &&
-      normalizeCreatorName(creator?.name) === normalizedName
-  )
-
-  return hit ? String(hit.id) : null
-}
-
-function parseSourceUrl(inputUrl) {
-  const parsed = new URL(inputUrl)
-  const host = parsed.hostname.toLowerCase()
-  const site = host.includes('coomerfans')
-    ? 'coomerfans'
-    : host.includes('coomer')
-      ? 'coomer'
-      : host.includes('kemono')
-        ? 'kemono'
-        : host.endsWith('reddit.com')
-          ? 'reddit'
-          : null
-  if (!site) throw new Error(`Unsupported Hoghaul host: ${parsed.hostname}`)
-
-  const parts = parsed.pathname.split('/').filter(Boolean)
-
-  if (site === 'reddit') {
-    if (parts[0]?.toLowerCase() === 'user' && parts[1]) {
-      const username = parts[1].replace(/^u_/, '')
-      return {
-        inputUrl,
-        origin: 'https://www.reddit.com',
-        site,
-        service: 'submitted',
-        userId: username,
-        username,
-        rawName: sanitize(username),
-      }
-    }
-
-    throw new Error(
-      'Expected a Reddit user URL like /user/name/submitted or /user/name'
-    )
-  }
-
-  if (site === 'coomerfans') {
-    if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
-      return {
-        inputUrl,
-        origin: parsed.origin,
-        site,
-        service: parts[1],
-        userId: parts[2],
-        rawName: sanitize(parts[3]),
-      }
-    }
-
-    const queryName = parsed.searchParams.get('q')
-    if (queryName) {
-      return {
-        inputUrl,
-        origin: parsed.origin,
-        site,
-        service: 'onlyfans',
-        userId: null,
-        rawName: sanitize(queryName),
-      }
-    }
-
-    throw new Error(
-      'Expected a CoomerFans URL like /u/onlyfans/id/name or /?q=name'
-    )
-  }
-
-  const userIndex = parts.indexOf('user')
-  const service = parts[0]
-  const userId = userIndex >= 0 ? parts[userIndex + 1] : null
-
-  if (!service || !userId) {
-    throw new Error(
-      'Expected a creator URL like /onlyfans/user/name or /patreon/user/id'
-    )
-  }
-
-  return {
-    inputUrl,
-    origin: parsed.origin,
-    site,
-    service,
-    userId,
-    rawName: sanitize(userId),
-  }
+  return httpClient.fetchHtml(url)
 }
 
 function parsePageRange(value) {
@@ -1666,39 +483,25 @@ function parsePageRange(value) {
   return { startPage: 0, endPage: pageCount - 1 }
 }
 
-function isTruthyFlag(value) {
-  if (value === true) return true
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-  return ['1', 'true', 'yes'].includes(normalized)
-}
-
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
-function getPostPageUrl(source, post) {
-  if (source.site === 'coomerfans') {
-    return (
-      post.url ||
-      `${source.origin}/p/${post.id}/${source.userId}/${source.service}`
-    )
-  }
-  if (source.site === 'reddit') {
-    return post.permalink
-      ? new URL(post.permalink, source.origin).toString()
-      : `${source.origin}/comments/${post.id}`
-  }
-  return `${source.origin}/${source.service}/user/${source.userId}/post/${post.id}`
-}
+function printMediaSample(entries, limit = 5) {
+  const sample = entries.slice(0, limit)
+  if (sample.length === 0) return
 
-function getMediaUrl(source, media) {
-  const mediaPath = String(media?.path || '').trim()
-  if (!mediaPath) return null
-  if (/^https?:\/\//i.test(mediaPath)) return mediaPath
-  return `${source.origin}/data${mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`}`
+  console.log('Media sample:')
+  for (const entry of sample) {
+    const sourceBits = [
+      entry.sourceSite,
+      entry.sourceSubreddit ? `r/${entry.sourceSubreddit}` : null,
+      entry.postId ? `post:${entry.postId}` : null,
+    ].filter(Boolean)
+    const sourceText = sourceBits.length ? ` (${sourceBits.join(', ')})` : ''
+    console.log(`- ${entry.filename}${sourceText}`)
+  }
 }
 
 function filenameFromMediaUrl(mediaUrl) {
@@ -1710,239 +513,14 @@ function filenameFromMediaUrl(mediaUrl) {
   }
 }
 
-function getRedditPostDate(post) {
-  const createdUtc = Number(post?.created_utc)
-  if (Number.isFinite(createdUtc) && createdUtc > 0) {
-    return new Date(createdUtc * 1000)
-  }
-  return parseResolvedDate(post?.created)
-}
-
-function getRedditLinkedUrl(source, value) {
-  const url = htmlDecode(value)
-  if (!url) return null
-  try {
-    return new URL(url, source.origin).toString()
-  } catch {
-    return url
-  }
-}
-
-function isRedditContainerUrl(source, post, value) {
-  if (!value) return false
-  try {
-    const parsed = new URL(value, source.origin)
-    const host = parsed.hostname.toLowerCase()
-    if (!host.endsWith('reddit.com')) return false
-    const pathname = parsed.pathname.toLowerCase()
-    const postId = String(post?.id || '').toLowerCase()
-    return (
-      pathname.includes(`/comments/${postId}`) ||
-      pathname.includes(`/gallery/${postId}`) ||
-      parsed.toString() === getPostPageUrl(source, post)
-    )
-  } catch {
-    return false
-  }
-}
-
-function getRedditPostLinkedUrls(source, post) {
-  return uniqueSeenUrls([
-    getRedditLinkedUrl(source, post?.url_overridden_by_dest),
-    getRedditLinkedUrl(source, post?.url),
-  ]).filter((url) => !isRedditContainerUrl(source, post, url))
-}
-
-function getRedditMediaPageUrls(source, post) {
-  const pageUrls = [getPostPageUrl(source, post)]
-  if (post?.is_gallery || post?.gallery_data) {
-    pageUrls.push(`${source.origin}/gallery/${post.id}`)
-  }
-  return uniqueSeenUrls(pageUrls)
-}
-
-function getRedditMediaMetadataUrls(metadata) {
-  return uniqueSeenUrls([
-    metadata?.s?.u,
-    metadata?.s?.gif,
-    metadata?.s?.mp4,
-    Array.isArray(metadata?.o) ? metadata.o.map((item) => item?.u) : [],
-    Array.isArray(metadata?.p) ? metadata.p.map((item) => item?.u) : [],
-  ])
-}
-
-function getRedditMediaMetadataUrl(metadata) {
-  return getRedditMediaMetadataUrls(metadata)[0] || ''
-}
-
-function extensionFromMime(mime) {
-  const normalized = String(mime || '').toLowerCase()
-  if (normalized.includes('jpeg') || normalized.includes('jpg')) return '.jpg'
-  if (normalized.includes('png')) return '.png'
-  if (normalized.includes('webp')) return '.webp'
-  if (normalized.includes('gif')) return '.gif'
-  if (normalized.includes('mp4')) return '.mp4'
-  return ''
-}
-
-function buildRedditFilename(source, post, mediaUrl, fallbackExt, index = 0) {
-  const urlName = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
-  const ext = path.extname(urlName || '') || fallbackExt || ''
-  const suffix = index > 0 ? `_${index + 1}` : ''
-  return `${source.rawName}_reddit_${post.id}${suffix}${ext || '.jpg'}`
-}
-
-function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
-  const filename =
-    options.filename ||
-    buildRedditFilename(
-      source,
-      post,
-      mediaUrl,
-      options.fallbackExt,
-      options.index
-    )
-  return {
-    postId: String(post.id || ''),
-    title: post.title || null,
-    mediaPageUrl: getPostPageUrl(source, post),
-    mediaPageUrls: getRedditMediaPageUrls(source, post),
-    mediaUrl,
-    mediaUrls: uniqueSeenUrls([mediaUrl, options.mediaUrls]),
-    sourceUrls: uniqueSeenUrls([
-      options.sourceUrls,
-      getRedditPostLinkedUrls(source, post),
-    ]),
-    filename,
-    originalName: options.originalName || filenameFromMediaUrl(mediaUrl),
-    uploadedDate,
-  }
-}
-
-function getNativeRedditVideoUrl(post) {
-  return (
-    post?.secure_media?.reddit_video?.fallback_url ||
-    post?.media?.reddit_video?.fallback_url ||
-    post?.preview?.reddit_video_preview?.fallback_url ||
-    null
-  )
-}
-
-function getNativeRedditVideoUrls(post) {
-  return uniqueSeenUrls([
-    post?.secure_media?.reddit_video?.fallback_url,
-    post?.secure_media?.reddit_video?.dash_url,
-    post?.secure_media?.reddit_video?.hls_url,
-    post?.media?.reddit_video?.fallback_url,
-    post?.media?.reddit_video?.dash_url,
-    post?.media?.reddit_video?.hls_url,
-    post?.preview?.reddit_video_preview?.fallback_url,
-    post?.preview?.reddit_video_preview?.dash_url,
-    post?.preview?.reddit_video_preview?.hls_url,
-  ])
-}
-
-function getRedditGalleryEntries(source, post, uploadedDate) {
-  const items = Array.isArray(post?.gallery_data?.items)
-    ? post.gallery_data.items
-    : []
-  const metadata = post?.media_metadata || {}
-
-  return items
-    .map((item, index) => {
-      const mediaId = item?.media_id
-      const meta = mediaId ? metadata[mediaId] : null
-      if (!meta || meta.status === 'failed') return null
-      const mediaUrl = getRedditMediaMetadataUrl(meta)
-      if (!mediaUrl) return null
-      return createRedditEntry(source, post, mediaUrl, uploadedDate, {
-        filename: buildRedditFilename(
-          source,
-          post,
-          mediaUrl,
-          extensionFromMime(meta.m),
-          index
-        ),
-        mediaUrls: getRedditMediaMetadataUrls(meta),
-        originalName: mediaId,
-      })
-    })
-    .filter(Boolean)
-}
-
-async function getRedditMediaEntries(source, post) {
-  const uploadedDate = getRedditPostDate(post)
-  const entries = getRedditGalleryEntries(source, post, uploadedDate)
-  const redgifsId = parseRedgifsId(post.url_overridden_by_dest || post.url)
-  let redgifsResolved = false
-  if (redgifsId) {
-    const redgifsEntry = await resolveRedgifsEntry(
-      source,
-      post,
-      post.url_overridden_by_dest || post.url,
-      uploadedDate
-    ).catch((err) => {
-      console.warn(`RedGIFs resolve failed for ${post.id}: ${err.message}`)
-      return null
-    })
-    if (redgifsEntry) {
-      entries.push(redgifsEntry)
-      redgifsResolved = true
-    }
-  }
-
-  const videoUrl = redgifsResolved ? null : getNativeRedditVideoUrl(post)
-  if (videoUrl) {
-    entries.push(
-      createRedditEntry(source, post, videoUrl, uploadedDate, {
-        fallbackExt: '.mp4',
-        mediaUrls: getNativeRedditVideoUrls(post),
-      })
-    )
-  }
-
-  const directUrl = htmlDecode(post.url_overridden_by_dest || post.url || '')
-  if (
-    /^https?:\/\/(?:i|preview)\.redd\.it\//i.test(directUrl) ||
-    /^https?:\/\/i\.redditmedia\.com\//i.test(directUrl)
-  ) {
-    entries.push(createRedditEntry(source, post, directUrl, uploadedDate))
-  }
-
-  return dedupeMediaEntries(entries).entries
-}
-
 function getMediaEntriesFromPost(source, post) {
   if (Array.isArray(post.mediaEntries)) return post.mediaEntries
-
-  const postPublishedAt = parseResolvedDate(post.published)
-  const mediaPageUrl = getPostPageUrl(source, post)
-  const rawEntries = []
-  if (post.file?.path) rawEntries.push(post.file)
-  if (Array.isArray(post.attachments)) rawEntries.push(...post.attachments)
-
-  const seen = new Set()
-  return rawEntries
-    .map((media) => {
-      const mediaUrl = getMediaUrl(source, media)
-      const filename = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
-      if (!mediaUrl || !filename) return null
-      const key = normalizeSeenUrl(mediaUrl)
-      if (seen.has(key)) return null
-      seen.add(key)
-      return {
-        postId: String(post.id || ''),
-        title: post.title || null,
-        mediaPageUrl,
-        mediaPageUrls: [mediaPageUrl],
-        mediaUrl,
-        mediaUrls: [mediaUrl],
-        filename,
-        originalName: media.name || null,
-        uploadedDate: postPublishedAt,
-      }
+  if (source.site === 'coomer' || source.site === 'kemono') {
+    return getCoomerKemonoMediaEntriesFromPost(source, post, {
+      normalizeUrl: normalizeSeenUrl,
     })
-    .filter(Boolean)
+  }
+  return []
 }
 
 async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
@@ -2042,10 +620,6 @@ function dedupeMediaEntries(entries) {
   }
 }
 
-function uniqueValues(values) {
-  return Array.from(new Set(values.filter(Boolean)))
-}
-
 function htmlDecode(value) {
   return String(value || '')
     .replace(/&amp;/g, '&')
@@ -2056,362 +630,59 @@ function htmlDecode(value) {
     .replace(/&gt;/g, '>')
 }
 
-function absoluteUrl(source, href) {
-  if (!href) return null
-  return new URL(htmlDecode(href), source.origin).toString()
-}
-
-function extractRegexValues(text, regex, group = 1) {
-  return Array.from(String(text || '').matchAll(regex))
-    .map((match) => match[group])
-    .filter(Boolean)
-}
-
-async function resolveCoomerFansCreator(source) {
-  if (source.userId) return source
-
-  const searchUrl = `${source.origin}/?q=${encodeURIComponent(source.rawName)}`
-  const { html } = await fetchHtml(searchUrl)
-  const candidates = extractRegexValues(
-    html,
-    /href=["']\/u\/([^/]+)\/(\d+)\/([^"']+)["']/gi,
-    0
-  )
-    .map((href) => {
-      const match = href.match(/\/u\/([^/]+)\/(\d+)\/([^"']+)/i)
-      if (!match) return null
-      return {
-        service: match[1],
-        userId: match[2],
-        rawName: sanitize(decodeURIComponent(match[3])),
-      }
-    })
-    .filter(Boolean)
-
-  const exact = candidates.find(
-    (candidate) =>
-      candidate.service === source.service &&
-      candidate.rawName === source.rawName
-  )
-  const fallback = candidates.find(
-    (candidate) => candidate.service === source.service
-  )
-  const resolved = exact || fallback
-  if (!resolved) {
-    throw new Error(`No CoomerFans creator found for ${source.rawName}`)
-  }
-
-  source.service = resolved.service
-  source.userId = resolved.userId
-  source.rawName = resolved.rawName
-  source.inputUrl = `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}`
-  console.log(
-    `Resolved CoomerFans creator ${source.rawName} -> ${source.service}/${source.userId}`
-  )
-  return source
-}
-
-function parseCoomerFansPostLinks(source, html) {
-  return uniqueValues(
-    extractRegexValues(html, /href=["'](\/p\/(\d+)\/(\d+)\/([^"']+))["']/gi, 1)
-  )
-    .filter((href) => href.includes(`/${source.userId}/`))
-    .map((href) => {
-      const match = href.match(/\/p\/(\d+)\/(\d+)\/([^/?#]+)/i)
-      return {
-        id: match?.[1] || path.basename(href),
-        url: absoluteUrl(source, href),
-      }
-    })
-    .filter((post) => post.id && post.url)
-}
-
-function parseCoomerFansDate(html) {
-  const decodedHtml = htmlDecode(html)
-  const match = decodedHtml.match(
-    /Added\s+([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9:]+\s+\+0000\s+UTC)/i
-  )
-  return match ? parseResolvedDate(match[1].replace(' UTC', '')) : null
-}
-
-function parseCoomerFansTitle(html) {
-  const ogTitle = String(html || '').match(
-    /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i
-  )?.[1]
-  if (ogTitle) return htmlDecode(ogTitle)
-  return htmlDecode(String(html || '').match(/<h1[^>]*>(.*?)<\/h1>/is)?.[1])
-    .replace(/<[^>]+>/g, ' ')
-    .trim()
-}
-
-function parseCoomerFansMediaEntries(source, post, html) {
-  const uploadedDate = parseCoomerFansDate(html)
-  const title = parseCoomerFansTitle(html) || null
-  const mediaUrls = uniqueValues(
-    extractRegexValues(
-      html,
-      /https?:\/\/(?:img\d+\.coomerfans\.com|coomerfans\.com)\/(?:storage|videos?)\/[^"'<> \r\n]+/gi,
-      0
-    )
-      .map((url) => htmlDecode(url))
-      .filter((url) => !url.includes('/istorage/'))
-  )
-
-  return mediaUrls
-    .map((mediaUrl) => {
-      const filename = filenameFromMediaUrl(mediaUrl)
-      if (!filename) return null
-      return {
-        postId: String(post.id || ''),
-        title,
-        mediaPageUrl: post.url,
-        mediaUrl,
-        filename,
-        originalName: null,
-        uploadedDate,
-      }
-    })
-    .filter(Boolean)
-}
-
-function getPostsApiUrl(source, offset = 0) {
-  return `${source.origin}/api/v1/${source.service}/user/${encodeURIComponent(
-    source.userId
-  )}/posts?o=${offset}`
-}
-
 async function preflightSourceJson(source, page = 0) {
   if (source.site === 'reddit') {
-    return preflightRedditSource(source)
+    return preflightRedditAdapterSource(source, {
+      fetchJson,
+      pageSize: REDDIT_PAGE_SIZE,
+    })
   }
-
-  const offset = page * API_PAGE_SIZE
-  const apiUrl = getPostsApiUrl(source, offset)
-  const { data, byteLength } = await fetchJson(apiUrl)
-
-  if (!Array.isArray(data)) {
-    throw new Error(
-      `Expected ${apiUrl} to return a JSON post array, got ${typeof data}`
-    )
+  if (source.site === 'coomerfans') {
+    return preflightCoomerFansSource(source, page, {
+      fetchHtml,
+      logger: console,
+    })
   }
-
-  const newest = data
-    .map((post) => parseResolvedDate(post?.published))
-    .filter(Boolean)
-    .sort((a, b) => b.getTime() - a.getTime())[0]
-
-  return {
-    apiUrl,
-    byteLength,
-    postCount: data.length,
-    newest,
-    firstPostId: data[0]?.id ? String(data[0].id) : null,
-  }
+  return preflightCoomerKemonoSource(source, page, {
+    fetchJson,
+    pageSize: API_PAGE_SIZE,
+  })
 }
 
 async function resolveKemonoCreatorIdForJson(source) {
-  if (source.site !== 'kemono' || /^\d+$/.test(source.userId)) {
-    return false
-  }
-
-  const resolvedId = await findCreatorIdByName(
-    source.origin,
-    source.service,
-    source.userId
-  ).catch(() => null)
-
-  if (!resolvedId) {
-    throw new Error(
-      `Kemono rejected "${source.userId}" for ${source.service}. Kemono creator URLs usually need the numeric creator ID, and that username was not found in /api/v1/creators.`
-    )
-  }
-
-  console.log(`Resolved Kemono creator ${source.userId} -> ${resolvedId}`)
-  source.userId = resolvedId
-  source.rawName = sanitize(resolvedId)
-  return true
-}
-
-async function fetchCoomerFansPosts(source, options) {
-  await resolveCoomerFansCreator(source)
-  const posts = []
-  let page = options.startPage
-  const postLimit = pLimit(options.postConcurrency || 1)
-
-  while (true) {
-    if (options.endPage !== null && page > options.endPage) break
-    const pageNumber = page + 1
-    const pageUrl =
-      pageNumber <= 1
-        ? `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}`
-        : `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}?page=${pageNumber}`
-    console.log(`Loading coomerfans page ${pageNumber} (${pageUrl})`)
-
-    const { html } = await fetchHtml(pageUrl)
-    const postLinks = parseCoomerFansPostLinks(source, html)
-    if (postLinks.length === 0) break
-
-    const selectedPostLinks =
-      Number.isFinite(options.maxPosts) && options.maxPosts > 0
-        ? postLinks.slice(0, Math.max(options.maxPosts - posts.length, 0))
-        : postLinks
-
-    const pagePosts = await Promise.all(
-      selectedPostLinks.map((post) =>
-        postLimit(async () => {
-          console.log(`Loading coomerfans post ${post.id}`)
-          const { html: postHtml } = await fetchHtml(post.url)
-          const mediaEntries = parseCoomerFansMediaEntries(
-            source,
-            post,
-            postHtml
-          )
-          return {
-            id: post.id,
-            url: post.url,
-            title: mediaEntries[0]?.title || null,
-            published: mediaEntries[0]?.uploadedDate || null,
-            mediaEntries,
-          }
-        })
-      )
-    )
-    posts.push(...pagePosts)
-
-    if (
-      Number.isFinite(options.maxPosts) &&
-      options.maxPosts > 0 &&
-      posts.length >= options.maxPosts
-    ) {
-      break
-    }
-
-    if (!html.includes(`?page=${pageNumber + 1}`)) break
-    page += 1
-  }
-
-  return posts
-}
-
-function getRedditListingUrl(source, after = null) {
-  const url = new URL(
-    `/user/${encodeURIComponent(source.username || source.userId)}/submitted/.json`,
-    source.origin
-  )
-  url.searchParams.set('limit', String(REDDIT_PAGE_SIZE))
-  url.searchParams.set('raw_json', '1')
-  if (after) url.searchParams.set('after', after)
-  return url.toString()
-}
-
-async function preflightRedditSource(source) {
-  const apiUrl = getRedditListingUrl(source)
-  const { data, byteLength } = await fetchJson(apiUrl)
-  const children = Array.isArray(data?.data?.children)
-    ? data.data.children.map((child) => child?.data).filter(Boolean)
-    : []
-  const newest = children
-    .map((post) => getRedditPostDate(post))
-    .filter(Boolean)
-    .sort((a, b) => b.getTime() - a.getTime())[0]
-
-  return {
-    apiUrl,
-    byteLength,
-    postCount: children.length,
-    newest,
-    firstPostId: children[0]?.id ? String(children[0].id) : null,
-  }
-}
-
-async function fetchRedditPosts(source, options) {
-  const posts = []
-  let after = null
-  let page = 0
-
-  while (true) {
-    if (options.endPage !== null && page > options.endPage) break
-    const apiUrl = getRedditListingUrl(source, after)
-    console.log(`Loading reddit page ${page + 1} (${apiUrl})`)
-    const { data } = await fetchJson(apiUrl)
-    const listing = data?.data
-    const pagePosts = Array.isArray(listing?.children)
-      ? listing.children.map((child) => child?.data).filter(Boolean)
-      : []
-    if (pagePosts.length === 0) break
-
-    for (const post of pagePosts) {
-      const mediaEntries = await getRedditMediaEntries(source, post)
-      posts.push({
-        ...post,
-        id: String(post.id || ''),
-        published: getRedditPostDate(post),
-        mediaEntries,
-      })
-      if (
-        Number.isFinite(options.maxPosts) &&
-        options.maxPosts > 0 &&
-        posts.length >= options.maxPosts
-      ) {
-        return posts
-      }
-    }
-
-    after = listing?.after || null
-    if (!after) break
-    page += 1
-  }
-
-  return posts
+  return resolveSharedKemonoCreatorIdForJson(source, {
+    fetchJson,
+    logger: console,
+  })
 }
 
 async function fetchPosts(source, options) {
   if (source.site === 'coomerfans') {
-    return fetchCoomerFansPosts(source, options)
+    return fetchCoomerFansAdapterPosts(source, options, {
+      fetchHtml,
+      logger: console,
+    })
   }
   if (source.site === 'reddit') {
-    return fetchRedditPosts(source, options)
+    return fetchRedditAdapterPosts(source, options, {
+      fetchJson,
+      logger: console,
+      normalizeUrl: normalizeSeenUrl,
+      pageSize: REDDIT_PAGE_SIZE,
+      redgifsClient,
+    })
   }
 
-  const posts = []
-  let page = options.startPage
-
-  while (true) {
-    if (options.endPage !== null && page > options.endPage) break
-    const offset = page * API_PAGE_SIZE
-    const apiUrl = getPostsApiUrl(source, offset)
-    console.log(`Loading ${source.site} page ${page + 1} (${apiUrl})`)
-
-    let pagePosts
-    try {
-      const pageResult = await fetchJson(apiUrl)
-      pagePosts = pageResult.data
-    } catch (err) {
-      if (source.site === 'kemono' && !/^\d+$/.test(source.userId)) {
-        await resolveKemonoCreatorIdForJson(source)
-        continue
-      }
-      throw err
-    }
-
-    if (!Array.isArray(pagePosts) || pagePosts.length === 0) break
-    posts.push(...pagePosts)
-    if (pagePosts.length < API_PAGE_SIZE) break
-    page += 1
-  }
-
-  return posts
+  return fetchCoomerKemonoPosts(source, options, {
+    fetchJson,
+    logger: console,
+    normalizeUrl: normalizeSeenUrl,
+    pageSize: API_PAGE_SIZE,
+  })
 }
 
 function classifyMedia(filename) {
-  const ext = path.extname(filename).toLowerCase()
-  if (['.mp4', '.m4v', '.webm', '.mov'].includes(ext))
-    return { ext, kind: 'video' }
-  if (ext === '.gif') return { ext, kind: 'gif' }
-  if (['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.avif'].includes(ext)) {
-    return { ext, kind: 'image' }
-  }
-  return { ext, kind: 'unknown' }
+  return classifyMediaFilename(filename)
 }
 
 async function downloadMediaBuffer(mediaUrl, entry = {}) {
@@ -2428,51 +699,31 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
 }
 
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
-  duplicateCount += 1
-  const seenDetails = getEntrySeenDetails(entry)
-  appendRunEvent(reason, {
-    filename: entry.filename,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrls: seenDetails.mediaUrls,
-    mediaPageUrls: seenDetails.mediaPageUrls,
+  hoghaulSavePipeline.recordDuplicate({
+    folders,
+    entry,
+    destination: {
+      relativePath: savedPath,
+      filename: entry.filename,
+    },
+    reason,
+    extra: extra && typeof extra === 'object' ? extra : {},
     savedPath,
-    ...(extra && typeof extra === 'object' ? extra : {}),
+    recordSeen: true,
   })
-  recordSuccessfulSeenMedia(folders.logDir, {
-    relativePath: savedPath,
-    filename: entry.filename,
-    ...seenDetails,
-  })
-  noteMediaOutcome(
-    isSkipReason(reason) ? 'skipped' : 'duplicate',
-    `${isSkipReason(reason) ? 'Skipped' : 'Duplicate'}: ${entry.filename}`
-  )
 }
 
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
-  const bucket = kind === 'gif' ? 'gif' : 'images'
-  const finalDir = kind === 'gif' ? folders.createGifFolder() : folders.images
-  const finalPath = path.join(finalDir, entry.filename)
-  const relativePath = getDatasetRelativePath(finalPath)
-
-  appendRunEvent('media_seen', {
+  const destination = hoghaulSavePipeline.getDestination({
     modelName,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-    mediaUrls: getEntryMediaUrls(entry),
-    filename: entry.filename,
-    extension: path.extname(entry.filename).toLowerCase(),
-    bucket,
-    candidateRelativePath: relativePath,
+    folders,
+    entry,
+    kind,
   })
 
-  const seenMediaMatch = getSuccessfulSeenMediaMatch(
-    folders.logDir,
-    getEntryMediaPageUrls(entry),
-    getEntryMediaUrls(entry)
-  )
+  hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
+
+  const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
       entry,
@@ -2480,166 +731,75 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
       'skip_seen_media',
       folders
     )
+    console.log(`Seen already: ${entry.filename}`)
     return
   }
 
-  if (existsLocallyOrOnNas(finalPath)) {
-    recordDuplicate(entry, relativePath, `skip_existing_${kind}`, folders)
+  const result = await hoghaulSavePipeline.saveImageLikeMedia({
+    modelName,
+    folders,
+    entry,
+    destination,
+    kind,
+    downloadBuffer: downloadMediaBuffer,
+    getBitwiseDuplicationRecord,
+    getVisualHashFromBuffer,
+    getVisualDuplicationRecord,
+    getFuzzyVisualDuplicationRecord,
+    getPendingImageVisualDuplicate,
+    reservePendingImageVisualClaim,
+    releasePendingImageVisualClaim,
+    addBitwiseHash,
+    addVisualHash,
+    saveBitwiseHashCache,
+    saveVisualHashCache,
+    duplicateRecordSeen: true,
+    visualChecks: kind === 'image',
+    fuzzyVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
+    pendingVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
+    saveVisualHashCacheOnSave: true,
+  })
+
+  if (result.reason?.startsWith('skip_existing_')) {
+    logScrollingMessage(`Exists already: ${entry.filename}`)
+    return
+  }
+  if (result.reason === 'duplicate_bitwise') {
+    logScrollingMessage(`Bitwise dupe: ${entry.filename}`)
+    return
+  }
+  if (result.reason === 'duplicate_visual') {
+    logScrollingMessage(`Visual dupe: ${entry.filename}`)
+    return
+  }
+  if (result.reason === 'duplicate_visual_fuzzy') {
+    logScrollingMessage(
+      `Fuzzy visual dupe (${result.match.distance}): ${entry.filename}`
+    )
+    return
+  }
+  if (result.reason === 'duplicate_visual_pending') {
+    logScrollingMessage(
+      `Pending visual dupe (${result.match.distance}): ${entry.filename}`
+    )
     return
   }
 
-  const buffer = await downloadMediaBuffer(entry.mediaUrl, entry)
-  const hash = createHash('md5').update(buffer).digest('hex')
-  const bitwiseMatch = getBitwiseDuplicationRecord(hash)
-  if (bitwiseMatch.isDuplicate) {
-    recordDuplicate(
-      entry,
-      bitwiseMatch.activeRefs[0],
-      'duplicate_bitwise',
-      folders
-    )
-    return
-  }
-
-  let visualHash = null
-  let visualClaimKey = null
-  if (kind === 'image') {
-    visualHash = await getVisualHashFromBuffer(buffer)
-    const visualMatch = visualHash
-      ? getVisualDuplicationRecord(visualHash)
-      : null
-    if (visualMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        visualMatch.activeRefs[0],
-        'duplicate_visual',
-        folders
-      )
-      return
-    }
-
-    const fuzzyMatch = visualHash
-      ? getFuzzyVisualDuplicationRecord(
-          modelName,
-          visualHash,
-          MAX_FUZZY_IMAGE_VISUAL_DISTANCE
-        )
-      : null
-    if (fuzzyMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        fuzzyMatch.activeRefs[0],
-        'duplicate_visual_fuzzy',
-        folders,
-        {
-          visualHash,
-          matchedVisualHash: fuzzyMatch.matchedHash,
-          distance: fuzzyMatch.distance,
-        }
-      )
-      return
-    }
-
-    const pendingMatch = visualHash
-      ? getPendingImageVisualDuplicate(
-          modelName,
-          visualHash,
-          MAX_FUZZY_IMAGE_VISUAL_DISTANCE
-        )
-      : null
-    if (pendingMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        pendingMatch.activeRefs[0],
-        'duplicate_visual_pending',
-        folders,
-        {
-          visualHash,
-          matchedVisualHash: pendingMatch.matchedHash,
-          distance: pendingMatch.distance,
-        }
-      )
-      return
-    }
-
-    visualClaimKey = reservePendingImageVisualClaim(
-      modelName,
-      relativePath,
-      visualHash
-    )
-  }
-
-  try {
-    fs.writeFileSync(finalPath, buffer)
-    const recordedDate = await mediaDates.recordImageDates(
-      path.join(datasetDir, modelName),
-      bucket,
-      entry.filename,
-      buffer,
-      entry.uploadedDate
-    )
-    const fileDate = applyFileTimestamp(
-      finalPath,
-      parseResolvedDate(recordedDate?.date) || entry.uploadedDate
-    )
-    const metadata = buildHashMetadata(
-      modelName,
-      finalPath,
-      kind === 'gif' ? 'gif' : 'image',
-      buffer.length,
-      fileDate
-    )
-
-    addBitwiseHash(hash, metadata)
-    if (visualHash) addVisualHash(visualHash, metadata)
-    saveBitwiseHashCache()
-    if (visualHash) saveVisualHashCache()
-
-    successCount += 1
-    savedBytes += buffer.length
-    if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += buffer.length
-    }
-    recordSuccessfulSeenMedia(folders.logDir, {
-      relativePath,
-      filename: entry.filename,
-      ...getEntrySeenDetails(entry),
-    })
-    appendRunEvent(kind === 'gif' ? 'saved_gif' : 'saved_image', {
-      modelName,
-      filename: entry.filename,
-      savedPath: relativePath,
-      hash,
-      visualHash,
-    })
-    noteMediaOutcome('saved', `Saved ${kind}: ${entry.filename}`)
-  } finally {
-    releasePendingImageVisualClaim(visualClaimKey)
-  }
+  logScrollingMessage(`Saved ${kind}: ${entry.filename}`)
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
-  const finalPath = path.join(folders.createWebmFolder(), entry.filename)
-  const tmpPath = path.join(folders.incompleteVideoDir, entry.filename)
-  const relativePath = getDatasetRelativePath(finalPath)
-
-  appendRunEvent('media_seen', {
+  const destination = hoghaulSavePipeline.getDestination({
     modelName,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-    mediaUrls: getEntryMediaUrls(entry),
-    filename: entry.filename,
-    extension: path.extname(entry.filename).toLowerCase(),
-    bucket: 'webm',
-    candidateRelativePath: relativePath,
+    folders,
+    entry,
+    kind: 'video',
   })
+  const { finalPath, tmpPath, relativePath } = destination
 
-  const seenMediaMatch = getSuccessfulSeenMediaMatch(
-    folders.logDir,
-    getEntryMediaPageUrls(entry),
-    getEntryMediaUrls(entry)
-  )
+  hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
+
+  const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
       entry,
@@ -2647,24 +807,21 @@ async function saveVideoMedia(modelName, folders, entry) {
       'skip_seen_media',
       folders
     )
+    logScrollingMessage(`Seen already: ${entry.filename}`)
     return
   }
 
-  if (existsLocallyOrOnNas(finalPath)) {
+  if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
     recordDuplicate(entry, relativePath, 'skip_lazy_existing', folders)
+    logScrollingMessage(`Exists already: ${entry.filename}`)
     return
   }
 
-  queuedVideoCount += 1
-  if (currentRunLog) currentRunLog.counters.queuedVideos += 1
-  appendRunEvent('queued_lazy_video', {
+  hoghaulSavePipeline.queueVideo({
     modelName,
-    filename: entry.filename,
-    mediaUrl: entry.mediaUrl,
-    mediaPageUrl: entry.mediaPageUrl,
-    mediaUrls: getEntryMediaUrls(entry),
-    mediaPageUrls: getEntryMediaPageUrls(entry),
-    savedPath: relativePath,
+    folders,
+    entry,
+    destination,
   })
 
   try {
@@ -2681,90 +838,57 @@ async function saveVideoMedia(modelName, folders, entry) {
         folders
       )
       removeFileIfExists(tmpPath)
+      logScrollingMessage(`Bitwise dupe: ${entry.filename}`)
       return
     }
 
-    moveFileIntoPlace(tmpPath, finalPath)
-    const recordedDate = await mediaDates.recordVideoDates(
-      path.join(datasetDir, modelName),
-      'webm',
-      entry.filename,
-      finalPath,
-      entry.uploadedDate
-    )
-    const fileDate = applyFileTimestamp(
-      finalPath,
-      parseResolvedDate(recordedDate?.date) || entry.uploadedDate
-    )
-    const stat = fs.statSync(finalPath)
-    let visualHash = await getVisualHashFromVideoPath(finalPath)
-    const visualMatch = visualHash
-      ? getVisualDuplicationRecord(visualHash)
-      : null
-    if (visualMatch?.isDuplicate) {
-      recordDuplicate(
-        entry,
-        visualMatch.activeRefs[0],
-        'duplicate_visual',
-        folders
-      )
-      removeFileIfExists(finalPath)
-      return
-    }
-
-    const metadata = buildHashMetadata(
+    const result = await hoghaulSavePipeline.finalizeVideoFile({
       modelName,
-      finalPath,
-      'video',
-      stat.size,
-      fileDate
-    )
-    addBitwiseHash(hash, metadata)
-    if (visualHash) addVisualHash(visualHash, metadata)
-    saveBitwiseHashCache()
-    saveVisualHashCache()
-
-    successCount += 1
-    savedBytes += stat.size
-    if (currentRunLog) {
-      currentRunLog.transfer.savedBytes += stat.size
-      currentRunLog.transfer.lazyTransferredBytes += stat.size
-    }
-    recordSuccessfulSeenMedia(folders.logDir, {
-      relativePath,
-      filename: entry.filename,
-      ...getEntrySeenDetails(entry),
-    })
-    appendRunEvent('saved_lazy_video', {
-      modelName,
-      filename: entry.filename,
-      savedPath: relativePath,
+      folders,
+      entry,
+      destination,
+      sourcePath: tmpPath,
+      moveFileIntoPlace,
       hash,
-      visualHash,
+      getVisualHashFromVideoPath,
+      getVisualDuplicationRecord,
+      addBitwiseHash,
+      addVisualHash,
+      saveBitwiseHashCache,
+      saveVisualHashCache,
+      removeFileIfExists,
+      checkVisualDuplicate: true,
+      duplicateRecordSeen: true,
     })
-    noteMediaOutcome('saved', `Saved video: ${entry.filename}`)
+
+    if (result.reason === 'duplicate_visual') {
+      logScrollingMessage(`Visual dupe: ${entry.filename}`)
+      return
+    }
+    logScrollingMessage(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)
     errorCount += 1
-    recordRunError('lazy_video_error', {
-      modelName,
-      filename: entry.filename,
-      mediaUrl: entry.mediaUrl,
-      mediaPageUrl: entry.mediaPageUrl,
-      savedPath: relativePath,
-      error: err.message,
-    })
-    appendRunEvent('lazy_video_error', {
-      modelName,
-      filename: entry.filename,
-      mediaUrl: entry.mediaUrl,
-      mediaPageUrl: entry.mediaPageUrl,
-      error: err.message,
-    })
-    noteMediaOutcome(
-      'failed',
-      `Failed video: ${entry.filename} - ${err.message}`
+    recordRunError(
+      'lazy_video_error',
+      hoghaulMediaSaver.buildErrorEvent({
+        modelName,
+        entry,
+        destination,
+        error: err,
+      })
     )
+    appendRunEvent(
+      'lazy_video_error',
+      hoghaulMediaSaver.buildErrorEvent({
+        modelName,
+        entry,
+        destination,
+        error: err,
+      })
+    )
+    noteMediaOutcome('failed', `video_error: ${entry.filename}`)
+    logScrollingMessage(`Failed video: ${entry.filename} - ${err.message}`)
   }
 }
 
@@ -2778,116 +902,30 @@ function hashFileFromPath(filePath) {
   })
 }
 
-function syncToNAS(modelName) {
-  return new Promise((resolve) => {
-    const cmd = `robocopy "%APPDATA%\\.slopvault\\dataset\\${modelName}" "Z:\\dataset\\${modelName}" /MIR /R:2 /W:5`
-    exec(cmd, (error, stdout, stderr) => {
-      const code = error?.code ?? 0
-      if (code > 3) {
-        console.error(`NAS sync failed with code ${code}: ${stderr || stdout}`)
-        resolve(false)
-      } else {
-        console.log('NAS sync complete.')
-        resolve(true)
-      }
-    })
-  })
-}
+async function run(argvInput = process.argv.slice(2)) {
+  resetRunState()
+  bannerHoghaul()
+  installProcessTerminationHandlers()
 
-async function run() {
-  const argv = minimist(process.argv.slice(2), {
-    string: [
-      'pages',
-      'model',
-      'max-posts',
-      'max-files',
-      'cookie',
-      'cookie-file',
-      'browser-executable',
-      'browser-profile',
-      'browser-connect',
-      'browser-validate-ms',
-      'post-concurrency',
-      'image-concurrency',
-      'video-concurrency',
-    ],
-    boolean: [
-      'dry-run',
-      'preflight',
-      'skip-nas-sync',
-      'track-source',
-      'keep-history',
-      'browser-media',
-      'browser-headless',
-      'headless',
-    ],
-    alias: {
-      model: 'm',
-    },
-    default: {
-      'browser-media': true,
-    },
+  const runOptions = normalizeHoghaulRunOptions(argvInput, {
+    requestTimeoutMs: REQUEST_TIMEOUT_MS,
   })
-  const inputUrl = argv._.find((arg) => /^https?:\/\//i.test(arg))
-  const dryRun =
-    argv['dry-run'] === true || isTruthyFlag(process.env.npm_config_dry_run)
-  const preflight =
-    argv.preflight === true || isTruthyFlag(process.env.npm_config_preflight)
-  const skipNasSync =
-    argv['skip-nas-sync'] === true ||
-    isTruthyFlag(process.env.npm_config_skip_nas_sync)
-  const trackSource =
-    argv['track-source'] === true ||
-    isTruthyFlag(process.env.npm_config_track_source)
-  const keepHistory =
-    argv['keep-history'] === true ||
-    isTruthyFlag(process.env.npm_config_keep_history)
-  let useBrowserMedia =
-    argv['browser-media'] !== false &&
-    !isTruthyFlag(process.env.npm_config_no_browser_media)
-  const browserHeadless =
-    argv.headless === true ||
-    argv['browser-headless'] === true ||
-    isTruthyFlag(process.env.npm_config_headless) ||
-    isTruthyFlag(process.env.HOGHAUL_BROWSER_HEADLESS)
-  const browserOptions = {
-    browserExecutable:
-      argv['browser-executable'] ||
-      process.env.npm_config_browser_executable ||
-      process.env.HOGHAUL_BROWSER_EXECUTABLE,
-    browserProfile:
-      argv['browser-profile'] ||
-      process.env.npm_config_browser_profile ||
-      process.env.HOGHAUL_BROWSER_PROFILE,
-    browserConnect:
-      argv['browser-connect'] ||
-      process.env.npm_config_browser_connect ||
-      process.env.HOGHAUL_BROWSER_CONNECT,
-    cookieHeader:
-      argv.cookie ||
-      process.env.npm_config_cookie ||
-      process.env.HOGHAUL_COOKIE,
-    cookieFile:
-      argv['cookie-file'] ||
-      process.env.npm_config_cookie_file ||
-      process.env.HOGHAUL_COOKIE_FILE,
-    headless: browserHeadless,
-    timeoutMs: REQUEST_TIMEOUT_MS,
-    validateMs:
-      Number.parseInt(
-        argv['browser-validate-ms'] ||
-          process.env.npm_config_browser_validate_ms ||
-          process.env.HOGHAUL_BROWSER_VALIDATE_MS ||
-          '0',
-        10
-      ) || 0,
-  }
+  const {
+    inputUrl,
+    model,
+    dryRun,
+    preflight,
+    skipNasSync,
+    trackSource,
+    keepHistory,
+    browserOptions,
+  } = runOptions
+  let useBrowserMedia = runOptions.useBrowserMedia
   if (!inputUrl) {
     console.error(
       'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
     )
-    process.exitCode = 1
-    return
+    return 1
   }
 
   loadBitwiseHashCache()
@@ -2898,30 +936,19 @@ async function run() {
     useBrowserMedia = false
   }
   const imageConcurrency = parsePositiveInteger(
-    argv['image-concurrency'] ||
-      process.env.npm_config_image_concurrency ||
-      process.env.HOGHAUL_IMAGE_CONCURRENCY,
+    runOptions.imageConcurrency || process.env.HOGHAUL_IMAGE_CONCURRENCY,
     source.site === 'coomerfans' ? 3 : 6
   )
   const postConcurrency = parsePositiveInteger(
-    argv['post-concurrency'] ||
-      process.env.npm_config_post_concurrency ||
-      process.env.HOGHAUL_POST_CONCURRENCY,
+    runOptions.postConcurrency || process.env.HOGHAUL_POST_CONCURRENCY,
     source.site === 'coomerfans' ? 8 : 1
   )
   const videoConcurrency = parsePositiveInteger(
-    argv['video-concurrency'] ||
-      process.env.npm_config_video_concurrency ||
-      process.env.HOGHAUL_VIDEO_CONCURRENCY,
+    runOptions.videoConcurrency || process.env.HOGHAUL_VIDEO_CONCURRENCY,
     6
   )
-  const { startPage, endPage } = parsePageRange(
-    argv.pages || process.env.npm_config_pages
-  )
-  const maxPosts = Number.parseInt(
-    argv['max-posts'] || process.env.npm_config_max_posts,
-    10
-  )
+  const { startPage, endPage } = parsePageRange(runOptions.pages)
+  const maxPosts = Number.parseInt(runOptions.maxPosts, 10)
 
   if (preflight) {
     let report
@@ -2941,14 +968,10 @@ async function run() {
       `Newest post: ${report.newest ? report.newest.toISOString() : 'unknown'}`
     )
     if (trackSource) {
-      registerSourceForRun(
-        source,
-        inputUrl,
-        argv.model || process.env.npm_config_model
-      )
+      registerSourceForRun(source, inputUrl, model)
     }
     console.log('No API key or Authorization header was used.')
-    return
+    return 0
   }
 
   const posts = await fetchPosts(source, {
@@ -2959,15 +982,18 @@ async function run() {
   })
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
-  const mediaEntries = selectedPosts.flatMap((post) =>
-    getMediaEntriesFromPost(source, post)
+  const mediaEntries = normalizeMediaEntries(
+    selectedPosts.flatMap((post) => getMediaEntriesFromPost(source, post)),
+    {
+      sourceSite: source.site,
+      sourceService: source.service,
+      sourceUserId: source.userId,
+      sourceUsername: source.username,
+    }
   )
   const sourceDeduped = dedupeMediaEntries(mediaEntries)
   let selectedMediaSourceDuplicateCount = sourceDeduped.duplicateCount
-  const maxFiles = Number.parseInt(
-    argv['max-files'] || process.env.npm_config_max_files,
-    10
-  )
+  const maxFiles = Number.parseInt(runOptions.maxFiles, 10)
   let selectedMedia =
     Number.isFinite(maxFiles) && maxFiles > 0
       ? sourceDeduped.entries.slice(0, maxFiles)
@@ -2983,12 +1009,8 @@ async function run() {
       .filter(Boolean)
       .sort((a, b) => b.getTime() - a.getTime())[0]
     const modelNamePreview = trackSource
-      ? registerSourceForRun(
-          source,
-          inputUrl,
-          argv.model || process.env.npm_config_model
-        )
-      : sanitize(argv.model || source.rawName)
+      ? registerSourceForRun(source, inputUrl, model)
+      : sanitize(model || source.rawName)
     console.log(
       `Resolved ${source.site}/${source.service}/${source.userId} -> ${modelNamePreview}: ${selectedPosts.length} posts, ${selectedMedia.length} media files`
     )
@@ -2997,17 +1019,14 @@ async function run() {
         `Dry run source media dedupe: ${selectedMediaSourceDuplicateCount} repeated media URL(s)`
       )
     }
+    printMediaSample(selectedMedia)
     console.log(
       `Dry run only. Newest post: ${newest ? newest.toISOString() : 'unknown'}`
     )
-    return
+    return 0
   }
 
-  const modelName = registerSourceForRun(
-    source,
-    inputUrl,
-    argv.model || process.env.npm_config_model
-  )
+  const modelName = registerSourceForRun(source, inputUrl, model)
   const folders = createModelFolders(modelName)
 
   console.log(
@@ -3042,15 +1061,17 @@ async function run() {
   setExpectedMediaCount(selectedMedia.length)
 
   if (useBrowserMedia) {
-    browserMediaDownloader = await createBrowserMediaDownloader(
-      source,
-      browserOptions
-    )
+    browserMediaDownloader = await createSharedBrowserMediaDownloader(source, {
+      ...browserOptions,
+      slopvaultRoot,
+      requestBuffer,
+      appendRunEvent,
+    })
     appendRunEvent('browser_media_enabled', {
       browserExecutable: browserOptions.browserExecutable || null,
       browserProfile:
         browserOptions.browserProfile ||
-        getDefaultBrowserProfileDir(source.site),
+        getDefaultBrowserProfileDir(slopvaultRoot, source.site),
       browserConnect: browserOptions.browserConnect || null,
       headless: browserOptions.headless,
       cookieFile: browserOptions.cookieFile || null,
@@ -3061,6 +1082,12 @@ async function run() {
       selectedMedia,
       browserMediaDownloader
     )
+    selectedMedia = normalizeMediaEntries(selectedMedia, {
+      sourceSite: source.site,
+      sourceService: source.service,
+      sourceUserId: source.userId,
+      sourceUsername: source.username,
+    })
     const browserDeduped = dedupeMediaEntries(selectedMedia)
     if (browserDeduped.duplicateCount > 0) {
       selectedMedia = browserDeduped.entries
@@ -3086,22 +1113,35 @@ async function run() {
   const videos = []
 
   for (const entry of selectedMedia) {
-    const classification = classifyMedia(entry.filename)
+    const normalizedEntry = normalizeMediaEntry(entry, {
+      sourceSite: source.site,
+      sourceService: source.service,
+      sourceUserId: source.userId,
+      sourceUsername: source.username,
+    })
+    if (!normalizedEntry) {
+      continue
+    }
+    const classification = classifyMedia(normalizedEntry.filename)
     if (classification.kind === 'unknown') {
       appendRunEvent('skip_unknown_media', {
         modelName,
-        filename: entry.filename,
-        mediaUrl: entry.mediaUrl,
-        mediaPageUrl: entry.mediaPageUrl,
+        filename: normalizedEntry.filename,
+        mediaUrl: normalizedEntry.mediaUrl,
+        mediaPageUrl: normalizedEntry.mediaPageUrl,
+        ...getEntrySourceDetails(normalizedEntry),
         extension: classification.ext,
       })
-      noteMediaOutcome('skipped', `skip_unknown_media: ${entry.filename}`)
+      noteMediaOutcome(
+        'skipped',
+        `skip_unknown_media: ${normalizedEntry.filename}`
+      )
       continue
     }
     if (classification.kind === 'video') {
-      videos.push(entry)
+      videos.push(normalizedEntry)
     } else {
-      imageLike.push({ ...entry, kind: classification.kind })
+      imageLike.push({ ...normalizedEntry, kind: classification.kind })
     }
   }
 
@@ -3128,6 +1168,7 @@ async function run() {
             filename: entry.filename,
             mediaUrl: entry.mediaUrl,
             mediaPageUrl: entry.mediaPageUrl,
+            ...getEntrySourceDetails(entry),
             error: err.message,
           })
           appendRunEvent('media_error', {
@@ -3135,12 +1176,11 @@ async function run() {
             filename: entry.filename,
             mediaUrl: entry.mediaUrl,
             mediaPageUrl: entry.mediaPageUrl,
+            ...getEntrySourceDetails(entry),
             error: err.message,
           })
-          noteMediaOutcome(
-            'failed',
-            `Failed media: ${entry.filename} - ${err.message}`
-          )
+          noteMediaOutcome('failed', `media_error: ${entry.filename}`)
+          console.log(`Failed media: ${entry.filename} - ${err.message}`)
         }
       })
     )
@@ -3163,25 +1203,15 @@ async function run() {
   if (skipNasSync) {
     console.log('NAS sync skipped by --skip-nas-sync')
   } else {
-    const nasSyncOk = await syncToNAS(modelName)
-    if (nasSyncOk) {
-      mergeNasMp4Entries(
-        collectMp4RelativePaths(path.join(datasetDir, modelName), datasetDir),
-        datasetDir
-      )
-      syncNasMp4IndexToMirror('Z:\\dataset', datasetDir)
-    }
+    await syncModelToNas({ modelName, datasetDir, nasDatasetDir })
   }
-  const runCounters = currentRunLog
-    ? {
-        processed: currentRunLog.counters.processed || 0,
-        expectedMedia: currentRunLog.counters.expectedMedia || 0,
-        saved: currentRunLog.counters.saved || 0,
-        skipped: currentRunLog.counters.skipped || 0,
-        duplicates: currentRunLog.counters.duplicates || 0,
-        failures: currentRunLog.counters.failures || 0,
-      }
-    : null
+  const runStats = runLifecycle.getRunProgressStats(currentRunLog, {
+    processed: selectedMedia.length,
+    expectedMedia: selectedMedia.length,
+    saved: successCount,
+    duplicates: duplicateCount,
+    failures: errorCount,
+  })
   finalizeRunLog({
     successCount,
     duplicateCount,
@@ -3193,25 +1223,46 @@ async function run() {
     sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
   })
 
-  logScrollingMessage(
-    `Done: ${runCounters?.processed ?? selectedMedia.length}/${runCounters?.expectedMedia ?? selectedMedia.length} processed | saved ${runCounters?.saved ?? successCount} | skipped ${runCounters?.skipped ?? 0} | dupes ${runCounters?.duplicates ?? duplicateCount} | failed ${runCounters?.failures ?? errorCount}`
-  )
+  logScrollingMessage(runLifecycle.formatRunSummaryLine(runStats))
   logRunProgress()
   console.log(getCompletionLine())
+  return 0
 }
 
-run()
-  .catch((err) => {
+async function runHoghaulCli(argvInput = process.argv.slice(2)) {
+  try {
+    return await run(argvInput)
+  } catch (err) {
     finalizeAbortedRun('failed', err)
     console.error(`Hoghaul failed: ${err.message}`)
-    process.exitCode = 1
-  })
-  .finally(() => {
-    return closeBrowserMediaDownloader()
+    return 1
+  } finally {
+    await closeBrowserMediaDownloader()
       .catch((err) => {
         console.warn(`Browser close warning: ${err.message}`)
       })
       .finally(() => {
         mediaDates.flushAllSidecars()
       })
-  })
+  }
+}
+
+module.exports = {
+  normalizeHoghaulRunOptions,
+  parseHoghaulArgs,
+  parseSourceUrl,
+  runHoghaulScrape: run,
+  runHoghaulCli,
+}
+
+if (require.main === module) {
+  const { runScraperCli } = require('../scrapyard/scraperRunner')
+  runScraperCli()
+    .then((code) => {
+      process.exitCode = code
+    })
+    .catch((err) => {
+      console.error(`Scraper runner failed: ${err.stack || err.message}`)
+      process.exitCode = 1
+    })
+}

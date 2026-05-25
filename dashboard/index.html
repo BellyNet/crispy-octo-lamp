@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dataset Dashboard</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css"
+    />
     <style>
       *,
       *::before,
@@ -150,7 +153,6 @@
         outline-offset: -1px;
       }
 
-
       #sidebar-footer {
         padding: 8px 12px;
         border-top: 1px solid var(--border);
@@ -260,7 +262,9 @@
         background-position: right 10px center;
         background-color: var(--card-bg);
       }
-      #sort-select:hover { border-color: var(--accent); }
+      #sort-select:hover {
+        border-color: var(--accent);
+      }
       #date-range {
         flex: 1;
         font-size: 11px;
@@ -569,7 +573,11 @@
         --pswp-error-text-color: #7070a0;
       }
       .pswp__top-bar {
-        background: linear-gradient(to bottom, rgba(10,10,15,0.7) 0%, transparent 100%);
+        background: linear-gradient(
+          to bottom,
+          rgba(10, 10, 15, 0.7) 0%,
+          transparent 100%
+        );
       }
       /* Counter element */
       .pswp__pswp-counter {
@@ -602,7 +610,7 @@
         background: rgba(10, 10, 15, 0.88);
         backdrop-filter: blur(10px);
         border-top: 1px solid rgba(255, 255, 255, 0.08);
-        display: flex;             /* always flex so transition works */
+        display: flex; /* always flex so transition works */
         align-items: center;
         gap: 14px;
         font-size: 13px;
@@ -610,7 +618,9 @@
         transform: translateY(100%);
         opacity: 0;
         pointer-events: none;
-        transition: transform 0.22s ease, opacity 0.22s ease;
+        transition:
+          transform 0.22s ease,
+          opacity 0.22s ease;
       }
       .pswp__pswp-info-panel.pswp-info-visible {
         transform: translateY(0);
@@ -625,9 +635,20 @@
         text-overflow: ellipsis;
         font-size: 12px;
       }
-      .pswp-info-date { font-weight: 500; flex-shrink: 0; }
-      .pswp-info-added { font-size: 12px; color: var(--muted); flex-shrink: 0; }
-      .pswp-info-src { font-size: 11px; color: var(--muted); font-style: italic; }
+      .pswp-info-date {
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+      .pswp-info-added {
+        font-size: 12px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .pswp-info-src {
+        font-size: 11px;
+        color: var(--muted);
+        font-style: italic;
+      }
       .pswp-info-meta {
         font-size: 11px;
         color: var(--muted);
@@ -649,8 +670,16 @@
         border-radius: 4px;
       }
       @media (max-width: 640px) {
-        .pswp__pswp-info-panel { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
-        .pswp-info-filename { order: 3; width: 100%; white-space: normal; }
+        .pswp__pswp-info-panel {
+          padding: 10px 12px;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .pswp-info-filename {
+          order: 3;
+          width: 100%;
+          white-space: normal;
+        }
       }
 
       /* ─── CAPTION SIDEBAR (desktop) ─────────────────────────── */
@@ -705,7 +734,9 @@
       }
       @media (max-width: 900px) {
         /* No room for a sidebar — caption falls back to the info panel. */
-        .pswp__pswp-caption { display: none; }
+        .pswp__pswp-caption {
+          display: none;
+        }
       }
       /* Caption inside the info panel (mobile). */
       .pswp-info-caption {
@@ -742,7 +773,9 @@
         padding: 6px;
         border-radius: 6px;
         flex-shrink: 0;
-        transition: background 0.15s, color 0.15s;
+        transition:
+          background 0.15s,
+          color 0.15s;
       }
       #home-btn:hover,
       #home-btn.active {
@@ -783,7 +816,9 @@
         background-position: right 10px center;
         background-color: var(--card-bg);
       }
-      #home-sort-select:hover { border-color: var(--accent); }
+      #home-sort-select:hover {
+        border-color: var(--accent);
+      }
       #home-shuffle-btn {
         background: var(--card-bg);
         border: 1px solid var(--border);
@@ -794,9 +829,15 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        transition: color 0.15s, border-color 0.15s, background 0.15s;
+        transition:
+          color 0.15s,
+          border-color 0.15s,
+          background 0.15s;
       }
-      #home-shuffle-btn:hover { color: var(--accent); border-color: var(--accent); }
+      #home-shuffle-btn:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
       .home-size-btn {
         background: none;
         border: none;
@@ -808,11 +849,19 @@
         border-radius: 4px;
         transition: all 0.1s;
       }
-      .home-size-btn:hover { background: var(--card-bg); color: var(--text); }
-      .home-size-btn.active { color: var(--accent); }
+      .home-size-btn:hover {
+        background: var(--card-bg);
+        color: var(--text);
+      }
+      .home-size-btn.active {
+        color: var(--accent);
+      }
       #home-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(var(--home-card-min), 1fr));
+        grid-template-columns: repeat(
+          auto-fill,
+          minmax(var(--home-card-min), 1fr)
+        );
         gap: 12px;
       }
       .home-card {
@@ -821,7 +870,10 @@
         border-radius: 10px;
         overflow: hidden;
         cursor: pointer;
-        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+        transition:
+          transform 0.15s,
+          border-color 0.15s,
+          box-shadow 0.15s;
         content-visibility: auto;
         contain-intrinsic-size: 240px 320px;
       }
@@ -913,20 +965,32 @@
       /* activity levels — inactive stays border colour.
          Tuned for dark UI: lvl-1 stands out from the inactive border
          (which is #2a2a3a) instead of fading into it. */
-      .yr-cell.lvl-1 { background: #1f5b2a; }
-      .yr-cell.lvl-2 { background: #2f8c3e; }
-      .yr-cell.lvl-3 { background: #4caf50; }
-      .yr-cell.lvl-4 { background: #76d77a; }
+      .yr-cell.lvl-1 {
+        background: #1f5b2a;
+      }
+      .yr-cell.lvl-2 {
+        background: #2f8c3e;
+      }
+      .yr-cell.lvl-3 {
+        background: #4caf50;
+      }
+      .yr-cell.lvl-4 {
+        background: #76d77a;
+      }
 
       /* ─── FEATURED CARD ──────────────────────────────────────────── */
       .home-card.featured {
         border-color: #f5c518;
-        box-shadow: 0 0 0 1px #f5c518, 0 6px 28px rgba(245, 197, 24, 0.35);
+        box-shadow:
+          0 0 0 1px #f5c518,
+          0 6px 28px rgba(245, 197, 24, 0.35);
         grid-column: span 2;
       }
       .home-card.featured:hover {
         border-color: #f5c518;
-        box-shadow: 0 0 0 2px #f5c518, 0 10px 40px rgba(245, 197, 24, 0.45);
+        box-shadow:
+          0 0 0 2px #f5c518,
+          0 10px 40px rgba(245, 197, 24, 0.45);
       }
       .home-card.featured .home-card-thumb {
         aspect-ratio: 16/9;
@@ -948,7 +1012,9 @@
       }
       /* On small home-card sizes, collapse the span */
       @media (max-width: 640px) {
-        .home-card.featured { grid-column: span 2; }
+        .home-card.featured {
+          grid-column: span 2;
+        }
       }
 
       /* ─── FILTER SELECT (mobile) ─────────────────────────────── */
@@ -984,7 +1050,10 @@
         padding: 5px 8px;
         border-radius: 6px;
         flex-shrink: 0;
-        transition: background 0.15s, color 0.15s, border-color 0.15s;
+        transition:
+          background 0.15s,
+          color 0.15s,
+          border-color 0.15s;
       }
       #rescan-btn:hover {
         background: var(--card-bg);
@@ -995,7 +1064,9 @@
         opacity: 0.5;
         cursor: progress;
       }
-      #rescan-btn.spinning svg { animation: spin 1.2s linear infinite; }
+      #rescan-btn.spinning svg {
+        animation: spin 1.2s linear infinite;
+      }
 
       /* ─── SCAN BANNER ────────────────────────────────────────── */
       #scan-banner {
@@ -1035,7 +1106,9 @@
         border-right: none;
       }
       #sidebar {
-        transition: width 0.25s ease, min-width 0.25s ease;
+        transition:
+          width 0.25s ease,
+          min-width 0.25s ease;
       }
 
       #sidebar-overlay {
@@ -1091,13 +1164,26 @@
         }
 
         /* filter pills → dropdown on mobile */
-        .filter-btn { display: none; }
-        #filter-select { display: block; }
+        .filter-btn {
+          display: none;
+        }
+        #filter-select {
+          display: block;
+        }
 
         /* size buttons — show column-count labels on mobile */
-        .size-btn[data-size='small']::after  { content: ' (4×)'; font-size: 9px; }
-        .size-btn[data-size='medium']::after { content: ' (2×)'; font-size: 9px; }
-        .size-btn[data-size='large']::after  { content: ' (1×)'; font-size: 9px; }
+        .size-btn[data-size='small']::after {
+          content: ' (4×)';
+          font-size: 9px;
+        }
+        .size-btn[data-size='medium']::after {
+          content: ' (2×)';
+          font-size: 9px;
+        }
+        .size-btn[data-size='large']::after {
+          content: ' (1×)';
+          font-size: 9px;
+        }
 
         #grid-container {
           padding: 10px 12px;
@@ -1115,7 +1201,6 @@
         #home-view {
           padding: 10px 12px;
         }
-
       }
     </style>
   </head>
@@ -1142,16 +1227,33 @@
     <div id="main">
       <header id="main-header">
         <button id="home-btn" title="All models">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            <polyline points="9 22 9 12 15 12 15 22"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
           </svg>
         </button>
         <button id="hamburger" aria-label="Toggle sidebar">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="3" y1="6" x2="21" y2="6"/>
-            <line x1="3" y1="12" x2="21" y2="12"/>
-            <line x1="3" y1="18" x2="21" y2="18"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
         <div id="header-left">
@@ -1159,21 +1261,36 @@
           <span id="media-stats"></span>
           <div id="source-links"></div>
         </div>
-        <select id="filter-select" aria-label="Filter media type" style="display:none">
+        <select
+          id="filter-select"
+          aria-label="Filter media type"
+          style="display: none"
+        >
           <option value="all">All</option>
           <option value="image">Images</option>
           <option value="gif">GIFs</option>
           <option value="video">Videos</option>
         </select>
         <button id="rescan-btn" title="Rescan all models" aria-label="Rescan">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"/>
-            <polyline points="1 20 1 14 7 14"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path
+              d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+            />
           </svg>
         </button>
       </header>
-      <div id="scan-banner" style="display:none">
+      <div id="scan-banner" style="display: none">
         <span id="scan-banner-text"></span>
       </div>
 
@@ -1208,18 +1325,33 @@
               <option value="newest-media">Newest media first</option>
               <option value="recently-added">Recently added</option>
             </select>
-            <button id="home-shuffle-btn" title="Reshuffle" aria-label="Reshuffle">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="16 3 21 3 21 8"/>
-                <line x1="4" y1="20" x2="21" y2="3"/>
-                <polyline points="21 16 21 21 16 21"/>
-                <line x1="15" y1="15" x2="21" y2="21"/>
-                <line x1="4" y1="4" x2="9" y2="9"/>
+            <button
+              id="home-shuffle-btn"
+              title="Reshuffle"
+              aria-label="Reshuffle"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="16 3 21 3 21 8" />
+                <line x1="4" y1="20" x2="21" y2="3" />
+                <polyline points="21 16 21 21 16 21" />
+                <line x1="15" y1="15" x2="21" y2="21" />
+                <line x1="4" y1="4" x2="9" y2="9" />
               </svg>
             </button>
             <div class="sort-bar-right">
               <span class="sort-label">Card</span>
-              <button class="home-size-btn active" data-home-size="small">S</button>
+              <button class="home-size-btn active" data-home-size="small">
+                S
+              </button>
               <button class="home-size-btn" data-home-size="medium">M</button>
               <button class="home-size-btn" data-home-size="large">L</button>
             </div>
@@ -1237,7 +1369,6 @@
         <div id="media-grid"></div>
       </div>
     </div>
-
 
     <script>
       'use strict'
@@ -1296,8 +1427,12 @@
       function formatFileSize(bytes) {
         if (!bytes) return ''
         const units = ['B', 'KB', 'MB', 'GB']
-        let v = bytes, u = 0
-        while (v >= 1024 && u < units.length - 1) { v /= 1024; u++ }
+        let v = bytes,
+          u = 0
+        while (v >= 1024 && u < units.length - 1) {
+          v /= 1024
+          u++
+        }
         return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`
       }
 
@@ -1329,10 +1464,16 @@
       // ─── "NEW" TRACKING ───────────────────────────────────────────────────
       const LAST_SEEN_KEY = 'dashboard-last-seen'
       function readLastSeen() {
-        try { return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || '{}') } catch { return {} }
+        try {
+          return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || '{}')
+        } catch {
+          return {}
+        }
       }
       function writeLastSeen(map) {
-        try { localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(map)) } catch {}
+        try {
+          localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(map))
+        } catch {}
       }
       function initLastSeen(users) {
         const seen = readLastSeen()
@@ -1340,7 +1481,10 @@
         let changed = false
         // Stamp models we've never recorded so we don't show NEW on first load.
         for (const u of users) {
-          if (seen[u.name] == null) { seen[u.name] = now; changed = true }
+          if (seen[u.name] == null) {
+            seen[u.name] = now
+            changed = true
+          }
         }
         if (changed) writeLastSeen(seen)
       }
@@ -1369,9 +1513,10 @@
         return { view: 'home' }
       }
       function setHashRoute(target) {
-        const next = target.view === 'user'
-          ? `#/u/${encodeURIComponent(target.username)}`
-          : '#/'
+        const next =
+          target.view === 'user'
+            ? `#/u/${encodeURIComponent(target.username)}`
+            : '#/'
         if (location.hash === next) return
         _suppressHashChange = true
         location.hash = next
@@ -1380,13 +1525,19 @@
         const route = parseHashRoute()
         if (route.view === 'user') {
           const u = usersData.find((x) => x.name === route.username)
-          if (u) { selectUser(u, null, { skipHashUpdate: true }); return }
+          if (u) {
+            selectUser(u, null, { skipHashUpdate: true })
+            return
+          }
           // Unknown model — bounce back to home rather than show a broken view.
         }
         showHomeView({ skipHashUpdate: true })
       }
       window.addEventListener('hashchange', () => {
-        if (_suppressHashChange) { _suppressHashChange = false; return }
+        if (_suppressHashChange) {
+          _suppressHashChange = false
+          return
+        }
         applyHashRoute()
       })
 
@@ -1408,15 +1559,23 @@
               changed = true
             } else {
               const prev = usersData[idx]
-              const update = { fileCount: u.fileCount, latestAddedMs: u.latestAddedMs }
+              const update = {
+                fileCount: u.fileCount,
+                latestAddedMs: u.latestAddedMs,
+              }
               // Only overwrite media dates for models not yet visited by the client
               if (!_accurateModels.has(u.name)) {
                 update.earliestMs = u.earliestMs
-                update.latestMs   = u.latestMs
+                update.latestMs = u.latestMs
                 update.yearCounts = u.yearCounts
               }
-              const needsUpdate = Object.entries(update).some(([k, v]) => prev[k] !== v)
-              if (needsUpdate) { usersData[idx] = { ...prev, ...update }; changed = true }
+              const needsUpdate = Object.entries(update).some(
+                ([k, v]) => prev[k] !== v
+              )
+              if (needsUpdate) {
+                usersData[idx] = { ...prev, ...update }
+                changed = true
+              }
             }
           }
           if (changed) {
@@ -1457,15 +1616,21 @@
 
       // Global year range across all models — defines the x-axis for every card
       function getYearRange() {
-        let minYear = Infinity, maxYear = new Date().getFullYear()
+        let minYear = Infinity,
+          maxYear = new Date().getFullYear()
         for (const u of usersData) {
-          if (u.earliestMs) minYear = Math.min(minYear, new Date(u.earliestMs).getFullYear())
-          if (u.latestMs)   maxYear = Math.max(maxYear, new Date(u.latestMs).getFullYear())
+          if (u.earliestMs)
+            minYear = Math.min(minYear, new Date(u.earliestMs).getFullYear())
+          if (u.latestMs)
+            maxYear = Math.max(maxYear, new Date(u.latestMs).getFullYear())
           // Also scan yearCounts keys — these include filesystem-fallback years that
           // earliestMs/latestMs don't capture (since those only track real media dates)
           for (const yr of Object.keys(u.yearCounts || {})) {
             const y = parseInt(yr, 10)
-            if (!isNaN(y)) { minYear = Math.min(minYear, y); maxYear = Math.max(maxYear, y) }
+            if (!isNaN(y)) {
+              minYear = Math.min(minYear, y)
+              maxYear = Math.max(maxYear, y)
+            }
           }
         }
         return { start: minYear === Infinity ? maxYear : minYear, end: maxYear }
@@ -1479,8 +1644,8 @@
         const names = usersData.map((u) => u.name)
         // Fisher-Yates
         for (let i = names.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [names[i], names[j]] = [names[j], names[i]]
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[names[i], names[j]] = [names[j], names[i]]
         }
         _homeRandomOrder = new Map(names.map((n, i) => [n, i]))
       }
@@ -1499,15 +1664,24 @@
           if (b.featured && !a.featured) return 1
           const aNew = isNewModel(a, seen) ? 1 : 0
           const bNew = isNewModel(b, seen) ? 1 : 0
-          if (aNew !== bNew) return bNew - aNew                     // new first
-          if (aNew && bNew) return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
-          if (homeSort === 'oldest-media') return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
-          if (homeSort === 'newest-media') return (b.latestMs || 0) - (a.latestMs || 0)
-          if (homeSort === 'recently-added') return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
+          if (aNew !== bNew) return bNew - aNew // new first
+          if (aNew && bNew)
+            return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
+          if (homeSort === 'oldest-media')
+            return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
+          if (homeSort === 'newest-media')
+            return (b.latestMs || 0) - (a.latestMs || 0)
+          if (homeSort === 'recently-added')
+            return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
           if (homeSort === 'random') {
-            return (_homeRandomOrder.get(a.name) ?? 9e9) - (_homeRandomOrder.get(b.name) ?? 9e9)
+            return (
+              (_homeRandomOrder.get(a.name) ?? 9e9) -
+              (_homeRandomOrder.get(b.name) ?? 9e9)
+            )
           }
-          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+          return a.name.localeCompare(b.name, undefined, {
+            sensitivity: 'base',
+          })
         })
 
         for (const u of sorted) {
@@ -1543,14 +1717,16 @@
             // Prefer the small JPEG thumbnail. Fall back to the GIF preview
             // (videos pre-cover-thumbs era) and finally to the source file.
             el.src = cover.thumbUrl || cover.previewUrl || cover.url
-            el.onerror = () => { el.style.opacity = '0.3' }
+            el.onerror = () => {
+              el.style.opacity = '0.3'
+            }
             if (mediaEl.parentNode === card) card.replaceChild(el, mediaEl)
           }
           if (u.cover) {
             useCover(u.cover)
           } else {
             fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
-              .then((r) => r.ok ? r.json() : null)
+              .then((r) => (r.ok ? r.json() : null))
               .then(useCover)
               .catch(() => {})
           }
@@ -1571,9 +1747,14 @@
 
           const srcs = document.createElement('div')
           srcs.className = 'home-card-sources'
-          for (const [key, label] of [['coomer','OF'],['kemono','K'],['stufferdb','S']]) {
+          for (const [key, label] of [
+            ['coomer', 'OF'],
+            ['kemono', 'K'],
+            ['stufferdb', 'S'],
+          ]) {
             const dot = document.createElement('span')
-            dot.className = 'home-src-dot' + ((u.sources?.[key]?.length) ? ' has-source' : '')
+            dot.className =
+              'home-src-dot' + (u.sources?.[key]?.length ? ' has-source' : '')
             dot.textContent = label
             srcs.appendChild(dot)
           }
@@ -1584,7 +1765,7 @@
           // Activity graph — GitHub-style year cells
           {
             const yearCounts = u.yearCounts || {}
-            const maxCount   = Math.max(...Object.values(yearCounts), 1)
+            const maxCount = Math.max(...Object.values(yearCounts), 1)
 
             const activity = document.createElement('div')
             activity.className = 'home-card-activity'
@@ -1610,15 +1791,21 @@
             const logMax = Math.log(maxCount + 1)
             for (let yr = globalStart; yr <= globalEnd; yr++) {
               const count = yearCounts[yr] || 0
-              const cell  = document.createElement('div')
+              const cell = document.createElement('div')
               const ratio = count > 0 ? Math.log(count + 1) / logMax : 0
-              const lvl   = count === 0 ? 0
-                          : ratio < 0.35 ? 1
-                          : ratio < 0.65 ? 2
-                          : ratio < 0.90 ? 3
-                          : 4
+              const lvl =
+                count === 0
+                  ? 0
+                  : ratio < 0.35
+                    ? 1
+                    : ratio < 0.65
+                      ? 2
+                      : ratio < 0.9
+                        ? 3
+                        : 4
               cell.className = `yr-cell${lvl > 0 ? ` lvl-${lvl}` : ''}`
-              cell.title = count > 0 ? `${yr}: ${count} files` : `${yr}: no files`
+              cell.title =
+                count > 0 ? `${yr}: ${count} files` : `${yr}: no files`
               graph.appendChild(cell)
             }
 
@@ -1663,12 +1850,15 @@
       // Esc       clear search if focused, else blur
       let _kbdIndex = -1
       function visibleUserItems() {
-        return Array.from(userListEl.querySelectorAll('.user-item'))
-          .filter((el) => el.style.display !== 'none')
+        return Array.from(userListEl.querySelectorAll('.user-item')).filter(
+          (el) => el.style.display !== 'none'
+        )
       }
       function applyKbdHighlight() {
         const items = visibleUserItems()
-        items.forEach((el, i) => el.classList.toggle('kbd-focus', i === _kbdIndex))
+        items.forEach((el, i) =>
+          el.classList.toggle('kbd-focus', i === _kbdIndex)
+        )
         if (_kbdIndex >= 0 && items[_kbdIndex]) {
           items[_kbdIndex].scrollIntoView({ block: 'nearest' })
         }
@@ -1676,7 +1866,12 @@
       window.addEventListener('keydown', (e) => {
         // Don't hijack typing in inputs other than the user-search itself.
         const t = e.target
-        const inOtherInput = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') && t !== userSearchEl
+        const inOtherInput =
+          t &&
+          (t.tagName === 'INPUT' ||
+            t.tagName === 'TEXTAREA' ||
+            t.tagName === 'SELECT') &&
+          t !== userSearchEl
         if (inOtherInput) return
 
         if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
@@ -1707,9 +1902,16 @@
           // or no input focused at all).
           if (t && t.tagName === 'INPUT' && t !== userSearchEl) return
           e.preventDefault()
-          _kbdIndex = _kbdIndex < 0
-            ? 0
-            : Math.max(0, Math.min(items.length - 1, _kbdIndex + (e.key === 'ArrowDown' ? 1 : -1)))
+          _kbdIndex =
+            _kbdIndex < 0
+              ? 0
+              : Math.max(
+                  0,
+                  Math.min(
+                    items.length - 1,
+                    _kbdIndex + (e.key === 'ArrowDown' ? 1 : -1)
+                  )
+                )
           applyKbdHighlight()
           return
         }
@@ -1744,7 +1946,7 @@
 
       // platform → short display prefix shown before the service name
       const PLATFORM_PREFIX = {
-        coomer: '',      // coomer URLs already carry the service name
+        coomer: '', // coomer URLs already carry the service name
         kemono: 'K·',
         stufferdb: '',
       }
@@ -1763,7 +1965,10 @@
           sourceLinksEl.appendChild(a)
         }
 
-        for (const [platform, prefix] of [['coomer', ''], ['kemono', 'K·']]) {
+        for (const [platform, prefix] of [
+          ['coomer', ''],
+          ['kemono', 'K·'],
+        ]) {
           for (const url of sources[platform] || []) {
             const service = url.split('/')[3] || platform
             const label = SERVICE_LABELS[service] || service
@@ -1789,7 +1994,9 @@
           .querySelectorAll('.user-item')
           .forEach((el) => el.classList.remove('active'))
         // find the li if not passed
-        const li = liEl || userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
+        const li =
+          liEl ||
+          userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
         if (li) li.classList.add('active')
 
         currentUsername = username
@@ -1799,7 +2006,10 @@
 
         // Restore the user's last sort for this model (defaults to 'asc').
         let savedSort = 'asc'
-        try { savedSort = localStorage.getItem(`dashboard-sort-${username}`) || 'asc' } catch {}
+        try {
+          savedSort =
+            localStorage.getItem(`dashboard-sort-${username}`) || 'asc'
+        } catch {}
         activeSort = savedSort
         sortSelect.value = savedSort
 
@@ -1810,8 +2020,11 @@
         sortBar.style.display = 'none'
         loadingEl.style.display = 'flex'
 
-        const mediaData = await fetch(`/api/users/${encodeURIComponent(username)}/media`)
-          .then(r => r.ok ? r.json() : null).catch(() => null)
+        const mediaData = await fetch(
+          `/api/users/${encodeURIComponent(username)}/media`
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
         allMedia = mediaData || []
 
         // ── Update this model's activity graph with accurate media dates ──────
@@ -1820,10 +2033,11 @@
         // full resolved dates (EXIF, MP4 metadata, etc.), refresh usersData so
         // the home graph is correct the next time it's rendered.
         if (allMedia.length) {
-          const uIdx = usersData.findIndex(u => u.name === username)
+          const uIdx = usersData.findIndex((u) => u.name === username)
           if (uIdx !== -1) {
             const yc = {}
-            let earliest = Infinity, latest = 0
+            let earliest = Infinity,
+              latest = 0
             for (const m of allMedia) {
               const dateMs = m.mediaDateMs || m.addedMs
               if (!dateMs) continue
@@ -1831,14 +2045,15 @@
               if (yr >= 1990 && yr <= 2035) yc[yr] = (yc[yr] || 0) + 1
               if (m.mediaDateMs) {
                 if (m.mediaDateMs < earliest) earliest = m.mediaDateMs
-                if (m.mediaDateMs > latest)   latest   = m.mediaDateMs
+                if (m.mediaDateMs > latest) latest = m.mediaDateMs
               }
             }
             usersData[uIdx] = {
               ...usersData[uIdx],
-              yearCounts:  yc,
-              earliestMs:  earliest === Infinity ? usersData[uIdx].earliestMs : earliest,
-              latestMs:    latest   || usersData[uIdx].latestMs,
+              yearCounts: yc,
+              earliestMs:
+                earliest === Infinity ? usersData[uIdx].earliestMs : earliest,
+              latestMs: latest || usersData[uIdx].latestMs,
             }
             _accurateModels.add(username)
           }
@@ -1860,18 +2075,25 @@
         // Sort by real media date, falling back to added-to-disk date as last resort
         const effectiveDate = (m) => m.mediaDateMs || m.addedMs
         const byMediaDate = (dir) => (a, b) => {
-          const da = effectiveDate(a), db = effectiveDate(b)
+          const da = effectiveDate(a),
+            db = effectiveDate(b)
           return dir === 'asc' ? da - db : db - da
         }
 
-        if      (activeSort === 'asc')           filtered.sort(byMediaDate('asc'))
-        else if (activeSort === 'desc')          filtered.sort(byMediaDate('desc'))
-        else if (activeSort === 'added-asc')     filtered.sort((a, b) => a.addedMs - b.addedMs)
-        else if (activeSort === 'added-desc')    filtered.sort((a, b) => b.addedMs - a.addedMs)
-        else if (activeSort === 'size-desc')     filtered.sort((a, b) => b.size - a.size)
-        else if (activeSort === 'size-asc')      filtered.sort((a, b) => a.size - b.size)
-        else if (activeSort === 'duration-desc') filtered.sort((a, b) => b.duration - a.duration)
-        else if (activeSort === 'duration-asc')  filtered.sort((a, b) => a.duration - b.duration)
+        if (activeSort === 'asc') filtered.sort(byMediaDate('asc'))
+        else if (activeSort === 'desc') filtered.sort(byMediaDate('desc'))
+        else if (activeSort === 'added-asc')
+          filtered.sort((a, b) => a.addedMs - b.addedMs)
+        else if (activeSort === 'added-desc')
+          filtered.sort((a, b) => b.addedMs - a.addedMs)
+        else if (activeSort === 'size-desc')
+          filtered.sort((a, b) => b.size - a.size)
+        else if (activeSort === 'size-asc')
+          filtered.sort((a, b) => a.size - b.size)
+        else if (activeSort === 'duration-desc')
+          filtered.sort((a, b) => b.duration - a.duration)
+        else if (activeSort === 'duration-asc')
+          filtered.sort((a, b) => a.duration - b.duration)
 
         renderGrid()
         updateDateRange()
@@ -1893,7 +2115,12 @@
         applyFilter()
         // Remember per-model so switching back restores the user's choice.
         if (currentUsername) {
-          try { localStorage.setItem(`dashboard-sort-${currentUsername}`, activeSort) } catch {}
+          try {
+            localStorage.setItem(
+              `dashboard-sort-${currentUsername}`,
+              activeSort
+            )
+          } catch {}
         }
       })
 
@@ -1912,7 +2139,12 @@
         if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
 
         // Update filter dropdown labels with counts.
-        const labels = { all: `All (${allMedia.length})`, image: imgs ? `Images (${imgs})` : 'Images', gif: gifs ? `GIFs (${gifs})` : 'GIFs', video: vids ? `Videos (${vids})` : 'Videos' }
+        const labels = {
+          all: `All (${allMedia.length})`,
+          image: imgs ? `Images (${imgs})` : 'Images',
+          gif: gifs ? `GIFs (${gifs})` : 'GIFs',
+          video: vids ? `Videos (${vids})` : 'Videos',
+        }
         for (const [type, label] of Object.entries(labels)) {
           const opt = filterSelect.querySelector(`option[value="${type}"]`)
           if (opt) opt.textContent = label
@@ -1932,26 +2164,35 @@
             ? (m) => m.addedMs
             : (m) => m.mediaDateMs || m.addedMs
 
-        let min = Infinity, max = 0
+        let min = Infinity,
+          max = 0
         for (const m of filtered) {
           const v = pickValue(m)
           if (!v) continue
           if (v < min) min = v
           if (v > max) max = v
         }
-        if (min === Infinity) { dateRangeEl.textContent = ''; return }
+        if (min === Infinity) {
+          dateRangeEl.textContent = ''
+          return
+        }
         const toISO = (ms) => new Date(ms).toISOString()
         dateRangeEl.textContent = `${formatDateShort(toISO(min))} – ${formatDateShort(toISO(max))}`
       }
 
       // ─── GRID RENDER ──────────────────────────────────────────────────────
-      const SOURCE_LABELS = { exif: 'exif', mp4: 'mp4', uploaded: 'upload', filesystem: 'local*' }
-      const SOURCE_TIPS   = {
-        exif:       'Date from embedded EXIF metadata',
-        mp4:        'Date from video container metadata (ffprobe)',
-        uploaded:   'Platform upload date (set by milkmaid)',
+      const SOURCE_LABELS = {
+        exif: 'exif',
+        mp4: 'mp4',
+        uploaded: 'upload',
+        filesystem: 'local*',
+      }
+      const SOURCE_TIPS = {
+        exif: 'Date from embedded EXIF metadata',
+        mp4: 'Date from video container metadata (ffprobe)',
+        uploaded: 'Platform upload date (set by milkmaid)',
         filesystem: '* Local download date — least reliable',
-        filename:   'filename timestamp',
+        filename: 'filename timestamp',
       }
       const DATE_FMT = { year: '2-digit', month: 'numeric', day: 'numeric' }
 
@@ -1966,13 +2207,15 @@
         if (item.type === 'video') {
           const img = document.createElement('img')
           img.loading = 'lazy'
-          img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
+          img.style.cssText =
+            'width:100%;height:100%;object-fit:cover;display:block;'
           if (item.previewUrl) {
             img.src = item.previewUrl
             img.onerror = () => {
               img.remove()
               const ph = document.createElement('div')
-              ph.style.cssText = 'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
+              ph.style.cssText =
+                'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
               ph.textContent = '⏳'
               thumb.insertBefore(ph, thumb.firstChild)
             }
@@ -1988,7 +2231,11 @@
           img.onerror = () => {
             // Fall back to the source if the thumb endpoint failed (e.g. sharp
             // rejected the format) — slower but the card still shows something.
-            if (img.dataset.fallback) { img.style.opacity = '0.3'; img.alt = '⚠ load error'; return }
+            if (img.dataset.fallback) {
+              img.style.opacity = '0.3'
+              img.alt = '⚠ load error'
+              return
+            }
             img.dataset.fallback = '1'
             img.src = item.url
           }
@@ -2003,7 +2250,8 @@
         footer.className = 'card-footer'
 
         const left = document.createElement('div')
-        left.style.cssText = 'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
+        left.style.cssText =
+          'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
 
         const badge = document.createElement('span')
         badge.className = `type-badge ${item.type}`
@@ -2020,14 +2268,21 @@
 
         const dateEl = document.createElement('span')
         dateEl.className = 'card-date'
-        dateEl.textContent = item.date ? new Date(item.date).toLocaleDateString('en-US', DATE_FMT) : '—'
-        dateEl.title = formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
+        dateEl.textContent = item.date
+          ? new Date(item.date).toLocaleDateString('en-US', DATE_FMT)
+          : '—'
+        dateEl.title =
+          formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
         left.appendChild(dateEl)
 
         const addedEl = document.createElement('span')
         addedEl.className = 'card-added'
-        addedEl.textContent = item.addedMs ? new Date(item.addedMs).toLocaleDateString('en-US', DATE_FMT) : '—'
-        addedEl.title = item.addedMs ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}` : 'Added date unknown'
+        addedEl.textContent = item.addedMs
+          ? new Date(item.addedMs).toLocaleDateString('en-US', DATE_FMT)
+          : '—'
+        addedEl.title = item.addedMs
+          ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}`
+          : 'Added date unknown'
 
         footer.appendChild(left)
         footer.appendChild(addedEl)
@@ -2045,7 +2300,10 @@
       let _scrollObserver = null
       function renderGrid() {
         gridEl.innerHTML = ''
-        if (_scrollObserver) { _scrollObserver.disconnect(); _scrollObserver = null }
+        if (_scrollObserver) {
+          _scrollObserver.disconnect()
+          _scrollObserver = null
+        }
 
         if (!filtered.length) {
           noResultsEl.style.display = 'block'
@@ -2055,7 +2313,7 @@
 
         const token = ++_renderToken
         const INITIAL = 200
-        const BATCH   = 200
+        const BATCH = 200
         let i = 0
 
         const renderBatch = (n) => {
@@ -2076,19 +2334,28 @@
         sentinel.style.cssText = 'grid-column: 1 / -1; height: 1px;'
         gridEl.appendChild(sentinel)
 
-        _scrollObserver = new IntersectionObserver((entries) => {
-          if (!entries[0].isIntersecting) return
-          if (_renderToken !== token) { _scrollObserver.disconnect(); return }
-          // Re-attach sentinel after the new cards so it stays at the bottom.
-          gridEl.removeChild(sentinel)
-          renderBatch(BATCH)
-          if (i >= filtered.length) {
-            _scrollObserver.disconnect()
-            _scrollObserver = null
-          } else {
-            gridEl.appendChild(sentinel)
+        _scrollObserver = new IntersectionObserver(
+          (entries) => {
+            if (!entries[0].isIntersecting) return
+            if (_renderToken !== token) {
+              _scrollObserver.disconnect()
+              return
+            }
+            // Re-attach sentinel after the new cards so it stays at the bottom.
+            gridEl.removeChild(sentinel)
+            renderBatch(BATCH)
+            if (i >= filtered.length) {
+              _scrollObserver.disconnect()
+              _scrollObserver = null
+            } else {
+              gridEl.appendChild(sentinel)
+            }
+          },
+          {
+            root: document.getElementById('grid-container'),
+            rootMargin: '500px',
           }
-        }, { root: document.getElementById('grid-container'), rootMargin: '500px' })
+        )
         _scrollObserver.observe(sentinel)
       }
 
@@ -2098,16 +2365,17 @@
       let _pswpModule = null
       function loadPswp() {
         if (!_pswpModule) {
-          _pswpModule = import('https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.esm.js')
-            .then(m => m.default)
+          _pswpModule = import(
+            'https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.esm.js'
+          ).then((m) => m.default)
         }
         return _pswpModule
       }
       loadPswp() // preload immediately
 
       function openLightbox(startIndex) {
-        loadPswp().then(PhotoSwipe => {
-          const dataSource = filtered.map(item => {
+        loadPswp().then((PhotoSwipe) => {
+          const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
               // No autoplay here — PhotoSwipe pre-creates ±1 adjacent slides,
               // and autoplay on those layers audio across slides. The active
@@ -2124,19 +2392,19 @@
               return { html: wrap.outerHTML, _item: item }
             }
             return {
-              src:    item.url,
-              width:  item.width  || 0,
+              src: item.url,
+              width: item.width || 0,
               height: item.height || 0,
-              _item:  item,
+              _item: item,
             }
           })
 
           const pswp = new PhotoSwipe({
             dataSource,
-            index:       startIndex,
-            bgOpacity:   0.97,
-            padding:     { top: 44, bottom: 0, left: 44, right: 44 },
-            loop:        true,
+            index: startIndex,
+            bgOpacity: 0.97,
+            padding: { top: 44, bottom: 0, left: 44, right: 44 },
+            loop: true,
             wheelToZoom: true,
           })
 
@@ -2150,13 +2418,22 @@
             if (!item || !item.hasCaption) return null
             if (_captionCache.has(item.url)) return _captionCache.get(item.url)
             try {
-              const r = await fetch(`/api/caption/${encodeURIComponent(currentUsername || '')}/${item.folder}/${encodeURIComponent(item.filename)}`)
-              if (!r.ok) { _captionCache.set(item.url, null); return null }
+              const r = await fetch(
+                `/api/caption/${encodeURIComponent(currentUsername || '')}/${item.folder}/${encodeURIComponent(item.filename)}`
+              )
+              if (!r.ok) {
+                _captionCache.set(item.url, null)
+                return null
+              }
               const data = await r.json()
-              const txt = (data && typeof data.text === 'string') ? data.text : null
+              const txt =
+                data && typeof data.text === 'string' ? data.text : null
               _captionCache.set(item.url, txt)
               return txt
-            } catch { _captionCache.set(item.url, null); return null }
+            } catch {
+              _captionCache.set(item.url, null)
+              return null
+            }
           }
 
           // All UI registration happens inside uiRegister — pswp.ui is guaranteed
@@ -2164,11 +2441,13 @@
           pswp.on('uiRegister', () => {
             // Slide counter (top-bar, left of zoom/close)
             pswp.ui.registerElement({
-              name:     'pswp-counter',
-              order:    5,
+              name: 'pswp-counter',
+              order: 5,
               isButton: false,
               onInit(el) {
-                const update = () => { el.textContent = `${pswp.currIndex + 1} / ${pswp.getNumItems()}` }
+                const update = () => {
+                  el.textContent = `${pswp.currIndex + 1} / ${pswp.getNumItems()}`
+                }
                 pswp.on('change', update)
                 update()
               },
@@ -2176,7 +2455,7 @@
 
             // Info panel — slides up from bottom when ⓘ is pressed
             pswp.ui.registerElement({
-              name:     'pswp-info-panel',
+              name: 'pswp-info-panel',
               appendTo: 'root',
               onInit(el) {
                 infoPanelEl = el
@@ -2187,7 +2466,8 @@
 
                   const typeBadge = document.createElement('span')
                   typeBadge.className = `type-badge ${item.type}`
-                  typeBadge.textContent = item.type === 'image' ? 'img' : item.type
+                  typeBadge.textContent =
+                    item.type === 'image' ? 'img' : item.type
                   el.appendChild(typeBadge)
 
                   const dateSpan = document.createElement('span')
@@ -2209,7 +2489,8 @@
 
                   // Compact metadata line: dimensions · duration · file size
                   const metaBits = []
-                  if (item.width && item.height) metaBits.push(`${item.width}×${item.height}`)
+                  if (item.width && item.height)
+                    metaBits.push(`${item.width}×${item.height}`)
                   const dur = formatDuration(item.duration)
                   if (dur) metaBits.push(dur)
                   const sz = formatFileSize(item.size)
@@ -2231,7 +2512,10 @@
                   // Caption (mobile only — desktop has the dedicated sidebar).
                   // Stamped synchronously with the rest of the panel, then filled
                   // in once the fetch resolves. Guarded against stale slide updates.
-                  if (item.hasCaption && window.matchMedia('(max-width: 900px)').matches) {
+                  if (
+                    item.hasCaption &&
+                    window.matchMedia('(max-width: 900px)').matches
+                  ) {
                     const capSpan = document.createElement('span')
                     capSpan.className = 'pswp-info-caption'
                     capSpan.textContent = '…'
@@ -2254,7 +2538,7 @@
             // The toggle button (below) also hides itself in that case.
             let captionBtnEl = null
             pswp.ui.registerElement({
-              name:     'pswp-caption',
+              name: 'pswp-caption',
               appendTo: 'root',
               onInit(el) {
                 captionPanelEl = el
@@ -2277,7 +2561,8 @@
                   if (captionBtnEl) captionBtnEl.style.display = ''
                   el.style.display = ''
                   el.classList.add('pswp-caption-visible')
-                  if (captionBtnEl) captionBtnEl.classList.add('pswp-caption-active')
+                  if (captionBtnEl)
+                    captionBtnEl.classList.add('pswp-caption-active')
 
                   el.replaceChildren()
                   const label = document.createElement('div')
@@ -2314,26 +2599,30 @@
             // mobile (where the sidebar is hidden via CSS). Hidden by the panel's
             // update() handler whenever the current slide has no caption.
             pswp.ui.registerElement({
-              name:     'pswp-caption-button',
-              order:    8,
+              name: 'pswp-caption-button',
+              order: 8,
               isButton: true,
-              title:    'Caption',
-              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><line x1="5.5" y1="9" x2="14.5" y2="9"/><line x1="5.5" y1="12" x2="11" y2="12"/></svg>',
-              onInit(el) { captionBtnEl = el },
+              title: 'Caption',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><line x1="5.5" y1="9" x2="14.5" y2="9"/><line x1="5.5" y1="12" x2="11" y2="12"/></svg>',
+              onInit(el) {
+                captionBtnEl = el
+              },
               onClick(e, el) {
                 if (!captionPanelEl) return
-                const on = captionPanelEl.classList.toggle('pswp-caption-visible')
+                const on = captionPanelEl.classList.toggle(
+                  'pswp-caption-visible'
+                )
                 el.classList.toggle('pswp-caption-active', on)
               },
             })
 
             // ⓘ toggle button
             pswp.ui.registerElement({
-              name:     'pswp-info-button',
-              order:    9,
+              name: 'pswp-info-button',
+              order: 9,
               isButton: true,
-              title:    'Info',
-              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.5" r="1" fill="currentColor"/></svg>',
+              title: 'Info',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.5" r="1" fill="currentColor"/></svg>',
               onClick(e, el) {
                 if (!infoPanelEl) return
                 const on = infoPanelEl.classList.toggle('pswp-info-visible')
@@ -2349,13 +2638,16 @@
             const root = pswp.element
             if (!root) return
             root.querySelectorAll('.pswp__item video').forEach((v) => {
-              const inActive = v.closest('.pswp__item.pswp__item--current') ||
-                               v.closest('.pswp__item--active')
+              const inActive =
+                v.closest('.pswp__item.pswp__item--current') ||
+                v.closest('.pswp__item--active')
               if (inActive) {
                 v.play().catch(() => {})
               } else {
                 v.pause()
-                try { v.currentTime = 0 } catch {}
+                try {
+                  v.currentTime = 0
+                } catch {}
               }
             })
           }
@@ -2364,7 +2656,9 @@
           pswp.on('close', () => {
             const root = pswp.element
             if (!root) return
-            root.querySelectorAll('video').forEach((v) => { v.pause() })
+            root.querySelectorAll('video').forEach((v) => {
+              v.pause()
+            })
           })
 
           pswp.init()
@@ -2373,8 +2667,8 @@
 
       // ─── CARD SIZE ────────────────────────────────────────────────────────
       const sizeBtns = document.querySelectorAll('.size-btn')
-      const CARD_SIZES   = { small: '160px', medium: '300px', large: '500px' }
-      const MOBILE_COLS  = { small: 4, medium: 2, large: 1 }
+      const CARD_SIZES = { small: '160px', medium: '300px', large: '500px' }
+      const MOBILE_COLS = { small: 4, medium: 2, large: 1 }
       const isMobile = () => window.matchMedia('(max-width: 640px)').matches
 
       sizeBtns.forEach((btn) => {
@@ -2382,18 +2676,24 @@
           sizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
           if (isMobile()) {
             document.documentElement.style.setProperty(
-              '--mobile-cols', MOBILE_COLS[btn.dataset.size]
+              '--mobile-cols',
+              MOBILE_COLS[btn.dataset.size]
             )
           } else {
             document.documentElement.style.setProperty(
-              '--card-min', CARD_SIZES[btn.dataset.size]
+              '--card-min',
+              CARD_SIZES[btn.dataset.size]
             )
           }
         })
       })
 
       // ─── HOME GRID SIZE ───────────────────────────────────────────────────
-      const HOME_CARD_SIZES = { small: '140px', medium: '200px', large: '280px' }
+      const HOME_CARD_SIZES = {
+        small: '140px',
+        medium: '200px',
+        large: '280px',
+      }
       const HOME_MOBILE_COLS = { small: 3, medium: 2, large: 1 }
 
       const homeShuffleBtn = document.getElementById('home-shuffle-btn')
@@ -2418,9 +2718,15 @@
         btn.addEventListener('click', () => {
           homeSizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
           if (isMobile()) {
-            document.documentElement.style.setProperty('--home-mobile-cols', HOME_MOBILE_COLS[btn.dataset.homeSize])
+            document.documentElement.style.setProperty(
+              '--home-mobile-cols',
+              HOME_MOBILE_COLS[btn.dataset.homeSize]
+            )
           } else {
-            document.documentElement.style.setProperty('--home-card-min', HOME_CARD_SIZES[btn.dataset.homeSize])
+            document.documentElement.style.setProperty(
+              '--home-card-min',
+              HOME_CARD_SIZES[btn.dataset.homeSize]
+            )
           }
         })
       })
@@ -2429,7 +2735,9 @@
       document.getElementById('home-btn').addEventListener('click', () => {
         if (homeVisible) return
         showHomeView()
-        userListEl.querySelectorAll('.user-item').forEach((el) => el.classList.remove('active'))
+        userListEl
+          .querySelectorAll('.user-item')
+          .forEach((el) => el.classList.remove('active'))
       })
 
       // ─── MOBILE SIDEBAR ───────────────────────────────────────────────────
@@ -2458,7 +2766,6 @@
       })
       sidebarOverlay.addEventListener('click', closeSidebar)
 
-
       // ─── RESCAN + SCAN STATUS ─────────────────────────────────────────────
       const rescanBtn = document.getElementById('rescan-btn')
       const scanBanner = document.getElementById('scan-banner')
@@ -2466,7 +2773,10 @@
       let scanPollTimer = null
 
       function setBanner(text) {
-        if (!text) { scanBanner.style.display = 'none'; return }
+        if (!text) {
+          scanBanner.style.display = 'none'
+          return
+        }
         scanBannerText.textContent = text
         scanBanner.style.display = 'block'
       }
@@ -2482,7 +2792,9 @@
               rescanBtn.disabled = true
               rescanBtn.classList.add('spinning')
               const trig = s.trigger ? `${s.trigger} ` : ''
-              setBanner(`Scanning… ${trig}${s.modelsDone}/${s.modelsTotal} models`)
+              setBanner(
+                `Scanning… ${trig}${s.modelsDone}/${s.modelsTotal} models`
+              )
               scanPollTimer = setTimeout(tick, 1500)
             } else {
               rescanBtn.disabled = false
@@ -2520,11 +2832,23 @@
 
       // Version / last-updated footer — refreshed on the same interval as user stats
       const sidebarFooterEl = document.getElementById('sidebar-footer')
-      const fmtShort = (iso) => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '—'
+      const fmtShort = (iso) =>
+        iso
+          ? new Date(iso).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true,
+            })
+          : '—'
       function refreshFooter() {
-        fetch('/api/info').then(r => r.json()).then(info => {
-          sidebarFooterEl.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
-        }).catch(() => {})
+        fetch('/api/info')
+          .then((r) => r.json())
+          .then((info) => {
+            sidebarFooterEl.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
+          })
+          .catch(() => {})
       }
       refreshFooter()
       setInterval(refreshFooter, 5 * 60 * 1000)

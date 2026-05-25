@@ -62,24 +62,40 @@ function sortStringValues(values) {
 }
 
 function sortPlatformSources(sources) {
-  if (!Array.isArray(sources)) return []
-  return sources
+  return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
+    const left =
+      String(a?.discoveredAs || '') ||
+      String(a?.userId || '') ||
+      String(a?.categoryId || '') ||
+      String(a?.url || '')
+    const right =
+      String(b?.discoveredAs || '') ||
+      String(b?.userId || '') ||
+      String(b?.categoryId || '') ||
+      String(b?.url || '')
+    return left.localeCompare(right)
+  })
+}
+
+function sortSourcesObject(sources) {
+  return Object.fromEntries(
+    Object.entries(sources && typeof sources === 'object' ? sources : {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([platform, srcs]) => [platform, sortPlatformSources(srcs)])
+  )
 }
 
 function sortModelRegistry(registry) {
   return Object.fromEntries(
-    Object.entries(registry || {}).map(([canonicalName, entry]) => [
-      canonicalName,
-      {
-        aliases: sortStringValues(entry?.aliases),
-        sources: Object.fromEntries(
-          Object.entries(entry?.sources || {}).map(([platform, srcs]) => [
-            platform,
-            sortPlatformSources(srcs),
-          ])
-        ),
-      },
-    ])
+    Object.entries(registry || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([canonicalName, entry]) => [
+        canonicalName,
+        {
+          aliases: sortStringValues(entry?.aliases),
+          sources: sortSourcesObject(entry?.sources),
+        },
+      ])
   )
 }
 
@@ -89,10 +105,16 @@ function ensureModelEntryShape(entry, canonicalName) {
     Array.isArray(entry?.aliases) ? entry.aliases.filter(Boolean) : []
   )
   if (canonicalName) aliasSet.add(canonicalName)
+  const existingSources =
+    entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
   return {
     aliases: Array.from(aliasSet),
-    sources:
-      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {},
+    sources: Object.fromEntries(
+      Object.entries(existingSources).map(([sourceName, sources]) => [
+        sourceName,
+        Array.isArray(sources) ? [...sources] : [],
+      ])
+    ),
   }
 }
 
@@ -106,6 +128,61 @@ function findCanonicalModelName(registry, rawName) {
     if (aliases.some((alias) => sanitize(alias) === normalizedRaw))
       return canonicalName
   }
+  return null
+}
+
+function getSourceRegistryKey(site) {
+  return site === 'coomerfans' ? 'coomer' : site
+}
+
+function findCanonicalModelNameBySource(registry, sourceInfo) {
+  const normalizedUrl = String(
+    sourceInfo?.inputUrl || sourceInfo?.url || ''
+  ).trim()
+  const normalizedSite = String(
+    getSourceRegistryKey(String(sourceInfo?.site || '').trim())
+  ).trim()
+  const normalizedService = String(sourceInfo?.service || '').trim()
+  const normalizedUserId = String(sourceInfo?.userId || '').trim()
+  const normalizedUsername = sanitize(sourceInfo?.username)
+
+  for (const [canonicalName, entry] of Object.entries(registry || {})) {
+    const sources =
+      entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+
+    for (const [siteKey, sourceList] of Object.entries(sources)) {
+      if (normalizedSite && siteKey !== normalizedSite) continue
+
+      for (const source of Array.isArray(sourceList) ? sourceList : []) {
+        const sourceUrl = String(source?.url || '').trim()
+        const sourceService = String(source?.service || '').trim()
+        const sourceUserId = String(source?.userId || '').trim()
+        const sourceUsername = sanitize(source?.username)
+
+        if (normalizedUrl && sourceUrl === normalizedUrl) {
+          return canonicalName
+        }
+
+        if (
+          normalizedService &&
+          normalizedUserId &&
+          sourceService === normalizedService &&
+          sourceUserId === normalizedUserId
+        ) {
+          return canonicalName
+        }
+
+        if (
+          normalizedSite === 'reddit' &&
+          normalizedUsername &&
+          sourceUsername === normalizedUsername
+        ) {
+          return canonicalName
+        }
+      }
+    }
+  }
+
   return null
 }
 
@@ -215,6 +292,43 @@ function upsertGenericSource(entry, platform, sourceUrl, rawName) {
   }
 }
 
+function upsertSourceInfo(entry, sourceInfo, rawName) {
+  const sourceKey = getSourceRegistryKey(sourceInfo?.site)
+  if (!sourceKey) return
+  const now = new Date().toISOString()
+  if (!entry.sources) entry.sources = {}
+  if (!Array.isArray(entry.sources[sourceKey])) entry.sources[sourceKey] = []
+
+  const normalizedUsername = sanitize(sourceInfo?.username)
+  const sourceIndex = entry.sources[sourceKey].findIndex(
+    (source) =>
+      source?.url === sourceInfo.inputUrl ||
+      (source?.service === sourceInfo.service &&
+        source?.userId === sourceInfo.userId) ||
+      (sourceInfo.site === 'reddit' &&
+        source?.username &&
+        sanitize(source.username) === normalizedUsername)
+  )
+
+  const nextSource = {
+    url: sourceInfo.inputUrl,
+    service: sourceInfo.service,
+    userId: sourceInfo.userId,
+    username: sourceInfo.username || null,
+    discoveredAs: rawName,
+    lastCheckedAt: now,
+  }
+
+  if (sourceIndex >= 0) {
+    entry.sources[sourceKey][sourceIndex] = {
+      ...entry.sources[sourceKey][sourceIndex],
+      ...nextSource,
+    }
+  } else {
+    entry.sources[sourceKey].push(nextSource)
+  }
+}
+
 // ─── RESOLVE & TRACK ──────────────────────────────────────────────────────────
 
 /**
@@ -229,10 +343,12 @@ function resolveAndTrackModel(
   rawName,
   platform,
   sourceUrl,
-  canonicalOverride
+  canonicalOverride,
+  options = {}
 ) {
   const registry = loadModelRegistry(registryPath)
-  const cleanedRawName = sanitize(rawName) || 'unknown_model'
+  const cleanedRawName =
+    sanitize(rawName) || options.unknownName || 'unknown_model'
   const cleanedCanonicalOverride = sanitize(canonicalOverride)
   const existingCanonical = cleanedCanonicalOverride
     ? findCanonicalModelName(registry, cleanedCanonicalOverride)
@@ -274,16 +390,69 @@ function resolveAndTrackModel(
   return canonicalName
 }
 
+function resolveAndTrackSourceModel(
+  registryPath,
+  rawName,
+  sourceInfo,
+  canonicalOverride,
+  options = {}
+) {
+  const registry = loadModelRegistry(registryPath)
+  const cleanedRawName =
+    sanitize(rawName) || options.unknownName || 'unknown_model'
+  const cleanedOverride = sanitize(canonicalOverride)
+  const existingCanonicalBySource = findCanonicalModelNameBySource(
+    registry,
+    sourceInfo
+  )
+  const existingCanonical = cleanedOverride
+    ? findCanonicalModelName(registry, cleanedOverride)
+    : existingCanonicalBySource ||
+      findCanonicalModelName(registry, cleanedRawName)
+  const canonicalName =
+    existingCanonical ||
+    existingCanonicalBySource ||
+    cleanedOverride ||
+    cleanedRawName
+
+  registry[canonicalName] = ensureModelEntryShape(
+    registry[canonicalName],
+    canonicalName
+  )
+
+  const aliases = registry[canonicalName].aliases
+  if (!aliases.some((alias) => sanitize(alias) === cleanedRawName)) {
+    aliases.push(cleanedRawName)
+  }
+  registry[canonicalName].aliases = sortStringValues(aliases)
+
+  upsertSourceInfo(
+    registry[canonicalName],
+    {
+      ...sourceInfo,
+      rawName: cleanedRawName,
+    },
+    cleanedRawName
+  )
+  saveModelRegistry(registryPath, registry)
+
+  return canonicalName
+}
+
 module.exports = {
   sanitize,
   loadModelRegistry,
   saveModelRegistry,
   sortModelRegistry,
   findCanonicalModelName,
+  findCanonicalModelNameBySource,
   ensureModelEntryShape,
+  getSourceRegistryKey,
   resolveAndTrackModel,
+  resolveAndTrackSourceModel,
   upsertStufferdbSource,
   upsertCoomerSource,
   upsertRedditSource,
   upsertGenericSource,
+  upsertSourceInfo,
 }

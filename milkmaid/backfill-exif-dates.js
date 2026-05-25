@@ -20,7 +20,7 @@ const path = require('path')
 const minimist = require('minimist')
 const pLimit = require('p-limit')
 
-const mediaDates = require('./media-dates.js')
+const mediaDates = require('../scrapyard/mediaDates')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
