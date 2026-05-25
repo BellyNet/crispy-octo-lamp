@@ -34,8 +34,10 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY dashboard/ ./dashboard/
 COPY milkmaid/media-dates.js ./milkmaid/
-COPY scrapyard/modelRegistry.js ./scrapyard/
-COPY scrapyard/repoFileWriter.js ./scrapyard/
+# milkmaid/media-dates.js is now a thin re-export of scrapyard/mediaDates,
+# which in turn has its own transitive helpers under scrapyard/. Copy the
+# whole dir so the dashboard always boots even as the refactor continues.
+COPY scrapyard/ ./scrapyard/
 COPY model_aliases.json ./
 
 ENV DATASET_DIR=/data/dataset
