@@ -78,7 +78,12 @@ const {
   addBitwiseHash,
   getBitwiseHashRecord,
 } = require('../scrapyard/bitwiseHasher')
-const { getCompletionLine } = require('../stuffinglogger')
+const {
+  getCompletionLine,
+  logProgress,
+  logScrollingMessage,
+  resetProgressBar,
+} = require('../stuffinglogger')
 
 const datasetPaths = createDatasetPaths({
   rootDir: path.join(__dirname, '..'),
@@ -280,16 +285,27 @@ function setExpectedMediaCount(total) {
     'expectedMedia',
     Number.isFinite(total) && total >= 0 ? total : 0
   )
+  resetProgressBar(null, 'scrape')
+  logRunProgress()
 }
 
 function logRunProgress(context = '') {
   if (!currentRunLog) return
-  console.log(
-    runLifecycle.formatRunProgressLine(
-      runLifecycle.getRunProgressStats(currentRunLog),
-      context
-    )
-  )
+
+  const stats = runLifecycle.getRunProgressStats(currentRunLog)
+  const bottomText = [
+    `processed ${stats.processed}/${stats.expectedMedia}`,
+    `saved ${stats.saved}`,
+    `skipped ${stats.skipped}`,
+    `dupes ${stats.duplicates}`,
+    `failed ${stats.failures}`,
+    `remaining ${stats.remaining}`,
+  ].join(' | ')
+
+  if (context) logScrollingMessage(context)
+  logProgress(stats.processed, Math.max(stats.expectedMedia, 1), {
+    bottomText,
+  })
 }
 
 function noteMediaOutcome(kind, context = '') {
@@ -745,31 +761,31 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
   })
 
   if (result.reason?.startsWith('skip_existing_')) {
-    console.log(`Exists already: ${entry.filename}`)
+    logScrollingMessage(`Exists already: ${entry.filename}`)
     return
   }
   if (result.reason === 'duplicate_bitwise') {
-    console.log(`Bitwise dupe: ${entry.filename}`)
+    logScrollingMessage(`Bitwise dupe: ${entry.filename}`)
     return
   }
   if (result.reason === 'duplicate_visual') {
-    console.log(`Visual dupe: ${entry.filename}`)
+    logScrollingMessage(`Visual dupe: ${entry.filename}`)
     return
   }
   if (result.reason === 'duplicate_visual_fuzzy') {
-    console.log(
+    logScrollingMessage(
       `Fuzzy visual dupe (${result.match.distance}): ${entry.filename}`
     )
     return
   }
   if (result.reason === 'duplicate_visual_pending') {
-    console.log(
+    logScrollingMessage(
       `Pending visual dupe (${result.match.distance}): ${entry.filename}`
     )
     return
   }
 
-  console.log(`Saved ${kind}: ${entry.filename}`)
+  logScrollingMessage(`Saved ${kind}: ${entry.filename}`)
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
@@ -791,13 +807,13 @@ async function saveVideoMedia(modelName, folders, entry) {
       'skip_seen_media',
       folders
     )
-    console.log(`Seen already: ${entry.filename}`)
+    logScrollingMessage(`Seen already: ${entry.filename}`)
     return
   }
 
   if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
     recordDuplicate(entry, relativePath, 'skip_lazy_existing', folders)
-    console.log(`Exists already: ${entry.filename}`)
+    logScrollingMessage(`Exists already: ${entry.filename}`)
     return
   }
 
@@ -822,7 +838,7 @@ async function saveVideoMedia(modelName, folders, entry) {
         folders
       )
       removeFileIfExists(tmpPath)
-      console.log(`Bitwise dupe: ${entry.filename}`)
+      logScrollingMessage(`Bitwise dupe: ${entry.filename}`)
       return
     }
 
@@ -846,10 +862,10 @@ async function saveVideoMedia(modelName, folders, entry) {
     })
 
     if (result.reason === 'duplicate_visual') {
-      console.log(`Visual dupe: ${entry.filename}`)
+      logScrollingMessage(`Visual dupe: ${entry.filename}`)
       return
     }
-    console.log(`Saved video: ${entry.filename}`)
+    logScrollingMessage(`Saved video: ${entry.filename}`)
   } catch (err) {
     removeFileIfExists(tmpPath)
     errorCount += 1
@@ -872,7 +888,7 @@ async function saveVideoMedia(modelName, folders, entry) {
       })
     )
     noteMediaOutcome('failed', `video_error: ${entry.filename}`)
-    console.log(`Failed video: ${entry.filename} - ${err.message}`)
+    logScrollingMessage(`Failed video: ${entry.filename} - ${err.message}`)
   }
 }
 
@@ -1080,13 +1096,13 @@ async function run(argvInput = process.argv.slice(2)) {
         duplicateCount: browserDeduped.duplicateCount,
         mediaCount: selectedMedia.length,
       })
-      console.log(
+      logScrollingMessage(
         `Browser media dedupe: skipped ${browserDeduped.duplicateCount} repeated media URL(s)`
       )
     }
     setExpectedMediaCount(selectedMedia.length)
   } else {
-    console.log(
+    logScrollingMessage(
       'Browser media mode disabled; using direct HTTP media requests.'
     )
   }
@@ -1129,11 +1145,11 @@ async function run(argvInput = process.argv.slice(2)) {
     }
   }
 
-  console.log(
+  logScrollingMessage(
     `Media buckets: ${imageLike.length} image/gif, ${videos.length} video`
   )
 
-  console.log(`Lazy downloading videos: ${videos.length}`)
+  logScrollingMessage(`Lazy downloading videos: ${videos.length}`)
   await Promise.all(
     videos.map((entry) =>
       videoLimit(() => saveVideoMedia(modelName, folders, entry))
@@ -1207,7 +1223,8 @@ async function run(argvInput = process.argv.slice(2)) {
     sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
   })
 
-  console.log(runLifecycle.formatRunSummaryLine(runStats))
+  logScrollingMessage(runLifecycle.formatRunSummaryLine(runStats))
+  logRunProgress()
   console.log(getCompletionLine())
   return 0
 }

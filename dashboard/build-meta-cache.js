@@ -11,14 +11,10 @@
 
 const fs = require('fs')
 const path = require('path')
-const { execFile } = require('child_process')
-const { promisify } = require('util')
 const pLimit = require('p-limit')
 const sharp = require('sharp')
 const mediaDates = require('../milkmaid/media-dates.js')
 const MetaCache = require('./meta-cache.js')
-
-const execFileAsync = promisify(execFile)
 
 const APPDATA =
   process.env.APPDATA ||
@@ -36,25 +32,14 @@ const ALL_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS])
 
 let ffprobePath = null
 
-async function getDuration(videoPath) {
-  if (!ffprobePath) return 0
-  try {
-    const { stdout } = await execFileAsync(
-      ffprobePath,
-      ['-v', 'quiet', '-print_format', 'json', '-show_format', videoPath],
-      { timeout: 10000 }
-    )
-    const d = parseFloat(JSON.parse(stdout)?.format?.duration)
-    return isFinite(d) && d > 0 ? d : 0
-  } catch {
-    return 0
-  }
-}
-
 async function processFile(cache, username, userDir, folder, filename) {
   const filePath = path.join(userDir, folder, filename)
   let stat
-  try { stat = await fs.promises.stat(filePath) } catch { return }
+  try {
+    stat = await fs.promises.stat(filePath)
+  } catch {
+    return
+  }
 
   // Already cached and valid — skip
   if (cache.get(username, folder, filename, stat)) return
@@ -72,12 +57,9 @@ async function processFile(cache, username, userDir, folder, filename) {
       meta.height = 0
     }
   } else if (VIDEO_EXTS.has(ext)) {
-    const [duration, videoDate] = await Promise.all([
-      getDuration(filePath),
-      mediaDates.extractVideoDateFromFile(filePath).catch(() => null),
-    ])
-    meta.duration = duration
-    if (videoDate) meta.videoDate = videoDate
+    const probed = await mediaDates.probeVideoFile(filePath).catch(() => ({}))
+    meta.duration = probed.duration || 0
+    if (probed.videoDate) meta.videoDate = probed.videoDate
   }
 
   cache.set(username, folder, filename, stat, meta)
@@ -85,7 +67,10 @@ async function processFile(cache, username, userDir, folder, filename) {
 
 async function main() {
   ffprobePath = await mediaDates.findFfprobe()
-  if (!ffprobePath) console.warn('  ffprobe not found — video duration/dates will not be cached')
+  if (!ffprobePath)
+    console.warn(
+      '  ffprobe not found — video duration/dates will not be cached'
+    )
 
   let dirs
   try {
@@ -95,7 +80,9 @@ async function main() {
     process.exit(1)
   }
 
-  const modelDirs = dirs.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+  const modelDirs = dirs.filter(
+    (e) => e.isDirectory() && !e.name.startsWith('.')
+  )
   const cache = new MetaCache(THUMB_DIR)
 
   console.log(`\n  Dataset:   ${datasetDir}`)
@@ -109,13 +96,18 @@ async function main() {
     for (const folder of MEDIA_FOLDERS) {
       try {
         const files = await fs.promises.readdir(path.join(userDir, folder))
-        totalFiles += files.filter((f) => ALL_EXTS.has(path.extname(f).toLowerCase())).length
+        totalFiles += files.filter((f) =>
+          ALL_EXTS.has(path.extname(f).toLowerCase())
+        ).length
       } catch {}
     }
   }
 
   console.log(`  Files:     ${totalFiles} total\n`)
-  if (totalFiles === 0) { console.log('  Nothing to do.'); return }
+  if (totalFiles === 0) {
+    console.log('  Nothing to do.')
+    return
+  }
 
   // Images use high concurrency (sharp is fast), videos use lower (ffprobe spawns processes)
   const imgLimit = pLimit(16)
@@ -135,7 +127,11 @@ async function main() {
     const tasks = []
     for (const folder of MEDIA_FOLDERS) {
       let files
-      try { files = await fs.promises.readdir(path.join(userDir, folder)) } catch { continue }
+      try {
+        files = await fs.promises.readdir(path.join(userDir, folder))
+      } catch {
+        continue
+      }
 
       for (const file of files) {
         const ext = path.extname(file).toLowerCase()
@@ -144,28 +140,33 @@ async function main() {
         const isVideo = VIDEO_EXTS.has(ext)
         const limiter = isVideo ? vidLimit : imgLimit
 
-        tasks.push(limiter(async () => {
-          const filePath = path.join(userDir, folder, file)
-          let stat
-          try { stat = await fs.promises.stat(filePath) } catch {
-            processed++; return
-          }
+        tasks.push(
+          limiter(async () => {
+            const filePath = path.join(userDir, folder, file)
+            let stat
+            try {
+              stat = await fs.promises.stat(filePath)
+            } catch {
+              processed++
+              return
+            }
 
-          if (cache.get(username, folder, file, stat)) {
-            hits++
-          } else {
-            await processFile(cache, username, userDir, folder, file)
-          }
+            if (cache.get(username, folder, file, stat)) {
+              hits++
+            } else {
+              await processFile(cache, username, userDir, folder, file)
+            }
 
-          processed++
-          if (processed % 200 === 0 || processed === totalFiles) {
-            const pct = Math.round((processed / totalFiles) * 100)
-            const elapsedS = ((Date.now() - startMs) / 1000).toFixed(0)
-            process.stdout.write(
-              `\r  Progress: ${processed}/${totalFiles} (${pct}%) — ${hits} cached — ${elapsedS}s elapsed`
-            )
-          }
-        }))
+            processed++
+            if (processed % 200 === 0 || processed === totalFiles) {
+              const pct = Math.round((processed / totalFiles) * 100)
+              const elapsedS = ((Date.now() - startMs) / 1000).toFixed(0)
+              process.stdout.write(
+                `\r  Progress: ${processed}/${totalFiles} (${pct}%) — ${hits} cached — ${elapsedS}s elapsed`
+              )
+            }
+          })
+        )
       }
     }
 

@@ -77,9 +77,9 @@ function toISO(date) {
 }
 
 // ─── EXTRACTION: VIDEOS (from saved file via ffprobe) ─────────────────────────
-async function extractVideoDateFromFile(filePath) {
+async function probeVideoFile(filePath) {
   const probe = await ensureFfprobe()
-  if (!probe) return null
+  if (!probe) return { duration: null, videoDate: null }
   try {
     const { stdout } = await execFileAsync(
       probe,
@@ -95,6 +95,19 @@ async function extractVideoDateFromFile(filePath) {
       { timeout: 15000 }
     )
     const info = JSON.parse(stdout)
+
+    let duration = Number.parseFloat(info?.format?.duration)
+    if (!(Number.isFinite(duration) && duration > 0)) {
+      for (const stream of info?.streams || []) {
+        const streamDuration = Number.parseFloat(stream?.duration)
+        if (Number.isFinite(streamDuration) && streamDuration > 0) {
+          duration = streamDuration
+          break
+        }
+      }
+    }
+    if (!(Number.isFinite(duration) && duration > 0)) duration = null
+
     const candidates = []
 
     const ft = info?.format?.tags || {}
@@ -108,11 +121,49 @@ async function extractVideoDateFromFile(filePath) {
         candidates.push(stream.tags.creation_time)
     }
 
+    let videoDate = null
     for (const raw of candidates) {
       const d = new Date(raw)
-      if (isSane(d)) return toISO(d)
+      if (isSane(d)) {
+        videoDate = toISO(d)
+        break
+      }
     }
-    return null
+    return { duration, videoDate }
+  } catch {
+    return { duration: null, videoDate: null }
+  }
+}
+
+async function extractVideoDateFromFile(filePath) {
+  return (await probeVideoFile(filePath)).videoDate
+}
+
+let exifrModule = null
+
+function getExifr() {
+  if (exifrModule) return exifrModule
+  try {
+    exifrModule = require('exifr')
+  } catch {
+    exifrModule = false
+  }
+  return exifrModule
+}
+
+async function extractImageDateFromFile(filePath) {
+  const exifr = getExifr()
+  if (!exifr) return null
+  try {
+    const data = await exifr.parse(filePath, {
+      pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized'],
+      translateValues: true,
+    })
+    const raw =
+      data?.DateTimeOriginal || data?.CreateDate || data?.DateTimeDigitized
+    if (!raw) return null
+    const date = raw instanceof Date ? raw : new Date(raw)
+    return isSane(date) ? toISO(date) : null
   } catch {
     return null
   }
@@ -291,6 +342,8 @@ module.exports = {
   resolveDateFromSidecar,
   resolveBestDateRecord,
   extractVideoDateFromFile,
+  probeVideoFile,
+  extractImageDateFromFile,
   extractFilenameDate,
   flushAllSidecars,
   findFfprobe,

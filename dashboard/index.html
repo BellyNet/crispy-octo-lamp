@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dataset Dashboard</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css"
+    />
     <style>
       *,
       *::before,
@@ -143,62 +146,11 @@
         border-left-color: var(--accent);
         font-weight: 500;
       }
-
-      /* ─── SIDEBAR MODEL PANEL ────────────────────────────────── */
-      #sidebar-model-panel {
-        border-top: 1px solid var(--border);
-        padding: 10px 12px;
-        display: none;
-        flex-direction: column;
-        gap: 8px;
-        flex-shrink: 0;
-      }
-      #sidebar-model-panel.visible {
-        display: flex;
-      }
-      #smp-name {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--text);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      #smp-stats {
-        font-size: 11px;
-        color: var(--muted);
-        line-height: 1.4;
-      }
-      .smp-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        color: var(--muted);
-        text-transform: uppercase;
-        margin-bottom: 4px;
-      }
-      #smp-filter-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-      .smp-filter-btn {
+      .user-item.kbd-focus {
         background: var(--card-bg);
-        border: 1px solid var(--border);
-        color: var(--muted);
-        padding: 3px 9px;
-        border-radius: 20px;
-        cursor: pointer;
-        font-size: 11px;
-        font-weight: 500;
-        transition: all 0.12s;
-        white-space: nowrap;
-      }
-      .smp-filter-btn:hover { border-color: var(--accent); color: var(--text); }
-      .smp-filter-btn.active {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
+        color: var(--text);
+        outline: 1px solid var(--accent-dim);
+        outline-offset: -1px;
       }
 
       #sidebar-footer {
@@ -310,7 +262,9 @@
         background-position: right 10px center;
         background-color: var(--card-bg);
       }
-      #sort-select:hover { border-color: var(--accent); }
+      #sort-select:hover {
+        border-color: var(--accent);
+      }
       #date-range {
         flex: 1;
         font-size: 11px;
@@ -445,6 +399,12 @@
         aspect-ratio: 1;
         display: flex;
         flex-direction: column;
+        /* Skip rendering, layout, and paint for cards outside the viewport.
+           Huge libraries (5000+ cards) no longer pay the full-mount cost
+           on first paint or while scrolling. contain-intrinsic-size keeps
+           the scroll bar honest before the card is actually rendered. */
+        content-visibility: auto;
+        contain-intrinsic-size: 200px 200px;
       }
       .media-card:hover {
         transform: translateY(-2px);
@@ -577,28 +537,7 @@
         color: #efa8a8;
       }
 
-      /* ─── EMPTY / LOADING STATE ──────────────────────────────── */
-      #empty-state {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        color: var(--muted);
-        gap: 12px;
-        padding: 40px;
-        text-align: center;
-      }
-      #empty-state svg {
-        opacity: 0.3;
-      }
-      #empty-state p {
-        font-size: 15px;
-      }
-      #empty-state small {
-        font-size: 12px;
-      }
-
+      /* ─── LOADING STATE ──────────────────────────────────────── */
       #loading-indicator {
         display: none;
         align-items: center;
@@ -634,7 +573,11 @@
         --pswp-error-text-color: #7070a0;
       }
       .pswp__top-bar {
-        background: linear-gradient(to bottom, rgba(10,10,15,0.7) 0%, transparent 100%);
+        background: linear-gradient(
+          to bottom,
+          rgba(10, 10, 15, 0.7) 0%,
+          transparent 100%
+        );
       }
       /* Counter element */
       .pswp__pswp-counter {
@@ -667,7 +610,7 @@
         background: rgba(10, 10, 15, 0.88);
         backdrop-filter: blur(10px);
         border-top: 1px solid rgba(255, 255, 255, 0.08);
-        display: flex;             /* always flex so transition works */
+        display: flex; /* always flex so transition works */
         align-items: center;
         gap: 14px;
         font-size: 13px;
@@ -675,7 +618,9 @@
         transform: translateY(100%);
         opacity: 0;
         pointer-events: none;
-        transition: transform 0.22s ease, opacity 0.22s ease;
+        transition:
+          transform 0.22s ease,
+          opacity 0.22s ease;
       }
       .pswp__pswp-info-panel.pswp-info-visible {
         transform: translateY(0);
@@ -690,9 +635,26 @@
         text-overflow: ellipsis;
         font-size: 12px;
       }
-      .pswp-info-date { font-weight: 500; flex-shrink: 0; }
-      .pswp-info-added { font-size: 12px; color: var(--muted); flex-shrink: 0; }
-      .pswp-info-src { font-size: 11px; color: var(--muted); font-style: italic; }
+      .pswp-info-date {
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+      .pswp-info-added {
+        font-size: 12px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .pswp-info-src {
+        font-size: 11px;
+        color: var(--muted);
+        font-style: italic;
+      }
+      .pswp-info-meta {
+        font-size: 11px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+      }
       /* Video slide wrapper */
       .pswp-video-wrap {
         width: 100%;
@@ -708,8 +670,86 @@
         border-radius: 4px;
       }
       @media (max-width: 640px) {
-        .pswp__pswp-info-panel { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
-        .pswp-info-filename { order: 3; width: 100%; white-space: normal; }
+        .pswp__pswp-info-panel {
+          padding: 10px 12px;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .pswp-info-filename {
+          order: 3;
+          width: 100%;
+          white-space: normal;
+        }
+      }
+
+      /* ─── CAPTION SIDEBAR (desktop) ─────────────────────────── */
+      /* Right-side panel inside the lightbox; visible on wide screens only.
+         On narrow viewports the caption goes into the info panel instead. */
+      .pswp__pswp-caption {
+        position: absolute;
+        top: 44px;
+        right: 0;
+        bottom: 0;
+        width: 360px;
+        padding: 18px 22px;
+        background: rgba(10, 10, 15, 0.85);
+        backdrop-filter: blur(10px);
+        border-left: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.55;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        z-index: 1050;
+        transform: translateX(100%);
+        transition: transform 0.22s ease;
+      }
+      .pswp__pswp-caption.pswp-caption-visible {
+        transform: translateX(0);
+      }
+      .pswp__pswp-caption-empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .pswp__pswp-caption-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      /* Caption button — same look as the info button */
+      .pswp__pswp-caption-button svg {
+        opacity: 0.75;
+        transition: opacity 0.15s;
+      }
+      .pswp__pswp-caption-button:hover svg,
+      .pswp__pswp-caption-button.pswp-caption-active svg {
+        opacity: 1;
+      }
+      .pswp__pswp-caption-button.pswp-caption-active {
+        color: var(--accent);
+      }
+      @media (max-width: 900px) {
+        /* No room for a sidebar — caption falls back to the info panel. */
+        .pswp__pswp-caption {
+          display: none;
+        }
+      }
+      /* Caption inside the info panel (mobile). */
+      .pswp-info-caption {
+        order: 4;
+        width: 100%;
+        white-space: pre-wrap;
+        font-size: 12px;
+        color: var(--text);
+        opacity: 0.9;
+        line-height: 1.5;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        margin-top: 4px;
       }
 
       /* ─── NO-RESULTS ─────────────────────────────────────────── */
@@ -733,7 +773,9 @@
         padding: 6px;
         border-radius: 6px;
         flex-shrink: 0;
-        transition: background 0.15s, color 0.15s;
+        transition:
+          background 0.15s,
+          color 0.15s;
       }
       #home-btn:hover,
       #home-btn.active {
@@ -774,7 +816,28 @@
         background-position: right 10px center;
         background-color: var(--card-bg);
       }
-      #home-sort-select:hover { border-color: var(--accent); }
+      #home-sort-select:hover {
+        border-color: var(--accent);
+      }
+      #home-shuffle-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          color 0.15s,
+          border-color 0.15s,
+          background 0.15s;
+      }
+      #home-shuffle-btn:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
       .home-size-btn {
         background: none;
         border: none;
@@ -786,11 +849,19 @@
         border-radius: 4px;
         transition: all 0.1s;
       }
-      .home-size-btn:hover { background: var(--card-bg); color: var(--text); }
-      .home-size-btn.active { color: var(--accent); }
+      .home-size-btn:hover {
+        background: var(--card-bg);
+        color: var(--text);
+      }
+      .home-size-btn.active {
+        color: var(--accent);
+      }
       #home-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(var(--home-card-min), 1fr));
+        grid-template-columns: repeat(
+          auto-fill,
+          minmax(var(--home-card-min), 1fr)
+        );
         gap: 12px;
       }
       .home-card {
@@ -799,7 +870,12 @@
         border-radius: 10px;
         overflow: hidden;
         cursor: pointer;
-        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+        transition:
+          transform 0.15s,
+          border-color 0.15s,
+          box-shadow 0.15s;
+        content-visibility: auto;
+        contain-intrinsic-size: 240px 320px;
       }
       .home-card:hover {
         transform: translateY(-3px);
@@ -824,6 +900,18 @@
         overflow: hidden;
         text-overflow: ellipsis;
         margin-bottom: 5px;
+      }
+      .home-card-new {
+        display: inline-block;
+        background: var(--accent);
+        color: #fff;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        vertical-align: middle;
+        margin-left: 2px;
       }
       .home-card-sources {
         display: flex;
@@ -874,21 +962,35 @@
         position: relative;
         cursor: default;
       }
-      /* activity levels — inactive stays border colour */
-      .yr-cell.lvl-1 { background: #2d4a2d; }
-      .yr-cell.lvl-2 { background: #3a7a3a; }
-      .yr-cell.lvl-3 { background: #4caf50; }
-      .yr-cell.lvl-4 { background: #76d77a; }
+      /* activity levels — inactive stays border colour.
+         Tuned for dark UI: lvl-1 stands out from the inactive border
+         (which is #2a2a3a) instead of fading into it. */
+      .yr-cell.lvl-1 {
+        background: #1f5b2a;
+      }
+      .yr-cell.lvl-2 {
+        background: #2f8c3e;
+      }
+      .yr-cell.lvl-3 {
+        background: #4caf50;
+      }
+      .yr-cell.lvl-4 {
+        background: #76d77a;
+      }
 
       /* ─── FEATURED CARD ──────────────────────────────────────────── */
       .home-card.featured {
         border-color: #f5c518;
-        box-shadow: 0 0 0 1px #f5c518, 0 6px 28px rgba(245, 197, 24, 0.35);
+        box-shadow:
+          0 0 0 1px #f5c518,
+          0 6px 28px rgba(245, 197, 24, 0.35);
         grid-column: span 2;
       }
       .home-card.featured:hover {
         border-color: #f5c518;
-        box-shadow: 0 0 0 2px #f5c518, 0 10px 40px rgba(245, 197, 24, 0.45);
+        box-shadow:
+          0 0 0 2px #f5c518,
+          0 10px 40px rgba(245, 197, 24, 0.45);
       }
       .home-card.featured .home-card-thumb {
         aspect-ratio: 16/9;
@@ -910,7 +1012,9 @@
       }
       /* On small home-card sizes, collapse the span */
       @media (max-width: 640px) {
-        .home-card.featured { grid-column: span 2; }
+        .home-card.featured {
+          grid-column: span 2;
+        }
       }
 
       /* ─── FILTER SELECT (mobile) ─────────────────────────────── */
@@ -932,6 +1036,48 @@
         background-repeat: no-repeat;
         background-position: right 8px center;
         padding-right: 22px;
+      }
+
+      /* ─── RESCAN BUTTON ──────────────────────────────────────── */
+      #rescan-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 5px 8px;
+        border-radius: 6px;
+        flex-shrink: 0;
+        transition:
+          background 0.15s,
+          color 0.15s,
+          border-color 0.15s;
+      }
+      #rescan-btn:hover {
+        background: var(--card-bg);
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      #rescan-btn[disabled] {
+        opacity: 0.5;
+        cursor: progress;
+      }
+      #rescan-btn.spinning svg {
+        animation: spin 1.2s linear infinite;
+      }
+
+      /* ─── SCAN BANNER ────────────────────────────────────────── */
+      #scan-banner {
+        padding: 6px 20px;
+        background: rgba(124, 108, 252, 0.12);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 500;
+        border-bottom: 1px solid var(--border);
+        text-align: center;
+        flex-shrink: 0;
       }
 
       /* ─── HAMBURGER ──────────────────────────────────────────── */
@@ -960,7 +1106,9 @@
         border-right: none;
       }
       #sidebar {
-        transition: width 0.25s ease, min-width 0.25s ease;
+        transition:
+          width 0.25s ease,
+          min-width 0.25s ease;
       }
 
       #sidebar-overlay {
@@ -1016,13 +1164,26 @@
         }
 
         /* filter pills → dropdown on mobile */
-        .filter-btn { display: none; }
-        #filter-select { display: block; }
+        .filter-btn {
+          display: none;
+        }
+        #filter-select {
+          display: block;
+        }
 
         /* size buttons — show column-count labels on mobile */
-        .size-btn[data-size='small']::after  { content: ' (4×)'; font-size: 9px; }
-        .size-btn[data-size='medium']::after { content: ' (2×)'; font-size: 9px; }
-        .size-btn[data-size='large']::after  { content: ' (1×)'; font-size: 9px; }
+        .size-btn[data-size='small']::after {
+          content: ' (4×)';
+          font-size: 9px;
+        }
+        .size-btn[data-size='medium']::after {
+          content: ' (2×)';
+          font-size: 9px;
+        }
+        .size-btn[data-size='large']::after {
+          content: ' (1×)';
+          font-size: 9px;
+        }
 
         #grid-container {
           padding: 10px 12px;
@@ -1040,7 +1201,6 @@
         #home-view {
           padding: 10px 12px;
         }
-
       }
     </style>
   </head>
@@ -1058,18 +1218,6 @@
       </div>
       <ul id="user-list"></ul>
 
-      <!-- Model info panel — hidden, kept for JS refs -->
-      <div id="sidebar-model-panel" style="display:none">
-        <div id="smp-name"></div>
-        <div id="smp-stats"></div>
-        <div id="smp-filter-row">
-          <button class="smp-filter-btn active" data-type="all">All</button>
-          <button class="smp-filter-btn" data-type="image">Images</button>
-          <button class="smp-filter-btn" data-type="gif">GIFs</button>
-          <button class="smp-filter-btn" data-type="video">Videos</button>
-        </div>
-      </div>
-
       <div id="sidebar-footer"></div>
     </aside>
 
@@ -1079,16 +1227,33 @@
     <div id="main">
       <header id="main-header">
         <button id="home-btn" title="All models">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            <polyline points="9 22 9 12 15 12 15 22"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
           </svg>
         </button>
         <button id="hamburger" aria-label="Toggle sidebar">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="3" y1="6" x2="21" y2="6"/>
-            <line x1="3" y1="12" x2="21" y2="12"/>
-            <line x1="3" y1="18" x2="21" y2="18"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
         <div id="header-left">
@@ -1096,13 +1261,38 @@
           <span id="media-stats"></span>
           <div id="source-links"></div>
         </div>
-        <select id="filter-select" aria-label="Filter media type" style="display:none">
+        <select
+          id="filter-select"
+          aria-label="Filter media type"
+          style="display: none"
+        >
           <option value="all">All</option>
           <option value="image">Images</option>
           <option value="gif">GIFs</option>
           <option value="video">Videos</option>
         </select>
+        <button id="rescan-btn" title="Rescan all models" aria-label="Rescan">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path
+              d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+            />
+          </svg>
+        </button>
       </header>
+      <div id="scan-banner" style="display: none">
+        <span id="scan-banner-text"></span>
+      </div>
 
       <div id="sort-bar" style="display: none">
         <select id="sort-select" aria-label="Sort order">
@@ -1129,36 +1319,44 @@
         <div id="home-view">
           <div id="home-sort-bar">
             <select id="home-sort-select" aria-label="Sort models">
+              <option value="random" selected>Random ↻</option>
               <option value="az">A → Z</option>
               <option value="oldest-media">Oldest media first</option>
               <option value="newest-media">Newest media first</option>
               <option value="recently-added">Recently added</option>
             </select>
+            <button
+              id="home-shuffle-btn"
+              title="Reshuffle"
+              aria-label="Reshuffle"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="16 3 21 3 21 8" />
+                <line x1="4" y1="20" x2="21" y2="3" />
+                <polyline points="21 16 21 21 16 21" />
+                <line x1="15" y1="15" x2="21" y2="21" />
+                <line x1="4" y1="4" x2="9" y2="9" />
+              </svg>
+            </button>
             <div class="sort-bar-right">
               <span class="sort-label">Card</span>
-              <button class="home-size-btn active" data-home-size="small">S</button>
+              <button class="home-size-btn active" data-home-size="small">
+                S
+              </button>
               <button class="home-size-btn" data-home-size="medium">M</button>
               <button class="home-size-btn" data-home-size="large">L</button>
             </div>
           </div>
           <div id="home-grid"></div>
-        </div>
-
-        <div id="empty-state">
-          <svg
-            width="64"
-            height="64"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <polyline points="21 15 16 10 5 21" />
-          </svg>
-          <p>Select a user from the sidebar</p>
-          <small>Media is sorted by creation date from filename metadata</small>
         </div>
 
         <div id="loading-indicator">
@@ -1172,7 +1370,6 @@
       </div>
     </div>
 
-
     <script>
       'use strict'
 
@@ -1182,6 +1379,7 @@
       let activeType = 'all'
       let activeSort = 'asc'
       let homeVisible = false
+      let currentUsername = null
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
       const userListEl = document.getElementById('user-list')
@@ -1189,24 +1387,18 @@
       const userCountEl = document.getElementById('user-count')
       const currentNameEl = document.getElementById('current-user-name')
       const mediaStatsEl = document.getElementById('media-stats')
-      const filterBtns = document.querySelectorAll('.filter-btn')
       const filterSelect = document.getElementById('filter-select')
       const sortSelect = document.getElementById('sort-select')
       const sortBar = document.getElementById('sort-bar')
       const dateRangeEl = document.getElementById('date-range')
       const gridEl = document.getElementById('media-grid')
-      const emptyState = document.getElementById('empty-state')
       const loadingEl = document.getElementById('loading-indicator')
       const noResultsEl = document.getElementById('no-results')
       const homeViewEl = document.getElementById('home-view')
       const homeGridEl = document.getElementById('home-grid')
-      const smpNameEl = document.getElementById('smp-name')
-      const smpStatsEl = document.getElementById('smp-stats')
-      const smpModelPanel = document.getElementById('sidebar-model-panel')
-      const smpFilterBtns = document.querySelectorAll('.smp-filter-btn')
       const homeSizeBtns = document.querySelectorAll('.home-size-btn')
       const homeSortSelect = document.getElementById('home-sort-select')
-      let homeSort = 'az'
+      let homeSort = 'random'
 
       // ─── HELPERS ──────────────────────────────────────────────────────────
       function formatDate(iso) {
@@ -1232,6 +1424,26 @@
         })
       }
 
+      function formatFileSize(bytes) {
+        if (!bytes) return ''
+        const units = ['B', 'KB', 'MB', 'GB']
+        let v = bytes,
+          u = 0
+        while (v >= 1024 && u < units.length - 1) {
+          v /= 1024
+          u++
+        }
+        return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`
+      }
+
+      function formatDuration(seconds) {
+        if (!seconds || seconds <= 0) return ''
+        const s = Math.round(seconds)
+        const m = Math.floor(s / 60)
+        const ss = String(s % 60).padStart(2, '0')
+        return `${m}:${ss}`
+      }
+
       // ─── USERS ────────────────────────────────────────────────────────────
       let usersData = [] // [{ name, sources }]
 
@@ -1239,9 +1451,95 @@
         const res = await fetch('/api/users')
         usersData = await res.json()
         userCountEl.textContent = usersData.length
+        // First-ever load: stamp every known model with "seen now" so we don't
+        // flood the home grid with NEW badges on first visit. Future additions
+        // / updates after this stamp will show NEW.
+        initLastSeen(usersData)
         renderUserList(usersData)
-        showHomeView() // start on the home grid
+        // Apply whatever route is in the URL bar. Browsers preserve the hash
+        // across refresh, so a deep link / refresh / back button all land here.
+        applyHashRoute()
       }
+
+      // ─── "NEW" TRACKING ───────────────────────────────────────────────────
+      const LAST_SEEN_KEY = 'dashboard-last-seen'
+      function readLastSeen() {
+        try {
+          return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || '{}')
+        } catch {
+          return {}
+        }
+      }
+      function writeLastSeen(map) {
+        try {
+          localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(map))
+        } catch {}
+      }
+      function initLastSeen(users) {
+        const seen = readLastSeen()
+        const now = Date.now()
+        let changed = false
+        // Stamp models we've never recorded so we don't show NEW on first load.
+        for (const u of users) {
+          if (seen[u.name] == null) {
+            seen[u.name] = now
+            changed = true
+          }
+        }
+        if (changed) writeLastSeen(seen)
+      }
+      function markSeen(username) {
+        if (!username) return
+        const seen = readLastSeen()
+        seen[username] = Date.now()
+        writeLastSeen(seen)
+      }
+      function isNewModel(u, seen) {
+        const last = seen[u.name]
+        if (last == null) return true // never recorded — treat as new
+        return (u.latestAddedMs || 0) > last
+      }
+
+      // ─── HASH ROUTING ─────────────────────────────────────────────────────
+      // #/                → home grid
+      // #/u/<encoded name>→ that model's media view
+      // Updates the URL whenever the user navigates (so browser back works),
+      // and reacts to manual hash changes (paste a link, back/forward button).
+      let _suppressHashChange = false
+      function parseHashRoute() {
+        const raw = (location.hash || '').replace(/^#/, '')
+        const m = raw.match(/^\/u\/(.+)$/)
+        if (m) return { view: 'user', username: decodeURIComponent(m[1]) }
+        return { view: 'home' }
+      }
+      function setHashRoute(target) {
+        const next =
+          target.view === 'user'
+            ? `#/u/${encodeURIComponent(target.username)}`
+            : '#/'
+        if (location.hash === next) return
+        _suppressHashChange = true
+        location.hash = next
+      }
+      function applyHashRoute() {
+        const route = parseHashRoute()
+        if (route.view === 'user') {
+          const u = usersData.find((x) => x.name === route.username)
+          if (u) {
+            selectUser(u, null, { skipHashUpdate: true })
+            return
+          }
+          // Unknown model — bounce back to home rather than show a broken view.
+        }
+        showHomeView({ skipHashUpdate: true })
+      }
+      window.addEventListener('hashchange', () => {
+        if (_suppressHashChange) {
+          _suppressHashChange = false
+          return
+        }
+        applyHashRoute()
+      })
 
       // Models whose full media has been loaded — their client-resolved dates are
       // more accurate than the server's fast buildModelStats() scan, so we preserve
@@ -1261,15 +1559,23 @@
               changed = true
             } else {
               const prev = usersData[idx]
-              const update = { fileCount: u.fileCount, latestAddedMs: u.latestAddedMs }
+              const update = {
+                fileCount: u.fileCount,
+                latestAddedMs: u.latestAddedMs,
+              }
               // Only overwrite media dates for models not yet visited by the client
               if (!_accurateModels.has(u.name)) {
                 update.earliestMs = u.earliestMs
-                update.latestMs   = u.latestMs
+                update.latestMs = u.latestMs
                 update.yearCounts = u.yearCounts
               }
-              const needsUpdate = Object.entries(update).some(([k, v]) => prev[k] !== v)
-              if (needsUpdate) { usersData[idx] = { ...prev, ...update }; changed = true }
+              const needsUpdate = Object.entries(update).some(
+                ([k, v]) => prev[k] !== v
+              )
+              if (needsUpdate) {
+                usersData[idx] = { ...prev, ...update }
+                changed = true
+              }
             }
           }
           if (changed) {
@@ -1284,20 +1590,20 @@
       setInterval(refreshUsers, 5 * 60 * 1000)
 
       // ─── HOME VIEW ────────────────────────────────────────────────────────
-      function showHomeView() {
+      function showHomeView(opts = {}) {
         homeVisible = true
+        currentUsername = null
         document.getElementById('home-btn').classList.add('active')
         homeViewEl.classList.add('visible')
-        emptyState.style.display = 'none'
         loadingEl.style.display = 'none'
         noResultsEl.style.display = 'none'
         gridEl.style.display = 'none'
         sortBar.style.display = 'none'
         currentNameEl.textContent = 'All Models'
-        smpModelPanel.classList.remove('visible')
         filterSelect.style.display = 'none'
         if (mediaStatsEl) mediaStatsEl.textContent = ''
         sourceLinksEl.innerHTML = ''
+        if (!opts.skipHashUpdate) setHashRoute({ view: 'home' })
         renderHomeGrid()
       }
 
@@ -1310,32 +1616,72 @@
 
       // Global year range across all models — defines the x-axis for every card
       function getYearRange() {
-        let minYear = Infinity, maxYear = new Date().getFullYear()
+        let minYear = Infinity,
+          maxYear = new Date().getFullYear()
         for (const u of usersData) {
-          if (u.earliestMs) minYear = Math.min(minYear, new Date(u.earliestMs).getFullYear())
-          if (u.latestMs)   maxYear = Math.max(maxYear, new Date(u.latestMs).getFullYear())
+          if (u.earliestMs)
+            minYear = Math.min(minYear, new Date(u.earliestMs).getFullYear())
+          if (u.latestMs)
+            maxYear = Math.max(maxYear, new Date(u.latestMs).getFullYear())
           // Also scan yearCounts keys — these include filesystem-fallback years that
           // earliestMs/latestMs don't capture (since those only track real media dates)
           for (const yr of Object.keys(u.yearCounts || {})) {
             const y = parseInt(yr, 10)
-            if (!isNaN(y)) { minYear = Math.min(minYear, y); maxYear = Math.max(maxYear, y) }
+            if (!isNaN(y)) {
+              minYear = Math.min(minYear, y)
+              maxYear = Math.max(maxYear, y)
+            }
           }
         }
         return { start: minYear === Infinity ? maxYear : minYear, end: maxYear }
       }
 
+      // Held in memory across renders so Random stays stable while navigating
+      // (clicking into a model and back doesn't reshuffle). The shuffle button
+      // and re-selecting Random both regenerate it.
+      let _homeRandomOrder = null
+      function reshuffleHome() {
+        const names = usersData.map((u) => u.name)
+        // Fisher-Yates
+        for (let i = names.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[names[i], names[j]] = [names[j], names[i]]
+        }
+        _homeRandomOrder = new Map(names.map((n, i) => [n, i]))
+      }
+
       function renderHomeGrid() {
         homeGridEl.innerHTML = ''
         const { start: globalStart, end: globalEnd } = getYearRange()
+        const seen = readLastSeen()
+        if (homeSort === 'random' && !_homeRandomOrder) reshuffleHome()
 
-        // Sort: featured always first, then by selected sort
+        // Sort order: featured → NEW models → everything else.
+        // Within each tier we honor the selected sort. NEW models are sorted
+        // by latestAddedMs desc so the freshest content is genuinely first.
         const sorted = [...usersData].sort((a, b) => {
           if (a.featured && !b.featured) return -1
           if (b.featured && !a.featured) return 1
-          if (homeSort === 'oldest-media') return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
-          if (homeSort === 'newest-media') return (b.latestMs || 0) - (a.latestMs || 0)
-          if (homeSort === 'recently-added') return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
-          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+          const aNew = isNewModel(a, seen) ? 1 : 0
+          const bNew = isNewModel(b, seen) ? 1 : 0
+          if (aNew !== bNew) return bNew - aNew // new first
+          if (aNew && bNew)
+            return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
+          if (homeSort === 'oldest-media')
+            return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
+          if (homeSort === 'newest-media')
+            return (b.latestMs || 0) - (a.latestMs || 0)
+          if (homeSort === 'recently-added')
+            return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
+          if (homeSort === 'random') {
+            return (
+              (_homeRandomOrder.get(a.name) ?? 9e9) -
+              (_homeRandomOrder.get(b.name) ?? 9e9)
+            )
+          }
+          return a.name.localeCompare(b.name, undefined, {
+            sensitivity: 'base',
+          })
         })
 
         for (const u of sorted) {
@@ -1358,32 +1704,32 @@
             card.appendChild(badge)
           }
 
-          // Fetch random cover async
-          fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
-            .then((r) => r.ok ? r.json() : null)
-            .then((cover) => {
-              if (!cover) return
-              let el
-              if (cover.type === 'video') {
-                el = document.createElement('video')
-                el.src = cover.url
-                el.autoplay = true
-                el.muted = true
-                el.loop = true
-                el.playsInline = true
-                el.addEventListener('timeupdate', () => {
-                  if (el.currentTime > 5) el.currentTime = 0
-                })
-              } else {
-                el = document.createElement('img')
-                el.src = cover.url
-                el.loading = 'lazy'
-                el.alt = u.name
-              }
-              el.className = 'home-card-thumb'
-              card.replaceChild(el, mediaEl)
-            })
-            .catch(() => {})
+          // Cover ships with the user object now — no extra HTTP request.
+          // Always renders as <img> so the home grid never streams full videos
+          // or layers audio across cards. Video covers use the pre-generated
+          // GIF preview (cached on disk by the server).
+          const useCover = (cover) => {
+            if (!cover) return
+            const el = document.createElement('img')
+            el.loading = 'lazy'
+            el.alt = u.name
+            el.className = 'home-card-thumb'
+            // Prefer the small JPEG thumbnail. Fall back to the GIF preview
+            // (videos pre-cover-thumbs era) and finally to the source file.
+            el.src = cover.thumbUrl || cover.previewUrl || cover.url
+            el.onerror = () => {
+              el.style.opacity = '0.3'
+            }
+            if (mediaEl.parentNode === card) card.replaceChild(el, mediaEl)
+          }
+          if (u.cover) {
+            useCover(u.cover)
+          } else {
+            fetch(`/api/users/${encodeURIComponent(u.name)}/cover`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then(useCover)
+              .catch(() => {})
+          }
 
           const body = document.createElement('div')
           body.className = 'home-card-body'
@@ -1391,12 +1737,24 @@
           const name = document.createElement('div')
           name.className = 'home-card-name'
           name.textContent = u.name
+          if (isNewModel(u, seen)) {
+            const newPill = document.createElement('span')
+            newPill.className = 'home-card-new'
+            newPill.textContent = 'NEW'
+            name.appendChild(document.createTextNode(' '))
+            name.appendChild(newPill)
+          }
 
           const srcs = document.createElement('div')
           srcs.className = 'home-card-sources'
-          for (const [key, label] of [['coomer','OF'],['kemono','K'],['stufferdb','S']]) {
+          for (const [key, label] of [
+            ['coomer', 'OF'],
+            ['kemono', 'K'],
+            ['stufferdb', 'S'],
+          ]) {
             const dot = document.createElement('span')
-            dot.className = 'home-src-dot' + ((u.sources?.[key]?.length) ? ' has-source' : '')
+            dot.className =
+              'home-src-dot' + (u.sources?.[key]?.length ? ' has-source' : '')
             dot.textContent = label
             srcs.appendChild(dot)
           }
@@ -1407,7 +1765,7 @@
           // Activity graph — GitHub-style year cells
           {
             const yearCounts = u.yearCounts || {}
-            const maxCount   = Math.max(...Object.values(yearCounts), 1)
+            const maxCount = Math.max(...Object.values(yearCounts), 1)
 
             const activity = document.createElement('div')
             activity.className = 'home-card-activity'
@@ -1428,17 +1786,26 @@
             const graph = document.createElement('div')
             graph.className = 'activity-graph'
 
+            // Log scale instead of linear: a year with 5 files visibly lights
+            // up next to a year with 5000, instead of getting flattened to lvl-1.
+            const logMax = Math.log(maxCount + 1)
             for (let yr = globalStart; yr <= globalEnd; yr++) {
               const count = yearCounts[yr] || 0
-              const cell  = document.createElement('div')
-              const ratio = count / maxCount
-              const lvl   = count === 0 ? 0
-                          : ratio < 0.15 ? 1
-                          : ratio < 0.40 ? 2
-                          : ratio < 0.75 ? 3
-                          : 4
+              const cell = document.createElement('div')
+              const ratio = count > 0 ? Math.log(count + 1) / logMax : 0
+              const lvl =
+                count === 0
+                  ? 0
+                  : ratio < 0.35
+                    ? 1
+                    : ratio < 0.65
+                      ? 2
+                      : ratio < 0.9
+                        ? 3
+                        : 4
               cell.className = `yr-cell${lvl > 0 ? ` lvl-${lvl}` : ''}`
-              cell.title = count > 0 ? `${yr}: ${count} files` : `${yr}: no files`
+              cell.title =
+                count > 0 ? `${yr}: ${count} files` : `${yr}: no files`
               graph.appendChild(cell)
             }
 
@@ -1471,6 +1838,90 @@
             ? ''
             : 'none'
         }
+        // Reset highlight when the visible set changes.
+        _kbdIndex = -1
+        applyKbdHighlight()
+      })
+
+      // ─── KEYBOARD NAV (sidebar) ──────────────────────────────────────────
+      // /         focus search
+      // Up/Down   move highlight through visible models
+      // Enter     open the highlighted model
+      // Esc       clear search if focused, else blur
+      let _kbdIndex = -1
+      function visibleUserItems() {
+        return Array.from(userListEl.querySelectorAll('.user-item')).filter(
+          (el) => el.style.display !== 'none'
+        )
+      }
+      function applyKbdHighlight() {
+        const items = visibleUserItems()
+        items.forEach((el, i) =>
+          el.classList.toggle('kbd-focus', i === _kbdIndex)
+        )
+        if (_kbdIndex >= 0 && items[_kbdIndex]) {
+          items[_kbdIndex].scrollIntoView({ block: 'nearest' })
+        }
+      }
+      window.addEventListener('keydown', (e) => {
+        // Don't hijack typing in inputs other than the user-search itself.
+        const t = e.target
+        const inOtherInput =
+          t &&
+          (t.tagName === 'INPUT' ||
+            t.tagName === 'TEXTAREA' ||
+            t.tagName === 'SELECT') &&
+          t !== userSearchEl
+        if (inOtherInput) return
+
+        if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
+          if (document.activeElement !== userSearchEl) {
+            e.preventDefault()
+            // Make sure the sidebar is open on mobile so the input is reachable.
+            if (isMobile()) openSidebar()
+            userSearchEl.focus()
+            userSearchEl.select()
+          }
+          return
+        }
+        if (e.key === 'Escape') {
+          if (document.activeElement === userSearchEl) {
+            if (userSearchEl.value) {
+              userSearchEl.value = ''
+              userSearchEl.dispatchEvent(new Event('input'))
+            } else {
+              userSearchEl.blur()
+            }
+          }
+          return
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const items = visibleUserItems()
+          if (!items.length) return
+          // Only intercept arrows if we're in the sidebar context (search focused
+          // or no input focused at all).
+          if (t && t.tagName === 'INPUT' && t !== userSearchEl) return
+          e.preventDefault()
+          _kbdIndex =
+            _kbdIndex < 0
+              ? 0
+              : Math.max(
+                  0,
+                  Math.min(
+                    items.length - 1,
+                    _kbdIndex + (e.key === 'ArrowDown' ? 1 : -1)
+                  )
+                )
+          applyKbdHighlight()
+          return
+        }
+        if (e.key === 'Enter' && _kbdIndex >= 0) {
+          const items = visibleUserItems()
+          if (items[_kbdIndex]) {
+            e.preventDefault()
+            items[_kbdIndex].click()
+          }
+        }
       })
 
       // ─── SOURCE LINKS ─────────────────────────────────────────────────────────────
@@ -1495,7 +1946,7 @@
 
       // platform → short display prefix shown before the service name
       const PLATFORM_PREFIX = {
-        coomer: '',      // coomer URLs already carry the service name
+        coomer: '', // coomer URLs already carry the service name
         kemono: 'K·',
         stufferdb: '',
       }
@@ -1514,7 +1965,10 @@
           sourceLinksEl.appendChild(a)
         }
 
-        for (const [platform, prefix] of [['coomer', ''], ['kemono', 'K·']]) {
+        for (const [platform, prefix] of [
+          ['coomer', ''],
+          ['kemono', 'K·'],
+        ]) {
           for (const url of sources[platform] || []) {
             const service = url.split('/')[3] || platform
             const label = SERVICE_LABELS[service] || service
@@ -1529,34 +1983,48 @@
         }
       }
 
-      async function selectUser(userObj, liEl) {
+      async function selectUser(userObj, liEl, opts = {}) {
         const username = typeof userObj === 'string' ? userObj : userObj.name
         const sources = typeof userObj === 'object' ? userObj.sources : null
         closeSidebar()
         hideHomeView()
+        if (!opts.skipHashUpdate) setHashRoute({ view: 'user', username })
 
         userListEl
           .querySelectorAll('.user-item')
           .forEach((el) => el.classList.remove('active'))
         // find the li if not passed
-        const li = liEl || userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
+        const li =
+          liEl ||
+          userListEl.querySelector(`[data-username="${CSS.escape(username)}"]`)
         if (li) li.classList.add('active')
 
+        currentUsername = username
+        markSeen(username)
         currentNameEl.textContent = username
-        smpNameEl.textContent = username
         renderSourceLinks(sources)
-        smpStatsEl.textContent = ''
-        smpModelPanel.classList.add('visible')
+
+        // Restore the user's last sort for this model (defaults to 'asc').
+        let savedSort = 'asc'
+        try {
+          savedSort =
+            localStorage.getItem(`dashboard-sort-${username}`) || 'asc'
+        } catch {}
+        activeSort = savedSort
+        sortSelect.value = savedSort
+
         setActiveType('all')
         filterSelect.style.display = 'block'
         gridEl.innerHTML = ''
-        emptyState.style.display = 'none'
         noResultsEl.style.display = 'none'
         sortBar.style.display = 'none'
         loadingEl.style.display = 'flex'
 
-        const mediaData = await fetch(`/api/users/${encodeURIComponent(username)}/media`)
-          .then(r => r.ok ? r.json() : null).catch(() => null)
+        const mediaData = await fetch(
+          `/api/users/${encodeURIComponent(username)}/media`
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
         allMedia = mediaData || []
 
         // ── Update this model's activity graph with accurate media dates ──────
@@ -1565,10 +2033,11 @@
         // full resolved dates (EXIF, MP4 metadata, etc.), refresh usersData so
         // the home graph is correct the next time it's rendered.
         if (allMedia.length) {
-          const uIdx = usersData.findIndex(u => u.name === username)
+          const uIdx = usersData.findIndex((u) => u.name === username)
           if (uIdx !== -1) {
             const yc = {}
-            let earliest = Infinity, latest = 0
+            let earliest = Infinity,
+              latest = 0
             for (const m of allMedia) {
               const dateMs = m.mediaDateMs || m.addedMs
               if (!dateMs) continue
@@ -1576,14 +2045,15 @@
               if (yr >= 1990 && yr <= 2035) yc[yr] = (yc[yr] || 0) + 1
               if (m.mediaDateMs) {
                 if (m.mediaDateMs < earliest) earliest = m.mediaDateMs
-                if (m.mediaDateMs > latest)   latest   = m.mediaDateMs
+                if (m.mediaDateMs > latest) latest = m.mediaDateMs
               }
             }
             usersData[uIdx] = {
               ...usersData[uIdx],
-              yearCounts:  yc,
-              earliestMs:  earliest === Infinity ? usersData[uIdx].earliestMs : earliest,
-              latestMs:    latest   || usersData[uIdx].latestMs,
+              yearCounts: yc,
+              earliestMs:
+                earliest === Infinity ? usersData[uIdx].earliestMs : earliest,
+              latestMs: latest || usersData[uIdx].latestMs,
             }
             _accurateModels.add(username)
           }
@@ -1605,18 +2075,25 @@
         // Sort by real media date, falling back to added-to-disk date as last resort
         const effectiveDate = (m) => m.mediaDateMs || m.addedMs
         const byMediaDate = (dir) => (a, b) => {
-          const da = effectiveDate(a), db = effectiveDate(b)
+          const da = effectiveDate(a),
+            db = effectiveDate(b)
           return dir === 'asc' ? da - db : db - da
         }
 
-        if      (activeSort === 'asc')           filtered.sort(byMediaDate('asc'))
-        else if (activeSort === 'desc')          filtered.sort(byMediaDate('desc'))
-        else if (activeSort === 'added-asc')     filtered.sort((a, b) => a.addedMs - b.addedMs)
-        else if (activeSort === 'added-desc')    filtered.sort((a, b) => b.addedMs - a.addedMs)
-        else if (activeSort === 'size-desc')     filtered.sort((a, b) => b.size - a.size)
-        else if (activeSort === 'size-asc')      filtered.sort((a, b) => a.size - b.size)
-        else if (activeSort === 'duration-desc') filtered.sort((a, b) => b.duration - a.duration)
-        else if (activeSort === 'duration-asc')  filtered.sort((a, b) => a.duration - b.duration)
+        if (activeSort === 'asc') filtered.sort(byMediaDate('asc'))
+        else if (activeSort === 'desc') filtered.sort(byMediaDate('desc'))
+        else if (activeSort === 'added-asc')
+          filtered.sort((a, b) => a.addedMs - b.addedMs)
+        else if (activeSort === 'added-desc')
+          filtered.sort((a, b) => b.addedMs - a.addedMs)
+        else if (activeSort === 'size-desc')
+          filtered.sort((a, b) => b.size - a.size)
+        else if (activeSort === 'size-asc')
+          filtered.sort((a, b) => a.size - b.size)
+        else if (activeSort === 'duration-desc')
+          filtered.sort((a, b) => b.duration - a.duration)
+        else if (activeSort === 'duration-asc')
+          filtered.sort((a, b) => a.duration - b.duration)
 
         renderGrid()
         updateDateRange()
@@ -1625,39 +2102,31 @@
       // Keep pills + select in sync
       function setActiveType(type) {
         activeType = type
-        filterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
-        smpFilterBtns.forEach((b) => b.classList.toggle('active', b.dataset.type === type))
         filterSelect.value = type
       }
-
-      filterBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          setActiveType(btn.dataset.type)
-          applyFilter()
-        })
-      })
 
       filterSelect.addEventListener('change', () => {
         setActiveType(filterSelect.value)
         applyFilter()
       })
 
-      smpFilterBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          setActiveType(btn.dataset.type)
-          applyFilter()
-        })
-      })
-
       sortSelect.addEventListener('change', () => {
         activeSort = sortSelect.value
         applyFilter()
+        // Remember per-model so switching back restores the user's choice.
+        if (currentUsername) {
+          try {
+            localStorage.setItem(
+              `dashboard-sort-${currentUsername}`,
+              activeSort
+            )
+          } catch {}
+        }
       })
 
       function updateStats() {
         if (!allMedia.length) {
           if (mediaStatsEl) mediaStatsEl.textContent = 'No media found'
-          smpStatsEl.textContent = 'No media found'
           return
         }
         const imgs = allMedia.filter((m) => m.type === 'image').length
@@ -1668,16 +2137,15 @@
         if (gifs) parts.push(`${gifs} GIF${gifs !== 1 ? 's' : ''}`)
         if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`)
         if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
-        smpStatsEl.textContent = parts.join(' · ')
 
-        // Update filter button + select labels with counts
-        const counts = { all: allMedia.length, image: imgs, gif: gifs, video: vids }
-        const labels = { all: `All (${allMedia.length})`, image: imgs ? `Images (${imgs})` : 'Images', gif: gifs ? `GIFs (${gifs})` : 'GIFs', video: vids ? `Videos (${vids})` : 'Videos' }
+        // Update filter dropdown labels with counts.
+        const labels = {
+          all: `All (${allMedia.length})`,
+          image: imgs ? `Images (${imgs})` : 'Images',
+          gif: gifs ? `GIFs (${gifs})` : 'GIFs',
+          video: vids ? `Videos (${vids})` : 'Videos',
+        }
         for (const [type, label] of Object.entries(labels)) {
-          const btn = document.querySelector(`.filter-btn[data-type="${type}"]`)
-          if (btn) btn.textContent = label
-          const smpBtn = document.querySelector(`.smp-filter-btn[data-type="${type}"]`)
-          if (smpBtn) smpBtn.textContent = label
           const opt = filterSelect.querySelector(`option[value="${type}"]`)
           if (opt) opt.textContent = label
         }
@@ -1689,33 +2157,42 @@
           return
         }
 
-        if (activeSort === 'added-asc' || activeSort === 'added-desc') {
-          const withAdded = filtered.filter((m) => m.addedMs)
-          if (!withAdded.length) { dateRangeEl.textContent = ''; return }
-          const first = withAdded[activeSort === 'added-asc' ? 0 : withAdded.length - 1]
-          const last  = withAdded[activeSort === 'added-asc' ? withAdded.length - 1 : 0]
-          const toISO = (ms) => new Date(ms).toISOString()
-          dateRangeEl.textContent = `${formatDateShort(toISO(first.addedMs))} – ${formatDateShort(toISO(last.addedMs))}`
+        // Pick the value to range over by sort kind. Compute min/max explicitly
+        // (don't rely on filtered order — it might be sorted by size/duration).
+        const pickValue =
+          activeSort === 'added-asc' || activeSort === 'added-desc'
+            ? (m) => m.addedMs
+            : (m) => m.mediaDateMs || m.addedMs
+
+        let min = Infinity,
+          max = 0
+        for (const m of filtered) {
+          const v = pickValue(m)
+          if (!v) continue
+          if (v < min) min = v
+          if (v > max) max = v
+        }
+        if (min === Infinity) {
+          dateRangeEl.textContent = ''
           return
         }
-
-        const effDate = (m) => m.mediaDateMs || m.addedMs
-        const withDates = filtered.filter(effDate)
-        if (!withDates.length) { dateRangeEl.textContent = ''; return }
         const toISO = (ms) => new Date(ms).toISOString()
-        const first = withDates[0]
-        const last  = withDates[withDates.length - 1]
-        dateRangeEl.textContent = `${formatDateShort(toISO(effDate(first)))} – ${formatDateShort(toISO(effDate(last)))}`
+        dateRangeEl.textContent = `${formatDateShort(toISO(min))} – ${formatDateShort(toISO(max))}`
       }
 
       // ─── GRID RENDER ──────────────────────────────────────────────────────
-      const SOURCE_LABELS = { exif: 'exif', mp4: 'mp4', uploaded: 'upload', filesystem: 'local*' }
-      const SOURCE_TIPS   = {
-        exif:       'Date from embedded EXIF metadata',
-        mp4:        'Date from video container metadata (ffprobe)',
-        uploaded:   'Platform upload date (set by milkmaid)',
+      const SOURCE_LABELS = {
+        exif: 'exif',
+        mp4: 'mp4',
+        uploaded: 'upload',
+        filesystem: 'local*',
+      }
+      const SOURCE_TIPS = {
+        exif: 'Date from embedded EXIF metadata',
+        mp4: 'Date from video container metadata (ffprobe)',
+        uploaded: 'Platform upload date (set by milkmaid)',
         filesystem: '* Local download date — least reliable',
-        filename:   'filename timestamp',
+        filename: 'filename timestamp',
       }
       const DATE_FMT = { year: '2-digit', month: 'numeric', day: 'numeric' }
 
@@ -1730,13 +2207,15 @@
         if (item.type === 'video') {
           const img = document.createElement('img')
           img.loading = 'lazy'
-          img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
+          img.style.cssText =
+            'width:100%;height:100%;object-fit:cover;display:block;'
           if (item.previewUrl) {
             img.src = item.previewUrl
             img.onerror = () => {
               img.remove()
               const ph = document.createElement('div')
-              ph.style.cssText = 'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
+              ph.style.cssText =
+                'width:100%;height:100%;background:#0a0a10;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;'
               ph.textContent = '⏳'
               thumb.insertBefore(ph, thumb.firstChild)
             }
@@ -1745,9 +2224,21 @@
         } else {
           const img = document.createElement('img')
           img.loading = 'lazy'
-          img.src = item.url
+          // Use the small JPEG thumbnail for grid cards. The lightbox still
+          // loads item.url (the original) when the card is clicked.
+          img.src = item.thumbUrl || item.url
           img.alt = item.filename
-          img.onerror = () => { img.style.opacity = '0.3'; img.alt = '⚠ load error' }
+          img.onerror = () => {
+            // Fall back to the source if the thumb endpoint failed (e.g. sharp
+            // rejected the format) — slower but the card still shows something.
+            if (img.dataset.fallback) {
+              img.style.opacity = '0.3'
+              img.alt = '⚠ load error'
+              return
+            }
+            img.dataset.fallback = '1'
+            img.src = item.url
+          }
           thumb.appendChild(img)
         }
 
@@ -1759,7 +2250,8 @@
         footer.className = 'card-footer'
 
         const left = document.createElement('div')
-        left.style.cssText = 'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
+        left.style.cssText =
+          'display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;'
 
         const badge = document.createElement('span')
         badge.className = `type-badge ${item.type}`
@@ -1776,14 +2268,21 @@
 
         const dateEl = document.createElement('span')
         dateEl.className = 'card-date'
-        dateEl.textContent = item.date ? new Date(item.date).toLocaleDateString('en-US', DATE_FMT) : '—'
-        dateEl.title = formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
+        dateEl.textContent = item.date
+          ? new Date(item.date).toLocaleDateString('en-US', DATE_FMT)
+          : '—'
+        dateEl.title =
+          formatDate(item.date) + (item.source ? ` [${item.source}]` : '')
         left.appendChild(dateEl)
 
         const addedEl = document.createElement('span')
         addedEl.className = 'card-added'
-        addedEl.textContent = item.addedMs ? new Date(item.addedMs).toLocaleDateString('en-US', DATE_FMT) : '—'
-        addedEl.title = item.addedMs ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}` : 'Added date unknown'
+        addedEl.textContent = item.addedMs
+          ? new Date(item.addedMs).toLocaleDateString('en-US', DATE_FMT)
+          : '—'
+        addedEl.title = item.addedMs
+          ? `Added: ${formatDate(new Date(item.addedMs).toISOString())}`
+          : 'Added date unknown'
 
         footer.appendChild(left)
         footer.appendChild(addedEl)
@@ -1793,12 +2292,18 @@
         return card
       }
 
-      // Renders in chunks of 60 per animation frame so the browser stays
-      // responsive and paints the first cards immediately rather than freezing
-      // until the entire list is built.
+      // Renders the first ~200 cards synchronously for fast first paint, then
+      // appends 200 more whenever the user scrolls within 500px of the bottom.
+      // For a 4000-item model, mobile only creates ~200 DOM nodes upfront
+      // instead of all 4000 — first paint goes from seconds to milliseconds.
       let _renderToken = 0
+      let _scrollObserver = null
       function renderGrid() {
         gridEl.innerHTML = ''
+        if (_scrollObserver) {
+          _scrollObserver.disconnect()
+          _scrollObserver = null
+        }
 
         if (!filtered.length) {
           noResultsEl.style.display = 'block'
@@ -1806,20 +2311,52 @@
         }
         noResultsEl.style.display = 'none'
 
-        const token = ++_renderToken // invalidates any in-progress render
-        const CHUNK = 60
+        const token = ++_renderToken
+        const INITIAL = 200
+        const BATCH = 200
         let i = 0
 
-        function renderChunk() {
-          if (_renderToken !== token) return // a newer render started, stop this one
+        const renderBatch = (n) => {
+          if (_renderToken !== token) return
+          const end = Math.min(i + n, filtered.length)
           const frag = document.createDocumentFragment()
-          const end = Math.min(i + CHUNK, filtered.length)
           for (; i < end; i++) frag.appendChild(createCard(filtered[i], i))
           gridEl.appendChild(frag)
-          if (i < filtered.length) requestAnimationFrame(renderChunk)
         }
 
-        requestAnimationFrame(renderChunk)
+        renderBatch(INITIAL)
+        if (i >= filtered.length) return
+
+        // Sentinel sits at the end of the grid; when it enters the viewport
+        // (or gets within 500px) we render the next batch and re-observe.
+        const sentinel = document.createElement('div')
+        sentinel.id = 'grid-sentinel'
+        sentinel.style.cssText = 'grid-column: 1 / -1; height: 1px;'
+        gridEl.appendChild(sentinel)
+
+        _scrollObserver = new IntersectionObserver(
+          (entries) => {
+            if (!entries[0].isIntersecting) return
+            if (_renderToken !== token) {
+              _scrollObserver.disconnect()
+              return
+            }
+            // Re-attach sentinel after the new cards so it stays at the bottom.
+            gridEl.removeChild(sentinel)
+            renderBatch(BATCH)
+            if (i >= filtered.length) {
+              _scrollObserver.disconnect()
+              _scrollObserver = null
+            } else {
+              gridEl.appendChild(sentinel)
+            }
+          },
+          {
+            root: document.getElementById('grid-container'),
+            rootMargin: '500px',
+          }
+        )
+        _scrollObserver.observe(sentinel)
       }
 
       // ─── LIGHTBOX (PhotoSwipe v5) ─────────────────────────────────────────
@@ -1828,51 +2365,89 @@
       let _pswpModule = null
       function loadPswp() {
         if (!_pswpModule) {
-          _pswpModule = import('https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.esm.js')
-            .then(m => m.default)
+          _pswpModule = import(
+            'https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.esm.js'
+          ).then((m) => m.default)
         }
         return _pswpModule
       }
       loadPswp() // preload immediately
 
       function openLightbox(startIndex) {
-        loadPswp().then(PhotoSwipe => {
-          const dataSource = filtered.map(item => {
+        loadPswp().then((PhotoSwipe) => {
+          const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
-              return {
-                html: `<div class="pswp-video-wrap"><video controls autoplay loop playsinline src="${item.url}"></video></div>`,
-                _item: item,
-              }
+              // No autoplay here — PhotoSwipe pre-creates ±1 adjacent slides,
+              // and autoplay on those layers audio across slides. The active
+              // slide is played from the `change` handler below.
+              const wrap = document.createElement('div')
+              wrap.className = 'pswp-video-wrap'
+              const video = document.createElement('video')
+              video.controls = true
+              video.loop = true
+              video.playsInline = true
+              video.preload = 'metadata'
+              video.src = item.url
+              wrap.appendChild(video)
+              return { html: wrap.outerHTML, _item: item }
             }
             return {
-              src:    item.url,
-              width:  item.width  || 0,
+              src: item.url,
+              width: item.width || 0,
               height: item.height || 0,
-              _item:  item,
+              _item: item,
             }
           })
 
           const pswp = new PhotoSwipe({
             dataSource,
-            index:       startIndex,
-            bgOpacity:   0.97,
-            padding:     { top: 44, bottom: 0, left: 44, right: 44 },
-            loop:        true,
+            index: startIndex,
+            bgOpacity: 0.97,
+            padding: { top: 44, bottom: 0, left: 44, right: 44 },
+            loop: true,
             wheelToZoom: true,
           })
 
           let infoPanelEl = null
+          let captionPanelEl = null
+
+          // Caption fetch cache for this lightbox instance — keyed by item URL.
+          // Avoids re-fetching when the user swipes back and forth.
+          const _captionCache = new Map()
+          async function loadCaption(item) {
+            if (!item || !item.hasCaption) return null
+            if (_captionCache.has(item.url)) return _captionCache.get(item.url)
+            try {
+              const r = await fetch(
+                `/api/caption/${encodeURIComponent(currentUsername || '')}/${item.folder}/${encodeURIComponent(item.filename)}`
+              )
+              if (!r.ok) {
+                _captionCache.set(item.url, null)
+                return null
+              }
+              const data = await r.json()
+              const txt =
+                data && typeof data.text === 'string' ? data.text : null
+              _captionCache.set(item.url, txt)
+              return txt
+            } catch {
+              _captionCache.set(item.url, null)
+              return null
+            }
+          }
 
           // All UI registration happens inside uiRegister — pswp.ui is guaranteed
           // to exist here (set in _createMainStructure before ui.init fires this event).
           pswp.on('uiRegister', () => {
             // Slide counter (top-bar, left of zoom/close)
             pswp.ui.registerElement({
-              name:     'pswp-counter',
-              order:    5,
+              name: 'pswp-counter',
+              order: 5,
               isButton: false,
               onInit(el) {
-                const update = () => { el.textContent = `${pswp.currIndex + 1} / ${pswp.getNumItems()}` }
+                const update = () => {
+                  el.textContent = `${pswp.currIndex + 1} / ${pswp.getNumItems()}`
+                }
                 pswp.on('change', update)
                 update()
               },
@@ -1880,43 +2455,209 @@
 
             // Info panel — slides up from bottom when ⓘ is pressed
             pswp.ui.registerElement({
-              name:     'pswp-info-panel',
+              name: 'pswp-info-panel',
               appendTo: 'root',
               onInit(el) {
                 infoPanelEl = el
                 const update = () => {
                   const item = filtered[pswp.currIndex]
                   if (!item) return
-                  const srcHtml = item.source
-                    ? `<span class="pswp-info-src">[${SOURCE_TIPS[item.source] || item.source}]</span>`
-                    : ''
-                  const addedHtml = item.addedMs
-                    ? `<span class="pswp-info-added">Added ${formatDate(new Date(item.addedMs).toISOString())}</span>`
-                    : ''
-                  el.innerHTML = `
-                    <span class="type-badge ${item.type}">${item.type === 'image' ? 'img' : item.type}</span>
-                    <span class="pswp-info-date">${formatDate(item.date)} ${srcHtml}</span>
-                    <span class="pswp-info-filename">${item.filename}</span>
-                    ${addedHtml}
-                  `
+                  el.replaceChildren()
+
+                  const typeBadge = document.createElement('span')
+                  typeBadge.className = `type-badge ${item.type}`
+                  typeBadge.textContent =
+                    item.type === 'image' ? 'img' : item.type
+                  el.appendChild(typeBadge)
+
+                  const dateSpan = document.createElement('span')
+                  dateSpan.className = 'pswp-info-date'
+                  dateSpan.textContent = formatDate(item.date)
+                  if (item.source) {
+                    dateSpan.appendChild(document.createTextNode(' '))
+                    const srcSpan = document.createElement('span')
+                    srcSpan.className = 'pswp-info-src'
+                    srcSpan.textContent = `[${SOURCE_TIPS[item.source] || item.source}]`
+                    dateSpan.appendChild(srcSpan)
+                  }
+                  el.appendChild(dateSpan)
+
+                  const nameSpan = document.createElement('span')
+                  nameSpan.className = 'pswp-info-filename'
+                  nameSpan.textContent = item.filename
+                  el.appendChild(nameSpan)
+
+                  // Compact metadata line: dimensions · duration · file size
+                  const metaBits = []
+                  if (item.width && item.height)
+                    metaBits.push(`${item.width}×${item.height}`)
+                  const dur = formatDuration(item.duration)
+                  if (dur) metaBits.push(dur)
+                  const sz = formatFileSize(item.size)
+                  if (sz) metaBits.push(sz)
+                  if (metaBits.length) {
+                    const metaSpan = document.createElement('span')
+                    metaSpan.className = 'pswp-info-meta'
+                    metaSpan.textContent = metaBits.join(' · ')
+                    el.appendChild(metaSpan)
+                  }
+
+                  if (item.addedMs) {
+                    const addedSpan = document.createElement('span')
+                    addedSpan.className = 'pswp-info-added'
+                    addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
+                    el.appendChild(addedSpan)
+                  }
+
+                  // Caption (mobile only — desktop has the dedicated sidebar).
+                  // Stamped synchronously with the rest of the panel, then filled
+                  // in once the fetch resolves. Guarded against stale slide updates.
+                  if (
+                    item.hasCaption &&
+                    window.matchMedia('(max-width: 900px)').matches
+                  ) {
+                    const capSpan = document.createElement('span')
+                    capSpan.className = 'pswp-info-caption'
+                    capSpan.textContent = '…'
+                    el.appendChild(capSpan)
+                    const idxAtStart = pswp.currIndex
+                    loadCaption(item).then((text) => {
+                      if (pswp.currIndex !== idxAtStart) return
+                      capSpan.textContent = text || ''
+                      if (!text) capSpan.remove()
+                    })
+                  }
                 }
                 pswp.on('change', update)
                 update()
               },
             })
 
+            // Caption sidebar — desktop only (≥901px). Hidden entirely when the
+            // current slide has no caption so the media gets the full viewport.
+            // The toggle button (below) also hides itself in that case.
+            let captionBtnEl = null
+            pswp.ui.registerElement({
+              name: 'pswp-caption',
+              appendTo: 'root',
+              onInit(el) {
+                captionPanelEl = el
+                el.classList.add('pswp-caption-visible') // visible by default
+                const update = async () => {
+                  const item = filtered[pswp.currIndex]
+                  if (!item) return
+                  // No caption: hide the panel and the button. Media is full-bleed.
+                  if (!item.hasCaption) {
+                    el.classList.remove('pswp-caption-visible')
+                    el.style.display = 'none'
+                    el.replaceChildren()
+                    if (captionBtnEl) {
+                      captionBtnEl.style.display = 'none'
+                      captionBtnEl.classList.remove('pswp-caption-active')
+                    }
+                    return
+                  }
+                  // Has a caption: show the button, render the panel.
+                  if (captionBtnEl) captionBtnEl.style.display = ''
+                  el.style.display = ''
+                  el.classList.add('pswp-caption-visible')
+                  if (captionBtnEl)
+                    captionBtnEl.classList.add('pswp-caption-active')
+
+                  el.replaceChildren()
+                  const label = document.createElement('div')
+                  label.className = 'pswp__pswp-caption-label'
+                  label.textContent = 'Caption'
+                  el.appendChild(label)
+                  const body = document.createElement('div')
+                  body.textContent = 'Loading…'
+                  body.className = 'pswp__pswp-caption-empty'
+                  el.appendChild(body)
+                  const idxAtStart = pswp.currIndex
+                  const text = await loadCaption(item)
+                  if (pswp.currIndex !== idxAtStart) return
+                  if (text) {
+                    body.className = ''
+                    body.textContent = text
+                  } else {
+                    // hasCaption was true but fetch failed — keep panel hidden
+                    // rather than showing a broken empty state.
+                    el.classList.remove('pswp-caption-visible')
+                    el.style.display = 'none'
+                    if (captionBtnEl) {
+                      captionBtnEl.style.display = 'none'
+                      captionBtnEl.classList.remove('pswp-caption-active')
+                    }
+                  }
+                }
+                pswp.on('change', update)
+                update()
+              },
+            })
+
+            // Caption toggle button — only meaningful on desktop, but harmless on
+            // mobile (where the sidebar is hidden via CSS). Hidden by the panel's
+            // update() handler whenever the current slide has no caption.
+            pswp.ui.registerElement({
+              name: 'pswp-caption-button',
+              order: 8,
+              isButton: true,
+              title: 'Caption',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><line x1="5.5" y1="9" x2="14.5" y2="9"/><line x1="5.5" y1="12" x2="11" y2="12"/></svg>',
+              onInit(el) {
+                captionBtnEl = el
+              },
+              onClick(e, el) {
+                if (!captionPanelEl) return
+                const on = captionPanelEl.classList.toggle(
+                  'pswp-caption-visible'
+                )
+                el.classList.toggle('pswp-caption-active', on)
+              },
+            })
+
             // ⓘ toggle button
             pswp.ui.registerElement({
-              name:     'pswp-info-button',
-              order:    9,
+              name: 'pswp-info-button',
+              order: 9,
               isButton: true,
-              title:    'Info',
-              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.5" r="1" fill="currentColor"/></svg>',
+              title: 'Info',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.5" r="1" fill="currentColor"/></svg>',
               onClick(e, el) {
                 if (!infoPanelEl) return
                 const on = infoPanelEl.classList.toggle('pswp-info-visible')
                 el.classList.toggle('pswp-info-active', on)
               },
+            })
+          })
+
+          // Play only the active slide's video; pause and rewind all others.
+          // PhotoSwipe pre-creates ±1 adjacent slides, so without this swiping
+          // quickly past videos layers audio across slides.
+          const syncVideos = () => {
+            const root = pswp.element
+            if (!root) return
+            root.querySelectorAll('.pswp__item video').forEach((v) => {
+              const inActive =
+                v.closest('.pswp__item.pswp__item--current') ||
+                v.closest('.pswp__item--active')
+              if (inActive) {
+                v.play().catch(() => {})
+              } else {
+                v.pause()
+                try {
+                  v.currentTime = 0
+                } catch {}
+              }
+            })
+          }
+          pswp.on('change', syncVideos)
+          pswp.on('afterInit', syncVideos)
+          pswp.on('close', () => {
+            const root = pswp.element
+            if (!root) return
+            root.querySelectorAll('video').forEach((v) => {
+              v.pause()
             })
           })
 
@@ -1926,8 +2667,8 @@
 
       // ─── CARD SIZE ────────────────────────────────────────────────────────
       const sizeBtns = document.querySelectorAll('.size-btn')
-      const CARD_SIZES   = { small: '160px', medium: '300px', large: '500px' }
-      const MOBILE_COLS  = { small: 4, medium: 2, large: 1 }
+      const CARD_SIZES = { small: '160px', medium: '300px', large: '500px' }
+      const MOBILE_COLS = { small: 4, medium: 2, large: 1 }
       const isMobile = () => window.matchMedia('(max-width: 640px)').matches
 
       sizeBtns.forEach((btn) => {
@@ -1935,22 +2676,41 @@
           sizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
           if (isMobile()) {
             document.documentElement.style.setProperty(
-              '--mobile-cols', MOBILE_COLS[btn.dataset.size]
+              '--mobile-cols',
+              MOBILE_COLS[btn.dataset.size]
             )
           } else {
             document.documentElement.style.setProperty(
-              '--card-min', CARD_SIZES[btn.dataset.size]
+              '--card-min',
+              CARD_SIZES[btn.dataset.size]
             )
           }
         })
       })
 
       // ─── HOME GRID SIZE ───────────────────────────────────────────────────
-      const HOME_CARD_SIZES = { small: '140px', medium: '200px', large: '280px' }
+      const HOME_CARD_SIZES = {
+        small: '140px',
+        medium: '200px',
+        large: '280px',
+      }
       const HOME_MOBILE_COLS = { small: 3, medium: 2, large: 1 }
 
+      const homeShuffleBtn = document.getElementById('home-shuffle-btn')
       homeSortSelect.addEventListener('change', () => {
         homeSort = homeSortSelect.value
+        if (homeSort === 'random') {
+          // Re-picking Random always re-shuffles, so a second click gives a
+          // fresh order even if you were already on Random.
+          reshuffleHome()
+          homeShuffleBtn.style.display = ''
+        } else {
+          homeShuffleBtn.style.display = 'none'
+        }
+        renderHomeGrid()
+      })
+      homeShuffleBtn.addEventListener('click', () => {
+        reshuffleHome()
         renderHomeGrid()
       })
 
@@ -1958,9 +2718,15 @@
         btn.addEventListener('click', () => {
           homeSizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
           if (isMobile()) {
-            document.documentElement.style.setProperty('--home-mobile-cols', HOME_MOBILE_COLS[btn.dataset.homeSize])
+            document.documentElement.style.setProperty(
+              '--home-mobile-cols',
+              HOME_MOBILE_COLS[btn.dataset.homeSize]
+            )
           } else {
-            document.documentElement.style.setProperty('--home-card-min', HOME_CARD_SIZES[btn.dataset.homeSize])
+            document.documentElement.style.setProperty(
+              '--home-card-min',
+              HOME_CARD_SIZES[btn.dataset.homeSize]
+            )
           }
         })
       })
@@ -1969,7 +2735,9 @@
       document.getElementById('home-btn').addEventListener('click', () => {
         if (homeVisible) return
         showHomeView()
-        userListEl.querySelectorAll('.user-item').forEach((el) => el.classList.remove('active'))
+        userListEl
+          .querySelectorAll('.user-item')
+          .forEach((el) => el.classList.remove('active'))
       })
 
       // ─── MOBILE SIDEBAR ───────────────────────────────────────────────────
@@ -1998,17 +2766,89 @@
       })
       sidebarOverlay.addEventListener('click', closeSidebar)
 
+      // ─── RESCAN + SCAN STATUS ─────────────────────────────────────────────
+      const rescanBtn = document.getElementById('rescan-btn')
+      const scanBanner = document.getElementById('scan-banner')
+      const scanBannerText = document.getElementById('scan-banner-text')
+      let scanPollTimer = null
+
+      function setBanner(text) {
+        if (!text) {
+          scanBanner.style.display = 'none'
+          return
+        }
+        scanBannerText.textContent = text
+        scanBanner.style.display = 'block'
+      }
+
+      async function pollScanStatus(initialDelay = 1000) {
+        clearTimeout(scanPollTimer)
+        const tick = async () => {
+          try {
+            const r = await fetch('/api/scan-status')
+            const s = r.ok ? await r.json() : null
+            if (!s) return
+            if (s.inProgress) {
+              rescanBtn.disabled = true
+              rescanBtn.classList.add('spinning')
+              const trig = s.trigger ? `${s.trigger} ` : ''
+              setBanner(
+                `Scanning… ${trig}${s.modelsDone}/${s.modelsTotal} models`
+              )
+              scanPollTimer = setTimeout(tick, 1500)
+            } else {
+              rescanBtn.disabled = false
+              rescanBtn.classList.remove('spinning')
+              setBanner('')
+              // Scan just completed — refresh stats once
+              if (s.completedAt) refreshUsers()
+            }
+          } catch {
+            rescanBtn.disabled = false
+            rescanBtn.classList.remove('spinning')
+          }
+        }
+        scanPollTimer = setTimeout(tick, initialDelay)
+      }
+
+      rescanBtn.addEventListener('click', async () => {
+        if (rescanBtn.disabled) return
+        rescanBtn.disabled = true
+        rescanBtn.classList.add('spinning')
+        try {
+          await fetch('/api/rescan', { method: 'POST' })
+          pollScanStatus(500)
+        } catch {
+          rescanBtn.disabled = false
+          rescanBtn.classList.remove('spinning')
+        }
+      })
+
+      // Poll once on load — if the server is mid-startup-scan, surface a banner.
+      pollScanStatus(0)
 
       // ─── INIT ─────────────────────────────────────────────────────────────
       loadUsers()
 
       // Version / last-updated footer — refreshed on the same interval as user stats
       const sidebarFooterEl = document.getElementById('sidebar-footer')
-      const fmtShort = (iso) => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '—'
+      const fmtShort = (iso) =>
+        iso
+          ? new Date(iso).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true,
+            })
+          : '—'
       function refreshFooter() {
-        fetch('/api/info').then(r => r.json()).then(info => {
-          sidebarFooterEl.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
-        }).catch(() => {})
+        fetch('/api/info')
+          .then((r) => r.json())
+          .then((info) => {
+            sidebarFooterEl.innerHTML = `<span>Registry: ${fmtShort(info.registryUpdatedAt)}</span><span>Server up: ${fmtShort(info.startedAt)}</span>`
+          })
+          .catch(() => {})
       }
       refreshFooter()
       setInterval(refreshFooter, 5 * 60 * 1000)
