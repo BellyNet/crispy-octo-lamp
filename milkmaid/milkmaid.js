@@ -1308,6 +1308,7 @@ async function saveStufferDbImageLikeMedia({
     saveBitwiseHashCache,
     shouldAddBitwiseHash: ({ hash }) => !isBitwiseDupe(hash),
     checkExistingBeforeDownload: false,
+    duplicateRecordSeen: true,
     visualChecks: kind === 'image',
     addVisualHashBeforeSave: true,
   })

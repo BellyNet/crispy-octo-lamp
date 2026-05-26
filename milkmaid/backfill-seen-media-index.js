@@ -5,6 +5,7 @@ const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
 const { isLikelyMediaUrl } = require('../scrapyard/mediaEntries')
+const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -40,6 +41,10 @@ const explicitModels = String(argv.models || '')
   .filter(Boolean)
 const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
 const dryRun = Boolean(argv['dry-run'])
+const datasetPaths = createDatasetPaths({
+  datasetDir: datasetRoot,
+  rootDir: path.join(__dirname, '..'),
+})
 
 const SAVE_EVENT_TYPES = new Set([
   'saved_image',
@@ -49,6 +54,7 @@ const SAVE_EVENT_TYPES = new Set([
   'skip_existing_gif',
   'skip_existing_video',
   'skip_lazy_existing',
+  'skip_seen_media',
 ])
 
 main().catch((err) => {
@@ -68,8 +74,9 @@ Options:
   -h, --help             Show help.
 
 Notes:
-  This scans historical milkmaid JSONL run logs and rebuilds
-  log/milkmaid-seen-media-index.json for each selected model.
+  This scans historical Milkmaid and Hoghaul JSONL run logs and rebuilds
+  log/milkmaid-seen-media-index.json for each selected model. NAS-backed
+  MP4 paths count as active.
 `)
 }
 
@@ -163,7 +170,8 @@ function backfillModel(modelName) {
     .readdirSync(logDir)
     .filter(
       (name) =>
-        name.startsWith('milkmaid-run-') &&
+        (name.startsWith('milkmaid-run-') ||
+          name.startsWith('hoghaul-run-')) &&
         name.endsWith('.jsonl') &&
         !name.includes('errors')
     )
@@ -241,7 +249,7 @@ function consumeRunLog(logPath, modelName, index) {
 
     if (!relativePath || !candidate) continue
     const absolutePath = path.join(datasetRoot, ...relativePath.split('/'))
-    if (!fs.existsSync(absolutePath)) continue
+    if (!datasetPaths.existsLocallyOrOnNas(absolutePath)) continue
 
     const payload = {
       relativePath,
