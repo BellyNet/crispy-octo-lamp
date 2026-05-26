@@ -23,6 +23,84 @@ const {
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
+const datasetRoot = path.join(process.env.APPDATA || '', '.slopvault', 'dataset')
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function getScraperRunSource(parsedSource) {
+  return parsedSource?.site === 'stufferdb' ? 'milkmaid' : 'hoghaul'
+}
+
+function getScrapeSummaryPath(modelName, parsedSource) {
+  if (!modelName) return null
+  return path.join(
+    datasetRoot,
+    modelName,
+    `${getScraperRunSource(parsedSource)}-last-run.json`
+  )
+}
+
+function readScrapeSummary(modelName, parsedSource) {
+  const summaryPath = getScrapeSummaryPath(modelName, parsedSource)
+  if (!summaryPath || !fs.existsSync(summaryPath)) return null
+  try {
+    return JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function getSummaryCounter(summary, name, fallbackNames = []) {
+  const counters = summary?.counters || {}
+  for (const key of [name, ...fallbackNames]) {
+    const value = counters[key] ?? summary?.[key]
+    if (value !== undefined && value !== null && value !== '') {
+      return Number(value) || 0
+    }
+  }
+  return 0
+}
+
+function formatScrapeSummaryLine(summary) {
+  const processed = getSummaryCounter(summary, 'processed')
+  const expected = getSummaryCounter(summary, 'expectedMedia')
+  const saved = getSummaryCounter(summary, 'saved', ['successCount'])
+  const skipped = getSummaryCounter(summary, 'skipped')
+  const dupes = getSummaryCounter(summary, 'duplicates', ['duplicateCount'])
+  const failed = getSummaryCounter(summary, 'failures', ['errorCount'])
+  const savedBytes = Number(summary?.transfer?.savedBytes || 0)
+  const pieces = [
+    `time ${formatDuration(summary?.durationMs)}`,
+    `processed ${processed}/${expected}`,
+    `saved ${saved}`,
+    `skipped ${skipped}`,
+    `dupes ${dupes}`,
+    `failed ${failed}`,
+    `downloaded ${formatBytes(savedBytes)}`,
+  ]
+  return `Run stats: ${pieces.join(' | ')}`
+}
 
 function printHelp() {
   console.log(`Usage:
@@ -404,13 +482,20 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
 
   const runCommand = deps.runCommand || runNodeScript
   const args = buildScraperArgs(parsedSource, argv)
+  let status = 0
   if (deps.runCommand) {
-    return runCommand(scriptPath, args, { log })
+    status = await runCommand(scriptPath, args, { log })
+  } else {
+    status = await runInProcessScraper(
+      parsedSource,
+      buildScraperOptions(parsedSource, argv)
+    )
   }
-  return runInProcessScraper(
-    parsedSource,
-    buildScraperOptions(parsedSource, argv)
-  )
+  const modelName =
+    sanitize(getOption(argv, 'model') || '') || parsedSource.rawName || ''
+  const summary = readScrapeSummary(modelName, parsedSource)
+  if (summary?.durationMs !== undefined) log(formatScrapeSummaryLine(summary))
+  return status
 }
 
 function loadRegistry(registryFile = registryPath) {
