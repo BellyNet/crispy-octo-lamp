@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
+const { mergeNasMp4Entries, normalizePath } = require('./nasMp4Index')
 
 const slopvaultRoot = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
@@ -119,6 +120,7 @@ function main() {
   let skippedMissingNas = 0
   let skippedSizeMismatch = 0
   let reclaimableBytes = 0
+  const confirmedNasRelativePaths = []
 
   console.log(
     `${dryRun ? 'Dry run' : 'Applying'} local eviction for bucket "${bucket}" against NAS root ${nasDatasetDir}`
@@ -156,6 +158,7 @@ function main() {
       modelEligible += 1
       reclaimableBytes += localStat.size
       modelBytes += localStat.size
+      confirmedNasRelativePaths.push(normalizePath(relativePath))
 
       if (shouldApply) {
         fs.unlinkSync(localFile)
@@ -175,6 +178,12 @@ function main() {
   console.log(
     `${dryRun ? 'Potentially reclaimable' : 'Reclaimed'}: ${formatBytes(reclaimableBytes)}`
   )
+  if (shouldApply && confirmedNasRelativePaths.length > 0) {
+    const indexPath = mergeNasMp4Entries(confirmedNasRelativePaths, datasetDir)
+    console.log(
+      `Updated NAS MP4 index with ${confirmedNasRelativePaths.length} confirmed path(s): ${indexPath}`
+    )
+  }
   if (dryRun) {
     console.log(
       'No files were deleted. Re-run with --apply=true, --mode=apply, or npm run evict:nas-media:apply to evict matching local files.'

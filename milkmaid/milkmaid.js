@@ -1275,6 +1275,7 @@ function recordMilkmaidDuplicate({
   destination,
   reason,
   extra = {},
+  recordSeen = false,
 }) {
   return milkmaidSavePipeline.recordDuplicate({
     modelName,
@@ -1283,6 +1284,7 @@ function recordMilkmaidDuplicate({
     destination,
     reason,
     extra,
+    recordSeen,
   })
 }
 
@@ -1334,13 +1336,16 @@ async function saveStufferDbImageLikeMedia({
 }
 
 function queueStufferDbVideoMedia({ modelName, folders, entry, destination }) {
-  if (milkmaidSavePipeline.isKnownOrExisting(destination, entry)) {
+  const destinationExists = existsLocallyOrOnNas(destination.finalPath)
+  if (knownFilenames.has(entry.filename) || destinationExists) {
     recordMilkmaidDuplicate({
       modelName,
+      folders,
       entry,
       destination,
       reason: 'skip_existing_video',
       extra: milkmaidSavePipeline.getExistingExtra(destination),
+      recordSeen: destinationExists,
     })
     return logAndProgress(
       `⛔ Skipping mp4 - already handled: ${entry.filename}`,
@@ -1977,18 +1982,39 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
           i
         ) =>
           lazyLimit(async () => {
-            if (
-              knownFilenames.has(filename) ||
-              existsLocallyOrOnNas(finalPath)
-            ) {
+            const destinationExists = existsLocallyOrOnNas(finalPath)
+            if (knownFilenames.has(filename) || destinationExists) {
               duplicateCount++
               runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+              const relativePath = getDatasetRelativePath(finalPath)
               appendRunEvent('skip_lazy_existing', {
                 modelName,
                 filename,
-                savedPath: getDatasetRelativePath(finalPath),
+                savedPath: relativePath,
                 quarantinedMirrorExists: isQuarantinedPath(finalPath),
               })
+              if (destinationExists) {
+                recordSuccessfulSeenMedia(
+                  folders.logDir,
+                  milkmaidMediaSaver.buildSeenRecord(
+                    {
+                      filename,
+                      mediaUrl: url,
+                      mediaUrls,
+                      mediaPageUrl,
+                      mediaPageUrls,
+                      sourceSite,
+                      sourceService,
+                      sourceUserId,
+                      sourceUsername,
+                      sourceSubreddit,
+                      postId,
+                      uploadedDate,
+                    },
+                    { relativePath, filename }
+                  )
+                )
+              }
               return logAndProgress(
                 `♻️ Lazy dupe (pre-download): ${filename}`,
                 true
