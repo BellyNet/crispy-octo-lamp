@@ -5,6 +5,9 @@ const fs = require('fs')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') }) // ← LOAD .env
 
 const model = process.argv[2]
+const allowMirrorDelete =
+  process.argv.includes('--mirror-delete') ||
+  process.argv.includes('--allow-delete')
 if (!model) {
   console.error('❌ You must specify a model name: node syncToNas.js <model>')
   process.exit(1)
@@ -28,7 +31,14 @@ if (!fs.existsSync(localPath)) {
 
 console.log(`📤 Syncing ${model} from local → NAS...`)
 try {
-  const robocopyCmd = `robocopy "${localPath}" "${nasPath}" /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:5`
+  const robocopyMode = allowMirrorDelete ? '/MIR' : '/E /XC /XN /XO'
+  const robocopyCmd = `robocopy "${localPath}" "${nasPath}" ${robocopyMode} /NFL /NDL /NJH /NJS /NP /R:2 /W:5`
+
+  if (allowMirrorDelete) {
+    console.warn(
+      'Mirror-delete mode enabled. NAS files missing locally can be deleted.'
+    )
+  }
 
   exec(robocopyCmd, (err, stdout, stderr) => {
     const exitCode = err?.code ?? 0

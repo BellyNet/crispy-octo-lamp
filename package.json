@@ -33,6 +33,7 @@
     "update:stufferdb": "node scrapyard/run-stufferdb-batch.js",
     "update:all-models": "node scrapyard/run-all-source-updates.js",
     "report:repair-failures": "node milkmaid/report-repair-failures.js",
+    "audit:missing-media": "node audit/audit-missing-media-refs.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
     "repair": "node scrapyard/run-scrape.js repair",
     "repair:tail-decode": "node audit/run-session-repair.js",
@@ -67,7 +68,8 @@
     "backfill:exif": "node milkmaid/backfill-exif-dates.js",
     "cleanup:gif-derived-mp4s": "node scrapyard/removeGifDerivedMp4s.js",
     "cleanup:mirrored-mp4s": "node scrapyard/removeMirroredMp4s.js",
-    "rebuild:nas-mp4-index": "node scrapyard/rebuildNasMp4Index.js"
+    "rebuild:nas-mp4-index": "node scrapyard/rebuildNasMp4Index.js",
+    "prune:missing-media": "node scrapyard/pruneMissingMediaRefs.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",
