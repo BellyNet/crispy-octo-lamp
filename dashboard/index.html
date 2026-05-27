@@ -479,6 +479,24 @@
         z-index: 2;
         pointer-events: none;
       }
+      /* Resolution chip for video cards. Top-right corner, color shifts by tier. */
+      .card-res-badge {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        padding: 2px 5px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.65);
+        color: #b8b8c8;
+        z-index: 2;
+        pointer-events: none;
+      }
+      .card-res-badge.tier-hd  { color: #a8d5be; }
+      .card-res-badge.tier-fhd { color: #7ec7ff; }
+      .card-res-badge.tier-4k  { color: #f4c674; }
       .media-card:hover .card-overlay {
         opacity: 1;
       }
@@ -655,6 +673,55 @@
         line-height: 44px;
         padding: 0 12px;
         user-select: none;
+      }
+      /* Date-position slider — sits next to the counter in the top bar.
+         Shows the current item's date and where it falls between the model's
+         earliest and newest media. Hidden entirely when the model has no
+         usable date range (single item, or all items share one date). */
+      .pswp__pswp-date-slider {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: stretch;
+        padding: 4px 10px 6px;
+        min-width: 160px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        user-select: none;
+      }
+      .pswp-date-slider-label {
+        font-size: 11px;
+        color: var(--muted);
+        text-align: center;
+        margin-bottom: 4px;
+        white-space: nowrap;
+        line-height: 1.2;
+      }
+      .pswp-date-slider-track {
+        position: relative;
+        height: 2px;
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 1px;
+      }
+      .pswp-date-slider-thumb {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+        transform: translate(-50%, -50%);
+        transition: left 0.2s ease;
+        box-shadow: 0 0 0 2px rgba(124, 108, 252, 0.28);
+      }
+      @media (max-width: 640px) {
+        .pswp__pswp-date-slider {
+          min-width: 110px;
+          padding: 4px 6px 6px;
+        }
+        .pswp-date-slider-label {
+          font-size: 10px;
+        }
       }
       /* Info button style */
       .pswp__pswp-info-button svg {
@@ -1548,6 +1615,17 @@
         return `${m}:${ss}`
       }
 
+      // Map a video's pixel dimensions to a coarse quality tier shown as a chip.
+      // Anything below 720p just gets a generic "SD" with the muted base color.
+      function resolutionTier(w, h) {
+        const m = Math.max(w || 0, h || 0)
+        if (!m) return null
+        if (m >= 2160) return { key: '4k', label: '4K' }
+        if (m >= 1080) return { key: 'fhd', label: 'FHD' }
+        if (m >= 720) return { key: 'hd', label: 'HD' }
+        return { key: 'sd', label: 'SD' }
+      }
+
       // ─── USERS ────────────────────────────────────────────────────────────
       let usersData = [] // [{ name, sources }]
 
@@ -2390,6 +2468,15 @@
             }
           }
           thumb.appendChild(img)
+
+          const tier = resolutionTier(item.width, item.height)
+          if (tier) {
+            const chip = document.createElement('span')
+            chip.className = `card-res-badge tier-${tier.key}`
+            chip.textContent = tier.label
+            chip.title = `${item.width}×${item.height}`
+            thumb.appendChild(chip)
+          }
         } else {
           const img = document.createElement('img')
           img.loading = 'lazy'
@@ -2607,6 +2694,20 @@
 
           // All UI registration happens inside uiRegister — pswp.ui is guaranteed
           // to exist here (set in _createMainStructure before ui.init fires this event).
+          // Compute the model's overall date range once for the slider.
+          // Uses every loaded media item (not just the filtered subset) so the
+          // slider position is "where this falls in the model's history" rather
+          // than "where it falls in the current filter".
+          let _modelMinMs = Infinity
+          let _modelMaxMs = -Infinity
+          for (const m of allMedia) {
+            const t = m.mediaDateMs || m.addedMs
+            if (!t) continue
+            if (t < _modelMinMs) _modelMinMs = t
+            if (t > _modelMaxMs) _modelMaxMs = t
+          }
+          const _dateRangeOk = _modelMaxMs > _modelMinMs
+
           pswp.on('uiRegister', () => {
             // Slide counter (top-bar, left of zoom/close)
             pswp.ui.registerElement({
@@ -2621,6 +2722,51 @@
                 update()
               },
             })
+
+            // Date-position slider — sits just right of the counter on the top
+            // bar. Only registered when the model spans more than one date.
+            if (_dateRangeOk) {
+              pswp.ui.registerElement({
+                name: 'pswp-date-slider',
+                order: 6,
+                isButton: false,
+                onInit(el) {
+                  const label = document.createElement('div')
+                  label.className = 'pswp-date-slider-label'
+                  const track = document.createElement('div')
+                  track.className = 'pswp-date-slider-track'
+                  const thumb = document.createElement('div')
+                  thumb.className = 'pswp-date-slider-thumb'
+                  track.appendChild(thumb)
+                  el.appendChild(label)
+                  el.appendChild(track)
+                  el.title = `${formatDateShort(new Date(_modelMinMs).toISOString())} — ${formatDateShort(new Date(_modelMaxMs).toISOString())}`
+
+                  const update = () => {
+                    const item = filtered[pswp.currIndex]
+                    if (!item) return
+                    const t = item.mediaDateMs || item.addedMs || 0
+                    const pct = t
+                      ? Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            ((t - _modelMinMs) /
+                              (_modelMaxMs - _modelMinMs)) *
+                              100
+                          )
+                        )
+                      : 0
+                    thumb.style.left = `${pct}%`
+                    label.textContent = item.date
+                      ? formatDateShort(item.date)
+                      : '—'
+                  }
+                  pswp.on('change', update)
+                  update()
+                },
+              })
+            }
 
             // Info panel — slides up from bottom when ⓘ is pressed
             pswp.ui.registerElement({
@@ -2663,9 +2809,17 @@
                   nameSpan.textContent = item.filename
                   el.appendChild(nameSpan)
 
-                  // Compact metadata line: dimensions · duration · file size
+                  // Compact metadata line. For videos, show the resolution tier
+                  // (HD/FHD/4K) instead of the raw W×H — the actual dimensions
+                  // are kept on the title attribute for hover. Images still show
+                  // dimensions since there's no equivalent tier to surface.
                   const metaBits = []
-                  if (item.width && item.height)
+                  const tier =
+                    item.type === 'video'
+                      ? resolutionTier(item.width, item.height)
+                      : null
+                  if (tier) metaBits.push(tier.label)
+                  else if (item.width && item.height)
                     metaBits.push(`${item.width}×${item.height}`)
                   const dur = formatDuration(item.duration)
                   if (dur) metaBits.push(dur)
@@ -2675,6 +2829,8 @@
                     const metaSpan = document.createElement('span')
                     metaSpan.className = 'pswp-info-meta'
                     metaSpan.textContent = metaBits.join(' · ')
+                    if (tier && item.width && item.height)
+                      metaSpan.title = `${item.width}×${item.height}`
                     el.appendChild(metaSpan)
                   }
 

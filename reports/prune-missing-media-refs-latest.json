@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-05-27T17:34:43.091Z",
+  "apply": false,
+  "datasetRoot": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset",
+  "auditPath": "F:\\Dev\\LoRA-Training\\reports\\missing-media-audit-latest.json",
+  "targetRefs": 2929,
+  "hashTargetRefs": 0,
+  "bitwiseTargetRefs": 0,
+  "visualTargetRefs": 0,
+  "seenTargetRefs": 0,
+  "nasIndexTargetRefs": 0,
+  "bitwiseRefsRemoved": 0,
+  "visualRefsRemoved": 0,
+  "seenRecordsRemoved": 0,
+  "seenKeysRemoved": 0,
+  "seenIndexesTouched": 0,
+  "nasIndexRefsRemoved": 0,
+  "backups": []
+}

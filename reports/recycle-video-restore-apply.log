@@ -1,0 +1,32 @@
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : Wednesday, May 27, 2026 12:05:35 PM
+   Source : Z:\@Recycle\dataset\
+     Dest : Z:\dataset\
+
+    Files : *.mp4
+	    *.webm
+	    *.m4v
+	    *.mov
+	    
+  Options : /NDL /NFL /TEE /S /DCOPY:DA /COPY:DAT /NP /XO /XN /XC /R:2 /W:2 
+
+------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :       270         6       264         0         0       277
+   Files :      8683      6084      2599         0         0      3858
+   Bytes : 508.234 g 362.998 g 145.235 g         0         0 275.230 g
+   Times :   1:26:59   1:26:04                       0:00:00   0:00:55
+
+
+   Speed :           75,474,689 Bytes/sec.
+   Speed :            4,318.696 MegaBytes/min.
+   Ended : Wednesday, May 27, 2026 1:32:35 PM
+

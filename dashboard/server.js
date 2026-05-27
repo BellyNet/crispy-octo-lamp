@@ -44,7 +44,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 4
+const RESPONSE_CACHE_VERSION = 5
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
@@ -550,6 +550,23 @@ async function processFileForResponse(username, userDir, item) {
       })
       metaUpdated = true
     }
+
+    // Backfill video dimensions for entries cached before ffprobe started
+    // recording width/height. One re-probe per video, then it sticks.
+    if (isVideo && hit.width === undefined) {
+      const probed = await mediaDates
+        .probeVideoFile(item.filePath)
+        .catch(() => ({}))
+      width = probed.width || 0
+      height = probed.height || 0
+      metaCache.set(username, item.folder, item.filename, stat, {
+        duration,
+        ...(videoDate !== undefined && { videoDate }),
+        width,
+        height,
+      })
+      metaUpdated = true
+    }
   } else {
     if (isVideo) {
       const probed = await mediaDates
@@ -557,6 +574,8 @@ async function processFileForResponse(username, userDir, item) {
         .catch(() => ({}))
       duration = probed.duration || 0
       videoDate = probed.videoDate || undefined
+      width = probed.width || 0
+      height = probed.height || 0
     } else if (IMAGE_EXTS_IN.has(ext)) {
       // sharp metadata and exif parse can run in parallel — both read the file
       // header. exifr returns null for formats with no EXIF (most PNGs, GIFs).
@@ -576,7 +595,12 @@ async function processFileForResponse(username, userDir, item) {
       item.filename,
       stat,
       isVideo
-        ? { duration, ...(videoDate !== undefined && { videoDate }) }
+        ? {
+            duration,
+            ...(videoDate !== undefined && { videoDate }),
+            width,
+            height,
+          }
         : { width, height, imageDate }
     )
     metaUpdated = true

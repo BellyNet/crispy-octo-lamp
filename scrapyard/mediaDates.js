@@ -90,7 +90,7 @@ function toISO(date) {
 // ─── EXTRACTION: VIDEOS (from saved file via ffprobe) ─────────────────────────
 async function probeVideoFile(filePath) {
   const probe = await ensureFfprobe()
-  if (!probe) return { duration: null, videoDate: null }
+  if (!probe) return { duration: null, videoDate: null, width: 0, height: 0 }
   try {
     const { stdout } = await execFileAsync(
       probe,
@@ -140,9 +140,19 @@ async function probeVideoFile(filePath) {
         break
       }
     }
-    return { duration, videoDate }
+
+    let width = 0
+    let height = 0
+    for (const stream of info?.streams || []) {
+      if (stream?.codec_type === 'video' && stream.width && stream.height) {
+        width = stream.width
+        height = stream.height
+        break
+      }
+    }
+    return { duration, videoDate, width, height }
   } catch {
-    return { duration: null, videoDate: null }
+    return { duration: null, videoDate: null, width: 0, height: 0 }
   }
 }
 
