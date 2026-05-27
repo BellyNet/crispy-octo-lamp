@@ -22,7 +22,9 @@ if (argv.help) {
   process.exit(0)
 }
 
-const datasetRoot = path.resolve(String(argv['dataset-root'] || getDefaultDatasetRoot()))
+const datasetRoot = path.resolve(
+  String(argv['dataset-root'] || getDefaultDatasetRoot())
+)
 const nasRoot = argv['nas-root'] ? path.resolve(String(argv['nas-root'])) : null
 const mergeLocalRoot = argv['merge-local-root']
   ? path.resolve(String(argv['merge-local-root']))
@@ -54,7 +56,7 @@ function main() {
   console.log(`Dataset root: ${datasetRoot}`)
   if (nasRoot) console.log(`NAS root: ${nasRoot}`)
   if (mergeLocalRoot) console.log(`Merged local root: ${mergeLocalRoot}`)
-  console.log(`Entries processed: ${entries.length}`)
+  console.log(`Video entries processed: ${entries.length}`)
   console.log(`Index path: ${indexPath}`)
   console.log(`Index size bytes: ${stat.size}`)
 }
@@ -65,10 +67,11 @@ function printHelp() {
 Options:
   --dataset-root <path>     Override local dataset root.
   --nas-root <path>         Rebuild the full index by scanning this NAS dataset root.
-  --merge-local-root <path> Merge local MP4 paths into the existing NAS index.
+  --merge-local-root <path> Merge local video paths into the existing NAS index.
   -h, --help                Show help.
 
 Notes:
-  The NAS MP4 index lives at the dataset root as nas-mp4-index.v1.json.
+  The NAS media index lives at the dataset root as nas-mp4-index.v1.json
+  for compatibility and covers mp4/m4v/mov/webm paths.
 `)
 }

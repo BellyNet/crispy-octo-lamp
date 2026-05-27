@@ -6,6 +6,14 @@ function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/')
 }
 
+const indexedVideoExtensions = new Set(['.mp4', '.m4v', '.mov', '.webm'])
+
+function isIndexedVideoPath(filePath) {
+  return indexedVideoExtensions.has(
+    path.extname(String(filePath || '')).toLowerCase()
+  )
+}
+
 function getDefaultDatasetRoot() {
   return path.join(
     process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
@@ -41,7 +49,9 @@ function loadNasMp4Index(datasetRoot = getDefaultDatasetRoot(), options = {}) {
       const raw = fs.readFileSync(indexPath, 'utf8').replace(/^\uFEFF/, '')
       const parsed = raw.trim() ? JSON.parse(raw) : {}
       const entries = Array.isArray(parsed?.entries) ? parsed.entries : []
-      values = new Set(entries.map((entry) => normalizePath(entry)).filter(Boolean))
+      values = new Set(
+        entries.map((entry) => normalizePath(entry)).filter(Boolean)
+      )
     } catch (err) {
       console.warn(`Failed to load NAS MP4 index: ${err.message}`)
     }
@@ -63,9 +73,10 @@ function saveNasMp4Index(entries, datasetRoot = getDefaultDatasetRoot()) {
     version: 1,
     updatedAt: new Date().toISOString(),
     entryCount: values.size,
-    entries: [...values].map((entry) => normalizePath(entry)).filter(Boolean).sort((a, b) =>
-      a.localeCompare(b)
-    ),
+    entries: [...values]
+      .map((entry) => normalizePath(entry))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
   }
 
   fs.mkdirSync(path.dirname(indexPath), { recursive: true })
@@ -78,12 +89,18 @@ function saveNasMp4Index(entries, datasetRoot = getDefaultDatasetRoot()) {
   return indexPath
 }
 
-function hasNasMp4RelativePath(relativePath, datasetRoot = getDefaultDatasetRoot()) {
+function hasNasMp4RelativePath(
+  relativePath,
+  datasetRoot = getDefaultDatasetRoot()
+) {
   return loadNasMp4Index(datasetRoot).has(normalizePath(relativePath))
 }
 
 function setNasMp4Entries(entries, datasetRoot = getDefaultDatasetRoot()) {
-  return saveNasMp4Index(new Set((entries || []).map((entry) => normalizePath(entry))), datasetRoot)
+  return saveNasMp4Index(
+    new Set((entries || []).map((entry) => normalizePath(entry))),
+    datasetRoot
+  )
 }
 
 function mergeNasMp4Entries(entries, datasetRoot = getDefaultDatasetRoot()) {
@@ -103,7 +120,10 @@ function removeNasMp4Entries(entries, datasetRoot = getDefaultDatasetRoot()) {
   return saveNasMp4Index(values, datasetRoot)
 }
 
-function collectMp4RelativePaths(rootPath, datasetRoot = getDefaultDatasetRoot()) {
+function collectMp4RelativePaths(
+  rootPath,
+  datasetRoot = getDefaultDatasetRoot()
+) {
   const resolvedRoot = path.resolve(rootPath)
   const resolvedDatasetRoot = path.resolve(datasetRoot)
   const results = []
@@ -111,10 +131,16 @@ function collectMp4RelativePaths(rootPath, datasetRoot = getDefaultDatasetRoot()
   return results
 }
 
-function syncNasMp4IndexToMirror(mirrorRoot, datasetRoot = getDefaultDatasetRoot()) {
+function syncNasMp4IndexToMirror(
+  mirrorRoot,
+  datasetRoot = getDefaultDatasetRoot()
+) {
   const resolvedMirrorRoot = path.resolve(String(mirrorRoot || ''))
   const indexPath = getNasMp4IndexPath(datasetRoot)
-  const destinationPath = path.join(resolvedMirrorRoot, path.basename(indexPath))
+  const destinationPath = path.join(
+    resolvedMirrorRoot,
+    path.basename(indexPath)
+  )
   fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
   fs.copyFileSync(indexPath, destinationPath)
   return destinationPath
@@ -131,13 +157,15 @@ function walkForMp4(currentPath, datasetRoot, results) {
       continue
     }
 
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.mp4')) continue
+    if (!entry.isFile() || !isIndexedVideoPath(entry.name)) continue
     results.push(normalizePath(path.relative(datasetRoot, absolutePath)))
   }
 }
 
 module.exports = {
   normalizePath,
+  indexedVideoExtensions,
+  isIndexedVideoPath,
   getDefaultDatasetRoot,
   getNasMp4IndexPath,
   loadNasMp4Index,

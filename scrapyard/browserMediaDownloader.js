@@ -254,11 +254,12 @@ async function createBrowserMediaDownloader(source, options = {}) {
   }
 
   return {
-    async download(mediaUrl, entry = {}) {
+    async download(mediaUrl, entry = {}, downloadOptions = {}) {
       const cookieHeader = await getCookieHeaderFor(mediaUrl)
       try {
         const response = await requestBuffer(mediaUrl, {
           timeoutMs: options.timeoutMs,
+          onProgress: downloadOptions.onProgress,
           headers: {
             Accept: '*/*',
             Referer: entry.mediaPageUrl || source.inputUrl,

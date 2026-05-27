@@ -353,6 +353,9 @@ async function main() {
     input: process.stdin,
     output: process.stdout,
   })
+  rl.on('SIGINT', () => {
+    process.emit('SIGINT')
+  })
   const sessionOptions = createSessionOptions()
 
   try {

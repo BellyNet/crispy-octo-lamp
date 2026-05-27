@@ -259,6 +259,8 @@ function startRunLog(modelName, inputUrl, folders, keepHistory) {
       savedBytes: 0,
       lazyExpectedBytes: 0,
       lazyTransferredBytes: 0,
+      downloadBytes: 0,
+      duplicateDownloadBytes: 0,
     },
     removeFileIfExists,
   })
@@ -293,6 +295,15 @@ function logRunProgress(context = '') {
   if (!currentRunLog) return
 
   const stats = runLifecycle.getRunProgressStats(currentRunLog)
+  const transfer = currentRunLog.transfer || {}
+  const downloadBytes = Number(transfer.downloadBytes || 0)
+  const duplicateDownloadBytes = Number(transfer.duplicateDownloadBytes || 0)
+  const elapsedSeconds = Math.max(
+    (Date.now() - new Date(currentRunLog.startedAt).getTime()) / 1000,
+    0
+  )
+  const averageSpeed = elapsedSeconds > 0 ? downloadBytes / elapsedSeconds : 0
+  const activeSpeed = Number(transfer.activeDownloadBytesPerSecond || 0)
   const bottomText = [
     `processed ${stats.processed}/${stats.expectedMedia}`,
     `saved ${stats.saved}`,
@@ -300,7 +311,15 @@ function logRunProgress(context = '') {
     `dupes ${stats.duplicates}`,
     `failed ${stats.failures}`,
     `remaining ${stats.remaining}`,
-  ].join(' | ')
+    `net ${runLifecycle.formatBytes(downloadBytes)}`,
+    `avg ${runLifecycle.formatBytes(averageSpeed)}/s`,
+    activeSpeed > 0 ? `now ${runLifecycle.formatBytes(activeSpeed)}/s` : null,
+    duplicateDownloadBytes > 0
+      ? `dupe dl ${runLifecycle.formatBytes(duplicateDownloadBytes)}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' | ')
 
   if (context) logScrollingMessage(context)
   logProgress(stats.processed, Math.max(stats.expectedMedia, 1), {
@@ -314,6 +333,58 @@ function noteMediaOutcome(kind, context = '') {
   runLifecycle.noteMediaOutcome(currentRunLog, kind)
 
   logRunProgress(context)
+}
+
+function noteDownloadProgress(entry, progress = {}) {
+  if (!currentRunLog) return
+
+  const chunkBytes = Number(progress.chunkBytes || 0)
+  if (chunkBytes > 0) {
+    runLifecycle.addRunTransfer(currentRunLog, 'downloadBytes', chunkBytes)
+  }
+
+  const elapsedSeconds = Math.max(Number(progress.elapsedMs || 0) / 1000, 0)
+  const activeSpeed =
+    elapsedSeconds > 0
+      ? Number(progress.downloadedBytes || 0) / elapsedSeconds
+      : 0
+  currentRunLog.transfer.activeDownloadFilename = entry?.filename || null
+  currentRunLog.transfer.activeDownloadBytes =
+    Number(progress.downloadedBytes || 0) || 0
+  currentRunLog.transfer.activeDownloadTotalBytes =
+    Number(progress.totalBytes || 0) || 0
+  currentRunLog.transfer.activeDownloadBytesPerSecond = activeSpeed
+
+  const now = Date.now()
+  if (now - Number(currentRunLog.lastDownloadProgressAt || 0) >= 1000) {
+    currentRunLog.lastDownloadProgressAt = now
+    runLifecycle.writeRunSnapshot(currentRunLog)
+    logRunProgress()
+  }
+}
+
+function createDownloadProgressTracker(entry) {
+  let lastDownloadedBytes = 0
+  return (progress = {}) => {
+    const downloadedBytes = Number(progress.downloadedBytes || 0)
+    const chunkBytes = Number.isFinite(progress.chunkBytes)
+      ? Number(progress.chunkBytes)
+      : Math.max(downloadedBytes - lastDownloadedBytes, 0)
+    lastDownloadedBytes = Math.max(lastDownloadedBytes, downloadedBytes)
+    noteDownloadProgress(entry, {
+      ...progress,
+      chunkBytes,
+    })
+  }
+}
+
+function noteDuplicateDownloadBytes(bytes) {
+  if (!currentRunLog) return
+  runLifecycle.addRunTransfer(
+    currentRunLog,
+    'duplicateDownloadBytes',
+    Number(bytes || 0)
+  )
 }
 
 function finalizeAbortedRun(status, error) {
@@ -693,16 +764,43 @@ function classifyMedia(filename) {
 }
 
 async function downloadMediaBuffer(mediaUrl, entry = {}) {
+  const startedAt = Date.now()
+  const onProgress = createDownloadProgressTracker(entry)
+  appendRunEvent('download_started', {
+    filename: entry.filename,
+    mediaUrl,
+    mediaPageUrl: entry.mediaPageUrl,
+    ...getEntrySourceDetails(entry),
+  })
+
+  let buffer
   if (browserMediaDownloader) {
-    return browserMediaDownloader.download(mediaUrl, entry)
+    buffer = await browserMediaDownloader.download(mediaUrl, entry, {
+      onProgress,
+    })
+  } else {
+    const response = await requestBuffer(mediaUrl, {
+      headers: {
+        Accept: '*/*',
+      },
+      onProgress,
+    })
+    buffer = response.buffer
   }
 
-  const response = await requestBuffer(mediaUrl, {
-    headers: {
-      Accept: '*/*',
-    },
+  const durationMs = Math.max(Date.now() - startedAt, 0)
+  const averageBytesPerSecond =
+    durationMs > 0 ? buffer.length / (durationMs / 1000) : 0
+  appendRunEvent('download_finished', {
+    filename: entry.filename,
+    mediaUrl,
+    mediaPageUrl: entry.mediaPageUrl,
+    ...getEntrySourceDetails(entry),
+    byteLength: buffer.length,
+    durationMs,
+    averageBytesPerSecond,
   })
-  return response.buffer
+  return buffer
 }
 
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
@@ -808,6 +906,7 @@ async function saveVideoMedia(modelName, folders, entry) {
     const hash = await hashFileFromPath(tmpPath)
     const bitwiseMatch = getBitwiseDuplicationRecord(hash)
     if (bitwiseMatch.isDuplicate) {
+      noteDuplicateDownloadBytes(buffer.length)
       recordDuplicate(
         entry,
         bitwiseMatch.activeRefs[0],
@@ -838,6 +937,7 @@ async function saveVideoMedia(modelName, folders, entry) {
     })
 
     if (result.reason === 'duplicate_visual') {
+      noteDuplicateDownloadBytes(result.sizeBytes)
       return
     }
   } catch (err) {
@@ -1181,6 +1281,8 @@ async function run(argvInput = process.argv.slice(2)) {
     duplicates: duplicateCount,
     failures: errorCount,
   })
+  const finalTransfer = { ...(currentRunLog?.transfer || {}) }
+  const finalStartedAt = currentRunLog?.startedAt || new Date().toISOString()
   finalizeRunLog({
     successCount,
     duplicateCount,
@@ -1193,6 +1295,18 @@ async function run(argvInput = process.argv.slice(2)) {
   })
 
   logScrollingMessage(runLifecycle.formatRunSummaryLine(runStats))
+  const durationSeconds =
+    Math.max((Date.now() - new Date(finalStartedAt).getTime()) / 1000, 0) || 0
+  const downloadBytes = Number(finalTransfer.downloadBytes || 0)
+  const averageDownloadSpeed =
+    durationSeconds > 0 ? downloadBytes / durationSeconds : 0
+  logScrollingMessage(
+    `Transfer: network ${runLifecycle.formatBytes(downloadBytes)} | saved ${runLifecycle.formatBytes(
+      Number(finalTransfer.savedBytes || 0)
+    )} | duplicate downloads ${runLifecycle.formatBytes(
+      Number(finalTransfer.duplicateDownloadBytes || 0)
+    )} | avg ${runLifecycle.formatBytes(averageDownloadSpeed)}/s`
+  )
   logRunProgress()
   console.log(getCompletionLine())
   return 0

@@ -4,7 +4,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const { hasNasMp4RelativePath } = require('./nasMp4Index')
+const { hasNasMp4RelativePath, isIndexedVideoPath } = require('./nasMp4Index')
 
 function createDatasetPaths(options = {}) {
   const rootDir = options.rootDir || path.join(__dirname, '..')
@@ -99,9 +99,7 @@ function createDatasetPaths(options = {}) {
 
   function existsLocallyOrOnNas(filePath) {
     if (existsAtExactPath(filePath)) return true
-    if (path.extname(String(filePath || '')).toLowerCase() !== '.mp4') {
-      return false
-    }
+    if (!isIndexedVideoPath(filePath)) return false
     return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
   }
 

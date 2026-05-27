@@ -181,6 +181,61 @@ function runNodeScriptQuiet(scriptPath, args) {
   return result.status ?? 1
 }
 
+function runNodeScriptInteractive(
+  scriptPath,
+  args,
+  { log = console.log } = {}
+) {
+  const { spawn } = require('child_process')
+  log('')
+  log(`Running: node ${scriptPath} ${args.join(' ')}`.trim())
+  log('')
+
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: rootDir,
+      stdio: 'inherit',
+    })
+    let settled = false
+    let killTimer = null
+
+    const cleanup = () => {
+      process.off('SIGINT', onSigint)
+      process.off('SIGTERM', onSigterm)
+      if (killTimer) clearTimeout(killTimer)
+    }
+    const forwardSignal = (signal, fallbackCode) => {
+      if (settled) return
+      child.kill(signal)
+      killTimer = setTimeout(() => {
+        if (!settled && child.exitCode === null) child.kill('SIGKILL')
+      }, 5000)
+      if (killTimer.unref) killTimer.unref()
+      process.exitCode = fallbackCode
+    }
+    const onSigint = () => forwardSignal('SIGINT', 130)
+    const onSigterm = () => forwardSignal('SIGTERM', 143)
+
+    process.on('SIGINT', onSigint)
+    process.on('SIGTERM', onSigterm)
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      console.error(`Failed to run ${scriptPath}: ${err.message}`)
+      resolve(1)
+    })
+    child.on('exit', (code, signal) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (signal === 'SIGINT') return resolve(130)
+      if (signal === 'SIGTERM') return resolve(143)
+      resolve(code ?? 1)
+    })
+  })
+}
+
 function runScriptResult(scriptPath, args, label) {
   const code = runNodeScript(scriptPath, args)
   return {
@@ -465,9 +520,15 @@ function printRecoveredRunSummary(summary, { log = console.log } = {}) {
   if (summary.logPath) log(`Run log: ${summary.logPath}`)
 }
 
-function runHoghaulScript(scriptPath, args, parsedSource, argv, { log } = {}) {
+async function runHoghaulScript(
+  scriptPath,
+  args,
+  parsedSource,
+  argv,
+  { log } = {}
+) {
   const modelName = getRunnerModelName(parsedSource, argv)
-  const code = runNodeScriptQuiet(scriptPath, args)
+  const code = await runNodeScriptInteractive(scriptPath, args, { log })
   const summary = modelName ? readModelRunSummary(modelName, 'hoghaul') : null
   if (summary?.status === 'running') {
     printRecoveredRunSummary(summary, { log })
@@ -537,7 +598,9 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   if (deps.runCommand) {
     status = await runCommand(scriptPath, args, { log })
   } else if (parsedSource.scraper === 'hoghaul') {
-    status = runHoghaulScript(scriptPath, args, parsedSource, argv, { log })
+    status = await runHoghaulScript(scriptPath, args, parsedSource, argv, {
+      log,
+    })
   } else {
     status = await runInProcessScraper(
       parsedSource,
