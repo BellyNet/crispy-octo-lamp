@@ -68,6 +68,8 @@ function formatScrapeSummaryLine(summary) {
   const dupes = getSummaryCounter(summary, 'duplicates', ['duplicateCount'])
   const failed = getSummaryCounter(summary, 'failures', ['errorCount'])
   const savedBytes = Number(summary?.transfer?.savedBytes || 0)
+  const modelName = summary?.modelName ? ` | model ${summary.modelName}` : ''
+  const source = summary?.source ? ` | source ${summary.source}` : ''
   const pieces = [
     `time ${formatDuration(summary?.durationMs)}`,
     `processed ${processed}/${expected}`,
@@ -77,7 +79,29 @@ function formatScrapeSummaryLine(summary) {
     `failed ${failed}`,
     `downloaded ${formatBytes(savedBytes)}`,
   ]
-  return `Run stats: ${pieces.join(' | ')}`
+  return [
+    '----- RUN STATS --------------------------------------------------',
+    `RUN STATS${modelName}${source}`,
+    pieces.join(' | '),
+    '------------------------------------------------------------------',
+  ].join('\n')
+}
+
+function formatModelHeader(index, total, modelName, sourceCount) {
+  return [
+    '',
+    '==================================================================',
+    `MODEL ${index}/${total}: ${modelName} | sources ${sourceCount}`,
+    '==================================================================',
+  ].join('\n')
+}
+
+function formatSourceHeader(index, total, modelName, sourceLabel, url) {
+  return [
+    '',
+    `-- SOURCE ${index}/${total}: ${modelName} -> ${sourceLabel}`,
+    `   ${url}`,
+  ].join('\n')
 }
 
 function printHelp() {
@@ -1204,9 +1228,13 @@ async function runStufferDbBatch(argvInput = {}) {
 
   for (let index = 0; index < selectedQueue.length; index += 1) {
     const item = selectedQueue[index]
-    console.log('')
     console.log(
-      `[${index + 1}/${selectedQueue.length}] Updating ${item.model} from ${item.sources.length} source(s)`
+      formatModelHeader(
+        index + 1,
+        selectedQueue.length,
+        item.model,
+        item.sources.length
+      )
     )
 
     const result = await runStufferModelUpdate(item, {
@@ -1322,9 +1350,14 @@ async function runAllSourceModelUpdate(item, context = {}) {
     const parsedSource = parseSourceUrl(source.url)
     const sourceLabel = source.label || source.sourceKey
 
-    console.log('')
     console.log(
-      `  [${index + 1}/${item.sources.length}] ${item.model} -> ${sourceLabel}: ${source.url}`
+      formatSourceHeader(
+        index + 1,
+        item.sources.length,
+        item.model,
+        sourceLabel,
+        source.url
+      )
     )
 
     if (!parsedSource) {
@@ -1461,9 +1494,13 @@ async function runAllSourceUpdates(argvInput = {}) {
 
   for (let index = 0; index < selectedQueue.length; index += 1) {
     const item = selectedQueue[index]
-    console.log('')
     console.log(
-      `[${index + 1}/${selectedQueue.length}] Updating ${item.model} from ${item.sources.length} source(s)`
+      formatModelHeader(
+        index + 1,
+        selectedQueue.length,
+        item.model,
+        item.sources.length
+      )
     )
 
     const result = await runAllSourceModelUpdate(item, {

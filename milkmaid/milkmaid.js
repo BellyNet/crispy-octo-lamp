@@ -1192,6 +1192,7 @@ function logAndProgress(message, increment = false) {
   logScrollingMessage(message)
 
   if (progressMode === 'lazy') {
+    if (!shouldDrawLazyProgress()) return
     const percent = totalLazyBytes
       ? (lazyBytesDownloaded / totalLazyBytes) * 100
       : 0
@@ -1217,6 +1218,13 @@ function logAndProgress(message, increment = false) {
       bottomText: getScrapeStatsLine(),
     })
   }
+}
+
+function shouldDrawLazyProgress() {
+  return (
+    lazyVideoQueue.length > 0 &&
+    (lazyActiveDownloads > 0 || lazyBytesDownloaded > 0)
+  )
 }
 
 function getScrapeStatsLine() {
@@ -1900,18 +1908,13 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
 
     logAndProgress('🧮 Scrape complete')
 
-    logAndProgress(`Lazy downloading videos: ${lazyVideoQueue.length}`)
-    resetProgressBar(null, 'lazy')
-    lastDraw = 0
     totalLazyBytes = 0
     lazyBytesDownloaded = 0
-    lazyDownloadStartedAt = Date.now()
     lazyActiveDownloads = 0
     lazyCompletedDownloads = 0
     lazyCurrentLabel = ''
     setRunLazyExpectedBytes(0)
     setRunLazyTransferredBytes(0)
-    setProgressMode('lazy')
 
     // Pre-fetch expected file sizes (best-effort)
     await Promise.all(
@@ -1931,7 +1934,16 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       })
     )
 
+    if (lazyVideoQueue.length > 0) {
+      logAndProgress(`Lazy videos queued: ${lazyVideoQueue.length}`)
+      resetProgressBar(null, 'lazy')
+      lastDraw = 0
+      lazyDownloadStartedAt = Date.now()
+      setProgressMode('lazy')
+    }
+
     function drawLazyProgress() {
+      if (!shouldDrawLazyProgress()) return
       const percent = totalLazyBytes
         ? (lazyBytesDownloaded / totalLazyBytes) * 100
         : 0

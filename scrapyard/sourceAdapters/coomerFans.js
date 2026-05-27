@@ -216,7 +216,6 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     const pagePosts = await Promise.all(
       selectedPostLinks.map((post) =>
         postLimit(async () => {
-          deps.logger?.log?.(`Loading coomerfans post ${post.id}`)
           const { html: postHtml } = await deps.fetchHtml(post.url)
           const mediaEntries = parseCoomerFansMediaEntries(
             source,
@@ -234,6 +233,13 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       )
     )
     posts.push(...pagePosts)
+    const pageMediaCount = pagePosts.reduce(
+      (total, post) => total + (post.mediaEntries?.length || 0),
+      0
+    )
+    deps.logger?.log?.(
+      `CoomerFans page ${pageNumber}: ${pagePosts.length} posts, ${pageMediaCount} media (total ${posts.length} posts)`
+    )
 
     if (
       Number.isFinite(options.maxPosts) &&
