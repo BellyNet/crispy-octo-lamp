@@ -25,6 +25,52 @@ const runLifecycle = require('./runLifecycle')
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
 const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb']
+const activeChildProcesses = new Set()
+let hardInterruptHandlersInstalled = false
+let hardInterruptInProgress = false
+
+function killProcessTree(child) {
+  if (!child || !child.pid) return
+
+  if (process.platform === 'win32') {
+    try {
+      const { spawnSync } = require('child_process')
+      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore',
+      })
+      return
+    } catch {
+      // Fall through to child.kill below.
+    }
+  }
+
+  try {
+    child.kill('SIGTERM')
+  } catch {}
+  try {
+    child.kill('SIGKILL')
+  } catch {}
+}
+
+function hardStopScrape(signal = 'SIGINT') {
+  if (hardInterruptInProgress) return
+  hardInterruptInProgress = true
+
+  const code = signal === 'SIGTERM' ? 143 : 130
+  process.exitCode = code
+  console.error('\nInterrupted; stopping the entire scrape now.')
+  for (const child of activeChildProcesses) {
+    killProcessTree(child)
+  }
+  process.exit(code)
+}
+
+function installHardInterruptHandlers() {
+  if (hardInterruptHandlersInstalled) return
+  hardInterruptHandlersInstalled = true
+  process.on('SIGINT', () => hardStopScrape('SIGINT'))
+  process.on('SIGTERM', () => hardStopScrape('SIGTERM'))
+}
 
 function formatDuration(ms) {
   const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000))
@@ -220,10 +266,12 @@ function runNodeScriptInteractive(
       cwd: rootDir,
       stdio: 'inherit',
     })
+    activeChildProcesses.add(child)
     let settled = false
     let killTimer = null
 
     const cleanup = () => {
+      activeChildProcesses.delete(child)
       process.off('SIGINT', onSigint)
       process.off('SIGTERM', onSigterm)
       if (killTimer) clearTimeout(killTimer)
@@ -232,7 +280,7 @@ function runNodeScriptInteractive(
       if (settled) return
       child.kill(signal)
       killTimer = setTimeout(() => {
-        if (!settled && child.exitCode === null) child.kill('SIGKILL')
+        if (!settled && child.exitCode === null) killProcessTree(child)
       }, 5000)
       if (killTimer.unref) killTimer.unref()
       process.exitCode = fallbackCode
@@ -1531,6 +1579,8 @@ async function runAllSourceUpdates(argvInput = {}) {
 }
 
 async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
+  installHardInterruptHandlers()
+
   const rawArgs = Array.isArray(argvInput) ? argvInput : []
   const command = String(rawArgs[0] || '')
     .trim()
