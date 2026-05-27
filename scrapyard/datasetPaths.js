@@ -24,6 +24,8 @@ function createDatasetPaths(options = {}) {
     )
   )
   const repairCanUseNasMirror = Boolean(options.repairCanUseNasMirror)
+  const nasMirrorExistsCache = new Map()
+  let nasMirrorAvailable = null
 
   function getIncompleteDirs(modelName) {
     const base = path.join(rootDir, 'incomplete', modelName)
@@ -90,6 +92,24 @@ function createDatasetPaths(options = {}) {
     return fs.existsSync(filePath)
   }
 
+  function isNasMirrorAvailable() {
+    if (nasMirrorAvailable === null) {
+      nasMirrorAvailable = fs.existsSync(nasDatasetDir)
+    }
+    return nasMirrorAvailable
+  }
+
+  function existsAtNasMirror(filePath) {
+    const relativePath = getDatasetRelativePath(filePath)
+    if (nasMirrorExistsCache.has(relativePath)) {
+      return nasMirrorExistsCache.get(relativePath)
+    }
+
+    const exists = fs.existsSync(getNasMirrorPath(filePath))
+    nasMirrorExistsCache.set(relativePath, exists)
+    return exists
+  }
+
   function existsForRepair(filePath) {
     if (existsAtExactPath(filePath)) return !isQuarantinedPath(filePath)
     return (
@@ -100,6 +120,10 @@ function createDatasetPaths(options = {}) {
   function existsLocallyOrOnNas(filePath) {
     if (existsAtExactPath(filePath)) return true
     if (!isIndexedVideoPath(filePath)) return false
+
+    if (existsAtNasMirror(filePath)) return true
+    if (isNasMirrorAvailable()) return false
+
     return hasNasMp4RelativePath(getDatasetRelativePath(filePath), datasetDir)
   }
 

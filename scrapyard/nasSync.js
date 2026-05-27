@@ -27,7 +27,7 @@ async function syncModelToNas({
   modelName,
   datasetDir,
   nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
-  mode = 'mirror',
+  mode = 'additive',
   log = console,
   successMessage = 'NAS sync complete.',
   failurePrefix = 'NAS sync failed with code',
