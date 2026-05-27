@@ -5,6 +5,8 @@ const readline = require('readline')
 const {
   loadModelRegistry,
   findCanonicalModelName,
+  resolveAndTrackModel,
+  resolveAndTrackSourceModel,
   sanitize,
 } = require('./modelRegistry')
 const { parseSourceUrl } = require('./sourceRouter')
@@ -21,6 +23,38 @@ const registryPath = require('./scraperRunner').registryPath
 
 function ask(rl, prompt) {
   return new Promise((resolve) => rl.question(prompt, resolve))
+}
+
+function registerParsedSourceForModel(
+  parsed,
+  canonicalModel,
+  registryFile = registryPath
+) {
+  const rawName = parsed.rawName || canonicalModel
+  if (parsed.scraper === 'milkmaid') {
+    return resolveAndTrackModel(
+      registryFile,
+      rawName,
+      parsed.sourceType,
+      parsed.url,
+      canonicalModel,
+      { unknownName: sanitize(canonicalModel) || 'unknown_model' }
+    )
+  }
+
+  return resolveAndTrackSourceModel(
+    registryFile,
+    rawName,
+    {
+      site: parsed.site || parsed.sourceType,
+      service: parsed.service,
+      userId: parsed.userId,
+      username: parsed.username,
+      inputUrl: parsed.url,
+    },
+    canonicalModel,
+    { unknownName: sanitize(canonicalModel) || 'unknown_model' }
+  )
 }
 
 async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
@@ -264,21 +298,64 @@ async function runSingleUrlFlow(rl, sessionOptions) {
     console.log(`Suggested canonical model: ${suggestedModel}`)
 
   const overridePrompt = suggestedModel
-    ? `Canonical model override (Enter to use ${suggestedModel}, type another name for a different/existing model, or "-" for scraper auto-detect): `
-    : 'Canonical model override (blank for scraper auto-detect): '
-  const overrideAnswer = (await ask(rl, overridePrompt)).trim()
-
+    ? `Known model to save/run under (Enter for ${suggestedModel}, another existing model, or "-" for scraper auto-detect): `
+    : 'Known model to save/run under (blank for scraper auto-detect): '
   let canonicalOverride = ''
-  if (overrideAnswer === '' && suggestedModel) {
-    canonicalOverride = suggestedModel
-  } else if (overrideAnswer !== '-') {
-    canonicalOverride = overrideAnswer
+  let shouldSaveSource = false
+  let noModelInfer = false
+
+  while (true) {
+    const overrideAnswer = (await ask(rl, overridePrompt)).trim()
+    if (overrideAnswer === '-') {
+      noModelInfer = true
+      break
+    }
+
+    if (overrideAnswer === '' && suggestedModel) {
+      canonicalOverride = suggestedModel
+      shouldSaveSource = true
+      break
+    }
+
+    if (overrideAnswer === '') break
+
+    const existingModel = findCanonicalModelName(
+      registry,
+      sanitize(overrideAnswer)
+    )
+    if (existingModel) {
+      canonicalOverride = existingModel
+      shouldSaveSource = true
+      break
+    }
+
+    const createAnswer = (
+      await ask(
+        rl,
+        `No existing model found for "${overrideAnswer}". Create it and save this source there? [y/N]: `
+      )
+    )
+      .trim()
+      .toLowerCase()
+    if (createAnswer === 'y' || createAnswer === 'yes') {
+      canonicalOverride = sanitize(overrideAnswer)
+      shouldSaveSource = true
+      break
+    }
+
+    console.log('Choose an existing model, create this one, or enter "-".')
+  }
+
+  if (shouldSaveSource && canonicalOverride) {
+    const savedModel = registerParsedSourceForModel(parsed, canonicalOverride)
+    canonicalOverride = savedModel
+    console.log(`Saved source in model_aliases.json under ${savedModel}.`)
   }
 
   const runOptions = {}
   if (canonicalOverride) {
     runOptions.model = canonicalOverride
-  } else if (overrideAnswer === '-') {
+  } else if (noModelInfer) {
     runOptions['no-model-infer'] = true
   }
 
@@ -461,6 +538,7 @@ async function main() {
 
 module.exports = {
   main,
+  registerParsedSourceForModel,
 }
 
 if (require.main === module) {

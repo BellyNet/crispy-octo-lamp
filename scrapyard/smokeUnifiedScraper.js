@@ -1,6 +1,9 @@
 'use strict'
 
 const assert = require('assert')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
 
 const {
   applyScrapePositionalFallback,
@@ -23,6 +26,7 @@ const {
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
 } = require('./sourceAdapters/stufferdb')
+const { registerParsedSourceForModel } = require('./run-scrape-interactive')
 
 async function withConsoleSilenced(callback) {
   const originalLog = console.log
@@ -172,6 +176,35 @@ async function main() {
   assert.deepStrictEqual(
     allSourceQueue[0].sources.map((source) => source.label),
     ['reddit', 'kemono', 'coomerfans', 'stufferdb']
+  )
+
+  const tempRegistryDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'scrape-registry-')
+  )
+  const tempRegistryPath = path.join(tempRegistryDir, 'model_aliases.json')
+  fs.writeFileSync(
+    tempRegistryPath,
+    JSON.stringify({ known_model: { aliases: ['known_model'], sources: {} } }),
+    'utf8'
+  )
+  registerParsedSourceForModel(
+    parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+    'known_model',
+    tempRegistryPath
+  )
+  registerParsedSourceForModel(
+    parseSourceUrl('https://stufferai.com/index?/category/8586'),
+    'known_model',
+    tempRegistryPath
+  )
+  const tempRegistry = JSON.parse(fs.readFileSync(tempRegistryPath, 'utf8'))
+  assert.strictEqual(
+    tempRegistry.known_model.sources.coomer[0].url,
+    'https://coomerfans.com/u/onlyfans/123/name_here'
+  )
+  assert.strictEqual(
+    tempRegistry.known_model.sources.stufferdb[0].url,
+    'https://stufferdb.com/index?/category/8586'
   )
 
   const redditOptions = buildScraperOptions(reddit, {
