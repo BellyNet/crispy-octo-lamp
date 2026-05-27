@@ -166,7 +166,6 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
     if (options.endPage !== null && page > options.endPage) break
     const offset = page * pageSize
     const apiUrl = getPostsApiUrl(source, offset, pageSize)
-    deps.logger?.log?.(`Loading ${source.site} page ${page + 1} (${apiUrl})`)
 
     let pagePosts
     try {

@@ -198,7 +198,6 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     if (options.endPage !== null && page > options.endPage) break
     const pageNumber = page + 1
     const pageUrl = getCoomerFansPageUrl(source, pageNumber)
-    deps.logger?.log?.(`Loading coomerfans page ${pageNumber} (${pageUrl})`)
 
     const { html } = await deps.fetchHtml(pageUrl)
     const postLinks = parseCoomerFansPostLinks(source, html)
@@ -233,13 +232,6 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       )
     )
     posts.push(...pagePosts)
-    const pageMediaCount = pagePosts.reduce(
-      (total, post) => total + (post.mediaEntries?.length || 0),
-      0
-    )
-    deps.logger?.log?.(
-      `CoomerFans page ${pageNumber}: ${pagePosts.length} posts, ${pageMediaCount} media (total ${posts.length} posts)`
-    )
 
     if (
       Number.isFinite(options.maxPosts) &&
