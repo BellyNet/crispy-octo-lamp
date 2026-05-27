@@ -38,6 +38,8 @@ function printHelp() {
 Options:
   --cleanup-mp4=true       Remove local MP4s that are verified on NAS after push.
   --cleanup-gif-mp4=true   Remove GIF-derived local MP4s after push.
+
+All sync directions are additive. Nothing is mirror-deleted.
 `)
 }
 
@@ -68,7 +70,7 @@ let cmd = ''
 if (isPush) {
   cmd = `robocopy "${baseLocal}" "${baseNAS}" /E /XC /XN /XO`
 } else if (isPull) {
-  cmd = `robocopy "${baseNAS}" "${baseLocal}" /MIR`
+  cmd = `robocopy "${baseNAS}" "${baseLocal}" /E /XC /XN /XO`
 } else if (modelName) {
   cmd = `robocopy "${baseLocal}\\${modelName}" "${baseNAS}\\${modelName}" /E /XC /XN /XO`
 } else {
