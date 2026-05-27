@@ -88,8 +88,9 @@ function redrawPinnedLines() {
 }
 
 function setPinnedLines(topText = '', bottomText = '') {
-  pinnedTopLineText = topText || ''
-  pinnedBottomLineText = bottomText || ''
+  const maxLineWidth = Math.max((process.stdout.columns || 120) - 1, 20)
+  pinnedTopLineText = truncateDisplayText(topText || '', maxLineWidth)
+  pinnedBottomLineText = truncateDisplayText(bottomText || '', maxLineWidth)
 
   if (!hasPinnedTerminalSupport()) {
     if (pinnedTopLineText) process.stdout.write(`${pinnedTopLineText}\n`)
@@ -218,7 +219,12 @@ function getProgressRatio(current, total) {
   }
 }
 
-function buildProgressBar(leftText, current, total, fillChar = persistentFillChar) {
+function buildProgressBar(
+  leftText,
+  current,
+  total,
+  fillChar = persistentFillChar
+) {
   const terminalWidth = process.stdout.columns || 80
   const visibleLeft = getDisplayWidth(leftText)
   const innerWidth = Math.max(terminalWidth - visibleLeft - 5, 10)
@@ -311,7 +317,12 @@ function logProgress(current, total, options = {}) {
   drawPinnedLines(`${leftText}${chalk.cyan(bar)}`, chalk.gray(bottomText))
 }
 
-function logLazyProgress(percent, downloadedBytes, totalBytes = 0, options = {}) {
+function logLazyProgress(
+  percent,
+  downloadedBytes,
+  totalBytes = 0,
+  options = {}
+) {
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
   const plainBucket = Math.min(100, Math.floor(safePercent / 10) * 10)
 

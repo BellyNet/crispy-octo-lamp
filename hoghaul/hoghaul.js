@@ -99,6 +99,8 @@ const REDDIT_PAGE_SIZE = 100
 const API_ACCEPT_HEADER = 'text/css'
 const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
+const DOWNLOAD_PROGRESS_SNAPSHOT_INTERVAL_MS = 1000
+const DOWNLOAD_PROGRESS_RENDER_INTERVAL_MS = 5000
 const httpClient = createHttpClient({ timeoutMs: REQUEST_TIMEOUT_MS })
 const requestBuffer = httpClient.requestBuffer
 const redgifsClient = createRedgifsClient({ requestBuffer })
@@ -356,9 +358,19 @@ function noteDownloadProgress(entry, progress = {}) {
   currentRunLog.transfer.activeDownloadBytesPerSecond = activeSpeed
 
   const now = Date.now()
-  if (now - Number(currentRunLog.lastDownloadProgressAt || 0) >= 1000) {
-    currentRunLog.lastDownloadProgressAt = now
+  if (
+    now - Number(currentRunLog.lastDownloadProgressSnapshotAt || 0) >=
+    DOWNLOAD_PROGRESS_SNAPSHOT_INTERVAL_MS
+  ) {
+    currentRunLog.lastDownloadProgressSnapshotAt = now
     runLifecycle.writeRunSnapshot(currentRunLog)
+  }
+
+  if (
+    now - Number(currentRunLog.lastDownloadProgressRenderAt || 0) >=
+    DOWNLOAD_PROGRESS_RENDER_INTERVAL_MS
+  ) {
+    currentRunLog.lastDownloadProgressRenderAt = now
     logRunProgress()
   }
 }
