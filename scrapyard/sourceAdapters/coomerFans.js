@@ -193,6 +193,8 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
   let page = options.startPage || 0
   const postLimit = pLimit(options.postConcurrency || 1)
   const seenPostIds = new Set()
+  let fetchedPages = 0
+  let fetchedMedia = 0
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -232,6 +234,14 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       )
     )
     posts.push(...pagePosts)
+    fetchedPages += 1
+    fetchedMedia += pagePosts.reduce(
+      (total, post) => total + (post.mediaEntries?.length || 0),
+      0
+    )
+    deps.logger?.status?.(
+      `Fetching coomerfans pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media`
+    )
 
     if (
       Number.isFinite(options.maxPosts) &&
@@ -244,6 +254,11 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     page += 1
   }
 
+  deps.logger?.statusDone?.(
+    fetchedPages > 0
+      ? `Fetched coomerfans pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media`
+      : ''
+  )
   return posts
 }
 

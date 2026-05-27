@@ -161,6 +161,7 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
   const pageSize = deps.pageSize || DEFAULT_PAGE_SIZE
   const posts = []
   let page = options.startPage || 0
+  let fetchedPages = 0
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -190,6 +191,10 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
         mediaEntries: getMediaEntriesFromPost(source, post, deps),
       }))
     )
+    fetchedPages += 1
+    deps.logger?.status?.(
+      `Fetching ${source.site} pages: ${fetchedPages} page(s), ${posts.length} post(s)`
+    )
     if (
       Number.isFinite(options.maxPosts) &&
       options.maxPosts > 0 &&
@@ -201,6 +206,11 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
     page += 1
   }
 
+  deps.logger?.statusDone?.(
+    fetchedPages > 0
+      ? `Fetched ${source.site} pages: ${fetchedPages} page(s), ${posts.length} post(s)`
+      : ''
+  )
   return posts
 }
 

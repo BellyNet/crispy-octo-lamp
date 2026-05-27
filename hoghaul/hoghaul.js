@@ -11,6 +11,7 @@ const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
 const { syncModelToNas } = require('../scrapyard/nasSync')
 const runLifecycle = require('../scrapyard/runLifecycle')
+const { createStatusLineLogger } = require('../scrapyard/statusLineLogger')
 const {
   parseHoghaulSourceUrl: parseSourceUrl,
 } = require('../scrapyard/sourceRouter')
@@ -747,10 +748,11 @@ async function resolveKemonoCreatorIdForJson(source) {
 }
 
 async function fetchPosts(source, options) {
+  const pageLogger = createStatusLineLogger(console)
   if (source.site === 'coomerfans') {
     return fetchCoomerFansAdapterPosts(source, options, {
       fetchHtml,
-      logger: console,
+      logger: pageLogger,
     })
   }
   if (source.site === 'reddit') {
@@ -765,7 +767,7 @@ async function fetchPosts(source, options) {
 
   return fetchCoomerKemonoPosts(source, options, {
     fetchJson,
-    logger: console,
+    logger: pageLogger,
     normalizeUrl: normalizeSeenUrl,
     pageSize: API_PAGE_SIZE,
   })

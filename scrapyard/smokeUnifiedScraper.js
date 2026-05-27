@@ -26,6 +26,8 @@ const {
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
 } = require('./sourceAdapters/stufferdb')
+const { fetchCoomerFansPosts } = require('./sourceAdapters/coomerFans')
+const { fetchCoomerKemonoPosts } = require('./sourceAdapters/coomerKemono')
 const { registerParsedSourceForModel } = require('./run-scrape-interactive')
 
 async function withConsoleSilenced(callback) {
@@ -205,6 +207,73 @@ async function main() {
   assert.strictEqual(
     tempRegistry.known_model.sources.stufferdb[0].url,
     'https://stufferdb.com/index?/category/8586'
+  )
+
+  const coomerFansStatuses = []
+  await fetchCoomerFansPosts(
+    {
+      origin: 'https://coomerfans.com',
+      site: 'coomerfans',
+      service: 'onlyfans',
+      userId: '123',
+      rawName: 'name_here',
+    },
+    {},
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/p/1/123/onlyfans')) {
+          return {
+            html: 'Added 2026-05-01 00:00:00 +0000 UTC https://img1.coomerfans.com/storage/a/b/one.mp4',
+          }
+        }
+        if (url.includes('/p/2/123/onlyfans')) {
+          return {
+            html: 'Added 2026-05-02 00:00:00 +0000 UTC https://img1.coomerfans.com/storage/a/b/two.jpg',
+          }
+        }
+        if (url.includes('page=2')) return { html: '' }
+        return {
+          html: '<a href="/p/1/123/onlyfans">one</a><a href="/p/2/123/onlyfans">two</a>',
+        }
+      },
+      logger: {
+        status: (line) => coomerFansStatuses.push(line),
+        statusDone: (line) => coomerFansStatuses.push(line),
+      },
+    }
+  )
+  assert(
+    coomerFansStatuses.some((line) =>
+      String(line).includes(
+        'Fetching coomerfans pages: 1 page(s), 2 post(s), 2 media'
+      )
+    )
+  )
+
+  const coomerStatuses = []
+  await fetchCoomerKemonoPosts(
+    {
+      origin: 'https://coomer.su',
+      site: 'coomer',
+      service: 'onlyfans',
+      userId: '123',
+    },
+    {},
+    {
+      fetchJson: async (url) => ({
+        data: url.includes('o=0') ? [{ id: '1', file: null }] : [],
+      }),
+      logger: {
+        status: (line) => coomerStatuses.push(line),
+        statusDone: (line) => coomerStatuses.push(line),
+      },
+      pageSize: 1,
+    }
+  )
+  assert(
+    coomerStatuses.some((line) =>
+      String(line).includes('Fetching coomer pages: 1 page(s), 1 post(s)')
+    )
   )
 
   const redditOptions = buildScraperOptions(reddit, {
