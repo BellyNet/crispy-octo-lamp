@@ -586,7 +586,7 @@ function printRecoveredRunSummary(summary, { log = console.log } = {}) {
 
   log('')
   log(
-    'Hoghaul ended before a normal run_finished event; recovered latest counters:'
+    `Hoghaul ended before a normal run_finished event (${summary.status || 'unknown'}); recovered latest counters:`
   )
   log(runLifecycle.formatRunSummaryLine(stats))
   if (summary.logPath) log(`Run log: ${summary.logPath}`)
@@ -602,7 +602,11 @@ async function runHoghaulScript(
   const modelName = getRunnerModelName(parsedSource, argv)
   const code = await runNodeScriptInteractive(scriptPath, args, { log })
   const summary = modelName ? readModelRunSummary(modelName, 'hoghaul') : null
-  if (summary?.status === 'running') {
+  if (
+    summary?.status &&
+    summary.status !== 'completed' &&
+    summary.status !== 'finished'
+  ) {
     printRecoveredRunSummary(summary, { log })
     return code === 0 ? 1 : code
   }
