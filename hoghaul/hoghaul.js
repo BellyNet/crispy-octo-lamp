@@ -102,6 +102,9 @@ const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
 const DOWNLOAD_PROGRESS_SNAPSHOT_INTERVAL_MS = 1000
 const DOWNLOAD_PROGRESS_RENDER_INTERVAL_MS = 5000
+const MAX_VIDEO_DOWNLOAD_BYTES =
+  Number.parseInt(process.env.HOGHAUL_MAX_VIDEO_DOWNLOAD_BYTES || '', 10) ||
+  2 * 1024 * 1024 * 1024
 const httpClient = createHttpClient({ timeoutMs: REQUEST_TIMEOUT_MS })
 const requestBuffer = httpClient.requestBuffer
 const redgifsClient = createRedgifsClient({ requestBuffer })
@@ -817,6 +820,46 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
   return buffer
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(2)} MB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${value} B`
+}
+
+async function getRemoteContentLength(mediaUrl) {
+  try {
+    const response = await requestBuffer(mediaUrl, {
+      method: 'HEAD',
+      headers: {
+        Accept: '*/*',
+      },
+    })
+    const contentLength = Number.parseInt(
+      response.headers?.['content-length'] || '',
+      10
+    )
+    return Number.isFinite(contentLength) && contentLength > 0
+      ? contentLength
+      : null
+  } catch {
+    return null
+  }
+}
+
+async function shouldSkipOversizedVideo(entry) {
+  if (!MAX_VIDEO_DOWNLOAD_BYTES || MAX_VIDEO_DOWNLOAD_BYTES <= 0) return null
+  const contentLength = await getRemoteContentLength(entry.mediaUrl)
+  if (!contentLength || contentLength <= MAX_VIDEO_DOWNLOAD_BYTES) return null
+  return {
+    contentLength,
+    maxBytes: MAX_VIDEO_DOWNLOAD_BYTES,
+    message: `Remote video is ${formatBytes(contentLength)}, above limit ${formatBytes(MAX_VIDEO_DOWNLOAD_BYTES)}`,
+  }
+}
+
 function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
   hoghaulSavePipeline.recordDuplicate({
     folders,
@@ -914,6 +957,25 @@ async function saveVideoMedia(modelName, folders, entry) {
   })
 
   try {
+    const oversizedVideo = await shouldSkipOversizedVideo(entry)
+    if (oversizedVideo) {
+      appendRunEvent('skip_oversized_video', {
+        modelName,
+        filename: entry.filename,
+        mediaUrl: entry.mediaUrl,
+        mediaPageUrl: entry.mediaPageUrl,
+        ...getEntrySourceDetails(entry),
+        contentLength: oversizedVideo.contentLength,
+        maxBytes: oversizedVideo.maxBytes,
+        reason: oversizedVideo.message,
+      })
+      logScrollingMessage(
+        `Skipping oversized video: ${entry.filename} (${formatBytes(oversizedVideo.contentLength)})`
+      )
+      noteMediaOutcome('skipped')
+      return
+    }
+
     removeFileIfExists(tmpPath)
     const buffer = await downloadMediaBuffer(entry.mediaUrl, entry)
     fs.writeFileSync(tmpPath, buffer)
