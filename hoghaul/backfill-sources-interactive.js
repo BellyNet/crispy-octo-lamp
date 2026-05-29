@@ -98,11 +98,15 @@ const PLATFORMS = {
       `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/`,
     listingUrl: (username) =>
       `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/.json?limit=1&raw_json=1`,
+    rssUrl: (username) =>
+      `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/.rss`,
   },
 }
 
 const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
 const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb']
+const REDDIT_PROBE_USER_AGENT =
+  'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(host, url, headers = {}) {
@@ -277,26 +281,41 @@ async function lookupReddit(username) {
   const cleanedUsername = String(username || '').replace(/^u_/, '')
   if (!cleanedUsername) return null
 
-  const { status, body } = await httpsGet(
-    cfg.host,
-    cfg.listingUrl(cleanedUsername),
-    {
-      Accept: 'application/json',
-    }
-  )
-  if (status === 404) return null
-  if (status !== 200) throw new Error(`HTTP ${status}`)
-
-  try {
-    const data = JSON.parse(body)
-    if (data?.kind === 'Listing' && data?.data) {
-      return {
-        username: cleanedUsername,
-        url: cfg.userUrl(cleanedUsername),
+  const listing = await httpsGet(cfg.host, cfg.listingUrl(cleanedUsername), {
+    Accept: 'application/json',
+    'User-Agent': REDDIT_PROBE_USER_AGENT,
+  })
+  if (listing.status === 200) {
+    try {
+      const data = JSON.parse(listing.body)
+      if (data?.kind === 'Listing' && data?.data) {
+        return {
+          username: cleanedUsername,
+          url: cfg.userUrl(cleanedUsername),
+        }
       }
+    } catch {
+      return null
     }
-  } catch {
-    return null
+  }
+  if (listing.status === 404) return null
+
+  const rss = await httpsGet(cfg.host, cfg.rssUrl(cleanedUsername), {
+    Accept: 'application/atom+xml,text/xml,application/xml',
+    'User-Agent': REDDIT_PROBE_USER_AGENT,
+  })
+  if (rss.status === 404) return null
+  if (rss.status !== 200) throw new Error(`HTTP ${listing.status}`)
+
+  const categoryMatch = rss.body.match(
+    /<category\b[^>]*(?:term|label)=["']u[\/_]([^"']+)["']/i
+  )
+  const feedUsername = categoryMatch?.[1] || cleanedUsername
+  if (feedUsername) {
+    return {
+      username: feedUsername,
+      url: cfg.userUrl(feedUsername),
+    }
   }
 
   return null
@@ -376,9 +395,6 @@ function isModelUsernameMatch(canonicalName, entry, hit) {
   for (const seed of getModelUsernameSeeds(canonicalName, entry)) {
     const normalizedSeed = seed.toLowerCase()
     if (username === normalizedSeed) return true
-    if (normalizedSeed.length >= 4 && username.startsWith(normalizedSeed)) {
-      return true
-    }
   }
 
   return false
