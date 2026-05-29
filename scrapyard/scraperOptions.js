@@ -37,6 +37,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'browser-media',
   'browser-headless',
   'headless',
+  'download-oversized',
 ]
 
 const RUNNER_STRING_OPTIONS = [

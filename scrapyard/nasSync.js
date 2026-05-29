@@ -35,7 +35,8 @@ function pushRegistryToNas({
   log = console,
 } = {}) {
   try {
-    if (!fs.existsSync(LOCAL_REGISTRY_PATH)) return { ok: false, reason: 'no-source' }
+    if (!fs.existsSync(LOCAL_REGISTRY_PATH))
+      return { ok: false, reason: 'no-source' }
     const dest = path.join(path.dirname(nasDatasetDir), 'model_aliases.json')
     fs.copyFileSync(LOCAL_REGISTRY_PATH, dest)
     return { ok: true, dest }

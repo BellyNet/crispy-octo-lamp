@@ -5,6 +5,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
+const { collectOversizedVideoTargets } = require('./run-scrape-interactive')
 const {
   applyScrapePositionalFallback,
   buildAllSourceQueue,
@@ -281,6 +282,7 @@ async function main() {
     'dry-run': true,
     'skip-nas-sync': true,
     'browser-media': false,
+    'download-oversized': true,
     pages: '1',
     'max-posts': '2',
   })
@@ -288,6 +290,7 @@ async function main() {
   assert.strictEqual(redditOptions.dryRun, true)
   assert.strictEqual(redditOptions.skipNasSync, true)
   assert.strictEqual(redditOptions.useBrowserMedia, false)
+  assert.strictEqual(redditOptions.downloadOversized, true)
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
 
@@ -298,6 +301,7 @@ async function main() {
     'max-posts': 'true',
     'dry-run': true,
     'skip-nas-sync': true,
+    'download-oversized': true,
   })
   assert.strictEqual(fallbackArgs.model, 'abigailgray256')
   assert.strictEqual(fallbackArgs.pages, '1')
@@ -325,7 +329,40 @@ async function main() {
     '--max-posts',
     '5',
     '--dry-run',
+    '--download-oversized',
   ])
+
+  const tempDataset = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'hoghaul-oversized-smoke-')
+  )
+  const tempLogDir = path.join(tempDataset, 'sample_model', 'log')
+  fs.mkdirSync(tempLogDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(tempLogDir, 'hoghaul-run-2026-01-01T00-00-00-000Z.jsonl'),
+    [
+      JSON.stringify({
+        at: '2026-01-01T00:00:00.000Z',
+        type: 'run_started',
+        modelName: 'sample_model',
+        inputUrl: 'https://coomerfans.com/u/onlyfans/123/sample_model',
+      }),
+      JSON.stringify({
+        at: '2026-01-01T00:01:00.000Z',
+        type: 'skip_oversized_video',
+        modelName: 'sample_model',
+        filename: 'huge.mp4',
+        contentLength: 2317869251,
+      }),
+    ].join('\n') + '\n'
+  )
+  const oversizedTargets = collectOversizedVideoTargets({
+    datasetDir: tempDataset,
+    models: 'sample_model',
+  })
+  assert.strictEqual(oversizedTargets.length, 1)
+  assert.strictEqual(oversizedTargets[0].modelName, 'sample_model')
+  assert.strictEqual(oversizedTargets[0].count, 1)
+  assert.strictEqual(oversizedTargets[0].largestBytes, 2317869251)
 
   assert.deepStrictEqual(
     buildRepairArgs({

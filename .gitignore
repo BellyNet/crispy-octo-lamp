@@ -42,6 +42,7 @@ Tagger/final
 *.ps1
 
 hoghaul/coomer_sources.json
+hoghaul/source-backfill-permanent-skips.json
 
 # Claude Code internals
 .claude/

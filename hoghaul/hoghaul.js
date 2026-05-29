@@ -102,12 +102,19 @@ const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
 const DOWNLOAD_PROGRESS_SNAPSHOT_INTERVAL_MS = 1000
 const DOWNLOAD_PROGRESS_RENDER_INTERVAL_MS = 5000
-const MAX_VIDEO_DOWNLOAD_BYTES =
-  Number.parseInt(process.env.HOGHAUL_MAX_VIDEO_DOWNLOAD_BYTES || '', 10) ||
-  2 * 1024 * 1024 * 1024
 const httpClient = createHttpClient({ timeoutMs: REQUEST_TIMEOUT_MS })
 const requestBuffer = httpClient.requestBuffer
+const requestToFile = httpClient.requestToFile
 const redgifsClient = createRedgifsClient({ requestBuffer })
+const DEFAULT_MAX_VIDEO_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
+const MAX_VIDEO_DOWNLOAD_BYTES = (() => {
+  const raw = process.env.HOGHAUL_MAX_VIDEO_DOWNLOAD_BYTES
+  if (raw === undefined || raw === '') return DEFAULT_MAX_VIDEO_DOWNLOAD_BYTES
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : DEFAULT_MAX_VIDEO_DOWNLOAD_BYTES
+})()
 
 let currentRunLog = null
 const sharedMediaSeenIndex = createMediaSeenIndex({
@@ -179,6 +186,7 @@ let browserMediaDownloader = null
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 let runTerminationHandled = false
 let processTerminationHandlersInstalled = false
+let activeMaxVideoDownloadBytes = MAX_VIDEO_DOWNLOAD_BYTES
 
 function resetRunState() {
   currentRunLog = null
@@ -189,6 +197,7 @@ function resetRunState() {
   savedBytes = 0
   browserMediaDownloader = null
   runTerminationHandled = false
+  activeMaxVideoDownloadBytes = MAX_VIDEO_DOWNLOAD_BYTES
 }
 
 function registerSourceForRun(source, inputUrl, canonicalOverride) {
@@ -849,14 +858,65 @@ async function getRemoteContentLength(mediaUrl) {
   }
 }
 
-async function shouldSkipOversizedVideo(entry) {
-  if (!MAX_VIDEO_DOWNLOAD_BYTES || MAX_VIDEO_DOWNLOAD_BYTES <= 0) return null
+async function downloadMediaToFile(mediaUrl, entry, destinationPath) {
+  const startedAt = Date.now()
+  const onProgress = createDownloadProgressTracker(entry)
+  appendRunEvent('download_started', {
+    filename: entry.filename,
+    mediaUrl,
+    mediaPageUrl: entry.mediaPageUrl,
+    ...getEntrySourceDetails(entry),
+  })
+
+  let byteLength = 0
+  if (browserMediaDownloader?.downloadToFile) {
+    byteLength = await browserMediaDownloader.downloadToFile(
+      mediaUrl,
+      destinationPath,
+      entry,
+      {
+        maxBytes: activeMaxVideoDownloadBytes,
+        onProgress,
+      }
+    )
+  } else {
+    const response = await requestToFile(mediaUrl, destinationPath, {
+      headers: {
+        Accept: '*/*',
+      },
+      maxBytes: activeMaxVideoDownloadBytes,
+      onProgress,
+    })
+    byteLength = response.byteLength
+  }
+
+  const durationMs = Math.max(Date.now() - startedAt, 0)
+  const averageBytesPerSecond =
+    durationMs > 0 ? byteLength / (durationMs / 1000) : 0
+  appendRunEvent('download_finished', {
+    filename: entry.filename,
+    mediaUrl,
+    mediaPageUrl: entry.mediaPageUrl,
+    ...getEntrySourceDetails(entry),
+    byteLength,
+    durationMs,
+    averageBytesPerSecond,
+  })
+  return byteLength
+}
+
+async function getOversizedVideoSkip(entry) {
+  if (!activeMaxVideoDownloadBytes || activeMaxVideoDownloadBytes <= 0) {
+    return null
+  }
   const contentLength = await getRemoteContentLength(entry.mediaUrl)
-  if (!contentLength || contentLength <= MAX_VIDEO_DOWNLOAD_BYTES) return null
+  if (!contentLength || contentLength <= activeMaxVideoDownloadBytes) {
+    return null
+  }
   return {
     contentLength,
-    maxBytes: MAX_VIDEO_DOWNLOAD_BYTES,
-    message: `Remote video is ${formatBytes(contentLength)}, above limit ${formatBytes(MAX_VIDEO_DOWNLOAD_BYTES)}`,
+    maxBytes: activeMaxVideoDownloadBytes,
+    message: `Remote video is ${formatBytes(contentLength)}, above limit ${formatBytes(activeMaxVideoDownloadBytes)}`,
   }
 }
 
@@ -873,6 +933,32 @@ function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
     savedPath,
     recordSeen: true,
   })
+}
+
+function recordOversizedVideoSkip(
+  modelName,
+  folders,
+  entry,
+  destination,
+  info
+) {
+  if (currentRunLog) currentRunLog.keepHistory = true
+  appendRunEvent(
+    'skip_oversized_video',
+    hoghaulMediaSaver.buildErrorEvent({
+      modelName,
+      entry,
+      destination,
+      error: info.message,
+      extra: {
+        contentLength: info.contentLength || null,
+        downloadedBytes: info.downloadedBytes || null,
+        maxBytes: info.maxBytes || activeMaxVideoDownloadBytes || null,
+      },
+    })
+  )
+  noteMediaOutcome('skipped', `skip_oversized_video: ${entry.filename}`)
+  logScrollingMessage(`Skipped oversized video: ${entry.filename}`)
 }
 
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
@@ -949,6 +1035,18 @@ async function saveVideoMedia(modelName, folders, entry) {
     return
   }
 
+  const oversizedSkip = await getOversizedVideoSkip(entry)
+  if (oversizedSkip) {
+    recordOversizedVideoSkip(
+      modelName,
+      folders,
+      entry,
+      destination,
+      oversizedSkip
+    )
+    return
+  }
+
   hoghaulSavePipeline.queueVideo({
     modelName,
     folders,
@@ -957,32 +1055,16 @@ async function saveVideoMedia(modelName, folders, entry) {
   })
 
   try {
-    const oversizedVideo = await shouldSkipOversizedVideo(entry)
-    if (oversizedVideo) {
-      appendRunEvent('skip_oversized_video', {
-        modelName,
-        filename: entry.filename,
-        mediaUrl: entry.mediaUrl,
-        mediaPageUrl: entry.mediaPageUrl,
-        ...getEntrySourceDetails(entry),
-        contentLength: oversizedVideo.contentLength,
-        maxBytes: oversizedVideo.maxBytes,
-        reason: oversizedVideo.message,
-      })
-      logScrollingMessage(
-        `Skipping oversized video: ${entry.filename} (${formatBytes(oversizedVideo.contentLength)})`
-      )
-      noteMediaOutcome('skipped')
-      return
-    }
-
     removeFileIfExists(tmpPath)
-    const buffer = await downloadMediaBuffer(entry.mediaUrl, entry)
-    fs.writeFileSync(tmpPath, buffer)
+    const downloadedBytes = await downloadMediaToFile(
+      entry.mediaUrl,
+      entry,
+      tmpPath
+    )
     const hash = await hashFileFromPath(tmpPath)
     const bitwiseMatch = getBitwiseDuplicationRecord(hash)
     if (bitwiseMatch.isDuplicate) {
-      noteDuplicateDownloadBytes(buffer.length)
+      noteDuplicateDownloadBytes(downloadedBytes)
       recordDuplicate(
         entry,
         bitwiseMatch.activeRefs[0],
@@ -1018,6 +1100,14 @@ async function saveVideoMedia(modelName, folders, entry) {
     }
   } catch (err) {
     removeFileIfExists(tmpPath)
+    if (err?.code === 'ERR_DOWNLOAD_TOO_LARGE') {
+      recordOversizedVideoSkip(modelName, folders, entry, destination, {
+        message: err.message,
+        downloadedBytes: err.downloadedBytes,
+        maxBytes: err.maxBytes,
+      })
+      return
+    }
     errorCount += 1
     recordRunError(
       'lazy_video_error',
@@ -1068,11 +1158,13 @@ async function run(argvInput = process.argv.slice(2)) {
     trackSource,
     keepHistory,
     browserOptions,
+    downloadOversized,
   } = runOptions
+  activeMaxVideoDownloadBytes = downloadOversized ? 0 : MAX_VIDEO_DOWNLOAD_BYTES
   let useBrowserMedia = runOptions.useBrowserMedia
   if (!inputUrl) {
     console.error(
-      'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
+      'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--download-oversized] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
     )
     return 1
   }
@@ -1190,6 +1282,13 @@ async function run(argvInput = process.argv.slice(2)) {
     `Download concurrency: ${imageConcurrency} image/gif, ${videoConcurrency} video`
   )
   console.log(`Post fetch concurrency: ${postConcurrency}`)
+  if (downloadOversized) {
+    console.log('Oversized video guard disabled for this retry run.')
+  } else if (activeMaxVideoDownloadBytes > 0) {
+    console.log(
+      `Oversized video guard: skip videos above ${formatBytes(activeMaxVideoDownloadBytes)}`
+    )
+  }
 
   startRunLog(modelName, inputUrl, folders, keepHistory)
   appendRunEvent('source_posts_loaded', {
@@ -1214,6 +1313,7 @@ async function run(argvInput = process.argv.slice(2)) {
       ...browserOptions,
       slopvaultRoot,
       requestBuffer,
+      requestToFile,
       appendRunEvent,
     })
     appendRunEvent('browser_media_enabled', {

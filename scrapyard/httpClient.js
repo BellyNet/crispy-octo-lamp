@@ -2,6 +2,8 @@
 
 const http = require('http')
 const https = require('https')
+const fs = require('fs')
+const path = require('path')
 const zlib = require('zlib')
 
 const DEFAULT_USER_AGENT =
@@ -138,6 +140,144 @@ function createHttpClient(options = {}) {
     })
   }
 
+  function requestToFile(url, destinationPath, requestOptions = {}) {
+    const {
+      method = 'GET',
+      headers = {},
+      timeoutMs = defaultTimeoutMs,
+      maxRedirects = 5,
+      maxBytes = 0,
+      onProgress = null,
+    } = requestOptions
+
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(url)
+      const client = parsed.protocol === 'https:' ? https : http
+      let settled = false
+      let output = null
+
+      function fail(err) {
+        if (settled) return
+        settled = true
+        if (output) output.destroy()
+        reject(err)
+      }
+
+      const req = client.request(
+        parsed,
+        {
+          method,
+          headers: {
+            'User-Agent': userAgent,
+            'Accept-Language': acceptLanguage,
+            'Accept-Encoding': 'identity',
+            ...headers,
+          },
+        },
+        (res) => {
+          const statusCode = res.statusCode || 0
+          const redirect = res.headers.location
+          if (
+            [301, 302, 303, 307, 308].includes(statusCode) &&
+            redirect &&
+            maxRedirects > 0
+          ) {
+            res.resume()
+            const nextUrl = new URL(redirect, url).toString()
+            requestToFile(nextUrl, destinationPath, {
+              method: statusCode === 303 ? 'GET' : method,
+              headers,
+              timeoutMs,
+              maxRedirects: maxRedirects - 1,
+              maxBytes,
+              onProgress,
+            }).then(resolve, reject)
+            return
+          }
+
+          if (statusCode < 200 || statusCode >= 300) {
+            const chunks = []
+            res.on('data', (chunk) => chunks.push(chunk))
+            res.on('end', () => {
+              const raw = Buffer.concat(chunks)
+              let body
+              try {
+                body = decodeBody(raw, res.headers).toString('utf8')
+              } catch {
+                body = raw.toString('utf8')
+              }
+              body = body.replace(/\s+/g, ' ').trim().slice(0, 500)
+              fail(new Error(`HTTP ${statusCode}: ${body}`))
+            })
+            res.on('error', fail)
+            return
+          }
+
+          if (method === 'HEAD') {
+            res.resume()
+            settled = true
+            resolve({
+              headers: res.headers,
+              statusCode,
+              url,
+              byteLength: 0,
+            })
+            return
+          }
+
+          fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
+          output = fs.createWriteStream(destinationPath)
+          let downloadedBytes = 0
+          const totalBytes = Number.parseInt(
+            res.headers['content-length'] || '0',
+            10
+          )
+          const startedAt = Date.now()
+
+          res.on('data', (chunk) => {
+            downloadedBytes += chunk.length
+            if (onProgress) {
+              onProgress({
+                downloadedBytes,
+                totalBytes,
+                chunkBytes: chunk.length,
+                elapsedMs: Date.now() - startedAt,
+              })
+            }
+            if (maxBytes > 0 && downloadedBytes > maxBytes) {
+              const err = new Error(
+                `Download exceeded limit ${maxBytes} bytes after ${downloadedBytes} bytes`
+              )
+              err.code = 'ERR_DOWNLOAD_TOO_LARGE'
+              err.downloadedBytes = downloadedBytes
+              err.maxBytes = maxBytes
+              res.destroy(err)
+            }
+          })
+          res.on('error', fail)
+          output.on('error', fail)
+          output.on('finish', () => {
+            if (settled) return
+            settled = true
+            resolve({
+              headers: res.headers,
+              statusCode,
+              url,
+              byteLength: downloadedBytes,
+            })
+          })
+          res.pipe(output)
+        }
+      )
+
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error(`Request timed out after ${timeoutMs}ms`))
+      })
+      req.on('error', fail)
+      req.end()
+    })
+  }
+
   async function fetchJson(url, requestOptions = {}) {
     const response = await requestBuffer(url, {
       ...requestOptions,
@@ -176,6 +316,7 @@ function createHttpClient(options = {}) {
 
   return {
     requestBuffer,
+    requestToFile,
     fetchJson,
     fetchHtml,
   }
