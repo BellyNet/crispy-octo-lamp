@@ -674,53 +674,113 @@
         padding: 0 12px;
         user-select: none;
       }
-      /* Date-position slider — sits next to the counter in the top bar.
-         Shows the current item's date and where it falls between the model's
-         earliest and newest media. Hidden entirely when the model has no
-         usable date range (single item, or all items share one date). */
+      /* Date-position timeline — pinned to the bottom of the lightbox,
+         spanning the full viewport. Clicking or dragging the track jumps to
+         the filtered item whose date is nearest to that point on the line.
+         Hidden entirely when the lightbox has no usable date range. */
       .pswp__pswp-date-slider {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 1020;
         display: flex;
         flex-direction: column;
-        justify-content: center;
-        align-items: stretch;
-        padding: 4px 10px 6px;
-        min-width: 160px;
+        gap: 6px;
+        padding: 14px 22px 18px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: linear-gradient(
+          to top,
+          rgba(10, 10, 15, 0.82) 0%,
+          rgba(10, 10, 15, 0.55) 60%,
+          transparent 100%
+        );
         user-select: none;
+        pointer-events: none; /* only the track itself takes pointer events */
       }
       .pswp-date-slider-label {
-        font-size: 11px;
-        color: var(--muted);
         text-align: center;
-        margin-bottom: 4px;
-        white-space: nowrap;
-        line-height: 1.2;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        letter-spacing: 0.02em;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+        line-height: 1;
+        pointer-events: none;
       }
       .pswp-date-slider-track {
         position: relative;
-        height: 2px;
+        height: 4px;
         background: rgba(255, 255, 255, 0.18);
-        border-radius: 1px;
+        border-radius: 2px;
+        cursor: pointer;
+        margin: 0 4px;
+        pointer-events: auto;
+        touch-action: none;
+      }
+      .pswp-date-slider-track::before {
+        /* Generous invisible hit target above and below the visible track
+           so it's easy to grab without missing on touch screens. */
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: -14px;
+        bottom: -14px;
+      }
+      .pswp-date-slider-fill {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 0;
+        background: var(--accent);
+        border-radius: 2px;
+        transition: width 0.18s ease;
       }
       .pswp-date-slider-thumb {
         position: absolute;
         top: 50%;
         left: 0;
-        width: 10px;
-        height: 10px;
+        width: 14px;
+        height: 14px;
         border-radius: 50%;
         background: var(--accent);
         transform: translate(-50%, -50%);
-        transition: left 0.2s ease;
-        box-shadow: 0 0 0 2px rgba(124, 108, 252, 0.28);
+        box-shadow:
+          0 0 0 3px rgba(124, 108, 252, 0.28),
+          0 1px 4px rgba(0, 0, 0, 0.6);
+        transition: left 0.18s ease, transform 0.12s ease;
+      }
+      .pswp-date-slider-track.pswp-date-slider-active .pswp-date-slider-thumb,
+      .pswp-date-slider-track:hover .pswp-date-slider-thumb {
+        transform: translate(-50%, -50%) scale(1.15);
+      }
+      .pswp-date-slider-track.pswp-date-slider-active .pswp-date-slider-fill,
+      .pswp-date-slider-track.pswp-date-slider-active ~ * {
+        transition: none;
+      }
+      .pswp-date-slider-track.pswp-date-slider-active .pswp-date-slider-thumb {
+        transition: none;
+      }
+      .pswp-date-slider-range {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        pointer-events: none;
       }
       @media (max-width: 640px) {
         .pswp__pswp-date-slider {
-          min-width: 110px;
-          padding: 4px 6px 6px;
+          padding: 10px 14px 14px;
         }
         .pswp-date-slider-label {
-          font-size: 10px;
+          font-size: 12px;
+        }
+        .pswp-date-slider-range {
+          font-size: 9px;
         }
       }
       /* Info button style */
@@ -2633,9 +2693,12 @@
         loadPswp().then((PhotoSwipe) => {
           const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
-              // No autoplay here — PhotoSwipe pre-creates ±1 adjacent slides,
-              // and autoplay on those layers audio across slides. The active
-              // slide is played from the `change` handler below.
+              // Initial preload is "metadata" — enough to render the first
+              // frame in the slide so the user never sees a gray placeholder.
+              // syncVideos() below promotes the *active* slide to "auto" (so
+              // playback bytes start flowing immediately) and demotes
+              // non-active slides to "none" (so adjacent ±1 slides don't keep
+              // tying up HTTP connections to the NAS while you scrub).
               const wrap = document.createElement('div')
               wrap.className = 'pswp-video-wrap'
               const video = document.createElement('video')
@@ -2692,57 +2755,82 @@
             }
           }
 
-          // All UI registration happens inside uiRegister — pswp.ui is guaranteed
-          // to exist here (set in _createMainStructure before ui.init fires this event).
-          // Compute the model's overall date range once for the slider.
-          // Uses every loaded media item (not just the filtered subset) so the
-          // slider position is "where this falls in the model's history" rather
-          // than "where it falls in the current filter".
-          let _modelMinMs = Infinity
-          let _modelMaxMs = -Infinity
-          for (const m of allMedia) {
-            const t = m.mediaDateMs || m.addedMs
-            if (!t) continue
-            if (t < _modelMinMs) _modelMinMs = t
-            if (t > _modelMaxMs) _modelMaxMs = t
+          // Pre-sort the filtered items by date so the slider can map a
+          // dragged time → the filtered index whose date is closest. The
+          // sort runs once per lightbox open; the slider's drag/click handler
+          // then does a single binary search per pointer event.
+          const _datedIdx = []
+          for (let i = 0; i < filtered.length; i++) {
+            const t = filtered[i].mediaDateMs || filtered[i].addedMs || 0
+            if (t) _datedIdx.push({ t, i })
           }
+          _datedIdx.sort((a, b) => a.t - b.t)
+          const _modelMinMs = _datedIdx.length ? _datedIdx[0].t : 0
+          const _modelMaxMs = _datedIdx.length
+            ? _datedIdx[_datedIdx.length - 1].t
+            : 0
           const _dateRangeOk = _modelMaxMs > _modelMinMs
 
-          pswp.on('uiRegister', () => {
-            // Slide counter (top-bar, left of zoom/close)
-            pswp.ui.registerElement({
-              name: 'pswp-counter',
-              order: 5,
-              isButton: false,
-              onInit(el) {
-                const update = () => {
-                  el.textContent = `${pswp.currIndex + 1} / ${pswp.getNumItems()}`
-                }
-                pswp.on('change', update)
-                update()
-              },
-            })
+          function _filteredIndexClosestToTime(t) {
+            if (!_datedIdx.length) return 0
+            let lo = 0
+            let hi = _datedIdx.length - 1
+            while (lo < hi) {
+              const mid = (lo + hi) >>> 1
+              if (_datedIdx[mid].t < t) lo = mid + 1
+              else hi = mid
+            }
+            if (
+              lo > 0 &&
+              Math.abs(_datedIdx[lo - 1].t - t) < Math.abs(_datedIdx[lo].t - t)
+            )
+              return _datedIdx[lo - 1].i
+            return _datedIdx[lo].i
+          }
 
-            // Date-position slider — sits just right of the counter on the top
-            // bar. Only registered when the model spans more than one date.
+          pswp.on('uiRegister', () => {
+            // Note: PhotoSwipe v5's default UI already includes a top-left
+            // slide counter, so we don't register our own here.
+
+            // Full-width scrubbable timeline pinned to the bottom of the
+            // lightbox. Clicking or dragging the track jumps to the filtered
+            // item whose date is closest to that point on the timeline.
+            // Hidden when the lightbox spans no usable date range.
             if (_dateRangeOk) {
               pswp.ui.registerElement({
                 name: 'pswp-date-slider',
-                order: 6,
-                isButton: false,
+                appendTo: 'root',
                 onInit(el) {
                   const label = document.createElement('div')
                   label.className = 'pswp-date-slider-label'
+                  const range = document.createElement('div')
+                  range.className = 'pswp-date-slider-range'
+                  const rangeMin = document.createElement('span')
+                  rangeMin.textContent = formatDateShort(
+                    new Date(_modelMinMs).toISOString()
+                  )
+                  const rangeMax = document.createElement('span')
+                  rangeMax.textContent = formatDateShort(
+                    new Date(_modelMaxMs).toISOString()
+                  )
+                  range.appendChild(rangeMin)
+                  range.appendChild(rangeMax)
                   const track = document.createElement('div')
                   track.className = 'pswp-date-slider-track'
+                  const fill = document.createElement('div')
+                  fill.className = 'pswp-date-slider-fill'
                   const thumb = document.createElement('div')
                   thumb.className = 'pswp-date-slider-thumb'
+                  track.appendChild(fill)
                   track.appendChild(thumb)
                   el.appendChild(label)
                   el.appendChild(track)
-                  el.title = `${formatDateShort(new Date(_modelMinMs).toISOString())} — ${formatDateShort(new Date(_modelMaxMs).toISOString())}`
+                  el.appendChild(range)
 
-                  const update = () => {
+                  // Position the thumb + fill + label based on the current
+                  // slide's date. Driven by both PhotoSwipe `change` events
+                  // and by the user dragging the track.
+                  const updateFromIndex = () => {
                     const item = filtered[pswp.currIndex]
                     if (!item) return
                     const t = item.mediaDateMs || item.addedMs || 0
@@ -2750,20 +2838,79 @@
                       ? Math.max(
                           0,
                           Math.min(
-                            100,
-                            ((t - _modelMinMs) /
-                              (_modelMaxMs - _modelMinMs)) *
-                              100
+                            1,
+                            (t - _modelMinMs) / (_modelMaxMs - _modelMinMs)
                           )
                         )
                       : 0
-                    thumb.style.left = `${pct}%`
+                    thumb.style.left = `${pct * 100}%`
+                    fill.style.width = `${pct * 100}%`
                     label.textContent = item.date
                       ? formatDateShort(item.date)
                       : '—'
                   }
-                  pswp.on('change', update)
-                  update()
+                  pswp.on('change', updateFromIndex)
+                  updateFromIndex()
+
+                  // Scrubbing: map pointer X → target time → nearest filtered
+                  // index → pswp.goTo(). Using rAF coalesces rapid moves into
+                  // one navigation per frame.
+                  let pendingIdx = null
+                  let rafQueued = false
+                  const flush = () => {
+                    rafQueued = false
+                    if (pendingIdx == null) return
+                    if (pendingIdx !== pswp.currIndex) pswp.goTo(pendingIdx)
+                    pendingIdx = null
+                  }
+                  const scrubTo = (clientX) => {
+                    const rect = track.getBoundingClientRect()
+                    if (!rect.width) return
+                    const pct = Math.max(
+                      0,
+                      Math.min(1, (clientX - rect.left) / rect.width)
+                    )
+                    const t =
+                      _modelMinMs + pct * (_modelMaxMs - _modelMinMs)
+                    pendingIdx = _filteredIndexClosestToTime(t)
+                    if (!rafQueued) {
+                      rafQueued = true
+                      requestAnimationFrame(flush)
+                    }
+                  }
+
+                  let dragging = false
+                  const onPointerMove = (e) => {
+                    if (!dragging) return
+                    scrubTo(e.clientX)
+                  }
+                  const onPointerUp = (e) => {
+                    if (!dragging) return
+                    dragging = false
+                    track.classList.remove('pswp-date-slider-active')
+                    try {
+                      track.releasePointerCapture(e.pointerId)
+                    } catch {}
+                    document.removeEventListener('pointermove', onPointerMove)
+                    document.removeEventListener('pointerup', onPointerUp)
+                  }
+                  track.addEventListener('pointerdown', (e) => {
+                    // Eat the gesture so PhotoSwipe doesn't try to drag the
+                    // slide while we scrub.
+                    e.preventDefault()
+                    e.stopPropagation()
+                    dragging = true
+                    track.classList.add('pswp-date-slider-active')
+                    try {
+                      track.setPointerCapture(e.pointerId)
+                    } catch {}
+                    scrubTo(e.clientX)
+                    document.addEventListener('pointermove', onPointerMove)
+                    document.addEventListener('pointerup', onPointerUp)
+                  })
+                  // Block bubble so the lightbox doesn't react to clicks on
+                  // the timeline (close on background click, etc.).
+                  el.addEventListener('click', (e) => e.stopPropagation())
                 },
               })
             }
@@ -3027,9 +3174,15 @@
             })
           })
 
-          // Play only the active slide's video; pause and rewind all others.
-          // PhotoSwipe pre-creates ±1 adjacent slides, so without this swiping
-          // quickly past videos layers audio across slides.
+          // Drive video state per-slide:
+          //   • Active slide  → preload="auto", play().
+          //   • Adjacent ±1   → preload="none", paused, rewound to 0.
+          //
+          // Toggling preload on adjacent slides is the difference between
+          // "instant" playback and "click play and wait" — with three
+          // simultaneous .mp4 fetches against the NAS, the active slide was
+          // getting starved of bandwidth and Chrome was logging the slower
+          // adjacent fetches as 503s when it cancelled them on slide change.
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
@@ -3038,8 +3191,10 @@
                 v.closest('.pswp__item.pswp__item--current') ||
                 v.closest('.pswp__item--active')
               if (inActive) {
+                if (v.preload !== 'auto') v.preload = 'auto'
                 v.play().catch(() => {})
               } else {
+                if (v.preload !== 'none') v.preload = 'none'
                 v.pause()
                 try {
                   v.currentTime = 0
