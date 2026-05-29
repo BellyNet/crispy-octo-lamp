@@ -159,12 +159,16 @@ async function getBrowserWebSocketEndpoint(connectValue, requestBuffer) {
 async function createBrowserMediaDownloader(source, options = {}) {
   const {
     requestBuffer,
+    requestToFile,
     slopvaultRoot,
     appendRunEvent = () => {},
     logger = console,
   } = options
   if (typeof requestBuffer !== 'function') {
     throw new Error('createBrowserMediaDownloader requires requestBuffer')
+  }
+  if (typeof requestToFile !== 'function') {
+    throw new Error('createBrowserMediaDownloader requires requestToFile')
   }
   if (!slopvaultRoot) {
     throw new Error('createBrowserMediaDownloader requires slopvaultRoot')
@@ -254,6 +258,39 @@ async function createBrowserMediaDownloader(source, options = {}) {
   }
 
   return {
+    async downloadToFile(
+      mediaUrl,
+      destinationPath,
+      entry = {},
+      requestOptions = {}
+    ) {
+      const cookieHeader = await getCookieHeaderFor(mediaUrl)
+      try {
+        const response = await requestToFile(mediaUrl, destinationPath, {
+          timeoutMs: options.timeoutMs,
+          maxBytes: requestOptions.maxBytes || 0,
+          onProgress: requestOptions.onProgress || null,
+          headers: {
+            Accept: '*/*',
+            Referer: entry.mediaPageUrl || source.inputUrl,
+            ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+          },
+        })
+        return response.byteLength
+      } catch (err) {
+        if (err?.code === 'ERR_DOWNLOAD_TOO_LARGE') throw err
+        appendRunEvent('browser_cookie_http_error', {
+          mediaUrl,
+          mediaPageUrl: entry.mediaPageUrl,
+          error: err.message,
+          hadCookieHeader: Boolean(cookieHeader),
+        })
+      }
+
+      const buffer = await this.download(mediaUrl, entry)
+      fs.writeFileSync(destinationPath, buffer)
+      return buffer.length
+    },
     async download(mediaUrl, entry = {}) {
       const cookieHeader = await getCookieHeaderFor(mediaUrl)
       try {

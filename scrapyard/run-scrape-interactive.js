@@ -1,7 +1,10 @@
 'use strict'
 
+const fs = require('fs')
+const path = require('path')
 const readline = require('readline')
 
+const { createDatasetPaths } = require('./datasetPaths')
 const {
   loadModelRegistry,
   findCanonicalModelName,
@@ -18,9 +21,162 @@ const {
 } = require('./scraperRunner')
 
 const registryPath = require('./scraperRunner').registryPath
+const datasetPaths = createDatasetPaths({
+  rootDir: path.join(__dirname, '..'),
+  repairCanUseNasMirror: true,
+})
 
 function ask(rl, prompt) {
   return new Promise((resolve) => rl.question(prompt, resolve))
+}
+
+function parseCommaList(value) {
+  return String(value || '')
+    .split(',')
+    .map((part) => sanitize(part.trim()))
+    .filter(Boolean)
+}
+
+function walkFiles(rootDir, predicate, results = []) {
+  if (!rootDir || !fs.existsSync(rootDir)) return results
+  for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    const fullPath = path.join(rootDir, entry.name)
+    if (entry.isDirectory()) {
+      walkFiles(fullPath, predicate, results)
+    } else if (!predicate || predicate(fullPath)) {
+      results.push(fullPath)
+    }
+  }
+  return results
+}
+
+function parseLargeVideoBytes(value) {
+  if (Number.isFinite(value) && value > 0) return value
+  const match = String(value || '').match(/Received\s+(\d+)/i)
+  return match ? Number.parseInt(match[1], 10) : null
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0
+  if (value <= 0) return 'unknown size'
+  if (value < 1024) return `${value} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let size = value / 1024
+  let unit = units.shift()
+  while (size >= 1024 && units.length) {
+    size /= 1024
+    unit = units.shift()
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${unit}`
+}
+
+function eventLooksLikeLargeVideoFailure(event) {
+  if (event?.type === 'skip_oversized_video') return true
+  const error = String(event?.error || '')
+  return (
+    event?.type === 'lazy_video_error' &&
+    /length.*out of range|Received\s+\d+/i.test(error)
+  )
+}
+
+function eventLooksHandledVideo(event) {
+  return [
+    'saved_lazy_video',
+    'duplicate_bitwise',
+    'duplicate_visual',
+    'skip_seen_media',
+    'skip_lazy_existing',
+  ].includes(event?.type)
+}
+
+function collectOversizedVideoTargets(options = {}) {
+  const modelFilter = new Set(parseCommaList(options.models || ''))
+  const datasetDir = options.datasetDir || datasetPaths.datasetDir
+  const logFiles = walkFiles(
+    datasetDir,
+    (filePath) =>
+      /[\\/]log[\\/]/i.test(filePath) &&
+      /hoghaul-run-.*\.jsonl$/i.test(path.basename(filePath))
+  )
+  const events = []
+  const handledVideos = new Set()
+  const targets = new Map()
+
+  for (const logPath of logFiles) {
+    let runModelName = ''
+    let inputUrl = ''
+    const lines = fs.readFileSync(logPath, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let event
+      try {
+        event = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (event.type === 'run_started') {
+        runModelName = sanitize(event.modelName || '')
+        inputUrl = String(event.inputUrl || '').trim()
+        continue
+      }
+
+      const modelName = sanitize(event.modelName || runModelName)
+      const sourceUrl = String(event.inputUrl || inputUrl || '').trim()
+      const filename = String(event.filename || '').trim()
+      const withContext = {
+        ...event,
+        modelName,
+        inputUrl: sourceUrl,
+        filename,
+      }
+      events.push(withContext)
+      if (eventLooksHandledVideo(withContext) && modelName && filename) {
+        handledVideos.add(`${modelName}\n${filename}`)
+      }
+    }
+  }
+
+  for (const event of events) {
+    if (!eventLooksLikeLargeVideoFailure(event)) continue
+
+    const modelName = sanitize(event.modelName || '')
+    const sourceUrl = String(event.inputUrl || '').trim()
+    const filename = String(event.filename || '').trim()
+    if (filename && handledVideos.has(`${modelName}\n${filename}`)) continue
+    if (!modelName || !sourceUrl) continue
+    if (modelFilter.size && !modelFilter.has(modelName)) continue
+
+    const key = `${modelName}\n${sourceUrl}`
+    const previous = targets.get(key) || {
+      modelName,
+      url: sourceUrl,
+      count: 0,
+      largestBytes: 0,
+      latestAt: '',
+      sampleFiles: [],
+    }
+    const bytes =
+      parseLargeVideoBytes(event.contentLength) ||
+      parseLargeVideoBytes(event.downloadedBytes) ||
+      parseLargeVideoBytes(event.error) ||
+      0
+    previous.count += 1
+    previous.largestBytes = Math.max(previous.largestBytes, bytes)
+    previous.latestAt =
+      !previous.latestAt || String(event.at || '') > previous.latestAt
+        ? String(event.at || '')
+        : previous.latestAt
+    if (filename && previous.sampleFiles.length < 3) {
+      previous.sampleFiles.push(filename)
+    }
+    targets.set(key, previous)
+  }
+
+  return Array.from(targets.values()).sort((a, b) => {
+    const modelCompare = a.modelName.localeCompare(b.modelName)
+    if (modelCompare) return modelCompare
+    return a.url.localeCompare(b.url)
+  })
 }
 
 async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
@@ -339,6 +495,80 @@ async function runSyncFlow(rl) {
   await runSync(options)
 }
 
+async function runOversizedVideoFlow(rl) {
+  const models = (
+    await ask(
+      rl,
+      'Model filter for oversized retries (comma-separated, blank for all): '
+    )
+  ).trim()
+  const skipNasSyncAnswer = (
+    await ask(rl, 'Skip NAS sync after each oversized retry? [y/N]: ')
+  )
+    .trim()
+    .toLowerCase()
+  const videoConcurrencyAnswer = (
+    await ask(rl, 'Video concurrency for oversized retries [1]: ')
+  ).trim()
+
+  const targets = collectOversizedVideoTargets({ models })
+  if (!targets.length) {
+    console.log('No oversized Hoghaul videos found in saved run logs.')
+    return
+  }
+
+  console.log('')
+  console.log(
+    `Found ${targets.length} Hoghaul source(s) with oversized videos:`
+  )
+  targets.forEach((target, index) => {
+    const samples = target.sampleFiles.length
+      ? ` | samples: ${target.sampleFiles.join(', ')}`
+      : ''
+    console.log(
+      `${index + 1}. ${target.modelName}: ${target.count} oversized | largest ${formatBytes(target.largestBytes)}${samples}`
+    )
+    console.log(`   ${target.url}`)
+  })
+
+  const confirm = (
+    await ask(
+      rl,
+      `Run ${targets.length} source(s) with the oversized guard disabled? [y/N]: `
+    )
+  )
+    .trim()
+    .toLowerCase()
+  if (confirm !== 'y' && confirm !== 'yes') {
+    console.log('Oversized retry cancelled.')
+    return
+  }
+
+  const sharedOptions = {
+    'download-oversized': true,
+    'video-concurrency': videoConcurrencyAnswer || '1',
+    'skip-nas-sync': skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
+    'keep-history': true,
+  }
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index]
+    console.log('')
+    console.log(
+      `[${index + 1}/${targets.length}] Oversized retry: ${target.modelName}`
+    )
+    console.log(target.url)
+    const status = await runScrape(target.url, {
+      ...sharedOptions,
+      model: target.modelName,
+    })
+    if (status !== 0) {
+      console.log(`Oversized retry stopped after scraper status ${status}.`)
+      return
+    }
+  }
+}
+
 async function main() {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -357,11 +587,12 @@ async function main() {
       console.log('6. Paste one source URL and run it')
       console.log('7. Repair models')
       console.log('8. Sync dataset/NAS')
-      console.log('9. Quit')
+      console.log('9. Download oversized Hoghaul videos')
+      console.log('10. Quit')
 
       const choice = (await ask(rl, '\nPick an option: ')).trim()
 
-      if (choice === '9' || /^q(?:uit)?$/i.test(choice)) {
+      if (choice === '10' || /^q(?:uit)?$/i.test(choice)) {
         console.log('Done.')
         break
       }
@@ -422,7 +653,12 @@ async function main() {
         continue
       }
 
-      console.log('Please choose 1-9.')
+      if (choice === '9') {
+        await runOversizedVideoFlow(rl)
+        continue
+      }
+
+      console.log('Please choose 1-10.')
     }
   } finally {
     rl.close()
@@ -430,6 +666,7 @@ async function main() {
 }
 
 module.exports = {
+  collectOversizedVideoTargets,
   main,
 }
 

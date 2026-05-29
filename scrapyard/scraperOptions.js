@@ -36,6 +36,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'browser-media',
   'browser-headless',
   'headless',
+  'download-oversized',
 ]
 
 const RUNNER_STRING_OPTIONS = [
@@ -207,6 +208,10 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
     keepHistory:
       Boolean(getRunOption(argv, 'keepHistory', 'keep-history')) ||
       isTruthy(process.env.npm_config_keep_history),
+    downloadOversized:
+      Boolean(getRunOption(argv, 'downloadOversized', 'download-oversized')) ||
+      isTruthy(process.env.npm_config_download_oversized) ||
+      isTruthy(process.env.HOGHAUL_DOWNLOAD_OVERSIZED),
     useBrowserMedia:
       existingUseBrowserMedia !== undefined
         ? Boolean(existingUseBrowserMedia)

@@ -23,7 +23,11 @@ const {
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
-const datasetRoot = path.join(process.env.APPDATA || '', '.slopvault', 'dataset')
+const datasetRoot = path.join(
+  process.env.APPDATA || '',
+  '.slopvault',
+  'dataset'
+)
 
 function formatDuration(ms) {
   const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000))
@@ -347,6 +351,11 @@ function appendHoghaulOptions(args, argv) {
     isTruthy(getOption(argv, 'browser-headless'))
   )
   appendBoolean(args, '--headless', isTruthy(getOption(argv, 'headless')))
+  appendBoolean(
+    args,
+    '--download-oversized',
+    isTruthy(getOption(argv, 'download-oversized'))
+  )
   appendOptionalBoolean(args, 'browser-media', getOption(argv, 'browser-media'))
 }
 
@@ -416,6 +425,7 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
       dryRun: isTruthy(getOption(argv, 'dry-run')),
       preflight: isTruthy(getOption(argv, 'preflight')),
       trackSource: isTruthy(getOption(argv, 'track-source')),
+      downloadOversized: isTruthy(getOption(argv, 'download-oversized')),
       browserMedia: getOption(argv, 'browser-media'),
       browserHeadless: isTruthy(getOption(argv, 'browser-headless')),
       headless: isTruthy(getOption(argv, 'headless')),
@@ -547,6 +557,8 @@ function buildSourceBatchOptions(argv) {
   if (isTruthy(getOption(argv, 'skip-nas-sync')))
     options['skip-nas-sync'] = true
   if (isTruthy(getOption(argv, 'dry-run'))) options['dry-run'] = true
+  if (isTruthy(getOption(argv, 'download-oversized')))
+    options['download-oversized'] = true
   return options
 }
 
@@ -567,6 +579,7 @@ Options:
   --dry-run                   Dry run.
   --skip-nas-sync             Skip NAS sync.
   --keep-history              Preserve last-run logs.
+  --download-oversized        Disable the 2 GiB video guard for retry runs.
   --help                      Show this help.
 `)
 }
@@ -1079,6 +1092,7 @@ Options:
   --delay-ms <n>              Delay between Coomer/Kemono models.
   --dry-run                   Dry run Coomer/Kemono.
   --skip-nas-sync             Skip NAS sync.
+  --download-oversized        Disable the 2 GiB video guard for retry runs.
   --stop-on-error             Stop when StufferDB updater hits a failure.
   --help                      Show this help.
 `)
@@ -1111,6 +1125,7 @@ async function runAllSourceUpdates(argvInput = {}) {
     'delay-ms': getOption(argv, 'delay-ms'),
     'dry-run': isTruthy(getOption(argv, 'dry-run')),
     'skip-nas-sync': isTruthy(getOption(argv, 'skip-nas-sync')),
+    'download-oversized': isTruthy(getOption(argv, 'download-oversized')),
   }
 
   console.log('\nRunning Coomer batch...')

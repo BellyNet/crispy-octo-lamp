@@ -34,10 +34,14 @@ const {
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
-const AUTO = !!argv.auto // auto-save exact matches, skip everything else
+const AUTO = !!argv.auto // auto-save canonical/alias username matches, skip everything else
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const permanentSkipPath = path.join(
+  __dirname,
+  'source-backfill-permanent-skips.json'
+)
 
 // ─── PLATFORM CONFIG ──────────────────────────────────────────────────────────
 const PLATFORMS = {
@@ -98,6 +102,7 @@ const PLATFORMS = {
 }
 
 const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
+const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb']
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(host, url, headers = {}) {
@@ -136,6 +141,74 @@ function httpsGet(host, url, headers = {}) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+function loadPermanentSkips() {
+  if (!fs.existsSync(permanentSkipPath)) {
+    return { version: 1, updatedAt: null, skips: {} }
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(permanentSkipPath, 'utf8'))
+    return {
+      version: 1,
+      updatedAt: parsed?.updatedAt || null,
+      skips:
+        parsed?.skips && typeof parsed.skips === 'object' ? parsed.skips : {},
+    }
+  } catch (err) {
+    console.warn(
+      `  Warning: could not parse permanent skip file ${permanentSkipPath}: ${err.message}`
+    )
+    return { version: 1, updatedAt: null, skips: {} }
+  }
+}
+
+function savePermanentSkips(state) {
+  state.updatedAt = new Date().toISOString()
+  fs.writeFileSync(permanentSkipPath, JSON.stringify(state, null, 2) + '\n')
+}
+
+function getPermanentSkipEntry(state, canonicalName, platform) {
+  const modelKey = sanitize(canonicalName)
+  const platformKey = String(platform || '')
+    .trim()
+    .toLowerCase()
+  return state?.skips?.[modelKey]?.[platformKey] || null
+}
+
+function isPermanentlySkipped(state, canonicalName, platform) {
+  return Boolean(getPermanentSkipEntry(state, canonicalName, platform))
+}
+
+function markPermanentSkip(
+  state,
+  canonicalName,
+  platform,
+  reason = 'no_content'
+) {
+  const modelKey = sanitize(canonicalName)
+  const platformKey = String(platform || '')
+    .trim()
+    .toLowerCase()
+  if (!modelKey || !SOURCE_PLATFORMS.includes(platformKey)) return false
+  if (!state.skips[modelKey]) state.skips[modelKey] = {}
+  state.skips[modelKey][platformKey] = {
+    reason: String(reason || '').trim() || 'no_content',
+    skippedAt: new Date().toISOString(),
+  }
+  savePermanentSkips(state)
+  return true
+}
+
+function parseSkipPlatforms(input) {
+  const normalized = String(input || '')
+    .trim()
+    .toLowerCase()
+  if (!normalized || normalized === 'all') return SOURCE_PLATFORMS
+  return normalized
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => SOURCE_PLATFORMS.includes(part))
+}
 
 function getCoomerSearchResultTotal(html) {
   const text = String(html || '').replace(/\s+/g, ' ')
@@ -181,7 +254,7 @@ async function searchCoomer(query) {
       })
     }
   }
-  return hits.slice(0, 1)
+  return hits.slice(0, 10)
 }
 
 async function lookupKemono(service, username) {
@@ -291,6 +364,87 @@ async function autoProbeModel(canonicalName, entry) {
   return allHits
 }
 
+function getModelUsernameSeeds(canonicalName, entry) {
+  const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
+  return [...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean))]
+}
+
+function isModelUsernameMatch(canonicalName, entry, hit) {
+  const username = sanitize(hit?.username).toLowerCase()
+  if (!username) return false
+
+  for (const seed of getModelUsernameSeeds(canonicalName, entry)) {
+    const normalizedSeed = seed.toLowerCase()
+    if (username === normalizedSeed) return true
+    if (normalizedSeed.length >= 4 && username.startsWith(normalizedSeed)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function addUniqueHit(targets, hit) {
+  if (!hit?.url || targets.some((existing) => existing.url === hit.url)) return
+  targets.push(hit)
+}
+
+async function autoProbeMatchingUsernames(canonicalName, entry, skipState) {
+  const usernames = getModelUsernameSeeds(canonicalName, entry)
+  const allHits = { coomer: [], kemono: [], reddit: [] }
+  if (!usernames.length) return allHits
+
+  for (const platform of getMissingSources(
+    canonicalName,
+    entry,
+    skipState,
+    false
+  )) {
+    for (const username of usernames) {
+      try {
+        const hits = await probeUsername(platform, username)
+        for (const hit of hits) {
+          if (isModelUsernameMatch(canonicalName, entry, hit)) {
+            addUniqueHit(allHits[platform], hit)
+          }
+        }
+      } catch {
+        await sleep(DELAY * 2)
+      }
+    }
+  }
+
+  return allHits
+}
+
+async function autoSaveDirectUsernameMatches(registry, skipState) {
+  let saved = 0
+  let probed = 0
+
+  for (const [canonicalName, entry] of Object.entries(registry)) {
+    const missing = getMissingSources(canonicalName, entry, skipState, false)
+    if (missing.length === 0) continue
+
+    probed += 1
+    const hits = await autoProbeMatchingUsernames(
+      canonicalName,
+      entry,
+      skipState
+    )
+    for (const platform of ['coomer', 'kemono', 'reddit']) {
+      if (!missing.includes(platform) || hits[platform].length === 0) continue
+      const hit = hits[platform][0]
+      resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
+      console.log(
+        `  auto-added ${platform}: ${canonicalName} -> ${hit.url} (${hit.username})`
+      )
+      saved += 1
+    }
+  }
+
+  return { probed, saved }
+}
+
 // ─── URL PARSING ──────────────────────────────────────────────────────────────
 function parseSourceUrl(input) {
   const str = String(input || '').trim()
@@ -377,6 +531,20 @@ function hasSource(entry, platform) {
   return Array.isArray(srcs) && srcs.length > 0
 }
 
+function needsSource(canonicalName, entry, platform, skipState) {
+  return (
+    !hasSource(entry, platform) &&
+    !isPermanentlySkipped(skipState, canonicalName, platform)
+  )
+}
+
+function getMissingSources(canonicalName, entry, skipState, includeStufferdb) {
+  return SOURCE_PLATFORMS.filter((platform) => {
+    if (!includeStufferdb && platform === 'stufferdb') return false
+    return needsSource(canonicalName, entry, platform, skipState)
+  })
+}
+
 function sourceLabel(entry, platform) {
   if (!hasSource(entry, platform)) return '❌ missing'
   const srcs = entry.sources[platform]
@@ -385,18 +553,67 @@ function sourceLabel(entry, platform) {
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
-async function run() {
-  const registry = loadModelRegistry(registryPath)
+function sourceStatusLabel(canonicalName, entry, platform, skipState) {
+  const permanentSkip = getPermanentSkipEntry(
+    skipState,
+    canonicalName,
+    platform
+  )
+  if (permanentSkip) return `permanent skip (${permanentSkip.reason})`
+  return sourceLabel(entry, platform)
+}
 
-  const toProcess = Object.entries(registry).filter(([, entry]) => {
-    if (FORCE) return true
-    return (
-      !hasSource(entry, 'coomer') ||
-      !hasSource(entry, 'kemono') ||
-      !hasSource(entry, 'reddit') ||
-      !hasSource(entry, 'stufferdb')
-    )
-  })
+async function promptPermanentSkip(
+  rl,
+  skipState,
+  canonicalName,
+  defaultPlatform
+) {
+  const prompt = defaultPlatform
+    ? `  Permanently skip ${defaultPlatform} for ${canonicalName}? [y/N]: `
+    : `  Platform(s) to permanently skip for ${canonicalName} (coomer, kemono, reddit, stufferdb, all): `
+  const answer = (await ask(rl, prompt)).trim().toLowerCase()
+  if (defaultPlatform) {
+    if (answer !== 'y' && answer !== 'yes') return []
+    markPermanentSkip(skipState, canonicalName, defaultPlatform)
+    return [defaultPlatform]
+  }
+
+  const platforms = parseSkipPlatforms(answer)
+  if (!platforms.length) {
+    console.log('  No valid platform selected.')
+    return []
+  }
+  for (const platform of platforms) {
+    markPermanentSkip(skipState, canonicalName, platform)
+  }
+  return platforms
+}
+
+async function run() {
+  let registry = loadModelRegistry(registryPath)
+  const permanentSkips = loadPermanentSkips()
+
+  console.log('\n  Running matching username source auto-backfill...')
+  const autoSummary = await autoSaveDirectUsernameMatches(
+    registry,
+    permanentSkips
+  )
+  if (autoSummary.saved > 0) {
+    registry = loadModelRegistry(registryPath)
+  }
+  console.log(
+    `  Auto-backfill checked ${autoSummary.probed} model(s), added ${autoSummary.saved} source(s).`
+  )
+
+  const toProcess = Object.entries(registry).filter(
+    ([canonicalName, entry]) => {
+      if (FORCE) return true
+      return (
+        getMissingSources(canonicalName, entry, permanentSkips, true).length > 0
+      )
+    }
+  )
 
   console.log('\n  ╔══════════════════════════════════════════╗')
   console.log('  ║   Unified Source Backfill (Interactive)  ║')
@@ -404,7 +621,10 @@ async function run() {
   console.log(`  Registry: ${registryPath}`)
   console.log(`  Delay:    ${DELAY}ms between API requests`)
   if (FORCE) console.log('  Mode:     --force (reviewing all models)')
-  if (AUTO) console.log('  Mode:     --auto (save exact matches, skip rest)')
+  if (AUTO)
+    console.log(
+      '  Mode:     --auto (save canonical/alias username matches, skip rest)'
+    )
   console.log(`\n  Models needing sources: ${toProcess.length}\n`)
 
   if (toProcess.length === 0) {
@@ -427,16 +647,27 @@ async function run() {
       console.log('\n' + '═'.repeat(68))
       console.log(`[${i + 1}/${toProcess.length}] ${canonicalName}`)
       console.log(`  Aliases:   ${aliases.join(', ')}`)
-      console.log(`  Coomer:    ${sourceLabel(entry, 'coomer')}`)
-      console.log(`  Kemono:    ${sourceLabel(entry, 'kemono')}`)
-      console.log(`  Reddit:    ${sourceLabel(entry, 'reddit')}`)
-      console.log(`  StufferDB: ${sourceLabel(entry, 'stufferdb')}`)
+      console.log(
+        `  Coomer:    ${sourceStatusLabel(canonicalName, entry, 'coomer', permanentSkips)}`
+      )
+      console.log(
+        `  Kemono:    ${sourceStatusLabel(canonicalName, entry, 'kemono', permanentSkips)}`
+      )
+      console.log(
+        `  Reddit:    ${sourceStatusLabel(canonicalName, entry, 'reddit', permanentSkips)}`
+      )
+      console.log(
+        `  StufferDB: ${sourceStatusLabel(canonicalName, entry, 'stufferdb', permanentSkips)}`
+      )
 
       // ── Auto-probe coomer + kemono ─────────────────────────────────────────
       const missing = []
-      if (!hasSource(entry, 'coomer')) missing.push('coomer')
-      if (!hasSource(entry, 'kemono')) missing.push('kemono')
-      if (!hasSource(entry, 'reddit')) missing.push('reddit')
+      if (needsSource(canonicalName, entry, 'coomer', permanentSkips))
+        missing.push('coomer')
+      if (needsSource(canonicalName, entry, 'kemono', permanentSkips))
+        missing.push('kemono')
+      if (needsSource(canonicalName, entry, 'reddit', permanentSkips))
+        missing.push('reddit')
 
       let autoHits = { coomer: [], kemono: [], reddit: [] }
       if (missing.length > 0) {
@@ -451,17 +682,24 @@ async function run() {
         process.stdout.write(` ${total} hit(s)\n`)
       }
 
-      let savedCoomer = hasSource(entry, 'coomer')
-      let savedKemono = hasSource(entry, 'kemono')
-      let savedReddit = hasSource(entry, 'reddit')
-      let savedStufferdb = hasSource(entry, 'stufferdb')
-
-      // Sanitized alias set for exact-match detection
-      const aliasSet = new Set(
-        [canonicalName, ...(entry.aliases || [])]
-          .map((a) => sanitize(a).toLowerCase())
-          .filter(Boolean)
-      )
+      let savedCoomer =
+        hasSource(entry, 'coomer') ||
+        isPermanentlySkipped(permanentSkips, canonicalName, 'coomer')
+      let savedKemono =
+        hasSource(entry, 'kemono') ||
+        isPermanentlySkipped(permanentSkips, canonicalName, 'kemono')
+      let savedReddit =
+        hasSource(entry, 'reddit') ||
+        isPermanentlySkipped(permanentSkips, canonicalName, 'reddit')
+      let savedStufferdb =
+        hasSource(entry, 'stufferdb') ||
+        isPermanentlySkipped(permanentSkips, canonicalName, 'stufferdb')
+      const markPlatformHandled = (platform) => {
+        if (platform === 'coomer') savedCoomer = true
+        if (platform === 'kemono') savedKemono = true
+        if (platform === 'reddit') savedReddit = true
+        if (platform === 'stufferdb') savedStufferdb = true
+      }
 
       // ── Accept/reject auto hits ────────────────────────────────────────────
       let skipAutoHits = false
@@ -470,7 +708,7 @@ async function run() {
         if (hasSource(entry, platform)) continue
         for (const hit of autoHits[platform]) {
           if (skipAutoHits) break
-          const isExact = aliasSet.has(hit.username.toLowerCase())
+          const isExact = isModelUsernameMatch(canonicalName, entry, hit)
 
           if (AUTO) {
             if (isExact) {
@@ -503,7 +741,7 @@ async function run() {
             const ans = (
               await ask(
                 rl,
-                '  Accept? [y=yes / s=skip / m=manual / q=quit / <url>=paste URL]: '
+                '  Accept? [y=yes / s=skip / p=permanent skip source / m=manual / q=quit / <url>=paste URL]: '
               )
             ).trim()
             const ansLower = ans.toLowerCase()
@@ -522,6 +760,15 @@ async function run() {
             } else if (ansLower === 's') {
               console.log(`  ⏭️  Skipped.`)
               break
+            } else if (ansLower === 'p') {
+              const skipped = await promptPermanentSkip(
+                rl,
+                permanentSkips,
+                canonicalName,
+                platform
+              )
+              skipped.forEach(markPlatformHandled)
+              break
             } else if (ansLower === 'm') {
               console.log(`  ↩️  Jumping to manual entry.`)
               skipAutoHits = true
@@ -535,7 +782,7 @@ async function run() {
               const parsed = parseSourceUrl(ans)
               if (!parsed) {
                 console.log(
-                  '  ❓ Unrecognized. Use y/s/m/q or paste a coomer/kemono/reddit/stufferdb URL.'
+                  '  ❓ Unrecognized. Use y/s/p/m/q or paste a coomer/kemono/reddit/stufferdb URL.'
                 )
                 continue
               }
@@ -664,6 +911,7 @@ async function run() {
     r <username> probe Reddit for a specific username
     o            reopen current URL in browser
     s            skip this model (move to next)
+    p <source>   permanently skip source for this model (or p all)
     q            quit`)
 
           if (currentUrl) console.log(`  Current URL: ${currentUrl}`)
@@ -681,6 +929,29 @@ async function run() {
           if (lower === 's') {
             console.log(`  ⏭️  Skipping ${canonicalName}`)
             break
+          }
+
+          if (lower === 'p' || lower.startsWith('p ')) {
+            const requested = lower === 'p' ? '' : raw.slice(2).trim()
+            const skipped =
+              requested.length > 0
+                ? parseSkipPlatforms(requested)
+                : await promptPermanentSkip(
+                    rl,
+                    permanentSkips,
+                    canonicalName,
+                    null
+                  )
+            if (requested.length > 0) {
+              for (const platform of skipped) {
+                markPermanentSkip(permanentSkips, canonicalName, platform)
+              }
+            }
+            skipped.forEach(markPlatformHandled)
+            if (skipped.length) {
+              console.log(`  Permanently skipped: ${skipped.join(', ')}`)
+            }
+            continue
           }
 
           if (lower === 'o') {
@@ -706,7 +977,7 @@ async function run() {
               openInBrowser(hit.url)
               currentUrl = hit.url
               while (true) {
-                const ans = (await ask(rl, '  Accept? [y/s/q]: '))
+                const ans = (await ask(rl, '  Accept? [y/s/p/q]: '))
                   .trim()
                   .toLowerCase()
                 if (ans === 'y') {
@@ -720,6 +991,15 @@ async function run() {
                   savedCoomer = true
                   break
                 } else if (ans === 's') {
+                  break
+                } else if (ans === 'p') {
+                  const skipped = await promptPermanentSkip(
+                    rl,
+                    permanentSkips,
+                    canonicalName,
+                    'coomer'
+                  )
+                  skipped.forEach(markPlatformHandled)
                   break
                 } else if (ans === 'q') {
                   console.log('\n  💾 Quitting.')
@@ -748,7 +1028,7 @@ async function run() {
               openInBrowser(hit.url)
               currentUrl = hit.url
               while (true) {
-                const ans = (await ask(rl, '  Accept? [y/s/q]: '))
+                const ans = (await ask(rl, '  Accept? [y/s/p/q]: '))
                   .trim()
                   .toLowerCase()
                 if (ans === 'y') {
@@ -762,6 +1042,15 @@ async function run() {
                   savedKemono = true
                   break
                 } else if (ans === 's') {
+                  break
+                } else if (ans === 'p') {
+                  const skipped = await promptPermanentSkip(
+                    rl,
+                    permanentSkips,
+                    canonicalName,
+                    'kemono'
+                  )
+                  skipped.forEach(markPlatformHandled)
                   break
                 } else if (ans === 'q') {
                   console.log('\n  💾 Quitting.')
@@ -795,7 +1084,7 @@ async function run() {
               openInBrowser(hit.url)
               currentUrl = hit.url
               while (true) {
-                const ans = (await ask(rl, '  Accept? [y/s/q]: '))
+                const ans = (await ask(rl, '  Accept? [y/s/p/q]: '))
                   .trim()
                   .toLowerCase()
                 if (ans === 'y') {
@@ -809,6 +1098,15 @@ async function run() {
                   savedReddit = true
                   break
                 } else if (ans === 's') {
+                  break
+                } else if (ans === 'p') {
+                  const skipped = await promptPermanentSkip(
+                    rl,
+                    permanentSkips,
+                    canonicalName,
+                    'reddit'
+                  )
+                  skipped.forEach(markPlatformHandled)
                   break
                 } else if (ans === 'q') {
                   console.log('\n  Quitting.')
@@ -826,7 +1124,7 @@ async function run() {
           const parsed = parseSourceUrl(raw)
           if (!parsed) {
             console.log(
-              '  Unrecognized input. Paste a coomer/kemono/reddit/stufferdb URL, or use c/k/r commands.'
+              '  Unrecognized input. Paste a coomer/kemono/reddit/stufferdb URL, or use c/k/r/p commands.'
             )
             continue
           }
