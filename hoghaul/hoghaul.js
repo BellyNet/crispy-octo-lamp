@@ -549,18 +549,20 @@ async function closeBrowserMediaDownloader() {
   await downloader.close()
 }
 
-async function fetchJson(url) {
+async function fetchJson(url, requestOptions = {}) {
   const parsed = new URL(url)
   const isReddit = parsed.hostname.toLowerCase().endsWith('reddit.com')
   return httpClient.fetchJson(url, {
+    ...requestOptions,
     headers: {
       Accept: isReddit ? 'application/json' : API_ACCEPT_HEADER,
+      ...(requestOptions.headers || {}),
     },
   })
 }
 
-async function fetchHtml(url) {
-  return httpClient.fetchHtml(url)
+async function fetchHtml(url, requestOptions = {}) {
+  return httpClient.fetchHtml(url, requestOptions)
 }
 
 function parsePageRange(value) {
@@ -770,7 +772,8 @@ async function fetchPosts(source, options) {
   if (source.site === 'reddit') {
     return fetchRedditAdapterPosts(source, options, {
       fetchJson,
-      logger: console,
+      fetchHtml,
+      logger: pageLogger,
       normalizeUrl: normalizeSeenUrl,
       pageSize: REDDIT_PAGE_SIZE,
       redgifsClient,
@@ -1271,23 +1274,25 @@ async function run(argvInput = process.argv.slice(2)) {
   const folders = createModelFolders(modelName)
 
   console.log(
-    `Resolved ${source.site}/${source.service}/${source.userId} -> ${modelName}: ${selectedPosts.length} posts, ${selectedMedia.length} media files`
+    `Source ready: ${source.site}/${source.service}/${source.userId} -> ${modelName} | posts ${selectedPosts.length} | media ${selectedMedia.length}`
   )
   if (selectedMediaSourceDuplicateCount > 0) {
     console.log(
       `Source media dedupe: skipped ${selectedMediaSourceDuplicateCount} repeated media URL(s)`
     )
   }
-  console.log(
-    `Download concurrency: ${imageConcurrency} image/gif, ${videoConcurrency} video`
-  )
-  console.log(`Post fetch concurrency: ${postConcurrency}`)
-  if (downloadOversized) {
-    console.log('Oversized video guard disabled for this retry run.')
-  } else if (activeMaxVideoDownloadBytes > 0) {
+  if (process.env.HOGHAUL_VERBOSE === '1') {
     console.log(
-      `Oversized video guard: skip videos above ${formatBytes(activeMaxVideoDownloadBytes)}`
+      `Download concurrency: ${imageConcurrency} image/gif, ${videoConcurrency} video`
     )
+    console.log(`Post fetch concurrency: ${postConcurrency}`)
+    if (downloadOversized) {
+      console.log('Oversized video guard disabled for this retry run.')
+    } else if (activeMaxVideoDownloadBytes > 0) {
+      console.log(
+        `Oversized video guard: skip videos above ${formatBytes(activeMaxVideoDownloadBytes)}`
+      )
+    }
   }
 
   startRunLog(modelName, inputUrl, folders, keepHistory)

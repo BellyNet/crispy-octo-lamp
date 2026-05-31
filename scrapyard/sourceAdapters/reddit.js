@@ -5,6 +5,8 @@ const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
 
 const DEFAULT_REDDIT_PAGE_SIZE = 100
+const REDDIT_RSS_USER_AGENT =
+  'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -18,6 +20,12 @@ function htmlDecode(value) {
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+}
+
+function stripTags(value) {
+  return htmlDecode(String(value || '').replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function uniqueUrls(values) {
@@ -38,12 +46,7 @@ function uniqueUrls(values) {
 }
 
 function getEntryMediaUrls(entry) {
-  return uniqueUrls([
-    entry?.mediaUrl,
-    entry?.jsonMediaUrl,
-    entry?.mediaUrls,
-    entry?.sourceUrls,
-  ])
+  return uniqueUrls([entry?.mediaUrl, entry?.jsonMediaUrl, entry?.mediaUrls])
 }
 
 function dedupeMediaEntries(entries, normalizeUrl) {
@@ -344,6 +347,17 @@ async function getRedditMediaEntries(source, post, deps = {}) {
     entries.push(createRedditEntry(source, post, directUrl, uploadedDate))
   }
 
+  if (Array.isArray(post.htmlMediaUrls)) {
+    post.htmlMediaUrls.forEach((mediaUrl, index) => {
+      entries.push(
+        createRedditEntry(source, post, mediaUrl, uploadedDate, {
+          index,
+          sourceUrls: [post.url_overridden_by_dest, post.url],
+        })
+      )
+    })
+  }
+
   return normalizeMediaEntries(dedupeMediaEntries(entries, deps.normalizeUrl), {
     sourceSite: source.site,
     sourceService: source.service,
@@ -365,6 +379,146 @@ function getRedditListingUrl(
   url.searchParams.set('raw_json', '1')
   if (after) url.searchParams.set('after', after)
   return url.toString()
+}
+
+function getRedditRssUrl(
+  source,
+  after = null,
+  pageSize = DEFAULT_REDDIT_PAGE_SIZE
+) {
+  const url = new URL(
+    `/user/${encodeURIComponent(source.username || source.userId)}/submitted/.rss`,
+    source.origin
+  )
+  url.searchParams.set('limit', String(pageSize))
+  if (after) url.searchParams.set('after', after)
+  return url.toString()
+}
+
+function countPostMedia(posts) {
+  return posts.reduce(
+    (total, post) =>
+      total + (Array.isArray(post.mediaEntries) ? post.mediaEntries.length : 0),
+    0
+  )
+}
+
+function extractXmlTag(block, tag) {
+  const match = String(block || '').match(
+    new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i')
+  )
+  return match ? htmlDecode(match[1]).trim() : ''
+}
+
+function extractRssContent(block) {
+  const raw = extractXmlTag(block, 'content')
+  return htmlDecode(raw)
+}
+
+function extractHrefByText(html, text) {
+  const needle = String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(
+    `<a\\b[^>]*href=["']([^"']+)["'][^>]*>\\s*${needle}\\s*<\\/a>`,
+    'i'
+  )
+  const match = String(html || '').match(pattern)
+  return match ? htmlDecode(match[1]) : ''
+}
+
+function extractRssSubreddit(block) {
+  const match = String(block || '').match(
+    /<category\b[^>]*label=["']r\/([^"']+)["']/i
+  )
+  return match ? htmlDecode(match[1]).trim() : ''
+}
+
+function extractPostIdFromUrl(url) {
+  const match = String(url || '').match(/\/comments\/([^/?#\s]+)/i)
+  if (match) return match[1]
+  const galleryMatch = String(url || '').match(/\/gallery\/([^/?#\s]+)/i)
+  return galleryMatch ? galleryMatch[1] : ''
+}
+
+function parseRssEntries(xml, source) {
+  return [...String(xml || '').matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)]
+    .map((match) => {
+      const block = match[1]
+      const contentHtml = extractRssContent(block)
+      const linkUrl = extractHrefByText(contentHtml, '[link]')
+      const commentsUrl = extractHrefByText(contentHtml, '[comments]')
+      const id = extractPostIdFromUrl(commentsUrl || linkUrl)
+      if (!id) return null
+
+      const subreddit = extractRssSubreddit(block)
+      const updated = extractXmlTag(block, 'updated')
+      const published = parseResolvedDate(updated)
+      const permalink = commentsUrl
+        ? new URL(commentsUrl).pathname
+        : `/comments/${id}`
+
+      return {
+        id,
+        title: stripTags(extractXmlTag(block, 'title')),
+        permalink,
+        subreddit,
+        subreddit_name_prefixed: subreddit ? `r/${subreddit}` : null,
+        created_utc: published ? published.getTime() / 1000 : null,
+        url: linkUrl || commentsUrl,
+        url_overridden_by_dest: linkUrl || commentsUrl,
+        is_gallery: /\/gallery\//i.test(linkUrl),
+        rssContentHtml: contentHtml,
+      }
+    })
+    .filter(Boolean)
+}
+
+function scoreRedditHtmlMediaUrl(url) {
+  let score = 0
+  try {
+    const parsed = new URL(url)
+    const width = Number.parseInt(parsed.searchParams.get('width') || '0', 10)
+    if (Number.isFinite(width)) score += width
+    if (!parsed.searchParams.has('blur')) score += 10000
+    if (parsed.hostname === 'i.redd.it') score += 20000
+  } catch {
+    return 0
+  }
+  return score
+}
+
+function getRedditHtmlMediaKey(url) {
+  try {
+    const parsed = new URL(url)
+    return parsed.pathname.replace(/^.*-v0-/, '')
+  } catch {
+    return url
+  }
+}
+
+function extractRedditHtmlMediaUrls(html) {
+  const decoded = htmlDecode(html)
+  const candidates = []
+  for (const match of decoded.matchAll(
+    /https:\/\/(?:i|preview)\.redd\.it\/[^\s"'<>]+/gi
+  )) {
+    const url = htmlDecode(match[0]).replace(/,$/, '')
+    if (/blur=/i.test(url)) continue
+    if (/\/cms\//i.test(url)) continue
+    candidates.push(url)
+  }
+
+  const bestByKey = new Map()
+  for (const url of candidates) {
+    const key = getRedditHtmlMediaKey(url)
+    const previous = bestByKey.get(key)
+    if (
+      !previous ||
+      scoreRedditHtmlMediaUrl(url) > scoreRedditHtmlMediaUrl(previous)
+    ) {
+      bestByKey.set(key, url)
+    }
+  }
+  return [...bestByKey.values()]
 }
 
 async function preflightRedditSource(source, deps = {}) {
@@ -410,8 +564,15 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
     const apiUrl = getRedditListingUrl(source, after, pageSize)
-    deps.logger?.log?.(`Loading reddit page ${page + 1} (${apiUrl})`)
-    const { data } = await deps.fetchJson(apiUrl)
+    let data
+    try {
+      ;({ data } = await deps.fetchJson(apiUrl))
+    } catch (err) {
+      if (page === 0 && /\bHTTP 403\b/.test(String(err?.message || ''))) {
+        return fetchRedditPostsFromRss(source, options, deps)
+      }
+      throw err
+    }
     const listing = data?.data
     const pagePosts = Array.isArray(listing?.children)
       ? listing.children.map((child) => child?.data).filter(Boolean)
@@ -431,15 +592,99 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
         options.maxPosts > 0 &&
         posts.length >= options.maxPosts
       ) {
+        deps.logger?.log?.(
+          `Fetched reddit pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
+        )
         return posts
       }
     }
+
+    deps.logger?.log?.(
+      `Fetched reddit pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
+    )
 
     after = listing?.after || null
     if (!after) break
     page += 1
   }
 
+  return posts
+}
+
+async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
+  if (typeof deps.fetchHtml !== 'function') {
+    throw new Error('Reddit RSS fallback requires fetchHtml')
+  }
+
+  deps.logger?.log?.('Reddit JSON blocked; using RSS/HTML fallback')
+  const posts = []
+  let after = null
+  let page = 0
+  const pageSize = deps.pageSize || DEFAULT_REDDIT_PAGE_SIZE
+
+  while (true) {
+    if (options.endPage !== null && page > options.endPage) break
+    const rssUrl = getRedditRssUrl(source, after, pageSize)
+    const { html } = await deps.fetchHtml(rssUrl, {
+      headers: {
+        Accept: 'application/atom+xml,text/xml,application/xml',
+        Referer: source.origin,
+        'User-Agent': REDDIT_RSS_USER_AGENT,
+      },
+    })
+    const pagePosts = parseRssEntries(html, source)
+    if (pagePosts.length === 0) break
+
+    for (const post of pagePosts) {
+      if (
+        post.url &&
+        (/reddit\.com\/gallery\//i.test(post.url) ||
+          /reddit\.com\/r\/[^/]+\/comments\//i.test(post.url))
+      ) {
+        try {
+          const { html: postHtml } = await deps.fetchHtml(post.url, {
+            headers: {
+              Referer: source.origin,
+              'User-Agent': REDDIT_RSS_USER_AGENT,
+            },
+          })
+          post.htmlMediaUrls = extractRedditHtmlMediaUrls(postHtml)
+        } catch (err) {
+          deps.logger?.warn?.(
+            `Reddit HTML media fallback failed for ${post.id}: ${err.message}`
+          )
+        }
+      }
+
+      const mediaEntries = await getRedditMediaEntries(source, post, deps)
+      posts.push({
+        ...post,
+        id: String(post.id || ''),
+        published: getRedditPostDate(post),
+        mediaEntries,
+      })
+      if (
+        Number.isFinite(options.maxPosts) &&
+        options.maxPosts > 0 &&
+        posts.length >= options.maxPosts
+      ) {
+        deps.logger?.log?.(
+          `Fetched reddit RSS pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
+        )
+        return posts
+      }
+    }
+
+    after = pagePosts[pagePosts.length - 1]?.id
+      ? `t3_${pagePosts[pagePosts.length - 1].id}`
+      : null
+    if (!after || pagePosts.length < pageSize) break
+    page += 1
+  }
+
+  deps.logger?.log?.(
+    `Fetched reddit RSS pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
+  )
   return posts
 }
 

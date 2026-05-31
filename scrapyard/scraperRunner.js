@@ -133,6 +133,56 @@ function formatScrapeSummaryLine(summary) {
   ].join('\n')
 }
 
+function summarizeRuns(runs = []) {
+  return runs.reduce(
+    (totals, run) => {
+      const summary = run.summary || {}
+      totals.sources += 1
+      if (!run.ok) totals.failures += 1
+      totals.saved += Number(summary.saved || 0)
+      totals.skipped += Number(summary.skipped || 0)
+      totals.duplicates += Number(summary.duplicates || 0)
+      totals.errors += Number(summary.errors || 0)
+      totals.processed += Number(summary.processed || 0)
+      totals.expectedMedia += Number(summary.expectedMedia || 0)
+      totals.savedBytes += Number(summary.savedBytes || 0)
+      totals.durationMs += Number(summary.durationMs || 0)
+      return totals
+    },
+    {
+      sources: 0,
+      failures: 0,
+      saved: 0,
+      skipped: 0,
+      duplicates: 0,
+      errors: 0,
+      processed: 0,
+      expectedMedia: 0,
+      savedBytes: 0,
+      durationMs: 0,
+    }
+  )
+}
+
+function formatModelSummaryLine(result) {
+  const totals = summarizeRuns(result.runs)
+  return [
+    '----- MODEL TOTAL ------------------------------------------------',
+    `MODEL TOTAL | ${result.model}`,
+    [
+      `time ${formatDuration(totals.durationMs)}`,
+      `sources ${totals.sources}/${result.sources.length}`,
+      `processed ${totals.processed}/${totals.expectedMedia}`,
+      `saved ${totals.saved}`,
+      `skipped ${totals.skipped}`,
+      `dupes ${totals.duplicates}`,
+      `failed ${totals.errors}`,
+      `downloaded ${formatBytes(totals.savedBytes)}`,
+    ].join(' | '),
+    '------------------------------------------------------------------',
+  ].join('\n')
+}
+
 function formatModelHeader(index, total, modelName, sourceCount) {
   return [
     '',
@@ -232,9 +282,6 @@ function appendOptionalBoolean(args, optionName, value) {
 
 function runNodeScript(scriptPath, args, { log = console.log } = {}) {
   const { spawnSync } = require('child_process')
-  log('')
-  log(`Running: node ${scriptPath} ${args.join(' ')}`.trim())
-  log('')
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: rootDir,
     stdio: 'inherit',
@@ -257,9 +304,6 @@ function runNodeScriptInteractive(
   { log = console.log } = {}
 ) {
   const { spawn } = require('child_process')
-  log('')
-  log(`Running: node ${scriptPath} ${args.join(' ')}`.trim())
-  log('')
 
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [scriptPath, ...args], {
@@ -568,6 +612,32 @@ function readModelRunSummary(modelName, source = 'milkmaid') {
   }
 }
 
+function isRunSummaryFresh(summary, options = {}) {
+  if (!summary || summary.parseError) return false
+  const { inputUrl, startedAfterMs = 0 } = options
+  const startedAtMs = new Date(summary.startedAt || 0).getTime()
+  if (startedAfterMs > 0 && startedAtMs < startedAfterMs - 1000) return false
+  if (inputUrl && summary.inputUrl) {
+    try {
+      const expected = new URL(inputUrl).toString()
+      const actual = new URL(summary.inputUrl).toString()
+      if (expected !== actual) return false
+    } catch {
+      if (String(summary.inputUrl) !== String(inputUrl)) return false
+    }
+  }
+  return true
+}
+
+function readFreshModelRunSummary(
+  modelName,
+  source = 'milkmaid',
+  options = {}
+) {
+  const summary = readModelRunSummary(modelName, source)
+  return isRunSummaryFresh(summary, options) ? summary : null
+}
+
 function getStatsFromRunSummary(summary) {
   if (!summary || summary.parseError) return null
   return runLifecycle.getRunProgressStats(
@@ -603,11 +673,16 @@ async function runHoghaulScript(
   args,
   parsedSource,
   argv,
-  { log } = {}
+  { log, startedAtMs = 0 } = {}
 ) {
   const modelName = getRunnerModelName(parsedSource, argv)
   const code = await runNodeScriptInteractive(scriptPath, args, { log })
-  const summary = modelName ? readModelRunSummary(modelName, 'hoghaul') : null
+  const summary = modelName
+    ? readFreshModelRunSummary(modelName, 'hoghaul', {
+        inputUrl: parsedSource.inputUrl,
+        startedAfterMs: startedAtMs,
+      })
+    : null
   if (
     summary?.status &&
     summary.status !== 'completed' &&
@@ -676,12 +751,14 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
 
   const runCommand = deps.runCommand || runNodeScript
   const args = buildScraperArgs(parsedSource, argv)
+  const startedAtMs = Date.now()
   let status = 0
   if (deps.runCommand) {
     status = await runCommand(scriptPath, args, { log })
   } else if (parsedSource.scraper === 'hoghaul') {
     status = await runHoghaulScript(scriptPath, args, parsedSource, argv, {
       log,
+      startedAtMs,
     })
   } else {
     status = await runInProcessScraper(
@@ -692,7 +769,10 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
 
   const modelName = getRunnerModelName(parsedSource, argv)
   const summary = modelName
-    ? readModelRunSummary(modelName, parsedSource.scraper)
+    ? readFreshModelRunSummary(modelName, parsedSource.scraper, {
+        inputUrl: parsedSource.inputUrl,
+        startedAfterMs: startedAtMs,
+      })
     : null
   if (summary?.durationMs !== undefined) log(formatScrapeSummaryLine(summary))
   return status
@@ -1387,11 +1467,13 @@ function summarizeSourceRunSummary(summary) {
   return {
     status: summary?.status || null,
     saved: Number(stats?.saved || summary?.successCount || 0),
+    skipped: Number(stats?.skipped || 0),
     duplicates: Number(stats?.duplicates || summary?.duplicateCount || 0),
     errors: Number(stats?.failures || summary?.errorCount || 0),
     processed: Number(stats?.processed || summary?.mediaCount || 0),
     expectedMedia: Number(stats?.expectedMedia || summary?.mediaCount || 0),
     savedBytes: Number(stats?.savedBytes || 0),
+    durationMs: Number(summary?.durationMs || 0),
     finishedAt: summary?.finishedAt || summary?.updatedAt || null,
     logPath: summary?.logPath || null,
   }
@@ -1436,11 +1518,15 @@ async function runAllSourceModelUpdate(item, context = {}) {
       continue
     }
 
+    const sourceStartedAtMs = Date.now()
     const code = await runScrape(
       source.url,
       buildAllSourceRunOptions(argv, item.model, parsedSource)
     )
-    const summary = readModelRunSummary(item.model, parsedSource.scraper)
+    const summary = readFreshModelRunSummary(item.model, parsedSource.scraper, {
+      inputUrl: parsedSource.inputUrl,
+      startedAfterMs: sourceStartedAtMs,
+    })
     const run = {
       ok: code === 0,
       code,
@@ -1457,6 +1543,7 @@ async function runAllSourceModelUpdate(item, context = {}) {
   }
 
   result.finishedAt = new Date().toISOString()
+  console.log(formatModelSummaryLine(result))
   return result
 }
 
@@ -1467,11 +1554,13 @@ function calculateAllSourceTotals(results) {
         totals.runs += 1
         if (!run.ok) totals.failures += 1
         totals.saved += Number(run.summary?.saved || 0)
+        totals.skipped += Number(run.summary?.skipped || 0)
         totals.duplicates += Number(run.summary?.duplicates || 0)
         totals.errors += Number(run.summary?.errors || 0)
         totals.processed += Number(run.summary?.processed || 0)
         totals.expectedMedia += Number(run.summary?.expectedMedia || 0)
         totals.savedBytes += Number(run.summary?.savedBytes || 0)
+        totals.durationMs += Number(run.summary?.durationMs || 0)
       }
       return totals
     },
@@ -1479,11 +1568,13 @@ function calculateAllSourceTotals(results) {
       runs: 0,
       failures: 0,
       saved: 0,
+      skipped: 0,
       duplicates: 0,
       errors: 0,
       processed: 0,
       expectedMedia: 0,
       savedBytes: 0,
+      durationMs: 0,
     }
   )
 }
@@ -1496,7 +1587,7 @@ function writeAllSourceReport(report, latestReportPath, latestTextPath) {
     `Generated: ${report.generatedAt}`,
     `Registry: ${report.registryPath}`,
     `Selected models: ${report.selectedModels}`,
-    `Totals: models=${report.results.length} runs=${report.totals.runs} saved=${report.totals.saved} dupes=${report.totals.duplicates} errors=${report.totals.errors} failures=${report.totals.failures} bytes=${runLifecycle.formatBytes(report.totals.savedBytes)}`,
+    `Totals: models=${report.results.length} runs=${report.totals.runs} saved=${report.totals.saved} skipped=${report.totals.skipped} dupes=${report.totals.duplicates} errors=${report.totals.errors} failures=${report.totals.failures} bytes=${runLifecycle.formatBytes(report.totals.savedBytes)} time=${formatDuration(report.totals.durationMs)}`,
     '',
   ]
 
@@ -1507,7 +1598,7 @@ function writeAllSourceReport(report, latestReportPath, latestTextPath) {
     )
     for (const run of item.runs) {
       lines.push(
-        `  ${run.label}: saved=${run.summary.saved} dupes=${run.summary.duplicates} errors=${run.summary.errors} status=${run.summary.status || 'unknown'}`
+        `  ${run.label}: saved=${run.summary.saved} skipped=${run.summary.skipped} dupes=${run.summary.duplicates} errors=${run.summary.errors} status=${run.summary.status || 'unknown'}`
       )
     }
   }
