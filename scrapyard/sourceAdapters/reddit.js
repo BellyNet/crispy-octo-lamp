@@ -404,6 +404,18 @@ function countPostMedia(posts) {
   )
 }
 
+function emitDiscoveryProgress(deps, details = {}) {
+  if (typeof deps.onDiscoveryProgress !== 'function') return
+  deps.onDiscoveryProgress({
+    pages: details.pages || 0,
+    posts: details.posts || 0,
+    media: details.media || 0,
+    current: details.current || 0,
+    total: details.total || 0,
+    mode: details.mode || 'reddit',
+  })
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -592,6 +604,18 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
         published: getRedditPostDate(post),
         mediaEntries,
       })
+      const targetPosts =
+        Number.isFinite(options.maxPosts) && options.maxPosts > 0
+          ? options.maxPosts
+          : Math.max(pageSize, posts.length + 1)
+      emitDiscoveryProgress(deps, {
+        mode: 'reddit json',
+        pages: page + 1,
+        posts: posts.length,
+        media: countPostMedia(posts),
+        current: Math.min(posts.length, targetPosts),
+        total: targetPosts,
+      })
       if (
         Number.isFinite(options.maxPosts) &&
         options.maxPosts > 0 &&
@@ -672,6 +696,18 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
         id: String(post.id || ''),
         published: getRedditPostDate(post),
         mediaEntries,
+      })
+      const targetPosts =
+        Number.isFinite(options.maxPosts) && options.maxPosts > 0
+          ? options.maxPosts
+          : Math.max(pageSize, posts.length + 1)
+      emitDiscoveryProgress(deps, {
+        mode: 'reddit rss/html',
+        pages: page + 1,
+        posts: posts.length,
+        media: countPostMedia(posts),
+        current: Math.min(posts.length, targetPosts),
+        total: targetPosts,
       })
       if (
         Number.isFinite(options.maxPosts) &&

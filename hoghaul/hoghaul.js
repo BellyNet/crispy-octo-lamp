@@ -796,7 +796,9 @@ async function ensureBrowserMediaDownloader(source, browserOptions) {
     browserExecutable: browserOptions.browserExecutable || null,
     browserProfile:
       browserOptions.browserProfile ||
-      getDefaultBrowserProfileDir(slopvaultRoot, source.site),
+      getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
+        headless: Boolean(browserOptions.headless),
+      }),
     browserConnect: browserOptions.browserConnect || null,
     headless: browserOptions.headless,
     cookieFile: browserOptions.cookieFile || null,
@@ -820,6 +822,7 @@ async function fetchPosts(source, options, deps = {}) {
       fetchHtml,
       fetchPostHtml: deps.fetchPostHtml,
       fallbackDelayMs: deps.fallbackDelayMs,
+      onDiscoveryProgress: deps.onDiscoveryProgress,
       logger: pageLogger,
       normalizeUrl: normalizeSeenUrl,
       pageSize: REDDIT_PAGE_SIZE,
@@ -1272,7 +1275,9 @@ async function run(argvInput = process.argv.slice(2)) {
     appendRunEvent('reddit_browser_fetch_enabled', {
       browserProfile:
         browserOptions.browserProfile ||
-        getDefaultBrowserProfileDir(slopvaultRoot, source.site),
+        getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
+          headless: Boolean(browserOptions.headless),
+        }),
       browserConnect: browserOptions.browserConnect || null,
     })
   }
@@ -1288,6 +1293,13 @@ async function run(argvInput = process.argv.slice(2)) {
     {
       fetchPostHtml: redditBrowserFetchHtml,
       fallbackDelayMs: runOptions.redditFallbackDelayMs,
+      onDiscoveryProgress: ({ current, total, pages, posts, media, mode }) => {
+        const expected = Math.max(total || 1, 1)
+        const processed = Math.max(current || 0, 0)
+        logProgress(current, Math.max(total || 1, 1), {
+          bottomText: `processed ${processed}/${expected} | saved 0 | skipped 0 | dupes 0 | failed 0 | remaining ${Math.max(expected - processed, 0)} | discovery ${pages}p/${posts} posts/${media} media`,
+        })
+      },
     }
   )
   const selectedPosts =

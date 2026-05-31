@@ -227,6 +227,7 @@ Options:
   --preflight                      Hoghaul API preflight.
   --track-source                   Keep source tracking history where supported.
   --no-browser-media               Disable Hoghaul browser media fallback.
+  --browser-visible                Show the fallback browser window.
   --cookie <header>                Hoghaul browser cookie header.
   --cookie-file <path>             Hoghaul browser cookie file.
   --browser-profile <path>         Hoghaul browser profile path.
@@ -510,6 +511,11 @@ function appendHoghaulOptions(args, argv) {
     '--browser-headless',
     isTruthy(getOption(argv, 'browser-headless'))
   )
+  appendBoolean(
+    args,
+    '--browser-visible',
+    isTruthy(getOption(argv, 'browser-visible'))
+  )
   appendBoolean(args, '--headless', isTruthy(getOption(argv, 'headless')))
   appendBoolean(
     args,
@@ -588,8 +594,9 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
       trackSource: isTruthy(getOption(argv, 'track-source')),
       downloadOversized: isTruthy(getOption(argv, 'download-oversized')),
       browserMedia: getOption(argv, 'browser-media'),
-      browserHeadless: isTruthy(getOption(argv, 'browser-headless')),
-      headless: isTruthy(getOption(argv, 'headless')),
+      browserHeadless: getOption(argv, 'browser-headless'),
+      browserVisible: getOption(argv, 'browser-visible'),
+      headless: getOption(argv, 'headless'),
     })
   }
 
@@ -684,6 +691,7 @@ async function runHoghaulScript(
 ) {
   const modelName = getRunnerModelName(parsedSource, argv)
   const code = await runNodeScriptInteractive(scriptPath, args, { log })
+  if (isTruthy(getOption(argv, 'dry-run'))) return code
   const summary = modelName
     ? readFreshModelRunSummary(modelName, 'hoghaul', {
         inputUrl: parsedSource.inputUrl,

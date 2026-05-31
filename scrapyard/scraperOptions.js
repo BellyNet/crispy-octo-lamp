@@ -36,6 +36,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'keep-history',
   'download-oversized',
   'browser-media',
+  'browser-visible',
   'browser-headless',
   'headless',
   'download-oversized',
@@ -89,6 +90,15 @@ function isTruthy(value) {
     .trim()
     .toLowerCase()
   return ['1', 'true', 'yes'].includes(normalized)
+}
+
+function optionalBoolean(value) {
+  if (value === undefined || value === null || value === '') return undefined
+  if (value === true || value === false) return value
+  const normalized = String(value).trim().toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  return Boolean(value)
 }
 
 function parseRunnerArgs(argvInput = process.argv.slice(2)) {
@@ -186,12 +196,32 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
     ''
   const existingUseBrowserMedia = getRunOption(argv, 'useBrowserMedia')
   const browserMedia = getRunOption(argv, 'browserMedia', 'browser-media')
-  const browserHeadless =
-    Boolean(argv.headless) ||
-    Boolean(getRunOption(argv, 'browserHeadless', 'browser-headless')) ||
-    isTruthy(process.env.npm_config_headless) ||
-    isTruthy(process.env.HOGHAUL_BROWSER_HEADLESS) ||
-    Boolean(existingBrowserOptions.headless)
+  const browserVisible =
+    getRunOption(argv, 'browserVisible', 'browser-visible') === true ||
+    isTruthy(process.env.npm_config_browser_visible) ||
+    isTruthy(process.env.HOGHAUL_BROWSER_VISIBLE)
+  const explicitBrowserHeadless =
+    getRunOption(argv, 'browserHeadless', 'browser-headless') === true
+      ? true
+      : undefined
+  const explicitHeadless =
+    getRunOption(argv, 'headless', 'headless') === true ? true : undefined
+  const envBrowserHeadless =
+    process.env.npm_config_headless !== undefined
+      ? optionalBoolean(process.env.npm_config_headless)
+      : process.env.HOGHAUL_BROWSER_HEADLESS !== undefined
+        ? optionalBoolean(process.env.HOGHAUL_BROWSER_HEADLESS)
+        : undefined
+  const browserHeadlessSetting =
+    explicitBrowserHeadless ??
+    explicitHeadless ??
+    envBrowserHeadless ??
+    optionalBoolean(existingBrowserOptions.headless)
+  const browserHeadless = browserVisible
+    ? false
+    : browserHeadlessSetting === undefined
+      ? true
+      : browserHeadlessSetting
 
   return {
     inputUrl,
@@ -292,11 +322,7 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       'npm_config_video_concurrency'
     ),
     redditFallbackDelayMs:
-      getRunOption(
-        argv,
-        'redditFallbackDelayMs',
-        'reddit-fallback-delay-ms'
-      ) ||
+      getRunOption(argv, 'redditFallbackDelayMs', 'reddit-fallback-delay-ms') ||
       process.env.npm_config_reddit_fallback_delay_ms ||
       process.env.HOGHAUL_REDDIT_FALLBACK_DELAY_MS,
   }

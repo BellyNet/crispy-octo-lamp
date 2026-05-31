@@ -26,6 +26,8 @@ function getDefaultBrowserExecutablePath() {
     process.env.HOGHAUL_BROWSER_EXECUTABLE,
     process.env.PUPPETEER_EXECUTABLE_PATH,
     '%LOCALAPPDATA%\\Yandex\\YandexBrowser\\Application\\browser.exe',
+    '%PROGRAMFILES%\\Yandex\\YandexBrowser\\Application\\browser.exe',
+    '%PROGRAMFILES(X86)%\\Yandex\\YandexBrowser\\Application\\browser.exe',
     '%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe',
     '%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe',
     '%PROGRAMFILES(X86)%\\Google\\Chrome\\Application\\chrome.exe',
@@ -35,8 +37,13 @@ function getDefaultBrowserExecutablePath() {
   ])
 }
 
-function getDefaultBrowserProfileDir(slopvaultRoot, sourceSite) {
-  return path.join(slopvaultRoot, 'hoghaul-browser-profile', sourceSite)
+function getDefaultBrowserProfileDir(slopvaultRoot, sourceSite, options = {}) {
+  const suffix = options.headless ? '-headless' : ''
+  return path.join(
+    slopvaultRoot,
+    'hoghaul-browser-profile',
+    `${sourceSite}${suffix}`
+  )
 }
 
 function normalizeCookieDomain(hostname) {
@@ -187,10 +194,12 @@ async function createBrowserMediaDownloader(source, options = {}) {
 
   const executablePath =
     options.browserExecutable || getDefaultBrowserExecutablePath()
+  const headless = options.headless ? 'new' : false
   const userDataDir =
     options.browserProfile ||
-    getDefaultBrowserProfileDir(slopvaultRoot, source.site)
-  const headless = options.headless ? 'new' : false
+    getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
+      headless: Boolean(options.headless),
+    })
   if (!browser) {
     fs.mkdirSync(userDataDir, { recursive: true })
 
