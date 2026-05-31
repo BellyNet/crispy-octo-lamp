@@ -25,6 +25,7 @@ const HOGHAUL_STRING_OPTIONS = [
   'post-concurrency',
   'image-concurrency',
   'video-concurrency',
+  'reddit-fallback-delay-ms',
 ]
 
 const HOGHAUL_BOOLEAN_OPTIONS = [
@@ -290,6 +291,14 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       'video-concurrency',
       'npm_config_video_concurrency'
     ),
+    redditFallbackDelayMs:
+      getRunOption(
+        argv,
+        'redditFallbackDelayMs',
+        'reddit-fallback-delay-ms'
+      ) ||
+      process.env.npm_config_reddit_fallback_delay_ms ||
+      process.env.HOGHAUL_REDDIT_FALLBACK_DELAY_MS,
   }
 }
 

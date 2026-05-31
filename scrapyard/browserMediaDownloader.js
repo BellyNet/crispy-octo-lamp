@@ -257,7 +257,38 @@ async function createBrowserMediaDownloader(source, options = {}) {
       .join('; ')
   }
 
+  async function fetchHtml(pageUrl, fetchOptions = {}) {
+    const page = await browser.newPage()
+    try {
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: fetchOptions.referer || source.inputUrl,
+        ...(fetchOptions.headers || {}),
+      })
+      const response = await page.goto(pageUrl, {
+        waitUntil: fetchOptions.waitUntil || 'domcontentloaded',
+        timeout: fetchOptions.timeoutMs || options.timeoutMs,
+      })
+      if (!response) throw new Error('Browser returned no response')
+      const status = response.status()
+      if (status < 200 || status >= 300) {
+        throw new Error(`Browser HTTP ${status}`)
+      }
+      const html = await page.content()
+      return {
+        html,
+        byteLength: Buffer.byteLength(html),
+        url: page.url(),
+        statusCode: status,
+        headers: response.headers(),
+      }
+    } finally {
+      await page.close().catch(() => {})
+    }
+  }
+
   return {
+    fetchHtml,
     async downloadToFile(
       mediaUrl,
       destinationPath,

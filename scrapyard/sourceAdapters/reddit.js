@@ -7,6 +7,7 @@ const mediaFileRecords = require('../mediaFileRecords')
 const DEFAULT_REDDIT_PAGE_SIZE = 100
 const REDDIT_RSS_USER_AGENT =
   'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
+const DEFAULT_REDDIT_FALLBACK_DELAY_MS = 1500
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -403,6 +404,10 @@ function countPostMedia(posts) {
   )
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function extractXmlTag(block, tag) {
   const match = String(block || '').match(
     new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i')
@@ -621,6 +626,9 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
   let after = null
   let page = 0
   const pageSize = deps.pageSize || DEFAULT_REDDIT_PAGE_SIZE
+  const fallbackDelayMs =
+    Number.parseInt(deps.fallbackDelayMs || '', 10) ||
+    DEFAULT_REDDIT_FALLBACK_DELAY_MS
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -642,13 +650,15 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
           /reddit\.com\/r\/[^/]+\/comments\//i.test(post.url))
       ) {
         try {
-          const { html: postHtml } = await deps.fetchHtml(post.url, {
+          const fetchPostHtml = deps.fetchPostHtml || deps.fetchHtml
+          const { html: postHtml } = await fetchPostHtml(post.url, {
             headers: {
               Referer: source.origin,
               'User-Agent': REDDIT_RSS_USER_AGENT,
             },
           })
           post.htmlMediaUrls = extractRedditHtmlMediaUrls(postHtml)
+          if (fallbackDelayMs > 0) await sleep(fallbackDelayMs)
         } catch (err) {
           deps.logger?.warn?.(
             `Reddit HTML media fallback failed for ${post.id}: ${err.message}`

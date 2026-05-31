@@ -42,6 +42,7 @@ const {
   removeFileIfExists,
 } = require('../scrapyard/fileOps')
 const { createHttpClient } = require('../scrapyard/httpClient')
+const redditOAuth = require('../scrapyard/redditOAuth')
 const { createRedgifsClient } = require('../scrapyard/redgifsClient')
 const {
   createBrowserMediaDownloader: createSharedBrowserMediaDownloader,
@@ -91,6 +92,7 @@ const datasetPaths = createDatasetPaths({
   repairCanUseNasMirror: true,
 })
 const rootDir = datasetPaths.rootDir
+const slopvaultRoot = datasetPaths.slopvaultRoot
 const datasetDir = datasetPaths.datasetDir
 const nasDatasetDir = datasetPaths.nasDatasetDir
 const registryPath =
@@ -552,6 +554,26 @@ async function closeBrowserMediaDownloader() {
 async function fetchJson(url, requestOptions = {}) {
   const parsed = new URL(url)
   const isReddit = parsed.hostname.toLowerCase().endsWith('reddit.com')
+  if (isReddit) {
+    try {
+      const access = await redditOAuth.getRedditOAuthAccess()
+      if (access?.accessToken) {
+        return httpClient.fetchJson(redditOAuth.toOAuthRedditUrl(url), {
+          ...requestOptions,
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${access.accessToken}`,
+            'User-Agent': access.userAgent,
+            ...(requestOptions.headers || {}),
+          },
+        })
+      }
+    } catch (err) {
+      if (process.env.HOGHAUL_VERBOSE === '1') {
+        console.warn(`Reddit OAuth unavailable: ${err.message}`)
+      }
+    }
+  }
   return httpClient.fetchJson(url, {
     ...requestOptions,
     headers: {
@@ -761,7 +783,30 @@ async function resolveKemonoCreatorIdForJson(source) {
   })
 }
 
-async function fetchPosts(source, options) {
+async function ensureBrowserMediaDownloader(source, browserOptions) {
+  if (browserMediaDownloader) return browserMediaDownloader
+  browserMediaDownloader = await createSharedBrowserMediaDownloader(source, {
+    ...browserOptions,
+    slopvaultRoot,
+    requestBuffer,
+    requestToFile,
+    appendRunEvent,
+  })
+  appendRunEvent('browser_media_enabled', {
+    browserExecutable: browserOptions.browserExecutable || null,
+    browserProfile:
+      browserOptions.browserProfile ||
+      getDefaultBrowserProfileDir(slopvaultRoot, source.site),
+    browserConnect: browserOptions.browserConnect || null,
+    headless: browserOptions.headless,
+    cookieFile: browserOptions.cookieFile || null,
+    hasCookieHeader: Boolean(browserOptions.cookieHeader),
+    validateMs: browserOptions.validateMs,
+  })
+  return browserMediaDownloader
+}
+
+async function fetchPosts(source, options, deps = {}) {
   const pageLogger = createStatusLineLogger(console)
   if (source.site === 'coomerfans') {
     return fetchCoomerFansAdapterPosts(source, options, {
@@ -773,6 +818,8 @@ async function fetchPosts(source, options) {
     return fetchRedditAdapterPosts(source, options, {
       fetchJson,
       fetchHtml,
+      fetchPostHtml: deps.fetchPostHtml,
+      fallbackDelayMs: deps.fallbackDelayMs,
       logger: pageLogger,
       normalizeUrl: normalizeSeenUrl,
       pageSize: REDDIT_PAGE_SIZE,
@@ -1176,7 +1223,7 @@ async function run(argvInput = process.argv.slice(2)) {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
-  if (source.site === 'coomerfans' || source.site === 'reddit') {
+  if (source.site === 'coomerfans') {
     useBrowserMedia = false
   }
   const imageConcurrency = parsePositiveInteger(
@@ -1218,12 +1265,31 @@ async function run(argvInput = process.argv.slice(2)) {
     return 0
   }
 
-  const posts = await fetchPosts(source, {
-    startPage,
-    endPage,
-    maxPosts,
-    postConcurrency,
-  })
+  let redditBrowserFetchHtml = null
+  if (source.site === 'reddit' && useBrowserMedia) {
+    const browser = await ensureBrowserMediaDownloader(source, browserOptions)
+    redditBrowserFetchHtml = browser.fetchHtml
+    appendRunEvent('reddit_browser_fetch_enabled', {
+      browserProfile:
+        browserOptions.browserProfile ||
+        getDefaultBrowserProfileDir(slopvaultRoot, source.site),
+      browserConnect: browserOptions.browserConnect || null,
+    })
+  }
+
+  const posts = await fetchPosts(
+    source,
+    {
+      startPage,
+      endPage,
+      maxPosts,
+      postConcurrency,
+    },
+    {
+      fetchPostHtml: redditBrowserFetchHtml,
+      fallbackDelayMs: runOptions.redditFallbackDelayMs,
+    }
+  )
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
   const mediaEntries = normalizeMediaEntries(
@@ -1314,24 +1380,7 @@ async function run(argvInput = process.argv.slice(2)) {
   setExpectedMediaCount(selectedMedia.length)
 
   if (useBrowserMedia) {
-    browserMediaDownloader = await createSharedBrowserMediaDownloader(source, {
-      ...browserOptions,
-      slopvaultRoot,
-      requestBuffer,
-      requestToFile,
-      appendRunEvent,
-    })
-    appendRunEvent('browser_media_enabled', {
-      browserExecutable: browserOptions.browserExecutable || null,
-      browserProfile:
-        browserOptions.browserProfile ||
-        getDefaultBrowserProfileDir(slopvaultRoot, source.site),
-      browserConnect: browserOptions.browserConnect || null,
-      headless: browserOptions.headless,
-      cookieFile: browserOptions.cookieFile || null,
-      hasCookieHeader: Boolean(browserOptions.cookieHeader),
-      validateMs: browserOptions.validateMs,
-    })
+    await ensureBrowserMediaDownloader(source, browserOptions)
     selectedMedia = await enrichMediaEntriesFromBrowserDom(
       selectedMedia,
       browserMediaDownloader

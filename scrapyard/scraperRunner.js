@@ -222,6 +222,7 @@ Options:
   --post-concurrency <n>           Hoghaul post fetch concurrency.
   --image-concurrency <n>          Hoghaul image/gif concurrency.
   --video-concurrency <n>          Hoghaul video concurrency.
+  --reddit-fallback-delay-ms <ms>  Delay between Reddit fallback post pages.
   --dry-run                        Hoghaul dry run.
   --preflight                      Hoghaul API preflight.
   --track-source                   Keep source tracking history where supported.
@@ -478,6 +479,11 @@ function appendHoghaulOptions(args, argv) {
     '--video-concurrency',
     getOption(argv, 'video-concurrency')
   )
+  appendOption(
+    args,
+    '--reddit-fallback-delay-ms',
+    getOption(argv, 'reddit-fallback-delay-ms')
+  )
   appendOption(args, '--cookie', getOption(argv, 'cookie'))
   appendOption(args, '--cookie-file', getOption(argv, 'cookie-file'))
   appendOption(
@@ -570,6 +576,7 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
       postConcurrency: getOption(argv, 'post-concurrency'),
       imageConcurrency: getOption(argv, 'image-concurrency'),
       videoConcurrency: getOption(argv, 'video-concurrency'),
+      redditFallbackDelayMs: getOption(argv, 'reddit-fallback-delay-ms'),
       cookie: getOption(argv, 'cookie'),
       cookieFile: getOption(argv, 'cookie-file'),
       browserExecutable: getOption(argv, 'browser-executable'),
@@ -893,7 +900,12 @@ function buildSourceBatchOptions(argv) {
     'video-concurrency': getOption(argv, 'video-concurrency') || '6',
   }
 
-  for (const name of ['pages', 'max-posts', 'max-files']) {
+  for (const name of [
+    'pages',
+    'max-posts',
+    'max-files',
+    'reddit-fallback-delay-ms',
+  ]) {
     const value = getOption(argv, name)
     if (value !== undefined && value !== null && value !== '') {
       options[name] = value
@@ -926,6 +938,7 @@ Options:
   --post-concurrency <n>      Post fetch concurrency.
   --image-concurrency <n>     Image/gif concurrency.
   --video-concurrency <n>     Video concurrency.
+  --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.
   --skip-nas-sync             Skip NAS sync.
@@ -1431,6 +1444,7 @@ Options:
   --post-concurrency <n>      Post fetch concurrency.
   --image-concurrency <n>     Image/gif concurrency.
   --video-concurrency <n>     Video concurrency.
+  --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between source runs.
   --dry-run                   Dry run Hoghaul sources.
   --skip-nas-sync             Skip NAS sync.
