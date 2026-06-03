@@ -10,6 +10,7 @@ const {
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
 const { transcodeWebmInUserDir } = require('./transcodeWebm')
+const { faststartInUserDir } = require('./faststartMp4')
 
 const LOCAL_REGISTRY_PATH = path.join(__dirname, '..', 'model_aliases.json')
 
@@ -64,6 +65,14 @@ async function syncModelToNas({
   // the sync; the original .webm stays in place and still gets robocopied.
   await transcodeWebmInUserDir(localModelDir, { log }).catch((err) => {
     log.warn?.(`Pre-sync webm transcode failed: ${err.message}`)
+  })
+
+  // Remux any non-faststart .mp4/.m4v in place so the browser doesn't
+  // have to round-trip the file tail before playback can begin. Pure
+  // remux (no re-encode), so it's fast and lossless. Same try/catch
+  // pattern: failures don't block the sync.
+  await faststartInUserDir(localModelDir, { log }).catch((err) => {
+    log.warn?.(`Pre-sync faststart pass failed: ${err.message}`)
   })
 
   const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /XC /XN /XO /R:2 /W:5`

@@ -2632,8 +2632,13 @@
         noResultsEl.style.display = 'none'
 
         const token = ++_renderToken
-        const INITIAL = 200
-        const BATCH = 200
+        // Smaller first batch on phones: iPhones repaint 60 cards quickly,
+        // get the user something they can scroll, then the IntersectionObserver
+        // streams the rest in. Desktop keeps 200 since the first batch fits
+        // multiple viewports without scrolling.
+        const onPhone = window.matchMedia('(max-width: 640px)').matches
+        const INITIAL = onPhone ? 60 : 200
+        const BATCH = onPhone ? 60 : 200
         let i = 0
 
         const renderBatch = (n) => {

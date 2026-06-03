@@ -1558,7 +1558,7 @@ async function start() {
     console.warn('  Startup scan error:', err.message)
   )
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`\n  Dataset Dashboard → http://localhost:${PORT}`)
     console.log(
       `  Tick:      every ${TICK_INTERVAL_MS / 1000}s — nightly full scan at ${NIGHTLY_HOUR}:00`
@@ -1567,6 +1567,14 @@ async function start() {
       `  Response cache: LRU(${RESPONSE_CACHE_MAX}) in memory + disk\n`
     )
   })
+
+  // Bump TCP keep-alive so iPhone Safari (which pauses for seconds between
+  // user taps) keeps connections warm. Default is 5 s — a freshly opened
+  // model on mobile then pays a fresh handshake on every other request.
+  // headersTimeout must be > keepAliveTimeout to avoid Node closing sockets
+  // mid-request when the client takes a moment to send headers.
+  server.keepAliveTimeout = 65 * 1000
+  server.headersTimeout = 70 * 1000
 
   // Cover thumbs first — these block the home grid being fast. Cheap (sharp).
   prewarmCoverThumbs()
