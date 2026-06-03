@@ -1609,7 +1609,7 @@
       let allMedia = [] // full list for current user
       let filtered = [] // filtered + sorted list
       let activeType = 'all'
-      let activeSort = 'asc'
+      let activeSort = 'added-desc'
       let homeVisible = false
       let currentUsername = null
 
@@ -2265,11 +2265,14 @@
         currentNameEl.textContent = username
         renderSourceLinks(sources)
 
-        // Restore the user's last sort for this model (defaults to 'asc').
-        let savedSort = 'asc'
+        // Restore the user's last sort for this model. First-ever visit
+        // defaults to 'added-desc' so freshly scraped media shows up at
+        // the top — that's almost always what you want when you click
+        // into a model.
+        let savedSort = 'added-desc'
         try {
           savedSort =
-            localStorage.getItem(`dashboard-sort-${username}`) || 'asc'
+            localStorage.getItem(`dashboard-sort-${username}`) || 'added-desc'
         } catch {}
         activeSort = savedSort
         sortSelect.value = savedSort
