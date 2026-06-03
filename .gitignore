@@ -40,6 +40,12 @@ slopvault-*.log
 slopvault-diff.txt
 Tagger/final
 *.ps1
+# These three are meaningful, shared operational scripts — the blanket
+# *.ps1 ignore above is meant to skip local one-offs and node_modules' .ps1
+# shims, not the repo's own automation. Keep them tracked.
+!deploy-dashboard.ps1
+!update-nas.ps1
+!update-repo.ps1
 
 hoghaul/coomer_sources.json
 hoghaul/source-backfill-permanent-skips.json
