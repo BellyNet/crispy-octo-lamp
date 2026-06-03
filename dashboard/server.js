@@ -235,7 +235,7 @@ function buildSourceMap() {
 function getMediaType(folder, filename) {
   const ext = path.extname(filename).toLowerCase()
   if (ext === '.gif') return 'gif'
-  if (ext === '.mp4' || ext === '.webm') return 'video'
+  if (VIDEO_EXTS_IN.has(ext)) return 'video'
   return 'image'
 }
 
