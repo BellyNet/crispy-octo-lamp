@@ -2694,19 +2694,22 @@
         loadPswp().then((PhotoSwipe) => {
           const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
-              // Initial preload is "metadata" — enough to render the first
-              // frame in the slide so the user never sees a gray placeholder.
-              // syncVideos() below promotes the *active* slide to "auto" (so
-              // playback bytes start flowing immediately) and demotes
-              // non-active slides to "none" (so adjacent ±1 slides don't keep
-              // tying up HTTP connections to the NAS while you scrub).
+              // preload="none" + a poster image: the slide opens *instantly*
+              // showing the cached GIF/JPEG preview, while no bytes are
+              // fetched until syncVideos() activates the slide. Earlier
+              // versions used preload="metadata" on every slide, which kicked
+              // off three simultaneous range requests for huge MP4s the
+              // moment the lightbox opened — the active slide had to fight
+              // for bandwidth and visibly stalled.
               const wrap = document.createElement('div')
               wrap.className = 'pswp-video-wrap'
               const video = document.createElement('video')
               video.controls = true
               video.loop = true
               video.playsInline = true
-              video.preload = 'metadata'
+              video.preload = 'none'
+              if (item.previewUrl || item.thumbUrl)
+                video.poster = item.previewUrl || item.thumbUrl
               video.src = item.url
               wrap.appendChild(video)
               return { html: wrap.outerHTML, _item: item }
@@ -3140,7 +3143,15 @@
                 v.closest('.pswp__item.pswp__item--current') ||
                 v.closest('.pswp__item--active')
               if (inActive) {
-                if (v.preload !== 'auto') v.preload = 'auto'
+                // Promote preload then call load() — setting the attribute
+                // alone doesn't restart the loading state machine, but
+                // load() does, and it's a no-op if the browser had already
+                // started fetching. Then play() — the user's click into
+                // the lightbox is the gesture that authorizes audio.
+                if (v.preload !== 'auto') {
+                  v.preload = 'auto'
+                  v.load()
+                }
                 v.play().catch(() => {})
               } else {
                 if (v.preload !== 'none') v.preload = 'none'
