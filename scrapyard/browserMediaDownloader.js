@@ -187,7 +187,7 @@ async function createBrowserMediaDownloader(source, options = {}) {
     const browserWSEndpoint = /^https?:\/\//i.test(options.browserConnect)
       ? await getBrowserWebSocketEndpoint(options.browserConnect, requestBuffer)
       : options.browserConnect
-    logger.log(`Browser media mode: connected browser (${browserWSEndpoint})`)
+    appendRunEvent('browser_connected', { browserWSEndpoint })
     browser = await puppeteer.connect({ browserWSEndpoint })
     shouldCloseBrowser = false
   }
@@ -216,10 +216,11 @@ async function createBrowserMediaDownloader(source, options = {}) {
     }
     if (executablePath) launchOptions.executablePath = executablePath
 
-    logger.log(
-      `Browser media mode: ${executablePath || 'bundled Chromium'} (${headless ? 'headless' : 'headful'})`
-    )
-    logger.log(`Browser profile: ${userDataDir}`)
+    appendRunEvent('browser_launched', {
+      executablePath: executablePath || null,
+      headless: Boolean(headless),
+      userDataDir,
+    })
 
     browser = await puppeteer.launch(launchOptions)
   }
@@ -228,7 +229,7 @@ async function createBrowserMediaDownloader(source, options = {}) {
     const cookiePage = await browser.newPage()
     await cookiePage.setCookie(...cookies)
     await cookiePage.close()
-    logger.log(`Loaded ${cookies.length} browser cookie(s) for media requests.`)
+    appendRunEvent('browser_cookies_loaded', { count: cookies.length })
   }
 
   const warmupPage = await browser.newPage()

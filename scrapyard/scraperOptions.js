@@ -39,6 +39,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'browser-visible',
   'browser-headless',
   'headless',
+  'reddit-browser-media',
   'download-oversized',
 ]
 
@@ -249,6 +250,10 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
         ? Boolean(existingUseBrowserMedia)
         : browserMedia !== false &&
           !isTruthy(process.env.npm_config_no_browser_media),
+    redditBrowserMedia:
+      Boolean(getRunOption(argv, 'redditBrowserMedia', 'reddit-browser-media')) ||
+      isTruthy(process.env.npm_config_reddit_browser_media) ||
+      isTruthy(process.env.HOGHAUL_REDDIT_BROWSER_MEDIA),
     browserOptions: {
       browserExecutable:
         getRunOption(argv, 'browserExecutable', 'browser-executable') ||

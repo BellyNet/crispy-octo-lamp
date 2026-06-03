@@ -107,7 +107,12 @@ const DOWNLOAD_PROGRESS_RENDER_INTERVAL_MS = 5000
 const httpClient = createHttpClient({ timeoutMs: REQUEST_TIMEOUT_MS })
 const requestBuffer = httpClient.requestBuffer
 const requestToFile = httpClient.requestToFile
-const redgifsClient = createRedgifsClient({ requestBuffer })
+const redgifsClient = createRedgifsClient({
+  requestBuffer,
+  timeoutMs:
+    Number.parseInt(String(process.env.HOGHAUL_REDGIFS_TIMEOUT_MS || ''), 10) ||
+    5000,
+})
 const DEFAULT_MAX_VIDEO_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_VIDEO_DOWNLOAD_BYTES = (() => {
   const raw = process.env.HOGHAUL_MAX_VIDEO_DOWNLOAD_BYTES
@@ -823,6 +828,7 @@ async function fetchPosts(source, options, deps = {}) {
       fetchPostHtml: deps.fetchPostHtml,
       fallbackDelayMs: deps.fallbackDelayMs,
       onDiscoveryProgress: deps.onDiscoveryProgress,
+      appendRunEvent,
       logger: pageLogger,
       normalizeUrl: normalizeSeenUrl,
       pageSize: REDDIT_PAGE_SIZE,
@@ -1229,6 +1235,13 @@ async function run(argvInput = process.argv.slice(2)) {
   if (source.site === 'coomerfans') {
     useBrowserMedia = false
   }
+  if (
+    source.site === 'reddit' &&
+    !runOptions.redditBrowserMedia &&
+    !process.env.HOGHAUL_REDDIT_BROWSER_MEDIA
+  ) {
+    useBrowserMedia = false
+  }
   const imageConcurrency = parsePositiveInteger(
     runOptions.imageConcurrency || process.env.HOGHAUL_IMAGE_CONCURRENCY,
     source.site === 'coomerfans' ? 3 : 6
@@ -1270,16 +1283,22 @@ async function run(argvInput = process.argv.slice(2)) {
 
   let redditBrowserFetchHtml = null
   if (source.site === 'reddit' && useBrowserMedia) {
-    const browser = await ensureBrowserMediaDownloader(source, browserOptions)
-    redditBrowserFetchHtml = browser.fetchHtml
-    appendRunEvent('reddit_browser_fetch_enabled', {
-      browserProfile:
-        browserOptions.browserProfile ||
-        getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
-          headless: Boolean(browserOptions.headless),
-        }),
-      browserConnect: browserOptions.browserConnect || null,
-    })
+    let redditBrowserFetchLogged = false
+    redditBrowserFetchHtml = async (...args) => {
+      const browser = await ensureBrowserMediaDownloader(source, browserOptions)
+      if (!redditBrowserFetchLogged) {
+        redditBrowserFetchLogged = true
+        appendRunEvent('reddit_browser_fetch_enabled', {
+          browserProfile:
+            browserOptions.browserProfile ||
+            getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
+              headless: Boolean(browserOptions.headless),
+            }),
+          browserConnect: browserOptions.browserConnect || null,
+        })
+      }
+      return browser.fetchHtml(...args)
+    }
   }
 
   const posts = await fetchPosts(
@@ -1391,7 +1410,8 @@ async function run(argvInput = process.argv.slice(2)) {
 
   setExpectedMediaCount(selectedMedia.length)
 
-  if (useBrowserMedia) {
+  const useBrowserDomEnrichment = useBrowserMedia && source.site !== 'reddit'
+  if (useBrowserDomEnrichment) {
     await ensureBrowserMediaDownloader(source, browserOptions)
     selectedMedia = await enrichMediaEntriesFromBrowserDom(
       selectedMedia,
@@ -1416,7 +1436,7 @@ async function run(argvInput = process.argv.slice(2)) {
       )
     }
     setExpectedMediaCount(selectedMedia.length)
-  } else {
+  } else if (!useBrowserMedia) {
     logScrollingMessage(
       'Browser media mode disabled; using direct HTTP media requests.'
     )

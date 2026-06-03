@@ -7,7 +7,9 @@ const mediaFileRecords = require('../mediaFileRecords')
 const DEFAULT_REDDIT_PAGE_SIZE = 100
 const REDDIT_RSS_USER_AGENT =
   'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
-const DEFAULT_REDDIT_FALLBACK_DELAY_MS = 1500
+const DEFAULT_REDDIT_FALLBACK_DELAY_MS = 0
+const REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS = 25
+const REDDIT_DISCOVERY_PROGRESS_EVERY_MS = 5000
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -348,8 +350,12 @@ async function getRedditMediaEntries(source, post, deps = {}) {
     entries.push(createRedditEntry(source, post, directUrl, uploadedDate))
   }
 
-  if (Array.isArray(post.htmlMediaUrls)) {
-    post.htmlMediaUrls.forEach((mediaUrl, index) => {
+  const htmlMediaUrls = uniqueUrls([
+    post.rssContentHtml ? extractRedditHtmlMediaUrls(post.rssContentHtml) : [],
+    post.htmlMediaUrls,
+  ])
+  if (htmlMediaUrls.length > 0) {
+    htmlMediaUrls.forEach((mediaUrl, index) => {
       entries.push(
         createRedditEntry(source, post, mediaUrl, uploadedDate, {
           index,
@@ -416,8 +422,34 @@ function emitDiscoveryProgress(deps, details = {}) {
   })
 }
 
+function getDiscoveryTargetPosts(options, page, pageSize, postCount) {
+  if (Number.isFinite(options.maxPosts) && options.maxPosts > 0) {
+    return options.maxPosts
+  }
+  return Math.max(pageSize * (page + 1), postCount || 1)
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const concurrency = Math.max(Number.parseInt(String(limit || '1'), 10) || 1, 1)
+  const results = new Array(items.length)
+  let nextIndex = 0
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(items[index], index)
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  )
+  return results
 }
 
 function extractXmlTag(block, tag) {
@@ -503,6 +535,25 @@ function scoreRedditHtmlMediaUrl(url) {
   return score
 }
 
+function normalizeRedditHtmlMediaUrl(url) {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'preview.redd.it') {
+      parsed.hostname = 'i.redd.it'
+      parsed.search = ''
+      return parsed.toString()
+    }
+    if (host === 'i.redd.it') {
+      parsed.search = ''
+      return parsed.toString()
+    }
+  } catch {
+    return url
+  }
+  return url
+}
+
 function getRedditHtmlMediaKey(url) {
   try {
     const parsed = new URL(url)
@@ -518,7 +569,9 @@ function extractRedditHtmlMediaUrls(html) {
   for (const match of decoded.matchAll(
     /https:\/\/(?:i|preview)\.redd\.it\/[^\s"'<>]+/gi
   )) {
-    const url = htmlDecode(match[0]).replace(/,$/, '')
+    const url = normalizeRedditHtmlMediaUrl(
+      htmlDecode(match[0]).replace(/,$/, '')
+    )
     if (/blur=/i.test(url)) continue
     if (/\/cms\//i.test(url)) continue
     candidates.push(url)
@@ -577,6 +630,38 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
   let after = null
   let page = 0
   const pageSize = deps.pageSize || DEFAULT_REDDIT_PAGE_SIZE
+  let lastDiscoveryProgressPostCount = 0
+  let lastDiscoveryProgressAt = 0
+  const postConcurrency = options.postConcurrency || 1
+
+  const maybeEmitProgress = (force = false) => {
+    const now = Date.now()
+    if (
+      !force &&
+      posts.length > 1 &&
+      posts.length - lastDiscoveryProgressPostCount <
+        REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS &&
+      now - lastDiscoveryProgressAt < REDDIT_DISCOVERY_PROGRESS_EVERY_MS
+    ) {
+      return
+    }
+    lastDiscoveryProgressPostCount = posts.length
+    lastDiscoveryProgressAt = now
+    const targetPosts = getDiscoveryTargetPosts(
+      options,
+      page,
+      pageSize,
+      posts.length
+    )
+    emitDiscoveryProgress(deps, {
+      mode: 'reddit json',
+      pages: page + 1,
+      posts: posts.length,
+      media: countPostMedia(posts),
+      current: Math.min(posts.length, targetPosts),
+      total: targetPosts,
+    })
+  }
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -596,41 +681,39 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
       : []
     if (pagePosts.length === 0) break
 
-    for (const post of pagePosts) {
-      const mediaEntries = await getRedditMediaEntries(source, post, deps)
-      posts.push({
-        ...post,
-        id: String(post.id || ''),
-        published: getRedditPostDate(post),
-        mediaEntries,
-      })
-      const targetPosts =
-        Number.isFinite(options.maxPosts) && options.maxPosts > 0
-          ? options.maxPosts
-          : Math.max(pageSize, posts.length + 1)
-      emitDiscoveryProgress(deps, {
-        mode: 'reddit json',
-        pages: page + 1,
-        posts: posts.length,
-        media: countPostMedia(posts),
-        current: Math.min(posts.length, targetPosts),
-        total: targetPosts,
-      })
+    const remainingPosts =
+      Number.isFinite(options.maxPosts) && options.maxPosts > 0
+        ? Math.max(options.maxPosts - posts.length, 0)
+        : pagePosts.length
+    const postsToProcess = pagePosts.slice(0, remainingPosts)
+    const processedPagePosts = await mapWithConcurrency(
+      postsToProcess,
+      postConcurrency,
+      async (post) => {
+        const mediaEntries = await getRedditMediaEntries(source, post, deps)
+        return {
+          ...post,
+          id: String(post.id || ''),
+          published: getRedditPostDate(post),
+          mediaEntries,
+        }
+      }
+    )
+
+    for (const post of processedPagePosts) {
+      posts.push(post)
+      maybeEmitProgress(false)
       if (
         Number.isFinite(options.maxPosts) &&
         options.maxPosts > 0 &&
         posts.length >= options.maxPosts
       ) {
-        deps.logger?.log?.(
-          `Fetched reddit pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
-        )
+        maybeEmitProgress(true)
         return posts
       }
     }
 
-    deps.logger?.log?.(
-      `Fetched reddit pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
-    )
+    maybeEmitProgress(true)
 
     after = listing?.after || null
     if (!after) break
@@ -645,14 +728,76 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
     throw new Error('Reddit RSS fallback requires fetchHtml')
   }
 
-  deps.logger?.log?.('Reddit JSON blocked; using RSS/HTML fallback')
   const posts = []
   let after = null
   let page = 0
   const pageSize = deps.pageSize || DEFAULT_REDDIT_PAGE_SIZE
+  const parsedFallbackDelayMs = Number.parseInt(
+    String(deps.fallbackDelayMs ?? ''),
+    10
+  )
   const fallbackDelayMs =
-    Number.parseInt(deps.fallbackDelayMs || '', 10) ||
-    DEFAULT_REDDIT_FALLBACK_DELAY_MS
+    Number.isFinite(parsedFallbackDelayMs) && parsedFallbackDelayMs >= 0
+      ? parsedFallbackDelayMs
+      : DEFAULT_REDDIT_FALLBACK_DELAY_MS
+  let lastDiscoveryProgressPostCount = 0
+  let lastDiscoveryProgressAt = 0
+  let htmlFallbackFailureCount = 0
+  let firstHtmlFallbackFailure = null
+  const postConcurrency = options.postConcurrency || 1
+
+  const maybeEmitProgress = (force = false) => {
+    const now = Date.now()
+    if (
+      !force &&
+      posts.length > 1 &&
+      posts.length - lastDiscoveryProgressPostCount <
+        REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS &&
+      now - lastDiscoveryProgressAt < REDDIT_DISCOVERY_PROGRESS_EVERY_MS
+    ) {
+      return
+    }
+    lastDiscoveryProgressPostCount = posts.length
+    lastDiscoveryProgressAt = now
+    const targetPosts = getDiscoveryTargetPosts(
+      options,
+      page,
+      pageSize,
+      posts.length
+    )
+    emitDiscoveryProgress(deps, {
+      mode: 'reddit rss/html',
+      pages: page + 1,
+      posts: posts.length,
+      media: countPostMedia(posts),
+      current: Math.min(posts.length, targetPosts),
+      total: targetPosts,
+    })
+  }
+
+  const noteHtmlFallbackFailure = (post, err) => {
+    htmlFallbackFailureCount += 1
+    if (!firstHtmlFallbackFailure) {
+      firstHtmlFallbackFailure = {
+        id: String(post?.id || 'unknown'),
+        message: String(err?.message || err || 'unknown error'),
+      }
+    }
+  }
+
+  const emitHtmlFallbackSummary = () => {
+    if (
+      htmlFallbackFailureCount === 0 ||
+      typeof deps.appendRunEvent !== 'function'
+    ) {
+      return
+    }
+    deps.appendRunEvent('reddit_html_media_fallback_summary', {
+      failures: htmlFallbackFailureCount,
+      samplePostId: firstHtmlFallbackFailure?.id || null,
+      sampleMessage: firstHtmlFallbackFailure?.message || null,
+    })
+  }
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -667,59 +812,69 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
     const pagePosts = parseRssEntries(html, source)
     if (pagePosts.length === 0) break
 
-    for (const post of pagePosts) {
-      if (
-        post.url &&
-        (/reddit\.com\/gallery\//i.test(post.url) ||
-          /reddit\.com\/r\/[^/]+\/comments\//i.test(post.url))
-      ) {
-        try {
-          const fetchPostHtml = deps.fetchPostHtml || deps.fetchHtml
-          const { html: postHtml } = await fetchPostHtml(post.url, {
-            headers: {
-              Referer: source.origin,
-              'User-Agent': REDDIT_RSS_USER_AGENT,
-            },
-          })
-          post.htmlMediaUrls = extractRedditHtmlMediaUrls(postHtml)
-          if (fallbackDelayMs > 0) await sleep(fallbackDelayMs)
-        } catch (err) {
-          deps.logger?.warn?.(
-            `Reddit HTML media fallback failed for ${post.id}: ${err.message}`
-          )
+    const remainingPosts =
+      Number.isFinite(options.maxPosts) && options.maxPosts > 0
+        ? Math.max(options.maxPosts - posts.length, 0)
+        : pagePosts.length
+    const postsToProcess = pagePosts.slice(0, remainingPosts)
+    const processedPagePosts = await mapWithConcurrency(
+      postsToProcess,
+      postConcurrency,
+      async (post) => {
+        const rssMediaUrls = extractRedditHtmlMediaUrls(post.rssContentHtml)
+        if (rssMediaUrls.length > 0) {
+          post.htmlMediaUrls = rssMediaUrls
+        }
+        if (
+          rssMediaUrls.length === 0 &&
+          typeof deps.fetchPostHtml === 'function' &&
+          post.url &&
+          (/reddit\.com\/gallery\//i.test(post.url) ||
+            /reddit\.com\/r\/[^/]+\/comments\//i.test(post.url))
+        ) {
+          try {
+            const { html: postHtml } = await deps.fetchPostHtml(post.url, {
+              headers: {
+                Referer: source.origin,
+                'User-Agent': REDDIT_RSS_USER_AGENT,
+              },
+            })
+            post.htmlMediaUrls = extractRedditHtmlMediaUrls(postHtml)
+            if (fallbackDelayMs > 0) await sleep(fallbackDelayMs)
+          } catch (err) {
+            noteHtmlFallbackFailure(post, err)
+          }
+        }
+
+        const mediaEntries = await getRedditMediaEntries(source, post, deps)
+        return {
+          ...post,
+          id: String(post.id || ''),
+          published: getRedditPostDate(post),
+          mediaEntries,
         }
       }
+    )
 
-      const mediaEntries = await getRedditMediaEntries(source, post, deps)
+    for (const post of processedPagePosts) {
       posts.push({
         ...post,
         id: String(post.id || ''),
         published: getRedditPostDate(post),
-        mediaEntries,
+        mediaEntries: post.mediaEntries || [],
       })
-      const targetPosts =
-        Number.isFinite(options.maxPosts) && options.maxPosts > 0
-          ? options.maxPosts
-          : Math.max(pageSize, posts.length + 1)
-      emitDiscoveryProgress(deps, {
-        mode: 'reddit rss/html',
-        pages: page + 1,
-        posts: posts.length,
-        media: countPostMedia(posts),
-        current: Math.min(posts.length, targetPosts),
-        total: targetPosts,
-      })
+      maybeEmitProgress(false)
       if (
         Number.isFinite(options.maxPosts) &&
         options.maxPosts > 0 &&
         posts.length >= options.maxPosts
       ) {
-        deps.logger?.log?.(
-          `Fetched reddit RSS pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
-        )
+        maybeEmitProgress(true)
+        emitHtmlFallbackSummary()
         return posts
       }
     }
+    maybeEmitProgress(true)
 
     after = pagePosts[pagePosts.length - 1]?.id
       ? `t3_${pagePosts[pagePosts.length - 1].id}`
@@ -728,9 +883,8 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
     page += 1
   }
 
-  deps.logger?.log?.(
-    `Fetched reddit RSS pages: ${page + 1} page(s), ${posts.length} post(s), ${countPostMedia(posts)} media`
-  )
+  maybeEmitProgress(true)
+  emitHtmlFallbackSummary()
   return posts
 }
 

@@ -3,6 +3,7 @@
 const DEFAULT_AUTH_URL = 'https://api.redgifs.com/v2/auth/temporary'
 const DEFAULT_GIF_API_BASE = 'https://api.redgifs.com/v2/gifs'
 const DEFAULT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000
+const DEFAULT_REQUEST_TIMEOUT_MS = 5000
 
 function sanitizeRedgifsId(value) {
   return String(value || '')
@@ -20,33 +21,46 @@ function createRedgifsClient(options = {}) {
   const authUrl = options.authUrl || DEFAULT_AUTH_URL
   const gifApiBase = options.gifApiBase || DEFAULT_GIF_API_BASE
   const tokenTtlMs = options.tokenTtlMs || DEFAULT_TOKEN_TTL_MS
+  const timeoutMs =
+    Number.parseInt(String(options.timeoutMs || ''), 10) ||
+    DEFAULT_REQUEST_TIMEOUT_MS
   let auth = null
+  let tokenPromise = null
 
   async function getToken() {
     if (auth?.token && auth.expiresAt > Date.now() + 60000) {
       return auth.token
     }
+    if (tokenPromise) return tokenPromise
 
-    const response = await requestBuffer(authUrl, {
-      headers: {
-        Accept: 'application/json',
-      },
+    tokenPromise = (async () => {
+      const response = await requestBuffer(authUrl, {
+        timeoutMs,
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+      const data = JSON.parse(response.buffer.toString('utf8'))
+      if (!data?.token) {
+        throw new Error('RedGIFs temporary auth returned no token')
+      }
+
+      auth = {
+        token: data.token,
+        expiresAt: Date.now() + tokenTtlMs,
+      }
+      return auth.token
+    })().finally(() => {
+      tokenPromise = null
     })
-    const data = JSON.parse(response.buffer.toString('utf8'))
-    if (!data?.token) {
-      throw new Error('RedGIFs temporary auth returned no token')
-    }
 
-    auth = {
-      token: data.token,
-      expiresAt: Date.now() + tokenTtlMs,
-    }
-    return auth.token
+    return tokenPromise
   }
 
   async function fetchJson(url) {
     const token = await getToken()
     const response = await requestBuffer(url, {
+      timeoutMs,
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,

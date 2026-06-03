@@ -1,19 +1,36 @@
 {
-  "generatedAt": "2026-05-27T17:34:43.091Z",
-  "apply": false,
+  "generatedAt": "2026-06-01T01:58:06.241Z",
+  "apply": true,
   "datasetRoot": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset",
-  "auditPath": "F:\\Dev\\LoRA-Training\\reports\\missing-media-audit-latest.json",
-  "targetRefs": 2929,
-  "hashTargetRefs": 0,
-  "bitwiseTargetRefs": 0,
-  "visualTargetRefs": 0,
-  "seenTargetRefs": 0,
+  "auditPath": "F:\\Dev\\LoRA-Training\\reports\\abigail-reddit-thumbnail-test-prune.json",
+  "targetRefs": 20,
+  "hashTargetRefs": 20,
+  "bitwiseTargetRefs": 20,
+  "visualTargetRefs": 20,
+  "seenTargetRefs": 20,
   "nasIndexTargetRefs": 0,
-  "bitwiseRefsRemoved": 0,
-  "visualRefsRemoved": 0,
-  "seenRecordsRemoved": 0,
-  "seenKeysRemoved": 0,
-  "seenIndexesTouched": 0,
+  "bitwiseRefsRemoved": 20,
+  "visualRefsRemoved": 20,
+  "seenRecordsRemoved": 20,
+  "seenKeysRemoved": 72,
+  "seenIndexesTouched": 1,
   "nasIndexRefsRemoved": 0,
-  "backups": []
+  "backups": [
+    {
+      "filePath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\abigailgray256\\log\\milkmaid-seen-media-index.json",
+      "backupPath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\abigailgray256\\log\\milkmaid-seen-media-index.json.bak-2026-06-01T01-58-04-499Z"
+    },
+    {
+      "filePath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\bitwiseHashes.v2.json",
+      "backupPath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\bitwiseHashes.v2.json.bak-2026-06-01T01-58-04-499Z"
+    },
+    {
+      "filePath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\visualHashes.v2.json",
+      "backupPath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\visualHashes.v2.json.bak-2026-06-01T01-58-04-499Z"
+    },
+    {
+      "filePath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\nas-mp4-index.v1.json",
+      "backupPath": "C:\\Users\\jagsr\\AppData\\Roaming\\.slopvault\\dataset\\nas-mp4-index.v1.json.bak-2026-06-01T01-58-04-499Z"
+    }
+  ]
 }

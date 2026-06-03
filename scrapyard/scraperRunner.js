@@ -223,6 +223,7 @@ Options:
   --image-concurrency <n>          Hoghaul image/gif concurrency.
   --video-concurrency <n>          Hoghaul video concurrency.
   --reddit-fallback-delay-ms <ms>  Delay between Reddit fallback post pages.
+  --reddit-browser-media           Opt into slow Reddit browser page expansion.
   --dry-run                        Hoghaul dry run.
   --preflight                      Hoghaul API preflight.
   --track-source                   Keep source tracking history where supported.
@@ -523,6 +524,11 @@ function appendHoghaulOptions(args, argv) {
     isTruthy(getOption(argv, 'download-oversized'))
   )
   appendOptionalBoolean(args, 'browser-media', getOption(argv, 'browser-media'))
+  appendBoolean(
+    args,
+    '--reddit-browser-media',
+    isTruthy(getOption(argv, 'reddit-browser-media'))
+  )
 }
 
 function appendMilkmaidOptions(args, argv) {
