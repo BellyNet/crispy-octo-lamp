@@ -9,6 +9,7 @@ const {
   mergeNasMp4Entries,
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
+const { transcodeWebmInUserDir } = require('./transcodeWebm')
 
 const LOCAL_REGISTRY_PATH = path.join(__dirname, '..', 'model_aliases.json')
 
@@ -56,6 +57,15 @@ async function syncModelToNas({
 }) {
   const localModelDir = path.join(datasetDir, modelName)
   const nasModelDir = path.join(nasDatasetDir, modelName)
+
+  // Convert any .webm files to iOS-friendly .mp4 BEFORE pushing — iPhone
+  // Safari can't decode VP9/Opus/WebM at all, so anything left in .webm
+  // is invisible to mobile dashboard visitors. Failures here don't block
+  // the sync; the original .webm stays in place and still gets robocopied.
+  await transcodeWebmInUserDir(localModelDir, { log }).catch((err) => {
+    log.warn?.(`Pre-sync webm transcode failed: ${err.message}`)
+  })
+
   const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /XC /XN /XO /R:2 /W:5`
   const result = await runRobocopy(command)
 

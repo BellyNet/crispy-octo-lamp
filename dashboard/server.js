@@ -33,7 +33,13 @@ const THUMB_DIR =
   process.env.THUMB_DIR || path.join(slopvaultRoot, '.dashboard-thumbs')
 
 const MEDIA_FOLDERS = ['images', 'gif', 'webm']
-const MEDIA_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.webm'])
+// `.m4v` is Apple's MP4 variant (H.264/AAC) — fully iOS-friendly. Without it
+// here, ~4.7k .m4v files in the dataset are silently filtered out at scan time
+// and never reach the UI.
+const MEDIA_EXTS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif',
+  '.mp4', '.m4v', '.webm',
+])
 
 fs.mkdirSync(THUMB_DIR, { recursive: true })
 const metaCache = new MetaCache(THUMB_DIR)
@@ -272,7 +278,7 @@ async function resolveDateForFile(
   const ext = path.extname(filename).toLowerCase()
   let result = null
 
-  if (['.mp4', '.webm', '.mov'].includes(ext)) {
+  if (['.mp4', '.m4v', '.webm', '.mov'].includes(ext)) {
     const videoDate =
       'cachedVideoDate' in opts
         ? opts.cachedVideoDate
@@ -370,7 +376,7 @@ app.use((req, res, next) => {
 // Disk caches back both layers so the next process restart is near-instant.
 
 const IMAGE_EXTS_IN = new Set(['.jpg', '.jpeg', '.png', '.gif'])
-const VIDEO_EXTS_IN = new Set(['.mp4', '.webm'])
+const VIDEO_EXTS_IN = new Set(['.mp4', '.m4v', '.webm'])
 
 let modelStatsCache = {}
 // { username: { earliestMs, latestMs, latestAddedMs, fileCount, yearCounts,
@@ -1313,8 +1319,7 @@ async function prewarmThumbnails() {
       continue
     }
     for (const file of files) {
-      if (!['.mp4', '.webm'].includes(path.extname(file).toLowerCase()))
-        continue
+      if (!VIDEO_EXTS_IN.has(path.extname(file).toLowerCase())) continue
       allVideos.push({
         username: dir.name,
         filename: file,
