@@ -52,6 +52,25 @@ function createMediaSavePipeline(options = {}) {
     onOutcome({ kind, label, ...details })
   }
 
+  function getReasonCounterName(reason, extra = {}) {
+    if (extra.reasonCounter) return extra.reasonCounter
+    if (reason === 'skip_seen_media') {
+      if (extra.matchType === 'media_page_url') return 'skipSeenMediaPage'
+      if (extra.matchType === 'media_url') return 'skipSeenMediaUrl'
+      return 'skipSeenMedia'
+    }
+    if (reason === 'skip_lazy_existing') return 'skipExistingVideo'
+    if (reason === 'skip_existing_image') return 'skipExistingImage'
+    if (reason === 'skip_existing_gif') return 'skipExistingGif'
+    if (reason === 'skip_existing_video') return 'skipExistingVideo'
+    if (reason === 'skip_permanent') return 'skipPermanent'
+    if (reason === 'duplicate_bitwise') return 'duplicateBitwise'
+    if (reason === 'duplicate_visual') return 'duplicateVisual'
+    if (reason === 'duplicate_visual_fuzzy') return 'duplicateVisualFuzzy'
+    if (reason === 'duplicate_visual_pending') return 'duplicateVisualPending'
+    return reason || null
+  }
+
   function recordDuplicate({
     modelName,
     folders,
@@ -91,7 +110,13 @@ function createMediaSavePipeline(options = {}) {
     recordOutcome(
       mediaSaver.getOutcomeKindForReason(reason),
       `${reason}: ${entry.filename}`,
-      { modelName, entry, destination, reason }
+      {
+        modelName,
+        entry,
+        destination,
+        reason,
+        reasonCounter: getReasonCounterName(reason, extra),
+      }
     )
   }
 
@@ -144,6 +169,7 @@ function createMediaSavePipeline(options = {}) {
       modelName,
       entry,
       destination,
+      reasonCounter: kind === 'video' ? 'savedVideo' : `saved${kind[0].toUpperCase()}${kind.slice(1)}`,
     })
     return stats
   }

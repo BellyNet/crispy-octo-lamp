@@ -468,6 +468,7 @@ function applyScrapePositionalFallback(inputUrl, argvInput = {}) {
 }
 
 async function runScrape(inputUrl, argvInput = {}, deps = {}) {
+  const startedAtMs = Date.now()
   const log = deps.log || console.log
   const error = deps.error || console.error
   const argv = applyScrapePositionalFallback(inputUrl, argvInput)
@@ -504,7 +505,14 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   const modelName =
     sanitize(getOption(argv, 'model') || '') || parsedSource.rawName || ''
   const summary = readScrapeSummary(modelName, parsedSource)
-  if (summary?.durationMs !== undefined) log(formatScrapeSummaryLine(summary))
+  const summaryFinishedAtMs = new Date(summary?.finishedAt || '').getTime()
+  if (
+    summary?.durationMs !== undefined &&
+    Number.isFinite(summaryFinishedAtMs) &&
+    summaryFinishedAtMs >= startedAtMs - 1000
+  ) {
+    log(formatScrapeSummaryLine(summary))
+  }
   return status
 }
 

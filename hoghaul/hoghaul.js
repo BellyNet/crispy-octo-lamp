@@ -90,6 +90,7 @@ const datasetPaths = createDatasetPaths({
   repairCanUseNasMirror: true,
 })
 const rootDir = datasetPaths.rootDir
+const slopvaultRoot = datasetPaths.slopvaultRoot
 const datasetDir = datasetPaths.datasetDir
 const nasDatasetDir = datasetPaths.nasDatasetDir
 const registryPath =
@@ -152,8 +153,8 @@ const hoghaulSavePipeline = createMediaSavePipeline({
     queuedVideoCount += 1
     runLifecycle.incrementRunCounter(currentRunLog, 'queuedVideos')
   },
-  onOutcome: ({ kind, label }) => {
-    noteMediaOutcome(kind, label)
+  onOutcome: ({ kind, label, reasonCounter }) => {
+    noteMediaOutcome(kind, label, reasonCounter)
   },
 })
 const duplicateChecker = createDuplicateChecker({
@@ -320,12 +321,20 @@ function logRunProgress(context = '') {
   })
 }
 
-function noteMediaOutcome(kind, context = '') {
+function noteMediaOutcome(kind, context = '', reasonCounter = null) {
   if (!currentRunLog) return
 
-  runLifecycle.noteMediaOutcome(currentRunLog, kind)
+  runLifecycle.noteMediaOutcomeReason(currentRunLog, kind, reasonCounter)
 
   logRunProgress(context)
+}
+
+function getSeenMatchReasonCounter(entry, match) {
+  if (match?.matchType === 'media_page_url') return 'skipSeenMediaPage'
+  if (match?.matchType !== 'media_url') return 'skipSeenMedia'
+  const directUrls = getEntryDirectMediaUrls(entry)
+  const hasStableKey = directUrls.some((url) => normalizeSeenUrl(url) !== url)
+  return hasStableKey ? 'skipStableKey' : 'skipSeenMediaUrl'
 }
 
 function finalizeAbortedRun(status, error) {
@@ -394,9 +403,51 @@ function installProcessTerminationHandlers() {
 }
 
 function normalizeSeenUrl(url) {
-  return String(url || '')
+  const raw = String(url || '')
     .trim()
     .replace(/&acs=[^&]+/gi, '')
+
+  if (!raw) return ''
+
+  try {
+    const parsed = new URL(raw)
+    const host = parsed.hostname.toLowerCase()
+    const pathname = parsed.pathname
+
+    if (
+      /(^|\.)coomerfans\.com$/i.test(host) &&
+      /^\/(?:storage|videos?)\//i.test(pathname)
+    ) {
+      return `${parsed.protocol}//${host}${pathname}`
+    }
+
+    if (
+      /(^|\.)coomer\.(?:su|party)$/i.test(host) &&
+      /^\/data\//i.test(pathname)
+    ) {
+      return `${parsed.protocol}//${host}${pathname}`
+    }
+
+    if (host === 'media.redgifs.com') {
+      const basename = path.basename(pathname).replace(/\.[^.]+$/, '')
+      const stableId = basename.replace(/-mobile$/i, '')
+      return stableId ? `redgifs:${stableId.toLowerCase()}` : raw
+    }
+
+    if (/(^|\.)redgifs\.com$/i.test(host)) {
+      const match = pathname.match(/\/watch\/([^/?#]+)/i)
+      if (match?.[1]) return `redgifs:${match[1].toLowerCase()}`
+    }
+
+    if (parsed.searchParams.has('acs')) {
+      parsed.searchParams.delete('acs')
+      return parsed.toString()
+    }
+  } catch {
+    return raw
+  }
+
+  return raw
 }
 
 function uniqueSeenUrls(values) {
@@ -405,6 +456,10 @@ function uniqueSeenUrls(values) {
 
 function getEntryMediaUrls(entry) {
   return getMediaEntryUrls(entry, { normalizeUrl: normalizeSeenUrl })
+}
+
+function getEntryDirectMediaUrls(entry = {}) {
+  return uniqueSeenUrls([entry.mediaUrl, entry.jsonMediaUrl, entry.mediaUrls])
 }
 
 function getEntryMediaPageUrls(entry) {
@@ -451,6 +506,18 @@ function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
   return sharedMediaSeenIndex.recordSuccessfulSeenMedia(modelLogDir, details)
 }
 
+function getDeadMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
+  return sharedMediaSeenIndex.getDeadMediaMatch(
+    modelLogDir,
+    mediaPageUrl,
+    mediaUrl
+  )
+}
+
+function recordDeadMedia(modelLogDir, details = {}) {
+  return sharedMediaSeenIndex.recordDeadMedia(modelLogDir, details)
+}
+
 async function closeBrowserMediaDownloader() {
   if (!browserMediaDownloader) return
   const downloader = browserMediaDownloader
@@ -468,8 +535,43 @@ async function fetchJson(url) {
   })
 }
 
-async function fetchHtml(url) {
-  return httpClient.fetchHtml(url)
+async function fetchHtml(url, options = {}) {
+  const parsed = new URL(url)
+  if (parsed.hostname.toLowerCase().endsWith('reddit.com')) {
+    const controller = new AbortController()
+    const timeout = setTimeout(
+      () => controller.abort(),
+      options.timeoutMs || REQUEST_TIMEOUT_MS
+    )
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          ...(options.headers || {}),
+        },
+        redirect: 'follow',
+        signal: controller.signal,
+      })
+      const html = await response.text()
+      if (!response.ok) {
+        throw new Error(
+          `HTTP ${response.status}: ${html.replace(/\s+/g, ' ').trim().slice(0, 500)}`
+        )
+      }
+      return {
+        html,
+        byteLength: Buffer.byteLength(html),
+        url: response.url || url,
+        headers: Object.fromEntries(response.headers.entries()),
+        statusCode: response.status,
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+  return httpClient.fetchHtml(url, options)
 }
 
 function parsePageRange(value) {
@@ -645,6 +747,7 @@ function htmlDecode(value) {
 async function preflightSourceJson(source, page = 0) {
   if (source.site === 'reddit') {
     return preflightRedditAdapterSource(source, {
+      fetchHtml,
       fetchJson,
       pageSize: REDDIT_PAGE_SIZE,
     })
@@ -677,6 +780,7 @@ async function fetchPosts(source, options) {
   }
   if (source.site === 'reddit') {
     return fetchRedditAdapterPosts(source, options, {
+      fetchHtml,
       fetchJson,
       logger: console,
       normalizeUrl: normalizeSeenUrl,
@@ -816,8 +920,69 @@ function recordOversizedVideoSkip(
       },
     })
   )
-  noteMediaOutcome('skipped', `skip_oversized_video: ${entry.filename}`)
+  noteMediaOutcome(
+    'skipped',
+    `skip_oversized_video: ${entry.filename}`,
+    'skipOversizedVideo'
+  )
   logScrollingMessage(`Skipped oversized video: ${entry.filename}`)
+}
+
+function getHttpStatusFromError(err) {
+  const message = String(err?.message || err || '')
+  const match = message.match(/\b(?:HTTP|Browser HTTP)\s+(\d{3})\b/i)
+  const status = match ? Number.parseInt(match[1], 10) : null
+  return Number.isFinite(status) ? status : null
+}
+
+function isPermanentDeadMediaError(err) {
+  return [404, 410].includes(getHttpStatusFromError(err))
+}
+
+function getDeadMediaReason(err) {
+  const status = getHttpStatusFromError(err)
+  if (status === 410) return 'gone_410'
+  if (status === 404) return 'not_found_404'
+  return 'dead_media'
+}
+
+function recordDeadMediaSkip(
+  modelName,
+  folders,
+  entry,
+  destination,
+  err,
+  extra = {}
+) {
+  const reason = extra.reason || getDeadMediaReason(err)
+  recordDeadMedia(folders.logDir, {
+    mediaUrl: entry.mediaUrl || null,
+    mediaUrls: getEntryDirectMediaUrls(entry),
+    mediaPageUrl: entry.mediaPageUrl || null,
+    mediaPageUrls: getEntryMediaPageUrls(entry),
+    filename: entry.filename,
+    reason,
+    error: err?.message || String(err || ''),
+  })
+  appendRunEvent(
+    'skip_dead_media',
+    hoghaulMediaSaver.buildErrorEvent({
+      modelName,
+      entry,
+      destination,
+      error: err?.message || String(err || ''),
+      extra: {
+        reason,
+        matchType: extra.matchType || null,
+      },
+    })
+  )
+  noteMediaOutcome(
+    'skipped',
+    `skip_dead_media: ${entry.filename}`,
+    'skipDeadMedia'
+  )
+  logScrollingMessage(`Skipped dead media: ${entry.filename}`)
 }
 
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
@@ -830,13 +995,37 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 
   hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
+  const deadMediaMatch = getDeadMediaMatch(
+    folders.logDir,
+    getEntryMediaPageUrls(entry),
+    getEntryDirectMediaUrls(entry)
+  )
+  if (deadMediaMatch) {
+    recordDeadMediaSkip(
+      modelName,
+      folders,
+      entry,
+      destination,
+      deadMediaMatch.error || deadMediaMatch.reason || 'known dead media',
+      {
+        reason: deadMediaMatch.reason || 'known_dead_media',
+        matchType: deadMediaMatch.matchType,
+      }
+    )
+    return
+  }
+
   const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
       entry,
       seenMediaMatch.relativePath,
       'skip_seen_media',
-      folders
+      folders,
+      {
+        matchType: seenMediaMatch.matchType,
+        reasonCounter: getSeenMatchReasonCounter(entry, seenMediaMatch),
+      }
     )
     console.log(`Seen already: ${entry.filename}`)
     return
@@ -906,13 +1095,37 @@ async function saveVideoMedia(modelName, folders, entry) {
 
   hoghaulSavePipeline.recordMediaSeen({ modelName, entry, destination })
 
+  const deadMediaMatch = getDeadMediaMatch(
+    folders.logDir,
+    getEntryMediaPageUrls(entry),
+    getEntryDirectMediaUrls(entry)
+  )
+  if (deadMediaMatch) {
+    recordDeadMediaSkip(
+      modelName,
+      folders,
+      entry,
+      destination,
+      deadMediaMatch.error || deadMediaMatch.reason || 'known dead media',
+      {
+        reason: deadMediaMatch.reason || 'known_dead_media',
+        matchType: deadMediaMatch.matchType,
+      }
+    )
+    return
+  }
+
   const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
       entry,
       seenMediaMatch.relativePath,
       'skip_seen_media',
-      folders
+      folders,
+      {
+        matchType: seenMediaMatch.matchType,
+        reasonCounter: getSeenMatchReasonCounter(entry, seenMediaMatch),
+      }
     )
     logScrollingMessage(`Seen already: ${entry.filename}`)
     return
@@ -994,6 +1207,10 @@ async function saveVideoMedia(modelName, folders, entry) {
       })
       return
     }
+    if (isPermanentDeadMediaError(err)) {
+      recordDeadMediaSkip(modelName, folders, entry, destination, err)
+      return
+    }
     errorCount += 1
     recordRunError(
       'lazy_video_error',
@@ -1013,7 +1230,7 @@ async function saveVideoMedia(modelName, folders, entry) {
         error: err,
       })
     )
-    noteMediaOutcome('failed', `video_error: ${entry.filename}`)
+    noteMediaOutcome('failed', `video_error: ${entry.filename}`, 'videoError')
     logScrollingMessage(`Failed video: ${entry.filename} - ${err.message}`)
   }
 }
@@ -1087,7 +1304,8 @@ async function run(argvInput = process.argv.slice(2)) {
       await resolveKemonoCreatorIdForJson(source)
       report = await preflightSourceJson(source, startPage)
     }
-    console.log(`JSON preflight OK: ${report.apiUrl}`)
+    const preflightKind = source.site === 'reddit' ? 'HTML' : 'JSON'
+    console.log(`${preflightKind} preflight OK: ${report.apiUrl}`)
     console.log(
       `Downloaded ${report.byteLength} bytes; parsed ${report.postCount} posts.`
     )
@@ -1270,7 +1488,8 @@ async function run(argvInput = process.argv.slice(2)) {
       })
       noteMediaOutcome(
         'skipped',
-        `skip_unknown_media: ${normalizedEntry.filename}`
+        `skip_unknown_media: ${normalizedEntry.filename}`,
+        'skipUnknownMedia'
       )
       continue
     }
@@ -1298,6 +1517,16 @@ async function run(argvInput = process.argv.slice(2)) {
         try {
           await saveImageLikeMedia(modelName, folders, entry, entry.kind)
         } catch (err) {
+          if (isPermanentDeadMediaError(err)) {
+            const destination = hoghaulSavePipeline.getDestination({
+              modelName,
+              folders,
+              entry,
+              kind: entry.kind,
+            })
+            recordDeadMediaSkip(modelName, folders, entry, destination, err)
+            return
+          }
           errorCount += 1
           recordRunError('media_error', {
             modelName,
@@ -1315,7 +1544,7 @@ async function run(argvInput = process.argv.slice(2)) {
             ...getEntrySourceDetails(entry),
             error: err.message,
           })
-          noteMediaOutcome('failed', `media_error: ${entry.filename}`)
+          noteMediaOutcome('failed', `media_error: ${entry.filename}`, 'mediaError')
           console.log(`Failed media: ${entry.filename} - ${err.message}`)
         }
       })
@@ -1331,6 +1560,8 @@ async function run(argvInput = process.argv.slice(2)) {
     postCount: selectedPosts.length,
     mediaCount: selectedMedia.length,
     sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
+    counters: currentRunLog?.counters || {},
+    transfer: currentRunLog?.transfer || {},
   })
 
   saveBitwiseHashCache()
@@ -1348,6 +1579,7 @@ async function run(argvInput = process.argv.slice(2)) {
     duplicates: duplicateCount,
     failures: errorCount,
   })
+  const reasonSummaryLine = runLifecycle.formatRunReasonSummary(currentRunLog)
   finalizeRunLog({
     successCount,
     duplicateCount,
@@ -1362,6 +1594,7 @@ async function run(argvInput = process.argv.slice(2)) {
   logScrollingMessage(runLifecycle.formatRunSummaryLine(runStats))
   logRunProgress()
   console.log(getCompletionLine())
+  if (reasonSummaryLine) console.log(reasonSummaryLine)
   return 0
 }
 

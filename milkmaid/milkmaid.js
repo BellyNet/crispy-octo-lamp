@@ -310,6 +310,9 @@ const milkmaidSavePipeline = createMediaSavePipeline({
   onQueued: () => {
     runLifecycle.incrementRunCounter(currentRunLog, 'queuedVideos')
   },
+  onOutcome: ({ reasonCounter }) => {
+    recordRunReason(reasonCounter)
+  },
 })
 const duplicateChecker = createDuplicateChecker({
   datasetDir,
@@ -386,6 +389,11 @@ function addRunFailedBytes(bytes) {
 
 function addRunFailedLazyVideoBytes(bytes) {
   runLifecycle.addRunTransfer(currentRunLog, 'failedLazyVideoBytes', bytes)
+}
+
+function recordRunReason(reason, delta = 1) {
+  if (!reason) return
+  runLifecycle.incrementRunReasonCounter(currentRunLog, reason, delta)
 }
 
 function setRunLazyExpectedBytes(bytes) {
@@ -1259,6 +1267,12 @@ function recordMilkmaidDuplicate({
   })
 }
 
+function getMilkmaidSeenMatchReasonCounter(entry, match) {
+  if (match?.matchType === 'media_page_url') return 'skipSeenMediaPage'
+  if (match?.matchType === 'media_url') return 'skipSeenMediaUrl'
+  return 'skipSeenMedia'
+}
+
 async function saveStufferDbImageLikeMedia({
   modelName,
   folders,
@@ -1368,6 +1382,7 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
         relativePath: destination.relativePath,
         reason: permanentSkipMatch.reason || 'manual_skip',
         note: permanentSkipMatch.note || null,
+        reasonCounter: 'skipPermanent',
       },
     })
     return logAndProgress(`🛑 Permanent skip: ${entry.filename}`, true)
@@ -1385,6 +1400,10 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
       reason: 'skip_seen_media',
       extra: {
         matchType: seenMediaMatch.matchType,
+        reasonCounter: getMilkmaidSeenMatchReasonCounter(
+          entry,
+          seenMediaMatch
+        ),
       },
     })
     return logAndProgress(
@@ -1487,6 +1506,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
           if (permanentSkipPageMatch) {
             duplicateCount++
             runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+            recordRunReason('skipPermanent')
             appendRunEvent('skip_permanent', {
               modelName,
               filename: null,
@@ -1511,6 +1531,12 @@ async function scrapeGallery(browser, url, modelName, folders) {
           if (seenMediaPageMatch) {
             duplicateCount++
             runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+            recordRunReason(
+              getMilkmaidSeenMatchReasonCounter(
+                { mediaPageUrl, mediaPageUrls: [mediaPageUrl] },
+                seenMediaPageMatch
+              )
+            )
             appendRunEvent('skip_seen_media', {
               modelName,
               filename: null,
@@ -1562,6 +1588,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
         } catch (err) {
           errorCount++
           runLifecycle.incrementRunCounter(currentRunLog, 'failures')
+          recordRunReason('mediaError')
           recordRunError('media_error', {
             modelName,
             mediaPageUrl,
@@ -1826,6 +1853,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
             ) {
               duplicateCount++
               runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+              recordRunReason('skipExistingVideo')
               appendRunEvent('skip_lazy_existing', {
                 modelName,
                 filename,
@@ -2121,6 +2149,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
             } catch (err) {
               errorCount++
               runLifecycle.incrementRunCounter(currentRunLog, 'failures')
+              recordRunReason('lazyVideoError')
               addRunFailedBytes(bytesDownloadedForFile)
               addRunFailedLazyVideoBytes(bytesDownloadedForFile)
               const relativePath = getDatasetRelativePath(finalPath)
@@ -2254,9 +2283,25 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       duplicates: duplicateCount,
       failures: errorCount,
     })
+    const reasonSummaryLine = runLifecycle.formatRunReasonSummary(currentRunLog)
+    appendRunEvent('run_finished', {
+      successCount,
+      duplicateCount,
+      errorCount,
+      queuedVideoCount: Number(currentRunLog?.counters?.queuedVideos || 0),
+      savedBytes: Number(currentRunLog?.transfer?.savedBytes || 0),
+      processedCount: finalStats.processed,
+      expectedMedia: finalStats.expectedMedia,
+      mediaCount: finalStats.expectedMedia,
+      categoryRunList,
+      combinedTotal,
+      counters: currentRunLog?.counters || {},
+      transfer: currentRunLog?.transfer || {},
+    })
     console.log(
       `🎉 Done: ${finalStats.saved} saved, ${finalStats.duplicates} dupes, ${finalStats.failures} errors`
     )
+    if (reasonSummaryLine) console.log(reasonSummaryLine)
     return 0
   } catch (err) {
     recordRunError('run_error', {
