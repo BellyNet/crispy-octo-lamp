@@ -10,6 +10,7 @@ const REDDIT_RSS_USER_AGENT =
 const DEFAULT_REDDIT_FALLBACK_DELAY_MS = 0
 const REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS = 25
 const REDDIT_DISCOVERY_PROGRESS_EVERY_MS = 5000
+const OLD_REDDIT_PAGE_SIZE = 25
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -19,6 +20,12 @@ function htmlDecode(value) {
   return String(value || '')
     .replace(/&amp;/g, '&')
     .replace(/&#43;/g, '+')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/&#(\d+);/g, (_, code) =>
+      String.fromCharCode(Number.parseInt(code, 10))
+    )
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
@@ -88,6 +95,21 @@ function filenameFromMediaUrl(mediaUrl) {
     return name && name !== 'data' ? name : null
   } catch {
     return null
+  }
+}
+
+function normalizeRedditImageUrl(mediaUrl) {
+  const decoded = htmlDecode(mediaUrl).trim()
+  if (!decoded) return ''
+  try {
+    const parsed = new URL(decoded)
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'preview.redd.it') {
+      return `https://i.redd.it${parsed.pathname}`
+    }
+    return parsed.toString()
+  } catch {
+    return decoded
   }
 }
 
@@ -237,6 +259,25 @@ function getNativeRedditVideoUrls(post) {
 }
 
 function getRedditGalleryEntries(source, post, uploadedDate) {
+  const htmlMediaUrls = uniqueUrls(post?.htmlMediaUrls || [])
+    .map((url) => normalizeRedditImageUrl(url))
+    .filter(Boolean)
+
+  if (htmlMediaUrls.length > 0) {
+    return htmlMediaUrls.map((mediaUrl, index) =>
+      createRedditEntry(source, post, mediaUrl, uploadedDate, {
+        filename: buildRedditFilename(
+          source,
+          post,
+          mediaUrl,
+          path.extname(new URL(mediaUrl).pathname) || '.jpg',
+          index
+        ),
+        mediaUrls: [mediaUrl],
+      })
+    )
+  }
+
   const items = Array.isArray(post?.gallery_data?.items)
     ? post.gallery_data.items
     : []
@@ -342,7 +383,9 @@ async function getRedditMediaEntries(source, post, deps = {}) {
     )
   }
 
-  const directUrl = htmlDecode(post.url_overridden_by_dest || post.url || '')
+  const directUrl = normalizeRedditImageUrl(
+    post.url_overridden_by_dest || post.url || ''
+  )
   if (
     /^https?:\/\/(?:i|preview)\.redd\.it\//i.test(directUrl) ||
     /^https?:\/\/i\.redditmedia\.com\//i.test(directUrl)
@@ -371,6 +414,203 @@ async function getRedditMediaEntries(source, post, deps = {}) {
     sourceUserId: source.userId,
     sourceUsername: source.username,
   })
+}
+
+function getOldRedditOrigin(source) {
+  const inputOrigin = source.origin || 'https://www.reddit.com'
+  try {
+    const parsed = new URL(inputOrigin)
+    parsed.hostname = 'old.reddit.com'
+    return parsed.origin
+  } catch {
+    return 'https://old.reddit.com'
+  }
+}
+
+function getOldRedditListingUrl(source) {
+  const oldOrigin = getOldRedditOrigin(source)
+  const url = new URL(
+    `/user/${encodeURIComponent(source.username || source.userId)}/submitted/`,
+    oldOrigin
+  )
+  url.searchParams.set('over18', '1')
+  return url.toString()
+}
+
+function getOldRedditHeaders(extra = {}) {
+  return {
+    Cookie: 'over18=1;',
+    Referer: 'https://old.reddit.com/',
+    ...extra,
+  }
+}
+
+async function fetchOldRedditHtml(url, deps = {}) {
+  if (typeof deps.fetchHtml !== 'function') {
+    throw new Error('fetchOldRedditHtml requires fetchHtml')
+  }
+  return deps.fetchHtml(url, {
+    headers: getOldRedditHeaders(deps.headers),
+  })
+}
+
+function parseHtmlAttributes(tag) {
+  const attrs = {}
+  for (const match of String(tag || '').matchAll(
+    /([a-zA-Z0-9_-]+)="([^"]*)"/g
+  )) {
+    attrs[match[1]] = htmlDecode(match[2])
+  }
+  return attrs
+}
+
+function getPostIdFromThing(attrs) {
+  const fullname = attrs['data-fullname'] || attrs.id || ''
+  const match = String(fullname).match(/(?:^|_)t3_([a-z0-9]+)/i)
+  return match?.[1] || String(attrs.id || '').replace(/^thing_t3_/i, '')
+}
+
+function getTitleFromPermalink(permalink) {
+  const parts = String(permalink || '').split('/').filter(Boolean)
+  const slug = parts[parts.length - 1] || ''
+  return slug ? slug.replace(/_/g, ' ') : null
+}
+
+function parseOldRedditListingPosts(source, html) {
+  const oldOrigin = getOldRedditOrigin(source)
+  const posts = []
+  const thingTags = String(html || '').match(
+    /<div\s+class="[^"]*\bthing\b[^"]*"[^>]*>/gi
+  )
+
+  for (const tag of thingTags || []) {
+    const attrs = parseHtmlAttributes(tag)
+    if (attrs['data-promoted'] === 'true') continue
+    const id = getPostIdFromThing(attrs)
+    if (!id) continue
+
+    const permalink = attrs['data-permalink']
+      ? new URL(attrs['data-permalink'], oldOrigin).toString()
+      : `${oldOrigin}/comments/${id}/`
+    const dataUrl = attrs['data-url']
+      ? new URL(attrs['data-url'], oldOrigin).toString()
+      : permalink
+    const timestampMs = Number.parseInt(attrs['data-timestamp'] || '', 10)
+    const createdUtc =
+      Number.isFinite(timestampMs) && timestampMs > 0
+        ? Math.floor(timestampMs / 1000)
+        : null
+
+    posts.push({
+      id,
+      name: `t3_${id}`,
+      title: getTitleFromPermalink(permalink),
+      subreddit: attrs['data-subreddit'] || null,
+      subreddit_name_prefixed:
+        attrs['data-subreddit-prefixed'] || attrs['data-subreddit'] || null,
+      created_utc: createdUtc,
+      permalink,
+      url: dataUrl,
+      url_overridden_by_dest: dataUrl,
+      is_gallery:
+        attrs['data-is-gallery'] === 'true' ||
+        /\/gallery\/[a-z0-9]+/i.test(dataUrl),
+      over_18: attrs['data-nsfw'] === 'true',
+    })
+  }
+
+  return posts
+}
+
+function parseOldRedditNextUrl(source, html) {
+  const match = String(html || '').match(
+    /<span class="next-button">[\s\S]*?<a href="([^"]+)"/i
+  )
+  if (!match?.[1]) return null
+  return new URL(htmlDecode(match[1]), getOldRedditOrigin(source)).toString()
+}
+
+function extractOldRedditImageUrls(html) {
+  const urls = []
+  const raw = String(html || '')
+  for (const match of raw.matchAll(
+    /https?:\/\/(?:i|preview)\.redd\.it\/[^"'<>\\\s]+/gi
+  )) {
+    const normalized = normalizeRedditImageUrl(match[0])
+    if (normalized) urls.push(normalized)
+  }
+  return uniqueUrls(urls)
+}
+
+async function enrichOldRedditHtmlPostMedia(source, post, deps = {}) {
+  if (!post.is_gallery) return post
+  const postUrl = new URL(post.permalink, getOldRedditOrigin(source))
+  postUrl.searchParams.set('over18', '1')
+  const { html } = await fetchOldRedditHtml(postUrl.toString(), deps)
+  return {
+    ...post,
+    htmlMediaUrls: extractOldRedditImageUrls(html),
+  }
+}
+
+async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
+  if (!deps.redgifsClient) {
+    throw new Error('fetchRedditPostsFromOldHtml requires redgifsClient')
+  }
+
+  const posts = []
+  let listingUrl = getOldRedditListingUrl(source)
+  let page = 0
+
+  while (listingUrl) {
+    if (options.endPage !== null && page > options.endPage) break
+
+    const { html } = await fetchOldRedditHtml(listingUrl, deps)
+    const pagePosts = parseOldRedditListingPosts(source, html)
+    if (pagePosts.length === 0) break
+    deps.logger?.log?.(
+      `Fetched reddit HTML page ${page + 1}: ${pagePosts.length} post(s)`
+    )
+
+    const shouldCollect = page >= (Number(options.startPage) || 0)
+    if (shouldCollect) {
+      for (const post of pagePosts) {
+        const enrichedPost = await enrichOldRedditHtmlPostMedia(
+          source,
+          post,
+          deps
+        ).catch((err) => {
+          deps.logger?.warn?.(
+            `Reddit gallery page fetch failed for ${post.id}: ${err.message}`
+          )
+          return post
+        })
+        const mediaEntries = await getRedditMediaEntries(
+          source,
+          enrichedPost,
+          deps
+        )
+        posts.push({
+          ...enrichedPost,
+          id: String(enrichedPost.id || ''),
+          published: getRedditPostDate(enrichedPost),
+          mediaEntries,
+        })
+        if (
+          Number.isFinite(options.maxPosts) &&
+          options.maxPosts > 0 &&
+          posts.length >= options.maxPosts
+        ) {
+          return posts
+        }
+      }
+    }
+
+    listingUrl = parseOldRedditNextUrl(source, html)
+    page += 1
+  }
+
+  return posts
 }
 
 function getRedditListingUrl(
@@ -592,8 +832,26 @@ function extractRedditHtmlMediaUrls(html) {
 }
 
 async function preflightRedditSource(source, deps = {}) {
+  if (typeof deps.fetchHtml === 'function') {
+    const pageUrl = getOldRedditListingUrl(source)
+    const { html, byteLength } = await fetchOldRedditHtml(pageUrl, deps)
+    const children = parseOldRedditListingPosts(source, html)
+    const newest = children
+      .map((post) => getRedditPostDate(post))
+      .filter(Boolean)
+      .sort((a, b) => b.getTime() - a.getTime())[0]
+
+    return {
+      apiUrl: pageUrl,
+      byteLength,
+      postCount: children.length,
+      newest,
+      firstPostId: children[0]?.id ? String(children[0].id) : null,
+    }
+  }
+
   if (typeof deps.fetchJson !== 'function') {
-    throw new Error('preflightRedditSource requires fetchJson')
+    throw new Error('preflightRedditSource requires fetchHtml or fetchJson')
   }
   const apiUrl = getRedditListingUrl(
     source,
@@ -619,8 +877,12 @@ async function preflightRedditSource(source, deps = {}) {
 }
 
 async function fetchRedditPosts(source, options = {}, deps = {}) {
+  if (typeof deps.fetchHtml === 'function') {
+    return fetchRedditPostsFromOldHtml(source, options, deps)
+  }
+
   if (typeof deps.fetchJson !== 'function') {
-    throw new Error('fetchRedditPosts requires fetchJson')
+    throw new Error('fetchRedditPosts requires fetchHtml or fetchJson')
   }
   if (!deps.redgifsClient) {
     throw new Error('fetchRedditPosts requires redgifsClient')
@@ -890,6 +1152,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
 
 module.exports = {
   DEFAULT_REDDIT_PAGE_SIZE,
+  OLD_REDDIT_PAGE_SIZE,
   buildRedditFilename,
   fetchRedditPosts,
   getPostPageUrl,

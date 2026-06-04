@@ -80,6 +80,15 @@ function incrementRunCounter(runLog, name, delta = 1) {
     Number(runLog.counters[name] || 0) + (Number(delta) || 0)
 }
 
+function incrementRunReasonCounter(runLog, name, delta = 1) {
+  if (!runLog?.counters || !name) return
+  if (!runLog.counters.reasons || typeof runLog.counters.reasons !== 'object') {
+    runLog.counters.reasons = {}
+  }
+  runLog.counters.reasons[name] =
+    Number(runLog.counters.reasons[name] || 0) + (Number(delta) || 0)
+}
+
 function setRunCounter(runLog, name, value) {
   if (!runLog?.counters || !name) return
   runLog.counters[name] = Number(value) || 0
@@ -173,6 +182,51 @@ function formatRunSummaryLine(stats) {
   return `Done: ${stats.processed}/${stats.expectedMedia} processed | downloaded ${stats.saved} (${formatBytes(stats.savedBytes)}) | skipped ${stats.skipped} | dupes ${stats.duplicates} | failed ${stats.failures}`
 }
 
+const reasonLabels = {
+  duplicateBitwise: 'bitwise dupes',
+  duplicateVisual: 'visual dupes',
+  duplicateVisualFuzzy: 'fuzzy visual dupes',
+  duplicateVisualPending: 'pending visual dupes',
+  lazyVideoError: 'lazy video errors',
+  mediaError: 'media errors',
+  savedGif: 'saved gifs',
+  savedImage: 'saved images',
+  savedVideo: 'saved videos',
+  skipDeadMedia: 'dead media skips',
+  skipExistingGif: 'existing gif skips',
+  skipExistingImage: 'existing image skips',
+  skipExistingVideo: 'existing video skips',
+  skipNuisanceMedia: 'nuisance skips',
+  skipOversizedVideo: 'oversized video skips',
+  skipPermanent: 'permanent skips',
+  skipSeenMedia: 'seen skips',
+  skipSeenMediaPage: 'seen page skips',
+  skipSeenMediaUrl: 'seen URL skips',
+  skipStableKey: 'stable-key skips',
+  skipUnknownMedia: 'unknown media skips',
+  videoError: 'video errors',
+}
+
+function formatRunReasonSummary(runLog, options = {}) {
+  const reasons = runLog?.counters?.reasons
+  if (!reasons || typeof reasons !== 'object') return ''
+
+  const limit = Number(options.limit || 10)
+  const entries = Object.entries(reasons)
+    .map(([name, count]) => [name, Number(count) || 0])
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+
+  if (!entries.length) return ''
+
+  const shown = entries
+    .slice(0, limit)
+    .map(([name, count]) => `${reasonLabels[name] || name} ${count}`)
+    .join(' | ')
+  const hidden = entries.length > limit ? ` | +${entries.length - limit} more` : ''
+  return `Reason stats: ${shown}${hidden}`
+}
+
 function noteMediaOutcome(runLog, kind) {
   if (!runLog) return
   incrementRunCounter(runLog, 'processed')
@@ -186,6 +240,11 @@ function noteMediaOutcome(runLog, kind) {
     incrementRunCounter(runLog, 'failures')
   }
   writeRunSnapshot(runLog)
+}
+
+function noteMediaOutcomeReason(runLog, kind, reason) {
+  noteMediaOutcome(runLog, kind)
+  if (reason) incrementRunReasonCounter(runLog, reason)
 }
 
 function finalizeRunLog(runLog, extra = {}, options = {}) {
@@ -242,10 +301,13 @@ module.exports = {
   createRunLog,
   finalizeRunLog,
   formatRunProgressLine,
+  formatRunReasonSummary,
   formatRunSummaryLine,
   getRunCounters,
   getRunProgressStats,
   incrementRunCounter,
+  incrementRunReasonCounter,
+  noteMediaOutcomeReason,
   noteMediaOutcome,
   recordRunError,
   setRunCounter,

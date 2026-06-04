@@ -84,10 +84,49 @@ function createMediaSeenIndex(options = {}) {
         parsed?.mediaUrls && typeof parsed.mediaUrls === 'object'
           ? parsed.mediaUrls
           : {},
+      deadMediaUrls:
+        parsed?.deadMediaUrls && typeof parsed.deadMediaUrls === 'object'
+          ? parsed.deadMediaUrls
+          : {},
+      deadMediaPageUrls:
+        parsed?.deadMediaPageUrls &&
+        typeof parsed.deadMediaPageUrls === 'object'
+          ? parsed.deadMediaPageUrls
+          : {},
+    }
+
+    if (migrateNormalizedKeys(data)) {
+      data.updatedAt = new Date().toISOString()
+      fs.writeFileSync(indexPath, JSON.stringify(data, null, 2) + '\n')
     }
 
     mediaSeenIndexCache = { indexPath, data }
     return data
+  }
+
+  function migrateNormalizedKeys(index) {
+    let changed = false
+    for (const bucketName of [
+      'mediaUrls',
+      'mediaPageUrls',
+      'deadMediaUrls',
+      'deadMediaPageUrls',
+    ]) {
+      const bucket = index[bucketName]
+      for (const [key, entry] of Object.entries(bucket)) {
+        const values =
+          bucketName === 'mediaUrls' || bucketName === 'deadMediaUrls'
+            ? [key, entry?.mediaUrl, entry?.mediaUrls]
+            : [key, entry?.mediaPageUrl, entry?.mediaPageUrls]
+        for (const normalized of uniqueSeenUrls(values)) {
+          if (!bucket[normalized]) {
+            bucket[normalized] = entry
+            changed = true
+          }
+        }
+      }
+    }
+    return changed
   }
 
   function saveMediaSeenIndex(modelLogDir, data) {
@@ -152,6 +191,40 @@ function createMediaSeenIndex(options = {}) {
       }
     }
 
+    return null
+  }
+
+  function getDeadEntry(index, normalizedMediaUrl) {
+    const mediaEntry = index.deadMediaUrls[normalizedMediaUrl]
+    if (!mediaEntry) return null
+    return { matchType: 'dead_media_url', ...mediaEntry }
+  }
+
+  function getDeadPageEntry(index, normalizedMediaPageUrl) {
+    const pageEntry = index.deadMediaPageUrls[normalizedMediaPageUrl]
+    if (!pageEntry) return null
+    return { matchType: 'dead_media_page_url', ...pageEntry }
+  }
+
+  function getDeadMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
+    const index = loadMediaSeenIndex(modelLogDir)
+    const mediaPageUrls = uniqueSeenUrls(
+      Array.isArray(mediaPageUrl) ? mediaPageUrl : [mediaPageUrl]
+    )
+    const mediaUrls = uniqueSeenUrls(
+      Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]
+    )
+
+    for (const normalizedMediaUrl of mediaUrls) {
+      const match = getDeadEntry(index, normalizedMediaUrl)
+      if (match) return match
+    }
+    if (mediaUrls.length === 0) {
+      for (const normalizedMediaPageUrl of mediaPageUrls) {
+        const match = getDeadPageEntry(index, normalizedMediaPageUrl)
+        if (match) return match
+      }
+    }
     return null
   }
 
@@ -223,6 +296,54 @@ function createMediaSeenIndex(options = {}) {
     if (changed) saveMediaSeenIndex(modelLogDir, index)
   }
 
+  function recordDeadMedia(modelLogDir, details = {}) {
+    const index = loadMediaSeenIndex(modelLogDir)
+    const mediaPageUrls = uniqueSeenUrls([
+      details.mediaPageUrl,
+      details.mediaPageUrls,
+    ])
+    const mediaUrls = uniqueSeenUrls([details.mediaUrl, details.mediaUrls])
+    if (mediaUrls.length === 0 && mediaPageUrls.length === 0) return
+
+    const recordedAt = new Date().toISOString()
+    const payload = {
+      filename: details.filename || null,
+      mediaUrl: mediaUrls[0] || null,
+      mediaUrls,
+      mediaPageUrl: mediaPageUrls[0] || null,
+      mediaPageUrls,
+      status: 'dead',
+      reason: details.reason || 'gone',
+      error: details.error || null,
+      recordedAt,
+    }
+
+    let changed = false
+    for (const normalizedMediaUrl of mediaUrls) {
+      if (
+        index.deadMediaUrls[normalizedMediaUrl]?.status !== 'dead' ||
+        index.deadMediaUrls[normalizedMediaUrl]?.reason !== payload.reason
+      ) {
+        index.deadMediaUrls[normalizedMediaUrl] = payload
+        changed = true
+      }
+    }
+    if (mediaUrls.length === 0) {
+      for (const normalizedMediaPageUrl of mediaPageUrls) {
+        if (
+          index.deadMediaPageUrls[normalizedMediaPageUrl]?.status !== 'dead' ||
+          index.deadMediaPageUrls[normalizedMediaPageUrl]?.reason !==
+            payload.reason
+        ) {
+          index.deadMediaPageUrls[normalizedMediaPageUrl] = payload
+          changed = true
+        }
+      }
+    }
+
+    if (changed) saveMediaSeenIndex(modelLogDir, index)
+  }
+
   function recordSuccessfulSeenMedia(modelLogDir, details = {}) {
     recordSeenMedia(modelLogDir, {
       ...details,
@@ -244,7 +365,9 @@ function createMediaSeenIndex(options = {}) {
     loadMediaSeenIndex,
     saveMediaSeenIndex,
     getActiveMediaSeenRecord,
+    getDeadMediaMatch,
     getSuccessfulSeenMediaMatch,
+    recordDeadMedia,
     recordSeenMedia,
     recordSuccessfulSeenMedia,
     recordFailedSeenMedia,

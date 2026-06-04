@@ -748,6 +748,7 @@ function applyScrapePositionalFallback(inputUrl, argvInput = {}) {
 }
 
 async function runScrape(inputUrl, argvInput = {}, deps = {}) {
+  const startedAtMs = Date.now()
   const log = deps.log || console.log
   const error = deps.error || console.error
   const argv = applyScrapePositionalFallback(inputUrl, argvInput)
@@ -772,7 +773,6 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
 
   const runCommand = deps.runCommand || runNodeScript
   const args = buildScraperArgs(parsedSource, argv)
-  const startedAtMs = Date.now()
   let status = 0
   if (deps.runCommand) {
     status = await runCommand(scriptPath, args, { log })
@@ -787,7 +787,6 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
       buildScraperOptions(parsedSource, argv)
     )
   }
-
   const modelName = getRunnerModelName(parsedSource, argv)
   const summary = modelName
     ? readFreshModelRunSummary(modelName, parsedSource.scraper, {
