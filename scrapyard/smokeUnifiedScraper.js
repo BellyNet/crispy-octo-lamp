@@ -341,6 +341,12 @@ async function main() {
     ),
     'https://stufferdb.com/index?/category/2333&image_order=5'
   )
+  assert.strictEqual(
+    withStufferDbNewestFirst(
+      'https://stufferdb.com/index?/category/2333/start-150&image_order=5'
+    ),
+    'https://stufferdb.com/index?/category/2333/start-150'
+  )
 
   const fallbackArgs = applyScrapePositionalFallback(reddit.url, {
     _: [reddit.url, 'abigailgray256', '1', '5'],

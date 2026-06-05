@@ -85,6 +85,7 @@ function withStufferDbNewestFirst(inputUrl) {
     /&image_order=\d+/gi,
     ''
   )
+  if (/\/start-\d+(?:[/?#&]|$)/i.test(normalized)) return normalized
   return `${normalized}&image_order=5`
 }
 

@@ -1496,6 +1496,9 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
   let unresolvedCount = 0
   let coverageComplete = false
   const checkpointCandidates = []
+  const visitedCategoryUrls = new Set()
+  const visitedGallerySignatures = new Set()
+  const seenCategoryPictureIds = new Set()
   url = withStufferDbNewestFirst(url)
 
   const page = await createScraperPage(browser, {
@@ -1510,7 +1513,6 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
 
   try {
     while (url) {
-      url = withStufferDbNewestFirst(url)
       await gotoWithTimeoutRetry(page, url, {
         waitUntil: 'domcontentloaded',
         timeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
@@ -1527,7 +1529,45 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
 
       const galleryLinks = await extractGalleryPictureUrls(page)
       const urls = galleryLinks.rawUrls
-      const dedupedUrls = galleryLinks.urls
+      const loadedCategoryUrl = normalizeStufferDbCategoryUrl(page.url())
+      const loadedUrlKey = loadedCategoryUrl.toLowerCase()
+      const pagePictureIds = galleryLinks.urls
+        .map((mediaPageUrl) => getStufferDbPictureId(mediaPageUrl))
+        .filter(Boolean)
+      const gallerySignature = [
+        pagePictureIds.length,
+        pagePictureIds[0] || '',
+        pagePictureIds[pagePictureIds.length - 1] || '',
+      ].join(':')
+      if (
+        visitedCategoryUrls.has(loadedUrlKey) ||
+        visitedGallerySignatures.has(gallerySignature)
+      ) {
+        errorCount++
+        unresolvedCount++
+        runLifecycle.incrementRunCounter(currentRunLog, 'failures')
+        recordRunReason('categoryPaginationLoop')
+        appendRunEvent('category_pagination_loop', {
+          modelName,
+          requestedUrl: url,
+          loadedCategoryUrl,
+          gallerySignature,
+        })
+        logAndProgress(
+          `StufferDB pagination repeated ${loadedCategoryUrl}; stopping category.`,
+          true
+        )
+        break
+      }
+      visitedCategoryUrls.add(loadedUrlKey)
+      visitedGallerySignatures.add(gallerySignature)
+
+      const dedupedUrls = galleryLinks.urls.filter((mediaPageUrl) => {
+        const pictureId = getStufferDbPictureId(mediaPageUrl)
+        if (!pictureId || seenCategoryPictureIds.has(pictureId)) return false
+        seenCategoryPictureIds.add(pictureId)
+        return true
+      })
       const checkpointIndex = checkpointActive
         ? dedupedUrls.findIndex(
             (mediaPageUrl) =>
