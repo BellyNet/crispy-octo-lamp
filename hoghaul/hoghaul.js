@@ -675,9 +675,20 @@ async function fetchHtml(url, requestOptions = {}) {
       })
       const html = await response.text()
       if (!response.ok) {
-        throw new Error(
+        const retryAfterSeconds = Number.parseInt(
+          response.headers.get('retry-after') ||
+            response.headers.get('x-ratelimit-reset') ||
+            '',
+          10
+        )
+        const err = new Error(
           `HTTP ${response.status}: ${html.replace(/\s+/g, ' ').trim().slice(0, 500)}`
         )
+        err.statusCode = response.status
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+          err.retryAfterMs = retryAfterSeconds * 1000
+        }
+        throw err
       }
       return {
         html,

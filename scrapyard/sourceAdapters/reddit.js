@@ -8,9 +8,13 @@ const DEFAULT_REDDIT_PAGE_SIZE = 100
 const REDDIT_RSS_USER_AGENT =
   'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
 const DEFAULT_REDDIT_FALLBACK_DELAY_MS = 0
+const DEFAULT_REDDIT_HTML_DELAY_MS = 1500
+const DEFAULT_REDDIT_HTML_RATE_LIMIT_DELAY_MS = 30000
+const DEFAULT_REDDIT_HTML_MAX_RETRIES = 1
 const REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS = 25
 const REDDIT_DISCOVERY_PROGRESS_EVERY_MS = 5000
 const OLD_REDDIT_PAGE_SIZE = 25
+let lastOldRedditHtmlFetchAt = 0
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -445,13 +449,79 @@ function getOldRedditHeaders(extra = {}) {
   }
 }
 
+function getPositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+function getRedditHtmlDelayMs(deps = {}) {
+  return getPositiveInteger(
+    deps.redditHtmlDelayMs ?? process.env.HOGHAUL_REDDIT_HTML_DELAY_MS,
+    DEFAULT_REDDIT_HTML_DELAY_MS
+  )
+}
+
+function getRedditHtmlRateLimitDelayMs(deps = {}) {
+  return getPositiveInteger(
+    deps.redditHtmlRateLimitDelayMs ??
+      process.env.HOGHAUL_REDDIT_HTML_RATE_LIMIT_DELAY_MS,
+    DEFAULT_REDDIT_HTML_RATE_LIMIT_DELAY_MS
+  )
+}
+
+function getRedditHtmlMaxRetries(deps = {}) {
+  return getPositiveInteger(
+    deps.redditHtmlMaxRetries ?? process.env.HOGHAUL_REDDIT_HTML_MAX_RETRIES,
+    DEFAULT_REDDIT_HTML_MAX_RETRIES
+  )
+}
+
+async function waitForOldRedditHtmlSlot(deps = {}) {
+  const delayMs = getRedditHtmlDelayMs(deps)
+  if (delayMs <= 0) return
+  const now = Date.now()
+  const waitMs = Math.max(lastOldRedditHtmlFetchAt + delayMs - now, 0)
+  if (waitMs > 0) await sleep(waitMs)
+  lastOldRedditHtmlFetchAt = Date.now()
+}
+
+function isRedditRateLimitError(err) {
+  return /\b(?:HTTP|Browser HTTP)\s+429\b/i.test(String(err?.message || err))
+}
+
+async function waitForRedditRateLimitRetry(err, attempt, deps = {}) {
+  const baseDelayMs = getRedditHtmlRateLimitDelayMs(deps)
+  const headerDelayMs = Number(err?.retryAfterMs || 0)
+  const delayMs = headerDelayMs > 0
+    ? Math.min(headerDelayMs + 5000, 10 * 60 * 1000)
+    : Math.min(baseDelayMs * Math.max(attempt, 1), 10 * 60 * 1000)
+  deps.logger?.warn?.(
+    `Reddit HTML 429; waiting ${Math.round(delayMs / 1000)}s before retry ${attempt}: ${err.message}`
+  )
+  await sleep(delayMs)
+}
+
 async function fetchOldRedditHtml(url, deps = {}) {
   if (typeof deps.fetchHtml !== 'function') {
     throw new Error('fetchOldRedditHtml requires fetchHtml')
   }
-  return deps.fetchHtml(url, {
-    headers: getOldRedditHeaders(deps.headers),
-  })
+  const maxRetries = getRedditHtmlMaxRetries(deps)
+  let lastError = null
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    await waitForOldRedditHtmlSlot(deps)
+    try {
+      return await deps.fetchHtml(url, {
+        headers: getOldRedditHeaders(deps.headers),
+      })
+    } catch (err) {
+      lastError = err
+      if (!isRedditRateLimitError(err) || attempt >= maxRetries) throw err
+      await waitForRedditRateLimitRetry(err, attempt + 1, deps)
+    }
+  }
+
+  throw lastError
 }
 
 function parseHtmlAttributes(tag) {
@@ -831,22 +901,61 @@ function extractRedditHtmlMediaUrls(html) {
   return [...bestByKey.values()]
 }
 
+async function preflightRedditRssSource(source, deps = {}) {
+  if (typeof deps.fetchHtml !== 'function') {
+    throw new Error('preflightRedditRssSource requires fetchHtml')
+  }
+  const rssUrl = getRedditRssUrl(
+    source,
+    null,
+    deps.pageSize || DEFAULT_REDDIT_PAGE_SIZE
+  )
+  const { html, byteLength } = await deps.fetchHtml(rssUrl, {
+    headers: {
+      Accept: 'application/atom+xml,text/xml,application/xml',
+      Referer: source.origin,
+      'User-Agent': REDDIT_RSS_USER_AGENT,
+    },
+  })
+  const children = parseRssEntries(html, source)
+  const newest = children
+    .map((post) => getRedditPostDate(post))
+    .filter(Boolean)
+    .sort((a, b) => b.getTime() - a.getTime())[0]
+
+  return {
+    apiUrl: rssUrl,
+    byteLength,
+    postCount: children.length,
+    newest,
+    firstPostId: children[0]?.id ? String(children[0].id) : null,
+  }
+}
+
 async function preflightRedditSource(source, deps = {}) {
   if (typeof deps.fetchHtml === 'function') {
     const pageUrl = getOldRedditListingUrl(source)
-    const { html, byteLength } = await fetchOldRedditHtml(pageUrl, deps)
-    const children = parseOldRedditListingPosts(source, html)
-    const newest = children
-      .map((post) => getRedditPostDate(post))
-      .filter(Boolean)
-      .sort((a, b) => b.getTime() - a.getTime())[0]
+    try {
+      const { html, byteLength } = await fetchOldRedditHtml(pageUrl, deps)
+      const children = parseOldRedditListingPosts(source, html)
+      const newest = children
+        .map((post) => getRedditPostDate(post))
+        .filter(Boolean)
+        .sort((a, b) => b.getTime() - a.getTime())[0]
 
-    return {
-      apiUrl: pageUrl,
-      byteLength,
-      postCount: children.length,
-      newest,
-      firstPostId: children[0]?.id ? String(children[0].id) : null,
+      return {
+        apiUrl: pageUrl,
+        byteLength,
+        postCount: children.length,
+        newest,
+        firstPostId: children[0]?.id ? String(children[0].id) : null,
+      }
+    } catch (err) {
+      if (!isRedditRateLimitError(err)) throw err
+      deps.logger?.warn?.(
+        `Reddit HTML preflight hit 429; falling back to RSS preflight: ${err.message}`
+      )
+      return preflightRedditRssSource(source, deps)
     }
   }
 
@@ -878,7 +987,15 @@ async function preflightRedditSource(source, deps = {}) {
 
 async function fetchRedditPosts(source, options = {}, deps = {}) {
   if (typeof deps.fetchHtml === 'function') {
-    return fetchRedditPostsFromOldHtml(source, options, deps)
+    try {
+      return await fetchRedditPostsFromOldHtml(source, options, deps)
+    } catch (err) {
+      if (!isRedditRateLimitError(err)) throw err
+      deps.logger?.warn?.(
+        `Reddit HTML discovery hit 429; falling back to RSS discovery: ${err.message}`
+      )
+      return fetchRedditPostsFromRss(source, options, deps)
+    }
   }
 
   if (typeof deps.fetchJson !== 'function') {
