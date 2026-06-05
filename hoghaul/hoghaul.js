@@ -49,6 +49,10 @@ const {
   recordRedditSourceCheck,
 } = require('../scrapyard/redditSourceState')
 const {
+  loadConfirmedSourceFrontier,
+  recordCompletedSourcePosts,
+} = require('../scrapyard/sourceFrontier')
+const {
   createBrowserMediaDownloader: createSharedBrowserMediaDownloader,
   getDefaultBrowserProfileDir,
 } = require('../scrapyard/browserMediaDownloader')
@@ -935,7 +939,10 @@ async function fetchPosts(source, options, deps = {}) {
   if (source.site === 'coomerfans') {
     return fetchCoomerFansAdapterPosts(source, options, {
       fetchHtml,
+      fullSourceRefresh: deps.fullSourceRefresh,
       logger: pageLogger,
+      sourceFrontier: deps.sourceFrontier,
+      sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
     })
   }
   if (source.site === 'reddit') {
@@ -959,9 +966,12 @@ async function fetchPosts(source, options, deps = {}) {
 
   return fetchCoomerKemonoPosts(source, options, {
     fetchJson,
+    fullSourceRefresh: deps.fullSourceRefresh,
     logger: pageLogger,
     normalizeUrl: normalizeSeenUrl,
     pageSize: API_PAGE_SIZE,
+    sourceFrontier: deps.sourceFrontier,
+    sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
   })
 }
 
@@ -1493,6 +1503,7 @@ async function run(argvInput = process.argv.slice(2)) {
   const maxPosts = Number.parseInt(runOptions.maxPosts, 10)
   const preliminaryModelName = sanitize(model || source.rawName)
   let redditStateContext = null
+  let sourceFrontier = null
   if (source.site === 'reddit' && preliminaryModelName) {
     const stateFolders = createModelFolders(preliminaryModelName)
     redditStateContext = createIncrementalSourceState(
@@ -1506,6 +1517,16 @@ async function run(argvInput = process.argv.slice(2)) {
     ) {
       console.log(
         `Reddit incremental state: ${redditStateContext.incrementalState.knownPostCount} known post(s), latest ${redditStateContext.incrementalState.latestPostId || 'unknown'}`
+      )
+    }
+  } else if (preliminaryModelName) {
+    const stateFolders = createModelFolders(preliminaryModelName)
+    sourceFrontier = loadConfirmedSourceFrontier(stateFolders.logDir, source, {
+      datasetPaths,
+    })
+    if (sourceFrontier.active && !runOptions.fullSourceRefresh) {
+      console.log(
+        `${source.site} incremental state: ${sourceFrontier.knownPostCount} confirmed post(s)`
       )
     }
   }
@@ -1569,6 +1590,9 @@ async function run(argvInput = process.argv.slice(2)) {
       redditFullRefresh: runOptions.redditFullRefresh,
       redditIncrementalOverlapPosts: runOptions.redditIncrementalOverlapPosts,
       redditSourceState: redditStateContext?.incrementalState || null,
+      fullSourceRefresh: runOptions.fullSourceRefresh,
+      sourceFrontier,
+      sourceIncrementalOverlapPages: runOptions.sourceIncrementalOverlapPages,
       onDiscoveryProgress: ({ current, total, pages, posts, media, mode }) => {
         const expected = Math.max(total || 1, 1)
         const processed = Math.max(current || 0, 0)
@@ -1610,6 +1634,12 @@ async function run(argvInput = process.argv.slice(2)) {
       }
       console.log(
         `No new Reddit posts for ${source.username || source.userId}; frontier ${redditStateContext.incrementalState.latestPostId || 'unknown'}`
+      )
+      return 0
+    }
+    if (source.site !== 'reddit' && sourceFrontier?.active) {
+      console.log(
+        `No new ${source.site} posts for ${source.rawName || source.userId}; ${sourceFrontier.knownPostCount} confirmed post(s)`
       )
       return 0
     }
@@ -1807,6 +1837,44 @@ async function run(argvInput = process.argv.slice(2)) {
       })
     )
   )
+
+  if (source.site !== 'reddit') {
+    const completedPostIds = selectedPosts
+      .filter((post) => {
+        const postEntries = normalizeMediaEntries(
+          getMediaEntriesFromPost(source, post),
+          {
+            sourceSite: source.site,
+            sourceService: source.service,
+            sourceUserId: source.userId,
+            sourceUsername: source.username,
+          }
+        )
+        return (
+          postEntries.length > 0 &&
+          postEntries.every((entry) =>
+            getSuccessfulSeenMediaMatch(
+              folders.logDir,
+              getMediaEntryPageUrls(entry),
+              getMediaEntryUrls(entry)
+            )
+          )
+        )
+      })
+      .map((post) => String(post.id || ''))
+      .filter(Boolean)
+    const frontierSummary = recordCompletedSourcePosts(
+      folders.logDir,
+      source,
+      completedPostIds
+    )
+    appendRunEvent('source_frontier_updated', frontierSummary)
+    if (frontierSummary.addedPostCount > 0) {
+      logScrollingMessage(
+        `Source frontier: ${frontierSummary.completedPostCount} complete post(s)`
+      )
+    }
+  }
 
   appendRunEvent('run_finished', {
     successCount,

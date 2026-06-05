@@ -4,11 +4,12 @@ const minimist = require('minimist')
 
 const { sanitize } = require('./modelRegistry')
 
-const MILKMAID_STRING_OPTIONS = ['model']
+const MILKMAID_STRING_OPTIONS = ['model', 'source-incremental-overlap-pages']
 const MILKMAID_BOOLEAN_OPTIONS = [
   'review-errors',
   'skip-nas-sync',
   'keep-history',
+  'full-source-refresh',
 ]
 
 const HOGHAUL_STRING_OPTIONS = [
@@ -27,6 +28,7 @@ const HOGHAUL_STRING_OPTIONS = [
   'video-concurrency',
   'reddit-fallback-delay-ms',
   'reddit-incremental-overlap-posts',
+  'source-incremental-overlap-pages',
 ]
 
 const HOGHAUL_BOOLEAN_OPTIONS = [
@@ -43,6 +45,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'reddit-browser-media',
   'reddit-full-refresh',
   'download-oversized',
+  'full-source-refresh',
 ]
 
 const RUNNER_STRING_OPTIONS = [
@@ -174,6 +177,17 @@ function normalizeMilkmaidRunOptions(input = process.argv.slice(2)) {
     reviewErrors: Boolean(argv.reviewErrors || argv['review-errors']),
     skipNasSync: Boolean(argv.skipNasSync || argv['skip-nas-sync']),
     keepHistory: Boolean(argv.keepHistory || argv['keep-history']),
+    fullSourceRefresh: Boolean(
+      argv.fullSourceRefresh || argv['full-source-refresh']
+    ),
+    sourceIncrementalOverlapPages:
+      getRunOption(
+        argv,
+        'sourceIncrementalOverlapPages',
+        'source-incremental-overlap-pages'
+      ) ||
+      process.env.npm_config_source_incremental_overlap_pages ||
+      process.env.HOGHAUL_SOURCE_INCREMENTAL_OVERLAP_PAGES,
   }
 }
 
@@ -253,7 +267,9 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
         : browserMedia !== false &&
           !isTruthy(process.env.npm_config_no_browser_media),
     redditBrowserMedia:
-      Boolean(getRunOption(argv, 'redditBrowserMedia', 'reddit-browser-media')) ||
+      Boolean(
+        getRunOption(argv, 'redditBrowserMedia', 'reddit-browser-media')
+      ) ||
       isTruthy(process.env.npm_config_reddit_browser_media) ||
       isTruthy(process.env.HOGHAUL_REDDIT_BROWSER_MEDIA),
     redditFullRefresh:
@@ -344,6 +360,18 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       ) ||
       process.env.npm_config_reddit_incremental_overlap_posts ||
       process.env.HOGHAUL_REDDIT_INCREMENTAL_OVERLAP_POSTS,
+    fullSourceRefresh:
+      Boolean(getRunOption(argv, 'fullSourceRefresh', 'full-source-refresh')) ||
+      isTruthy(process.env.npm_config_full_source_refresh) ||
+      isTruthy(process.env.HOGHAUL_FULL_SOURCE_REFRESH),
+    sourceIncrementalOverlapPages:
+      getRunOption(
+        argv,
+        'sourceIncrementalOverlapPages',
+        'source-incremental-overlap-pages'
+      ) ||
+      process.env.npm_config_source_incremental_overlap_pages ||
+      process.env.HOGHAUL_SOURCE_INCREMENTAL_OVERLAP_PAGES,
   }
 }
 

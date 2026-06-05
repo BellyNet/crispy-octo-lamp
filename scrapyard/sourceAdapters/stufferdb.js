@@ -80,6 +80,14 @@ function normalizeStufferDbCategoryUrl(inputUrl) {
     .replace(/[?&=]+$/, '')
 }
 
+function withStufferDbNewestFirst(inputUrl) {
+  const normalized = normalizeStufferDbCategoryUrl(inputUrl).replace(
+    /&image_order=\d+/gi,
+    ''
+  )
+  return `${normalized}&image_order=5`
+}
+
 function getStufferDbCategoryId(inputUrl) {
   return String(inputUrl || '').match(/category\/?(\d+)/)?.[1] || null
 }
@@ -452,4 +460,5 @@ module.exports = {
   normalizeStufferDbHost,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
+  withStufferDbNewestFirst,
 }

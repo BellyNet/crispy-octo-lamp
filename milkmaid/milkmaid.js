@@ -78,6 +78,10 @@ const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
 const {
+  getSourceCheckpoint,
+  recordSourceCheckpoint,
+} = require('../scrapyard/sourceFrontier')
+const {
   moveFileIntoPlace,
   removeFileIfExists,
 } = require('../scrapyard/fileOps')
@@ -89,9 +93,11 @@ const {
   fetchStufferDBTotalCount: fetchStufferDbTotalCountFromAdapter,
   getBreadcrumbInfo: getStufferDbBreadcrumbInfo,
   getStufferDbCategoryId,
+  getStufferDbPictureId,
   gotoStufferDbWithFallback,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
+  withStufferDbNewestFirst,
 } = require('../scrapyard/sourceAdapters/stufferdb')
 
 function extractModelNameFromBreadcrumb(anchors) {
@@ -1440,10 +1446,7 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
       reason: 'skip_seen_media',
       extra: {
         matchType: seenMediaMatch.matchType,
-        reasonCounter: getMilkmaidSeenMatchReasonCounter(
-          entry,
-          seenMediaMatch
-        ),
+        reasonCounter: getMilkmaidSeenMatchReasonCounter(entry, seenMediaMatch),
       },
     })
     return logAndProgress(
@@ -1465,8 +1468,35 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
   })
 }
 
-async function scrapeGallery(browser, url, modelName, folders) {
+async function scrapeGallery(browser, url, modelName, folders, options = {}) {
   const { base, images, webm } = folders
+  const fullSourceRefresh = Boolean(options.fullSourceRefresh)
+  const categoryId = getStufferDbCategoryId(url)
+  const sourceIdentity = {
+    site: 'stufferdb',
+    service: 'category',
+    userId: categoryId,
+    rawName: modelName,
+  }
+  const savedCheckpoint = fullSourceRefresh
+    ? null
+    : getSourceCheckpoint(folders.logDir, sourceIdentity)
+  const checkpointMediaPageUrl = savedCheckpoint?.mediaPageUrl
+    ? normalizeStufferDbPictureUrl(savedCheckpoint.mediaPageUrl)
+    : null
+  const checkpointId =
+    savedCheckpoint?.id || getStufferDbPictureId(checkpointMediaPageUrl)
+  const checkpointActive = Boolean(
+    checkpointId &&
+      checkpointMediaPageUrl &&
+      getSuccessfulSeenMediaMatch(folders.logDir, checkpointMediaPageUrl, null)
+  )
+  let categoryInspectedCount = 0
+  let unscannedCount = 0
+  let unresolvedCount = 0
+  let coverageComplete = false
+  const checkpointCandidates = []
+  url = withStufferDbNewestFirst(url)
 
   const page = await createScraperPage(browser, {
     site: 'stufferdb',
@@ -1480,6 +1510,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
 
   try {
     while (url) {
+      url = withStufferDbNewestFirst(url)
       await gotoWithTimeoutRetry(page, url, {
         waitUntil: 'domcontentloaded',
         timeoutMs: CATEGORY_PAGE_TIMEOUT_MS,
@@ -1497,8 +1528,40 @@ async function scrapeGallery(browser, url, modelName, folders) {
       const galleryLinks = await extractGalleryPictureUrls(page)
       const urls = galleryLinks.rawUrls
       const dedupedUrls = galleryLinks.urls
-
-      const total = dedupedUrls.length
+      const checkpointIndex = checkpointActive
+        ? dedupedUrls.findIndex(
+            (mediaPageUrl) =>
+              getStufferDbPictureId(mediaPageUrl) === String(checkpointId)
+          )
+        : -1
+      const pageUrls =
+        checkpointIndex >= 0
+          ? dedupedUrls.slice(0, checkpointIndex)
+          : dedupedUrls
+      checkpointCandidates.push(...pageUrls)
+      const total = pageUrls.length
+      categoryInspectedCount += total
+      const confirmedSeenPages = new Map()
+      if (!fullSourceRefresh) {
+        for (const rawMediaPageUrl of pageUrls) {
+          const mediaPageUrl = normalizeStufferDbPictureUrl(rawMediaPageUrl)
+          const match = getSuccessfulSeenMediaMatch(
+            folders.logDir,
+            mediaPageUrl,
+            null
+          )
+          if (match) confirmedSeenPages.set(mediaPageUrl, match)
+        }
+      }
+      const confirmedSeenCount = confirmedSeenPages.size
+      const candidateUrls = fullSourceRefresh
+        ? pageUrls
+        : pageUrls.filter(
+            (mediaPageUrl) =>
+              !confirmedSeenPages.has(
+                normalizeStufferDbPictureUrl(mediaPageUrl)
+              )
+          )
 
       // If prefetch undercounted, keep the rollup large enough to cover
       // what we have already processed plus what remains visible right now.
@@ -1515,20 +1578,56 @@ async function scrapeGallery(browser, url, modelName, folders) {
         categoryUrl: url,
         mode,
         mediaLinks: dedupedUrls.length,
+        inspectedMediaLinks: pageUrls.length,
         rawMediaLinks: urls.length,
         trackedTotal: global.totalSearchTotal || 0,
+        confirmedSeenCount,
+        checkpointId: checkpointActive ? checkpointId : null,
+        checkpointReached: checkpointIndex >= 0,
       })
-
-      const pages = await Promise.all(
-        Array.from({ length: MEDIA_PAGE_CONCURRENCY }, () =>
-          createScraperPage(browser, {
-            site: 'stufferdb',
-            interceptMedia: false,
-          })
+      if (!fullSourceRefresh) {
+        logAndProgress(
+          `StufferDB incremental page: ${confirmedSeenCount} confirmed seen, ${candidateUrls.length} new candidate(s)${checkpointIndex >= 0 ? ', checkpoint reached' : ''}`
         )
-      )
+      }
 
-      let pageIndex = 0
+      for (const [mediaPageUrl, seenMediaPageMatch] of confirmedSeenPages) {
+        totalCount++
+        duplicateCount++
+        runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+        recordRunReason(
+          getMilkmaidSeenMatchReasonCounter(
+            { mediaPageUrl, mediaPageUrls: [mediaPageUrl] },
+            seenMediaPageMatch
+          )
+        )
+        appendRunEvent('skip_seen_media', {
+          modelName,
+          filename: null,
+          mediaUrl: seenMediaPageMatch.sourceUrl || null,
+          mediaPageUrl,
+          matchType: seenMediaPageMatch.matchType,
+          savedPath: seenMediaPageMatch.relativePath,
+          preNavigation: true,
+          incrementalFrontier: true,
+        })
+        logAndProgress(
+          `Seen page skip (${seenMediaPageMatch.matchType}): ${mediaPageUrl}`,
+          true
+        )
+      }
+
+      const pages =
+        candidateUrls.length > 0
+          ? await Promise.all(
+              Array.from({ length: MEDIA_PAGE_CONCURRENCY }, () =>
+                createScraperPage(browser, {
+                  site: 'stufferdb',
+                  interceptMedia: false,
+                })
+              )
+            )
+          : []
 
       const pageLocks = pages.map(() => pLimit(1)) // 🧠 One lock per tab
 
@@ -1615,7 +1714,14 @@ async function scrapeGallery(browser, url, modelName, folders) {
               },
             }
           )
-          if (!mediaEntry) return
+          if (!mediaEntry) {
+            unresolvedCount++
+            appendRunEvent('media_page_unresolved', {
+              modelName,
+              mediaPageUrl,
+            })
+            return
+          }
           mediaUrl = mediaEntry.mediaUrl
           filename = mediaEntry.filename
           ext = mediaEntry.extension
@@ -1654,16 +1760,43 @@ async function scrapeGallery(browser, url, modelName, folders) {
         await randomDelay()
       }
 
-      await Promise.all(
-        dedupedUrls.map((mediaPageUrl, i) => {
-          const page = pages[i % pages.length]
-          const lock = pageLocks[i % pageLocks.length]
+      try {
+        await Promise.all(
+          candidateUrls.map((mediaPageUrl, i) => {
+            const workerPage = pages[i % pages.length]
+            const lock = pageLocks[i % pageLocks.length]
 
-          return limit(() =>
-            lock(() => scrapeMediaOnPage(page, mediaPageUrl, i))
+            return limit(() =>
+              lock(() => scrapeMediaOnPage(workerPage, mediaPageUrl, i))
+            )
+          })
+        )
+      } finally {
+        await Promise.all(
+          pages.map((workerPage) =>
+            workerPage.isClosed() ? null : workerPage.close()
           )
+        )
+      }
+
+      if (checkpointIndex >= 0) {
+        coverageComplete = unresolvedCount === 0
+        unscannedCount = Math.max(
+          Number(options.categoryTotal || 0) - categoryInspectedCount,
+          0
+        )
+        appendRunEvent('category_incremental_frontier_reached', {
+          modelName,
+          categoryUrl: url,
+          checkpointId,
+          categoryInspectedCount,
+          unscannedCount,
         })
-      )
+        logAndProgress(
+          `StufferDB checkpoint ${checkpointId} reached; stopping.`
+        )
+        break
+      }
 
       const nextHref = await page
         .$eval('a[rel="next"]', (el) => el?.href)
@@ -1672,6 +1805,7 @@ async function scrapeGallery(browser, url, modelName, folders) {
         const baseUrl = new URL(url)
         url = new URL(nextHref, baseUrl).href
       } else {
+        coverageComplete = unresolvedCount === 0
         break
       }
     }
@@ -1681,6 +1815,20 @@ async function scrapeGallery(browser, url, modelName, folders) {
     logAndProgress(getCompletionLine())
 
     await page.close()
+  }
+  return {
+    categoryId,
+    checkpointCandidates,
+    existingCheckpoint:
+      checkpointActive && checkpointMediaPageUrl
+        ? {
+            id: String(checkpointId),
+            mediaPageUrl: checkpointMediaPageUrl,
+          }
+        : null,
+    coverageComplete,
+    unresolvedCount,
+    unscannedCount,
   }
 }
 
@@ -1780,6 +1928,8 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
   let modelName = null
   let categoryRunList = []
   let combinedTotal = 0
+  let effectiveCombinedTotal = 0
+  const pendingCategoryCheckpoints = []
 
   try {
     const {
@@ -1788,6 +1938,8 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       reviewErrors,
       skipNasSync,
       keepHistory,
+      fullSourceRefresh,
+      sourceIncrementalOverlapPages,
     } = normalizeMilkmaidRunOptions(argvInput)
     let inputUrl = initialInputUrl
     if (
@@ -1912,6 +2064,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
 
       combinedTotal =
         categoryCounts.reduce((sum, count) => sum + (count || 0), 0) || 1
+      effectiveCombinedTotal = combinedTotal
 
       resetProgressCounter(combinedTotal)
 
@@ -1922,14 +2075,31 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
         const categoryUrl = categoryRunList[i]
         const categoryTotal = categoryCounts[i] || 0
 
-        setProgressTotal(Math.max(global.totalSearchTotal || 1, combinedTotal))
+        setProgressTotal(Math.max(completedTotal, effectiveCombinedTotal, 1))
 
         logScrollingMessage(`🍼 Scraping category: ${categoryUrl}`)
         logScrollingMessage(
           `📊 Category media total: ${categoryTotal || 'prefetch failed, will infer from page'}`
         )
 
-        await scrapeGallery(browser, categoryUrl, modelName, folders)
+        const categoryResult = await scrapeGallery(
+          browser,
+          categoryUrl,
+          modelName,
+          folders,
+          {
+            fullSourceRefresh,
+            sourceIncrementalOverlapPages,
+            categoryTotal,
+          }
+        )
+        effectiveCombinedTotal = Math.max(
+          effectiveCombinedTotal - Number(categoryResult.unscannedCount || 0),
+          completedTotal,
+          1
+        )
+        pendingCategoryCheckpoints.push(categoryResult)
+        setProgressTotal(effectiveCombinedTotal)
       }
     }
 
@@ -2462,6 +2632,51 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       )
     )
 
+    if (errorCount === 0) {
+      for (const categoryResult of pendingCategoryCheckpoints) {
+        if (
+          !categoryResult.coverageComplete ||
+          categoryResult.unresolvedCount > 0
+        ) {
+          continue
+        }
+
+        const confirmedCandidate =
+          categoryResult.checkpointCandidates.find((mediaPageUrl) =>
+            getSuccessfulSeenMediaMatch(folders.logDir, mediaPageUrl, null)
+          ) || categoryResult.existingCheckpoint?.mediaPageUrl
+        if (!confirmedCandidate) continue
+
+        const normalizedCandidate =
+          normalizeStufferDbPictureUrl(confirmedCandidate)
+        const checkpoint = recordSourceCheckpoint(
+          folders.logDir,
+          {
+            site: 'stufferdb',
+            service: 'category',
+            userId: categoryResult.categoryId,
+            rawName: modelName,
+          },
+          {
+            id: getStufferDbPictureId(normalizedCandidate),
+            mediaPageUrl: normalizedCandidate,
+          }
+        )
+        appendRunEvent('category_checkpoint_recorded', {
+          modelName,
+          categoryId: categoryResult.categoryId,
+          checkpointId: checkpoint?.id || null,
+          mediaPageUrl: checkpoint?.mediaPageUrl || null,
+        })
+      }
+    } else if (pendingCategoryCheckpoints.length > 0) {
+      appendRunEvent('category_checkpoint_deferred', {
+        modelName,
+        reason: 'run_errors',
+        errorCount,
+      })
+    }
+
     await browser.close()
     browser = null
 
@@ -2500,6 +2715,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
       mediaCount: finalStats.expectedMedia,
       categoryRunList,
       combinedTotal,
+      effectiveCombinedTotal,
       counters: currentRunLog?.counters || {},
       transfer: currentRunLog?.transfer || {},
     })

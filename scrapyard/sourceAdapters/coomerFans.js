@@ -4,6 +4,7 @@ const path = require('path')
 const pLimit = require('p-limit')
 const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
+const { createBoundaryPageFilter } = require('../sourceFrontier')
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -195,6 +196,15 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
   const seenPostIds = new Set()
   let fetchedPages = 0
   let fetchedMedia = 0
+  const pageFilter = createBoundaryPageFilter(deps.sourceFrontier, {
+    fullRefresh: deps.fullSourceRefresh,
+    overlapPages: deps.sourceIncrementalOverlapPages ?? 1,
+  })
+  if (pageFilter.active) {
+    deps.logger?.log?.(
+      `CoomerFans incremental frontier: ${deps.sourceFrontier.knownPostCount} confirmed post(s)`
+    )
+  }
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -208,11 +218,15 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     const newPostLinks = postLinks.filter((post) => !seenPostIds.has(post.id))
     if (newPostLinks.length === 0) break
     for (const post of newPostLinks) seenPostIds.add(post.id)
+    const filteredPage = pageFilter.filterPage(newPostLinks)
 
     const selectedPostLinks =
       Number.isFinite(options.maxPosts) && options.maxPosts > 0
-        ? newPostLinks.slice(0, Math.max(options.maxPosts - posts.length, 0))
-        : newPostLinks
+        ? filteredPage.items.slice(
+            0,
+            Math.max(options.maxPosts - posts.length, 0)
+          )
+        : filteredPage.items
 
     const pagePosts = await Promise.all(
       selectedPostLinks.map((post) =>
@@ -240,7 +254,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       0
     )
     deps.logger?.status?.(
-      `Fetching coomerfans pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media`
+      `Fetching coomerfans pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media, ${filteredPage.completedCount || 0} complete skipped`
     )
 
     if (
@@ -251,6 +265,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       break
     }
 
+    if (filteredPage.stopAfterPage) break
     page += 1
   }
 

@@ -25,9 +25,20 @@ const runLifecycle = require('./runLifecycle')
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
 const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb']
+const temporarilyDisabledSources = new Map([
+  ['kemono', 'Kemono is temporarily unavailable'],
+])
 const activeChildProcesses = new Set()
 let hardInterruptHandlersInstalled = false
 let hardInterruptInProgress = false
+
+function getTemporarilyDisabledSourceReason(parsedSource) {
+  return (
+    temporarilyDisabledSources.get(
+      String(parsedSource?.sourceType || parsedSource?.site || '').toLowerCase()
+    ) || null
+  )
+}
 
 function killProcessTree(child) {
   if (!child || !child.pid) return
@@ -222,6 +233,9 @@ Options:
   --post-concurrency <n>           Hoghaul post fetch concurrency.
   --image-concurrency <n>          Hoghaul image/gif concurrency.
   --video-concurrency <n>          Hoghaul video concurrency.
+  --source-incremental-overlap-pages <n>
+                                    Archive pages checked past the first known page.
+  --full-source-refresh            Scan every source page, ignoring frontiers.
   --reddit-fallback-delay-ms <ms>  Delay between Reddit fallback post pages.
   --reddit-browser-media           Opt into slow Reddit browser page expansion.
   --dry-run                        Hoghaul dry run.
@@ -464,6 +478,16 @@ function appendSharedOptions(args, parsedSource, argv) {
     '--keep-history',
     isTruthy(getOption(argv, 'keep-history'))
   )
+  appendOption(
+    args,
+    '--source-incremental-overlap-pages',
+    getOption(argv, 'source-incremental-overlap-pages')
+  )
+  appendBoolean(
+    args,
+    '--full-source-refresh',
+    isTruthy(getOption(argv, 'full-source-refresh'))
+  )
 }
 
 function appendHoghaulOptions(args, argv) {
@@ -568,6 +592,11 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
     modelOverride: modelName,
     skipNasSync: isTruthy(getOption(argv, 'skip-nas-sync')),
     keepHistory: isTruthy(getOption(argv, 'keep-history')),
+    fullSourceRefresh: isTruthy(getOption(argv, 'full-source-refresh')),
+    sourceIncrementalOverlapPages: getOption(
+      argv,
+      'source-incremental-overlap-pages'
+    ),
   }
 
   if (parsedSource.scraper === 'milkmaid') {
@@ -760,6 +789,12 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
     return 1
   }
 
+  const disabledReason = getTemporarilyDisabledSourceReason(parsedSource)
+  if (disabledReason) {
+    log(`Skipped ${describeSource(parsedSource)}: ${disabledReason}.`)
+    return 0
+  }
+
   const scriptPath = getScraperScript(parsedSource)
   if (!scriptPath) {
     error(`No scraper is registered for ${describeSource(parsedSource)}.`)
@@ -918,6 +953,7 @@ function buildSourceBatchOptions(argv) {
     'max-posts',
     'max-files',
     'reddit-fallback-delay-ms',
+    'source-incremental-overlap-pages',
   ]) {
     const value = getOption(argv, name)
     if (value !== undefined && value !== null && value !== '') {
@@ -935,6 +971,8 @@ function buildSourceBatchOptions(argv) {
   if (isTruthy(getOption(argv, 'dry-run'))) options['dry-run'] = true
   if (isTruthy(getOption(argv, 'download-oversized')))
     options['download-oversized'] = true
+  if (isTruthy(getOption(argv, 'full-source-refresh')))
+    options['full-source-refresh'] = true
   return options
 }
 
@@ -951,6 +989,8 @@ Options:
   --post-concurrency <n>      Post fetch concurrency.
   --image-concurrency <n>     Image/gif concurrency.
   --video-concurrency <n>     Video concurrency.
+  --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
+  --full-source-refresh       Scan every source page, ignoring frontiers.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.
@@ -978,6 +1018,12 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
   if (!sourceKey) {
     printSourceBatchHelp()
     return 1
+  }
+  if (temporarilyDisabledSources.has(sourceKey)) {
+    console.log(
+      `Skipping ${sourceKey} batch: ${temporarilyDisabledSources.get(sourceKey)}.`
+    )
+    return 0
   }
 
   const registry = loadRegistry()
@@ -1457,6 +1503,8 @@ Options:
   --post-concurrency <n>      Post fetch concurrency.
   --image-concurrency <n>     Image/gif concurrency.
   --video-concurrency <n>     Video concurrency.
+  --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
+  --full-source-refresh       Scan every source page, ignoring frontiers.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between source runs.
   --dry-run                   Dry run Hoghaul sources.
@@ -1470,6 +1518,11 @@ Options:
 function buildAllSourceRunOptions(argv, modelName, parsedSource) {
   const options = {
     model: modelName,
+    'source-incremental-overlap-pages': getOption(
+      argv,
+      'source-incremental-overlap-pages'
+    ),
+    'full-source-refresh': isTruthy(getOption(argv, 'full-source-refresh')),
   }
 
   const keepHistory = !(
@@ -1774,6 +1827,7 @@ module.exports = {
   registryPath,
   printHelp,
   parseRunnerArgs,
+  getTemporarilyDisabledSourceReason,
   appendOption,
   appendBoolean,
   runNodeScript,

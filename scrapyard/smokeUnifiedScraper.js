@@ -12,10 +12,18 @@ const {
   buildRepairArgs,
   buildScraperOptions,
   buildSyncArgs,
+  getTemporarilyDisabledSourceReason,
   runScrape,
   runScraperCli,
 } = require('./scraperRunner')
 const { parseSourceUrl } = require('./sourceRouter')
+const {
+  createBoundaryPageFilter,
+  getSourceCheckpoint,
+  loadConfirmedSourceFrontier,
+  recordCompletedSourcePosts,
+  recordSourceCheckpoint,
+} = require('./sourceFrontier')
 const {
   getMediaEntrySeenDetails,
   getMediaEntryUrls,
@@ -26,6 +34,7 @@ const {
   getStufferDbFallbackUrls,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
+  withStufferDbNewestFirst,
 } = require('./sourceAdapters/stufferdb')
 const { fetchCoomerFansPosts } = require('./sourceAdapters/coomerFans')
 const { fetchCoomerKemonoPosts } = require('./sourceAdapters/coomerKemono')
@@ -94,16 +103,37 @@ async function main() {
     sourceType: 'coomer',
     rawName: 'name_here',
   })
-  await assertRouted('https://kemono.su/patreon/user/12345', {
-    scraper: 'hoghaul',
-    sourceType: 'kemono',
-    rawName: '12345',
-  })
-  await assertRouted('https://stufferdb.com/index?/category/2333', {
-    scraper: 'milkmaid',
-    sourceType: 'stufferdb',
-    rawName: null,
-  })
+  const kemono = parseSourceUrl('https://kemono.su/patreon/user/12345')
+  assert(kemono)
+  assert.strictEqual(
+    getTemporarilyDisabledSourceReason(kemono),
+    'Kemono is temporarily unavailable'
+  )
+  let kemonoCommandRan = false
+  const kemonoStatus = await runScrape(
+    kemono.url,
+    { model: 'sample_model' },
+    {
+      log: () => {},
+      error: (message) => {
+        throw new Error(message)
+      },
+      runCommand: () => {
+        kemonoCommandRan = true
+        return 0
+      },
+    }
+  )
+  assert.strictEqual(kemonoStatus, 0)
+  assert.strictEqual(kemonoCommandRan, false)
+  const stufferdb = await assertRouted(
+    'https://stufferdb.com/index?/category/2333',
+    {
+      scraper: 'milkmaid',
+      sourceType: 'stufferdb',
+      rawName: null,
+    }
+  )
   const stufferAi = await assertRouted(
     'https://stufferai.com/picture?/659098/category/8586',
     {
@@ -283,6 +313,8 @@ async function main() {
     'skip-nas-sync': true,
     'browser-media': false,
     'download-oversized': true,
+    'full-source-refresh': true,
+    'source-incremental-overlap-pages': '2',
     pages: '1',
     'max-posts': '2',
   })
@@ -291,8 +323,24 @@ async function main() {
   assert.strictEqual(redditOptions.skipNasSync, true)
   assert.strictEqual(redditOptions.useBrowserMedia, false)
   assert.strictEqual(redditOptions.downloadOversized, true)
+  assert.strictEqual(redditOptions.fullSourceRefresh, true)
+  assert.strictEqual(redditOptions.sourceIncrementalOverlapPages, '2')
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
+
+  const stufferOptions = buildScraperOptions(stufferdb, {
+    model: 'sample_model',
+    'full-source-refresh': true,
+    'source-incremental-overlap-pages': '3',
+  })
+  assert.strictEqual(stufferOptions.fullSourceRefresh, true)
+  assert.strictEqual(stufferOptions.sourceIncrementalOverlapPages, '3')
+  assert.strictEqual(
+    withStufferDbNewestFirst(
+      'https://stufferdb.com/index?/category/2333&image_order=2'
+    ),
+    'https://stufferdb.com/index?/category/2333&image_order=5'
+  )
 
   const fallbackArgs = applyScrapePositionalFallback(reddit.url, {
     _: [reddit.url, 'abigailgray256', '1', '5'],
@@ -363,6 +411,69 @@ async function main() {
   assert.strictEqual(oversizedTargets[0].modelName, 'sample_model')
   assert.strictEqual(oversizedTargets[0].count, 1)
   assert.strictEqual(oversizedTargets[0].largestBytes, 2317869251)
+
+  const frontierDataset = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'source-frontier-smoke-')
+  )
+  const frontierModelDir = path.join(frontierDataset, 'sample_model')
+  const frontierLogDir = path.join(frontierModelDir, 'log')
+  const frontierImagePath = path.join(frontierModelDir, 'images', 'known.jpg')
+  fs.mkdirSync(path.dirname(frontierImagePath), { recursive: true })
+  fs.mkdirSync(frontierLogDir, { recursive: true })
+  fs.writeFileSync(frontierImagePath, 'known')
+  fs.writeFileSync(
+    path.join(frontierLogDir, 'milkmaid-seen-media-index.json'),
+    JSON.stringify({
+      mediaUrls: {},
+      mediaPageUrls: {
+        'https://coomerfans.com/p/123/456/onlyfans': {
+          relativePath: 'sample_model/images/known.jpg',
+          sourceSite: 'coomerfans',
+          sourceService: 'onlyfans',
+          sourceUserId: '456',
+          sourceUsername: 'sample_model',
+          postId: '123',
+        },
+      },
+    })
+  )
+  const frontierSource = {
+    site: 'coomerfans',
+    service: 'onlyfans',
+    userId: '456',
+    rawName: 'sample_model',
+  }
+  recordCompletedSourcePosts(frontierLogDir, frontierSource, ['123'])
+  const frontier = loadConfirmedSourceFrontier(frontierLogDir, frontierSource, {
+    datasetPaths: {
+      toDatasetAbsolutePath: (relativePath) =>
+        path.join(frontierDataset, relativePath),
+      existsLocallyOrOnNas: fs.existsSync,
+    },
+  })
+  assert.strictEqual(frontier.knownPostCount, 1)
+  const pageFilter = createBoundaryPageFilter(frontier, { overlapPages: 1 })
+  assert.deepStrictEqual(pageFilter.filterPage([{ id: '123' }]).items, [])
+  assert.strictEqual(
+    pageFilter.filterPage([{ id: 'older' }]).stopAfterPage,
+    true
+  )
+
+  const checkpointSource = {
+    site: 'stufferdb',
+    service: 'category',
+    userId: '2333',
+    rawName: 'sample_model',
+  }
+  recordSourceCheckpoint(frontierLogDir, checkpointSource, {
+    id: '659098',
+    mediaPageUrl: 'https://stufferdb.com/picture?/659098/category/2333',
+  })
+  recordCompletedSourcePosts(frontierLogDir, checkpointSource, ['659098'])
+  assert.strictEqual(
+    getSourceCheckpoint(frontierLogDir, checkpointSource).id,
+    '659098'
+  )
 
   assert.deepStrictEqual(
     buildRepairArgs({

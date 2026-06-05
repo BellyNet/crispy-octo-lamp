@@ -674,7 +674,7 @@ async function main() {
       )
       console.log('2. Update all StufferDB models')
       console.log('3. Update all Coomer models')
-      console.log('4. Update all Kemono models')
+      console.log('4. Update all Kemono models (temporarily disabled)')
       console.log('5. Set session Hoghaul options')
       console.log('6. Run a model/alias from registry')
       console.log('7. Paste one source URL and run it')

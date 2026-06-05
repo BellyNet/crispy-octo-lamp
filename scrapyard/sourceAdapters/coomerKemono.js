@@ -3,6 +3,7 @@
 const path = require('path')
 const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
+const { createBoundaryPageFilter } = require('../sourceFrontier')
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -162,6 +163,15 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
   const posts = []
   let page = options.startPage || 0
   let fetchedPages = 0
+  const pageFilter = createBoundaryPageFilter(deps.sourceFrontier, {
+    fullRefresh: deps.fullSourceRefresh,
+    overlapPages: deps.sourceIncrementalOverlapPages ?? 1,
+  })
+  if (pageFilter.active) {
+    deps.logger?.log?.(
+      `${source.site} incremental frontier: ${deps.sourceFrontier.knownPostCount} confirmed post(s)`
+    )
+  }
 
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
@@ -181,10 +191,14 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
     }
 
     if (!Array.isArray(pagePosts) || pagePosts.length === 0) break
+    const filteredPage = pageFilter.filterPage(pagePosts)
     const selectedPagePosts =
       Number.isFinite(options.maxPosts) && options.maxPosts > 0
-        ? pagePosts.slice(0, Math.max(options.maxPosts - posts.length, 0))
-        : pagePosts
+        ? filteredPage.items.slice(
+            0,
+            Math.max(options.maxPosts - posts.length, 0)
+          )
+        : filteredPage.items
     posts.push(
       ...selectedPagePosts.map((post) => ({
         ...post,
@@ -193,7 +207,7 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
     )
     fetchedPages += 1
     deps.logger?.status?.(
-      `Fetching ${source.site} pages: ${fetchedPages} page(s), ${posts.length} post(s)`
+      `Fetching ${source.site} pages: ${fetchedPages} page(s), ${posts.length} post(s), ${filteredPage.completedCount || 0} complete skipped`
     )
     if (
       Number.isFinite(options.maxPosts) &&
@@ -202,6 +216,7 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
     ) {
       break
     }
+    if (filteredPage.stopAfterPage) break
     if (pagePosts.length < pageSize) break
     page += 1
   }
