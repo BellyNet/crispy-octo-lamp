@@ -26,6 +26,7 @@ const HOGHAUL_STRING_OPTIONS = [
   'image-concurrency',
   'video-concurrency',
   'reddit-fallback-delay-ms',
+  'reddit-incremental-overlap-posts',
 ]
 
 const HOGHAUL_BOOLEAN_OPTIONS = [
@@ -40,6 +41,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'browser-headless',
   'headless',
   'reddit-browser-media',
+  'reddit-full-refresh',
   'download-oversized',
 ]
 
@@ -254,6 +256,10 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       Boolean(getRunOption(argv, 'redditBrowserMedia', 'reddit-browser-media')) ||
       isTruthy(process.env.npm_config_reddit_browser_media) ||
       isTruthy(process.env.HOGHAUL_REDDIT_BROWSER_MEDIA),
+    redditFullRefresh:
+      Boolean(getRunOption(argv, 'redditFullRefresh', 'reddit-full-refresh')) ||
+      isTruthy(process.env.npm_config_reddit_full_refresh) ||
+      isTruthy(process.env.HOGHAUL_REDDIT_FULL_REFRESH),
     browserOptions: {
       browserExecutable:
         getRunOption(argv, 'browserExecutable', 'browser-executable') ||
@@ -330,6 +336,14 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       getRunOption(argv, 'redditFallbackDelayMs', 'reddit-fallback-delay-ms') ||
       process.env.npm_config_reddit_fallback_delay_ms ||
       process.env.HOGHAUL_REDDIT_FALLBACK_DELAY_MS,
+    redditIncrementalOverlapPosts:
+      getRunOption(
+        argv,
+        'redditIncrementalOverlapPosts',
+        'reddit-incremental-overlap-posts'
+      ) ||
+      process.env.npm_config_reddit_incremental_overlap_posts ||
+      process.env.HOGHAUL_REDDIT_INCREMENTAL_OVERLAP_POSTS,
   }
 }
 

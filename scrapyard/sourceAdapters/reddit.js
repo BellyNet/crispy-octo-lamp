@@ -14,6 +14,7 @@ const DEFAULT_REDDIT_HTML_MAX_RETRIES = 1
 const REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS = 25
 const REDDIT_DISCOVERY_PROGRESS_EVERY_MS = 5000
 const OLD_REDDIT_PAGE_SIZE = 25
+const DEFAULT_REDDIT_INCREMENTAL_OVERLAP_POSTS = 5
 let lastOldRedditHtmlFetchAt = 0
 
 function parseResolvedDate(date) {
@@ -123,6 +124,75 @@ function getRedditPostDate(post) {
     return new Date(createdUtc * 1000)
   }
   return parseResolvedDate(post?.created)
+}
+
+function getRedditPostCreatedUtc(post) {
+  const date = getRedditPostDate(post)
+  return date ? Math.floor(date.getTime() / 1000) : null
+}
+
+function getIncrementalOverlapPosts(deps = {}) {
+  return getPositiveInteger(
+    deps.redditIncrementalOverlapPosts ??
+      process.env.HOGHAUL_REDDIT_INCREMENTAL_OVERLAP_POSTS,
+    DEFAULT_REDDIT_INCREMENTAL_OVERLAP_POSTS
+  )
+}
+
+function createIncrementalPostFilter(deps = {}, options = {}) {
+  const state = deps.redditSourceState
+  const fullRefresh = Boolean(options.redditFullRefresh || deps.redditFullRefresh)
+  if (!state?.hasFrontier || fullRefresh) {
+    return {
+      active: false,
+      filterPage: (posts) => ({ posts, stopAfterPage: false, boundaryHits: 0 }),
+    }
+  }
+
+  const overlapPosts = getIncrementalOverlapPosts(deps)
+  const knownPostIds =
+    state.knownPostIds instanceof Set
+      ? state.knownPostIds
+      : new Set(state.knownPostIds || [])
+  const latestCreatedUtc = Number(state.latestCreatedUtc || 0) || null
+
+  return {
+    active: true,
+    latestPostId: state.latestPostId || null,
+    latestCreatedUtc,
+    knownPostCount: knownPostIds.size,
+    filterPage(pagePosts = []) {
+      const output = []
+      let boundaryHits = 0
+
+      for (const post of pagePosts) {
+        const postId = String(post?.id || '')
+        const postCreatedUtc = getRedditPostCreatedUtc(post)
+        const known = postId && knownPostIds.has(postId)
+        const atOrBeforeFrontier =
+          latestCreatedUtc && postCreatedUtc && postCreatedUtc <= latestCreatedUtc
+
+        if (known) {
+          boundaryHits += 1
+          continue
+        }
+
+        if (atOrBeforeFrontier) {
+          boundaryHits += 1
+          if (boundaryHits <= overlapPosts) output.push(post)
+          continue
+        }
+
+        output.push(post)
+      }
+
+      return {
+        posts: output,
+        stopAfterPage: boundaryHits > 0,
+        boundaryHits,
+      }
+    },
+  }
 }
 
 function getRedditSubreddit(post) {
@@ -631,6 +701,12 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
   const posts = []
   let listingUrl = getOldRedditListingUrl(source)
   let page = 0
+  const incrementalFilter = createIncrementalPostFilter(deps, options)
+  if (incrementalFilter.active) {
+    deps.logger?.log?.(
+      `Reddit incremental frontier: ${incrementalFilter.knownPostCount} known post(s), latest ${incrementalFilter.latestPostId || 'unknown'}`
+    )
+  }
 
   while (listingUrl) {
     if (options.endPage !== null && page > options.endPage) break
@@ -638,13 +714,14 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
     const { html } = await fetchOldRedditHtml(listingUrl, deps)
     const pagePosts = parseOldRedditListingPosts(source, html)
     if (pagePosts.length === 0) break
+    const filteredPage = incrementalFilter.filterPage(pagePosts)
     deps.logger?.log?.(
-      `Fetched reddit HTML page ${page + 1}: ${pagePosts.length} post(s)`
+      `Fetched reddit HTML page ${page + 1}: ${pagePosts.length} post(s), ${filteredPage.posts.length} new candidate(s)`
     )
 
     const shouldCollect = page >= (Number(options.startPage) || 0)
     if (shouldCollect) {
-      for (const post of pagePosts) {
+      for (const post of filteredPage.posts) {
         const enrichedPost = await enrichOldRedditHtmlPostMedia(
           source,
           post,
@@ -676,6 +753,12 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
       }
     }
 
+    if (filteredPage.stopAfterPage) {
+      deps.logger?.log?.(
+        `Reddit incremental frontier reached after ${filteredPage.boundaryHits} known/old post(s).`
+      )
+      break
+    }
     listingUrl = parseOldRedditNextUrl(source, html)
     page += 1
   }
@@ -1124,6 +1207,12 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
   let htmlFallbackFailureCount = 0
   let firstHtmlFallbackFailure = null
   const postConcurrency = options.postConcurrency || 1
+  const incrementalFilter = createIncrementalPostFilter(deps, options)
+  if (incrementalFilter.active) {
+    deps.logger?.log?.(
+      `Reddit incremental frontier: ${incrementalFilter.knownPostCount} known post(s), latest ${incrementalFilter.latestPostId || 'unknown'}`
+    )
+  }
 
   const maybeEmitProgress = (force = false) => {
     const now = Date.now()
@@ -1190,12 +1279,16 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
     })
     const pagePosts = parseRssEntries(html, source)
     if (pagePosts.length === 0) break
+    const filteredPage = incrementalFilter.filterPage(pagePosts)
+    deps.logger?.log?.(
+      `Fetched reddit RSS page ${page + 1}: ${pagePosts.length} post(s), ${filteredPage.posts.length} new candidate(s)`
+    )
 
     const remainingPosts =
       Number.isFinite(options.maxPosts) && options.maxPosts > 0
         ? Math.max(options.maxPosts - posts.length, 0)
-        : pagePosts.length
-    const postsToProcess = pagePosts.slice(0, remainingPosts)
+        : filteredPage.posts.length
+    const postsToProcess = filteredPage.posts.slice(0, remainingPosts)
     const processedPagePosts = await mapWithConcurrency(
       postsToProcess,
       postConcurrency,
@@ -1255,6 +1348,12 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
     }
     maybeEmitProgress(true)
 
+    if (filteredPage.stopAfterPage) {
+      deps.logger?.log?.(
+        `Reddit incremental frontier reached after ${filteredPage.boundaryHits} known/old post(s).`
+      )
+      break
+    }
     after = pagePosts[pagePosts.length - 1]?.id
       ? `t3_${pagePosts[pagePosts.length - 1].id}`
       : null

@@ -45,6 +45,10 @@ const { createHttpClient } = require('../scrapyard/httpClient')
 const redditOAuth = require('../scrapyard/redditOAuth')
 const { createRedgifsClient } = require('../scrapyard/redgifsClient')
 const {
+  createIncrementalSourceState,
+  recordRedditSourceCheck,
+} = require('../scrapyard/redditSourceState')
+const {
   createBrowserMediaDownloader: createSharedBrowserMediaDownloader,
   getDefaultBrowserProfileDir,
 } = require('../scrapyard/browserMediaDownloader')
@@ -941,6 +945,9 @@ async function fetchPosts(source, options, deps = {}) {
       fetchHtml,
       fetchPostHtml: deps.fetchPostHtml,
       fallbackDelayMs: deps.fallbackDelayMs,
+      redditFullRefresh: deps.redditFullRefresh,
+      redditIncrementalOverlapPosts: deps.redditIncrementalOverlapPosts,
+      redditSourceState: deps.redditSourceState,
       onDiscoveryProgress: deps.onDiscoveryProgress,
       appendRunEvent,
       logger: pageLogger,
@@ -1484,6 +1491,24 @@ async function run(argvInput = process.argv.slice(2)) {
   )
   const { startPage, endPage } = parsePageRange(runOptions.pages)
   const maxPosts = Number.parseInt(runOptions.maxPosts, 10)
+  const preliminaryModelName = sanitize(model || source.rawName)
+  let redditStateContext = null
+  if (source.site === 'reddit' && preliminaryModelName) {
+    const stateFolders = createModelFolders(preliminaryModelName)
+    redditStateContext = createIncrementalSourceState(
+      stateFolders.logDir,
+      source,
+      { datasetPaths }
+    )
+    if (
+      redditStateContext.incrementalState.hasFrontier &&
+      !runOptions.redditFullRefresh
+    ) {
+      console.log(
+        `Reddit incremental state: ${redditStateContext.incrementalState.knownPostCount} known post(s), latest ${redditStateContext.incrementalState.latestPostId || 'unknown'}`
+      )
+    }
+  }
 
   if (preflight) {
     let report
@@ -1541,6 +1566,9 @@ async function run(argvInput = process.argv.slice(2)) {
     {
       fetchPostHtml: redditBrowserFetchHtml,
       fallbackDelayMs: runOptions.redditFallbackDelayMs,
+      redditFullRefresh: runOptions.redditFullRefresh,
+      redditIncrementalOverlapPosts: runOptions.redditIncrementalOverlapPosts,
+      redditSourceState: redditStateContext?.incrementalState || null,
       onDiscoveryProgress: ({ current, total, pages, posts, media, mode }) => {
         const expected = Math.max(total || 1, 1)
         const processed = Math.max(current || 0, 0)
@@ -1570,6 +1598,21 @@ async function run(argvInput = process.argv.slice(2)) {
       : sourceDeduped.entries
 
   if (selectedPosts.length === 0) {
+    if (
+      source.site === 'reddit' &&
+      redditStateContext?.incrementalState?.hasFrontier
+    ) {
+      if (!dryRun) {
+        recordRedditSourceCheck(redditStateContext.modelLogDir, source, {
+          posts: [],
+          noNewPosts: true,
+        })
+      }
+      console.log(
+        `No new Reddit posts for ${source.username || source.userId}; frontier ${redditStateContext.incrementalState.latestPostId || 'unknown'}`
+      )
+      return 0
+    }
     throw new Error(`No posts found for ${inputUrl}`)
   }
 
