@@ -189,6 +189,7 @@ const reasonLabels = {
   duplicateVisualPending: 'pending visual dupes',
   lazyVideoError: 'lazy video errors',
   mediaError: 'media errors',
+  noNewPosts: 'no-new-post runs',
   savedGif: 'saved gifs',
   savedImage: 'saved images',
   savedVideo: 'saved videos',
@@ -204,6 +205,7 @@ const reasonLabels = {
   skipSeenMediaUrl: 'seen URL skips',
   skipStableKey: 'stable-key skips',
   skipUnknownMedia: 'unknown media skips',
+  sourceError: 'source errors',
   videoError: 'video errors',
 }
 
@@ -223,7 +225,8 @@ function formatRunReasonSummary(runLog, options = {}) {
     .slice(0, limit)
     .map(([name, count]) => `${reasonLabels[name] || name} ${count}`)
     .join(' | ')
-  const hidden = entries.length > limit ? ` | +${entries.length - limit} more` : ''
+  const hidden =
+    entries.length > limit ? ` | +${entries.length - limit} more` : ''
   return `Reason stats: ${shown}${hidden}`
 }
 
@@ -271,6 +274,7 @@ function finalizeRunLog(runLog, extra = {}, options = {}) {
     transfer: runLog.transfer,
     errors: runLog.errors,
     ...rest,
+    status,
   }
 
   const summaryPayload = JSON.stringify(summary, null, 2)
@@ -283,7 +287,6 @@ function finalizeRunLog(runLog, extra = {}, options = {}) {
     JSON.stringify(
       {
         ...summary,
-        status,
       },
       null,
       2

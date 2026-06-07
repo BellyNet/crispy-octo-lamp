@@ -141,7 +141,9 @@ function getIncrementalOverlapPosts(deps = {}) {
 
 function createIncrementalPostFilter(deps = {}, options = {}) {
   const state = deps.redditSourceState
-  const fullRefresh = Boolean(options.redditFullRefresh || deps.redditFullRefresh)
+  const fullRefresh = Boolean(
+    options.redditFullRefresh || deps.redditFullRefresh
+  )
   if (!state?.hasFrontier || fullRefresh) {
     return {
       active: false,
@@ -170,7 +172,9 @@ function createIncrementalPostFilter(deps = {}, options = {}) {
         const postCreatedUtc = getRedditPostCreatedUtc(post)
         const known = postId && knownPostIds.has(postId)
         const atOrBeforeFrontier =
-          latestCreatedUtc && postCreatedUtc && postCreatedUtc <= latestCreatedUtc
+          latestCreatedUtc &&
+          postCreatedUtc &&
+          postCreatedUtc <= latestCreatedUtc
 
         if (known) {
           boundaryHits += 1
@@ -559,21 +563,33 @@ function isRedditRateLimitError(err) {
   return /\b(?:HTTP|Browser HTTP)\s+429\b/i.test(String(err?.message || err))
 }
 
+function isRedditAccessError(err) {
+  return /\b(?:HTTP|Browser HTTP)\s+(?:403|429)\b/i.test(
+    String(err?.message || err)
+  )
+}
+
 async function waitForRedditRateLimitRetry(err, attempt, deps = {}) {
   const baseDelayMs = getRedditHtmlRateLimitDelayMs(deps)
   const headerDelayMs = Number(err?.retryAfterMs || 0)
-  const delayMs = headerDelayMs > 0
-    ? Math.min(headerDelayMs + 5000, 10 * 60 * 1000)
-    : Math.min(baseDelayMs * Math.max(attempt, 1), 10 * 60 * 1000)
+  const delayMs =
+    headerDelayMs > 0
+      ? Math.min(headerDelayMs + 5000, 10 * 60 * 1000)
+      : Math.min(baseDelayMs * Math.max(attempt, 1), 10 * 60 * 1000)
   deps.logger?.warn?.(
     `Reddit HTML 429; waiting ${Math.round(delayMs / 1000)}s before retry ${attempt}: ${err.message}`
   )
+  deps.appendRunEvent?.('reddit_rate_limit_retry', {
+    attempt,
+    delayMs,
+    error: err.message,
+  })
   await sleep(delayMs)
 }
 
-async function fetchOldRedditHtml(url, deps = {}) {
+async function fetchRedditHtmlWithRetry(url, requestOptions, deps = {}) {
   if (typeof deps.fetchHtml !== 'function') {
-    throw new Error('fetchOldRedditHtml requires fetchHtml')
+    throw new Error('fetchRedditHtmlWithRetry requires fetchHtml')
   }
   const maxRetries = getRedditHtmlMaxRetries(deps)
   let lastError = null
@@ -581,9 +597,7 @@ async function fetchOldRedditHtml(url, deps = {}) {
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     await waitForOldRedditHtmlSlot(deps)
     try {
-      return await deps.fetchHtml(url, {
-        headers: getOldRedditHeaders(deps.headers),
-      })
+      return await deps.fetchHtml(url, requestOptions)
     } catch (err) {
       lastError = err
       if (!isRedditRateLimitError(err) || attempt >= maxRetries) throw err
@@ -592,6 +606,16 @@ async function fetchOldRedditHtml(url, deps = {}) {
   }
 
   throw lastError
+}
+
+async function fetchOldRedditHtml(url, deps = {}) {
+  return fetchRedditHtmlWithRetry(
+    url,
+    {
+      headers: getOldRedditHeaders(deps.headers),
+    },
+    deps
+  )
 }
 
 function parseHtmlAttributes(tag) {
@@ -611,7 +635,9 @@ function getPostIdFromThing(attrs) {
 }
 
 function getTitleFromPermalink(permalink) {
-  const parts = String(permalink || '').split('/').filter(Boolean)
+  const parts = String(permalink || '')
+    .split('/')
+    .filter(Boolean)
   const slug = parts[parts.length - 1] || ''
   return slug ? slug.replace(/_/g, ' ') : null
 }
@@ -711,9 +737,27 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
   while (listingUrl) {
     if (options.endPage !== null && page > options.endPage) break
 
-    const { html } = await fetchOldRedditHtml(listingUrl, deps)
+    const response = await fetchOldRedditHtml(listingUrl, deps)
+    const { html } = response
     const pagePosts = parseOldRedditListingPosts(source, html)
-    if (pagePosts.length === 0) break
+    deps.onListingPage?.({
+      mode: 'old_html',
+      page: page + 1,
+      url: response.url || listingUrl,
+      statusCode: response.statusCode || null,
+      byteLength: response.byteLength || Buffer.byteLength(html || ''),
+      rawPostCount: pagePosts.length,
+    })
+    if (pagePosts.length === 0) {
+      deps.appendRunEvent?.('reddit_discovery_empty_page', {
+        mode: 'old_html',
+        page: page + 1,
+        url: response.url || listingUrl,
+        statusCode: response.statusCode || null,
+        byteLength: response.byteLength || Buffer.byteLength(html || ''),
+      })
+      break
+    }
     const filteredPage = incrementalFilter.filterPage(pagePosts)
     deps.logger?.log?.(
       `Fetched reddit HTML page ${page + 1}: ${pagePosts.length} post(s), ${filteredPage.posts.length} new candidate(s)`
@@ -827,7 +871,10 @@ function sleep(ms) {
 }
 
 async function mapWithConcurrency(items, limit, mapper) {
-  const concurrency = Math.max(Number.parseInt(String(limit || '1'), 10) || 1, 1)
+  const concurrency = Math.max(
+    Number.parseInt(String(limit || '1'), 10) || 1,
+    1
+  )
   const results = new Array(items.length)
   let nextIndex = 0
 
@@ -1070,13 +1117,39 @@ async function preflightRedditSource(source, deps = {}) {
 
 async function fetchRedditPosts(source, options = {}, deps = {}) {
   if (typeof deps.fetchHtml === 'function') {
+    let oldHtmlListingPosts = 0
     try {
-      return await fetchRedditPostsFromOldHtml(source, options, deps)
-    } catch (err) {
-      if (!isRedditRateLimitError(err)) throw err
+      const posts = await fetchRedditPostsFromOldHtml(source, options, {
+        ...deps,
+        onListingPage: (details) => {
+          oldHtmlListingPosts += Number(details.rawPostCount || 0)
+          deps.onListingPage?.(details)
+        },
+      })
+      if (posts.length > 0 || oldHtmlListingPosts > 0) return posts
       deps.logger?.warn?.(
-        `Reddit HTML discovery hit 429; falling back to RSS discovery: ${err.message}`
+        'Reddit HTML discovery returned an empty listing; trying RSS discovery.'
       )
+      deps.appendRunEvent?.('reddit_discovery_fallback', {
+        from: 'old_html',
+        to: 'rss',
+        reason: 'empty_listing',
+      })
+      return fetchRedditPostsFromRss(source, options, deps)
+    } catch (err) {
+      if (!isRedditAccessError(err)) throw err
+      const reason = isRedditRateLimitError(err)
+        ? 'rate_limited'
+        : 'access_denied'
+      deps.logger?.warn?.(
+        `Reddit HTML discovery failed; falling back to RSS discovery: ${err.message}`
+      )
+      deps.appendRunEvent?.('reddit_discovery_fallback', {
+        from: 'old_html',
+        to: 'rss',
+        reason,
+        error: err.message,
+      })
       return fetchRedditPostsFromRss(source, options, deps)
     }
   }
@@ -1270,15 +1343,37 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
     const rssUrl = getRedditRssUrl(source, after, pageSize)
-    const { html } = await deps.fetchHtml(rssUrl, {
-      headers: {
-        Accept: 'application/atom+xml,text/xml,application/xml',
-        Referer: source.origin,
-        'User-Agent': REDDIT_RSS_USER_AGENT,
+    const response = await fetchRedditHtmlWithRetry(
+      rssUrl,
+      {
+        headers: {
+          Accept: 'application/atom+xml,text/xml,application/xml',
+          Referer: source.origin,
+          'User-Agent': REDDIT_RSS_USER_AGENT,
+        },
       },
-    })
+      deps
+    )
+    const { html } = response
     const pagePosts = parseRssEntries(html, source)
-    if (pagePosts.length === 0) break
+    deps.onListingPage?.({
+      mode: 'rss',
+      page: page + 1,
+      url: response.url || rssUrl,
+      statusCode: response.statusCode || null,
+      byteLength: response.byteLength || Buffer.byteLength(html || ''),
+      rawPostCount: pagePosts.length,
+    })
+    if (pagePosts.length === 0) {
+      deps.appendRunEvent?.('reddit_discovery_empty_page', {
+        mode: 'rss',
+        page: page + 1,
+        url: response.url || rssUrl,
+        statusCode: response.statusCode || null,
+        byteLength: response.byteLength || Buffer.byteLength(html || ''),
+      })
+      break
+    }
     const filteredPage = incrementalFilter.filterPage(pagePosts)
     deps.logger?.log?.(
       `Fetched reddit RSS page ${page + 1}: ${pagePosts.length} post(s), ${filteredPage.posts.length} new candidate(s)`

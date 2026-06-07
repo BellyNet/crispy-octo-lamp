@@ -717,6 +717,12 @@ function printRecoveredRunSummary(summary, { log = console.log } = {}) {
   if (summary.logPath) log(`Run log: ${summary.logPath}`)
 }
 
+function isSuccessfulRunStatus(status) {
+  return ['completed', 'finished', 'no_new_posts'].includes(
+    String(status || '').toLowerCase()
+  )
+}
+
 async function runHoghaulScript(
   scriptPath,
   args,
@@ -733,11 +739,7 @@ async function runHoghaulScript(
         startedAfterMs: startedAtMs,
       })
     : null
-  if (
-    summary?.status &&
-    summary.status !== 'completed' &&
-    summary.status !== 'finished'
-  ) {
+  if (summary?.status && !isSuccessfulRunStatus(summary.status)) {
     printRecoveredRunSummary(summary, { log })
     return code === 0 ? 1 : code
   }
@@ -1832,6 +1834,7 @@ module.exports = {
   appendBoolean,
   runNodeScript,
   inferCanonicalModel,
+  isSuccessfulRunStatus,
   buildAllSourceQueue,
   buildScraperArgs,
   buildScraperOptions,

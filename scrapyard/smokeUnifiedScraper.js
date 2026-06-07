@@ -13,6 +13,7 @@ const {
   buildScraperOptions,
   buildSyncArgs,
   getTemporarilyDisabledSourceReason,
+  isSuccessfulRunStatus,
   runScrape,
   runScraperCli,
 } = require('./scraperRunner')
@@ -38,7 +39,9 @@ const {
 } = require('./sourceAdapters/stufferdb')
 const { fetchCoomerFansPosts } = require('./sourceAdapters/coomerFans')
 const { fetchCoomerKemonoPosts } = require('./sourceAdapters/coomerKemono')
+const { fetchRedditPosts } = require('./sourceAdapters/reddit')
 const { registerParsedSourceForModel } = require('./run-scrape-interactive')
+const runLifecycle = require('./runLifecycle')
 
 async function withConsoleSilenced(callback) {
   const originalLog = console.log
@@ -88,6 +91,8 @@ async function main() {
       rawName: 'abigailgray256',
     }
   )
+  assert.strictEqual(isSuccessfulRunStatus('no_new_posts'), true)
+  assert.strictEqual(isSuccessfulRunStatus('failed'), false)
   await assertRouted('https://coomerfans.com/u/onlyfans/123/name_here', {
     scraper: 'hoghaul',
     sourceType: 'coomerfans',
@@ -306,6 +311,114 @@ async function main() {
       String(line).includes('Fetching coomer pages: 1 page(s), 1 post(s)')
     )
   )
+
+  const redditDiscoveryEvents = []
+  const redditListingPages = []
+  let redditFetchCount = 0
+  const emptyRedditPosts = await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'empty_user',
+      username: 'empty_user',
+    },
+    {},
+    {
+      fetchHtml: async (url) => {
+        redditFetchCount += 1
+        return {
+          html: url.includes('.rss') ? '<feed></feed>' : '<html></html>',
+          byteLength: 13,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: {},
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        redditDiscoveryEvents.push({ type, ...payload }),
+      onListingPage: (details) => redditListingPages.push(details),
+      logger: { log: () => {}, warn: () => {} },
+    }
+  )
+  assert.deepStrictEqual(emptyRedditPosts, [])
+  assert.strictEqual(redditFetchCount, 2)
+  assert.deepStrictEqual(
+    redditListingPages.map((page) => page.mode),
+    ['old_html', 'rss']
+  )
+  assert(
+    redditDiscoveryEvents.some(
+      (event) =>
+        event.type === 'reddit_discovery_fallback' &&
+        event.reason === 'empty_listing'
+    )
+  )
+
+  const redditAccessEvents = []
+  let redditAccessFetchCount = 0
+  await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'blocked_user',
+      username: 'blocked_user',
+    },
+    {},
+    {
+      fetchHtml: async (url) => {
+        redditAccessFetchCount += 1
+        if (!url.includes('.rss')) throw new Error('HTTP 403: blocked')
+        return {
+          html: '<feed></feed>',
+          byteLength: 13,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: {},
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        redditAccessEvents.push({ type, ...payload }),
+      logger: { log: () => {}, warn: () => {} },
+    }
+  )
+  assert.strictEqual(redditAccessFetchCount, 2)
+  assert(
+    redditAccessEvents.some(
+      (event) =>
+        event.type === 'reddit_discovery_fallback' &&
+        event.reason === 'access_denied'
+    )
+  )
+
+  const lifecycleRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'run-lifecycle-smoke-')
+  )
+  const lifecycleFolders = {
+    base: path.join(lifecycleRoot, 'sample_model'),
+    logDir: path.join(lifecycleRoot, 'sample_model', 'log'),
+  }
+  fs.mkdirSync(lifecycleFolders.logDir, { recursive: true })
+  const lifecycleLog = runLifecycle.createRunLog({
+    source: 'hoghaul',
+    modelName: 'sample_model',
+    inputUrl: 'https://www.reddit.com/user/sample_model/submitted/',
+    folders: lifecycleFolders,
+    keepHistory: true,
+  })
+  runLifecycle.finalizeRunLog(lifecycleLog, {
+    status: 'no_new_posts',
+    reason: 'noNewPosts',
+  })
+  const lifecycleSummary = JSON.parse(
+    fs.readFileSync(lifecycleLog.summaryPath, 'utf8')
+  )
+  assert.strictEqual(lifecycleSummary.status, 'no_new_posts')
 
   const redditOptions = buildScraperOptions(reddit, {
     model: 'abigailgray256',

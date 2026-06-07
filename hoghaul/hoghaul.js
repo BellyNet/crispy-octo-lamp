@@ -17,6 +17,9 @@ const {
 } = require('../scrapyard/sourceRouter')
 const {
   sanitize,
+  findCanonicalModelName,
+  findCanonicalModelNameBySource,
+  loadModelRegistry,
   resolveAndTrackSourceModel,
 } = require('../scrapyard/modelRegistry')
 const {
@@ -232,6 +235,23 @@ function registerSourceForRun(source, inputUrl, canonicalOverride) {
   return modelName
 }
 
+function resolveModelNameForRun(source, inputUrl, canonicalOverride) {
+  const registry = loadModelRegistry(registryPath)
+  const cleanedOverride = sanitize(canonicalOverride)
+  const cleanedRawName = sanitize(source.rawName) || 'unknown_model'
+  const sourceInfo = {
+    ...source,
+    inputUrl,
+  }
+  return (
+    (cleanedOverride && findCanonicalModelName(registry, cleanedOverride)) ||
+    findCanonicalModelNameBySource(registry, sourceInfo) ||
+    findCanonicalModelName(registry, cleanedRawName) ||
+    cleanedOverride ||
+    cleanedRawName
+  )
+}
+
 function createModelFolders(modelName) {
   return datasetPaths.createModelFolders(modelName)
 }
@@ -444,6 +464,9 @@ function finalizeAbortedRun(status, error) {
     error instanceof Error ? error.message : String(error || '').trim()
 
   if (errorMessage) {
+    errorCount += 1
+    runLifecycle.incrementRunCounter(currentRunLog, 'failures')
+    runLifecycle.incrementRunReasonCounter(currentRunLog, 'sourceError')
     recordRunError('run_error', {
       error: errorMessage,
       status: normalizedStatus,
@@ -454,13 +477,61 @@ function finalizeAbortedRun(status, error) {
     })
   }
 
+  appendRunEvent('run_finished', {
+    status: normalizedStatus,
+    successCount,
+    duplicateCount,
+    errorCount,
+    queuedVideoCount,
+    savedBytes,
+    counters: currentRunLog.counters,
+    transfer: currentRunLog.transfer,
+  })
   finalizeRunLog({
     status: normalizedStatus,
     successCount,
     duplicateCount,
-    errorCount: errorMessage ? errorCount + 1 : errorCount,
+    errorCount,
     queuedVideoCount,
     savedBytes,
+  })
+}
+
+function finalizeEmptyRun({ status, source, modelName, reason, details = {} }) {
+  runLifecycle.incrementRunReasonCounter(currentRunLog, reason)
+  appendRunEvent('source_empty', {
+    modelName,
+    site: source.site,
+    service: source.service,
+    userId: source.userId,
+    reason,
+    ...details,
+  })
+  appendRunEvent('run_finished', {
+    status,
+    successCount: 0,
+    duplicateCount: 0,
+    errorCount: 0,
+    queuedVideoCount: 0,
+    savedBytes: 0,
+    postCount: 0,
+    mediaCount: 0,
+    sourceDuplicateMediaCount: 0,
+    counters: currentRunLog.counters,
+    transfer: currentRunLog.transfer,
+  })
+  finalizeRunLog({
+    status,
+    successCount: 0,
+    duplicateCount: 0,
+    errorCount: 0,
+    queuedVideoCount: 0,
+    savedBytes: 0,
+    postCount: 0,
+    mediaCount: 0,
+    sourceDuplicateMediaCount: 0,
+    reason,
+    ...details,
   })
 }
 
@@ -956,6 +1027,7 @@ async function fetchPosts(source, options, deps = {}) {
       redditIncrementalOverlapPosts: deps.redditIncrementalOverlapPosts,
       redditSourceState: deps.redditSourceState,
       onDiscoveryProgress: deps.onDiscoveryProgress,
+      onListingPage: deps.onListingPage,
       appendRunEvent,
       logger: pageLogger,
       normalizeUrl: normalizeSeenUrl,
@@ -1501,16 +1573,23 @@ async function run(argvInput = process.argv.slice(2)) {
   )
   const { startPage, endPage } = parsePageRange(runOptions.pages)
   const maxPosts = Number.parseInt(runOptions.maxPosts, 10)
-  const preliminaryModelName = sanitize(model || source.rawName)
+  const modelName = resolveModelNameForRun(source, inputUrl, model)
+  const folders = createModelFolders(modelName)
   let redditStateContext = null
   let sourceFrontier = null
-  if (source.site === 'reddit' && preliminaryModelName) {
-    const stateFolders = createModelFolders(preliminaryModelName)
-    redditStateContext = createIncrementalSourceState(
-      stateFolders.logDir,
-      source,
-      { datasetPaths }
-    )
+  if (!preflight && !dryRun) {
+    startRunLog(modelName, inputUrl, folders, keepHistory)
+    appendRunEvent('source_discovery_started', {
+      modelName,
+      site: source.site,
+      service: source.service,
+      userId: source.userId,
+    })
+  }
+  if (source.site === 'reddit' && modelName) {
+    redditStateContext = createIncrementalSourceState(folders.logDir, source, {
+      datasetPaths,
+    })
     if (
       redditStateContext.incrementalState.hasFrontier &&
       !runOptions.redditFullRefresh
@@ -1519,9 +1598,8 @@ async function run(argvInput = process.argv.slice(2)) {
         `Reddit incremental state: ${redditStateContext.incrementalState.knownPostCount} known post(s), latest ${redditStateContext.incrementalState.latestPostId || 'unknown'}`
       )
     }
-  } else if (preliminaryModelName) {
-    const stateFolders = createModelFolders(preliminaryModelName)
-    sourceFrontier = loadConfirmedSourceFrontier(stateFolders.logDir, source, {
+  } else if (modelName) {
+    sourceFrontier = loadConfirmedSourceFrontier(folders.logDir, source, {
       datasetPaths,
     })
     if (sourceFrontier.active && !runOptions.fullSourceRefresh) {
@@ -1600,6 +1678,9 @@ async function run(argvInput = process.argv.slice(2)) {
           bottomText: `processed ${processed}/${expected} | saved 0 | skipped 0 | dupes 0 | failed 0 | remaining ${Math.max(expected - processed, 0)} | discovery ${pages}p/${posts} posts/${media} media`,
         })
       },
+      onListingPage: (details) => {
+        appendRunEvent('reddit_discovery_page', details)
+      },
     }
   )
   const selectedPosts =
@@ -1635,15 +1716,45 @@ async function run(argvInput = process.argv.slice(2)) {
       console.log(
         `No new Reddit posts for ${source.username || source.userId}; frontier ${redditStateContext.incrementalState.latestPostId || 'unknown'}`
       )
+      finalizeEmptyRun({
+        status: 'no_new_posts',
+        source,
+        modelName,
+        reason: 'noNewPosts',
+        details: {
+          frontierPostId:
+            redditStateContext.incrementalState.latestPostId || null,
+          knownPostCount:
+            redditStateContext.incrementalState.knownPostCount || 0,
+        },
+      })
       return 0
     }
     if (source.site !== 'reddit' && sourceFrontier?.active) {
       console.log(
         `No new ${source.site} posts for ${source.rawName || source.userId}; ${sourceFrontier.knownPostCount} confirmed post(s)`
       )
+      finalizeEmptyRun({
+        status: 'no_new_posts',
+        source,
+        modelName,
+        reason: 'noNewPosts',
+        details: {
+          knownPostCount: sourceFrontier.knownPostCount || 0,
+        },
+      })
       return 0
     }
-    throw new Error(`No posts found for ${inputUrl}`)
+    appendRunEvent('source_discovery_failed', {
+      modelName,
+      site: source.site,
+      service: source.service,
+      userId: source.userId,
+      reason: 'no_posts_after_fallbacks',
+    })
+    throw new Error(
+      `No posts found after all ${source.site} discovery methods for ${inputUrl}`
+    )
   }
 
   if (dryRun) {
@@ -1669,8 +1780,12 @@ async function run(argvInput = process.argv.slice(2)) {
     return 0
   }
 
-  const modelName = registerSourceForRun(source, inputUrl, model)
-  const folders = createModelFolders(modelName)
+  const trackedModelName = registerSourceForRun(source, inputUrl, model)
+  if (trackedModelName !== modelName) {
+    throw new Error(
+      `Resolved model changed during source registration: ${modelName} -> ${trackedModelName}`
+    )
+  }
 
   console.log(
     `Source ready: ${source.site}/${source.service}/${source.userId} -> ${modelName} | posts ${selectedPosts.length} | media ${selectedMedia.length}`
@@ -1694,7 +1809,6 @@ async function run(argvInput = process.argv.slice(2)) {
     }
   }
 
-  startRunLog(modelName, inputUrl, folders, keepHistory)
   appendRunEvent('source_posts_loaded', {
     modelName,
     site: source.site,
