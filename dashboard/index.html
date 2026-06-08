@@ -2721,17 +2721,23 @@
               const wrap = document.createElement('div')
               wrap.className = 'pswp-video-wrap'
               const video = document.createElement('video')
-              video.loop = true
-              video.playsInline = true
+              // Boolean attributes go through setAttribute, not property
+              // assignment: the dataSource entry is serialized to an HTML
+              // string via wrap.outerHTML and PhotoSwipe re-parses it, and
+              // some boolean *properties* (notably `muted`, which iOS needs
+              // to be a content attribute for unrestricted autoplay) don't
+              // round-trip through serialize → reparse via property
+              // assignment alone.
+              video.setAttribute('loop', '')
+              video.setAttribute('playsinline', '')
               video.src = item.url
               if (gifLike) {
-                video.muted = true
-                video.autoplay = true
+                video.setAttribute('muted', '')
+                video.setAttribute('autoplay', '')
                 video.preload = 'auto'
-                video.controls = false
                 video.setAttribute('data-gif-like', '1')
               } else {
-                video.controls = true
+                video.setAttribute('controls', '')
                 video.preload = 'none'
                 if (item.previewUrl || item.thumbUrl)
                   video.poster = item.previewUrl || item.thumbUrl

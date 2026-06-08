@@ -50,7 +50,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 6
+const RESPONSE_CACHE_VERSION = 5
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
