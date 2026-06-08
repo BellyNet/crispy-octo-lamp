@@ -5,7 +5,12 @@ services:
     ports:
       - '3420:3420'
     volumes:
-      - /share/Vault69/dataset:/data/dataset:ro
+      # Writable so the in-container nightly maintenance pass can transcode
+      # .webm → .mp4 and remux non-faststart files in place. The dashboard
+      # itself never writes to this mount outside of those scheduled passes
+      # — read-only behavior is preserved by the application code, not by
+      # the bind mount.
+      - /share/Vault69/dataset:/data/dataset
       # Live registry — updated by sync; picked up on next /api/users request, no rebuild needed
       - /share/Vault69/model_aliases.json:/app/model_aliases.json:ro
       - dashboard-thumbs:/data/thumbs

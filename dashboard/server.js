@@ -13,6 +13,8 @@ const sharp = require('sharp')
 const execFileAsync = promisify(execFile)
 const mediaDates = require('../milkmaid/media-dates.js')
 const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
+const { transcodeWebmInUserDir } = require('../scrapyard/transcodeWebm.js')
+const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
 const MetaCache = require('./meta-cache.js')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -1278,6 +1280,108 @@ app.get('/api/users/:username/cover', (req, res) => {
   })
 })
 
+// ─── MEDIA MAINTENANCE ───────────────────────────────────────────────────────
+// Two heavy passes that keep the dataset iPhone-friendly:
+//   1) Transcode any .webm to H.264/AAC .mp4 (iOS can't decode VP9/Opus).
+//   2) Remux any non-faststart .mp4/.m4v so the moov atom sits at byte 0
+//      (no extra round-trip for the browser to find the play index).
+//
+// Both are idempotent — they skip files that are already converted /
+// already faststart, so re-running is cheap. They run inline as part of
+// the nightly tick, and can also be triggered on demand via /api/run-maint.
+//
+// Requires the dataset bind-mount to be writable, not :ro. docker-compose.yml
+// now mounts the dataset as default rw for that reason.
+const maintState = {
+  inProgress: false,
+  trigger: null, // 'nightly' | 'manual'
+  startedAt: null,
+  completedAt: null,
+  modelsTotal: 0,
+  modelsDone: 0,
+  webmTranscoded: 0,
+  faststartRemuxed: 0,
+  errors: 0,
+}
+
+async function runMediaMaintenance({ trigger = 'manual' } = {}) {
+  if (maintState.inProgress) {
+    return { skipped: true, reason: 'already running' }
+  }
+  let dirs
+  try {
+    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+  } catch (err) {
+    return { error: 'dataset dir unreadable: ' + err.message }
+  }
+  const modelDirs = dirs
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .map((e) => path.join(datasetDir, e.name))
+
+  Object.assign(maintState, {
+    inProgress: true,
+    trigger,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    modelsTotal: modelDirs.length,
+    modelsDone: 0,
+    webmTranscoded: 0,
+    faststartRemuxed: 0,
+    errors: 0,
+  })
+  const t0 = Date.now()
+  console.log(`  Maint:     ${trigger}, ${modelDirs.length} models…`)
+
+  for (const userDir of modelDirs) {
+    try {
+      const wr = await transcodeWebmInUserDir(userDir, { log: console })
+      maintState.webmTranscoded += wr.filter((r) => r.ok && !r.skipped).length
+    } catch (err) {
+      maintState.errors++
+      console.warn(
+        `  Maint: webm pass on ${path.basename(userDir)} —`,
+        err.message
+      )
+    }
+    try {
+      const fr = await faststartInUserDir(userDir, { log: console })
+      maintState.faststartRemuxed += fr.filter((r) => r.ok).length
+    } catch (err) {
+      maintState.errors++
+      console.warn(
+        `  Maint: faststart pass on ${path.basename(userDir)} —`,
+        err.message
+      )
+    }
+    maintState.modelsDone++
+  }
+
+  maintState.completedAt = new Date().toISOString()
+  maintState.inProgress = false
+  const dur = ((Date.now() - t0) / 1000).toFixed(0)
+  console.log(
+    `  Maint:     done in ${dur}s — webm:${maintState.webmTranscoded} faststart:${maintState.faststartRemuxed} errors:${maintState.errors}`
+  )
+  return { ok: true }
+}
+
+app.get('/api/maint-status', (_req, res) => {
+  res.json({ ...maintState })
+})
+
+app.post('/api/run-maint', (_req, res) => {
+  if (maintState.inProgress) {
+    return res
+      .status(202)
+      .json({ skipped: true, reason: 'already running', state: maintState })
+  }
+  // Kick off without awaiting — client polls /api/maint-status for progress.
+  runMediaMaintenance({ trigger: 'manual' }).catch((err) =>
+    console.warn('  Manual maintenance error:', err.message)
+  )
+  res.json({ ok: true, state: maintState })
+})
+
 // ─── SCAN ENDPOINTS ──────────────────────────────────────────────────────────
 app.get('/api/scan-status', (_req, res) => {
   res.json({ ...scanState, responseCacheSize: mediaResponseCache.size })
@@ -1627,6 +1731,14 @@ async function start() {
   // offline during a sync).
   const scheduleNightly = () => {
     setTimeout(async () => {
+      // Run the heavy media passes FIRST so the subsequent scan picks up
+      // any new .mp4 files the webm transcoder produced and the moved
+      // .webm originals in .webm-backup/.
+      try {
+        await runMediaMaintenance({ trigger: 'nightly' })
+      } catch (err) {
+        console.warn('  Nightly maintenance error:', err.message)
+      }
       try {
         await scanAll({ force: true, trigger: 'nightly' })
       } catch (err) {
