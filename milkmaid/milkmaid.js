@@ -1101,6 +1101,34 @@ function isStructuralLazyVideoFailure(errorMessage) {
   )
 }
 
+function getPermanentLazyVideoFailure(errorMessage) {
+  const text = String(errorMessage || '').trim()
+  if (isStructuralLazyVideoFailure(text)) {
+    const tailDecodeFailure = text.includes('tail_decode_error')
+    return {
+      reason: tailDecodeFailure
+        ? 'upstream_tail_decode_error'
+        : 'lazy_video_error',
+      note: tailDecodeFailure
+        ? 'Fully downloaded but tail decode failed; skipping future reruns unless manually cleared.'
+        : `Lazy video failed during validation: ${text}`,
+      preservePartial: true,
+    }
+  }
+
+  const statusMatch = text.match(/^HTTP\s+(\d{3})\b/i)
+  const statusCode = Number(statusMatch?.[1] || 0)
+  if (statusCode === 404 || statusCode === 410) {
+    return {
+      reason: 'upstream_media_missing',
+      note: `Upstream media returned HTTP ${statusCode}; skipping future reruns unless manually cleared.`,
+      preservePartial: false,
+    }
+  }
+
+  return null
+}
+
 function quoteForShell(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`
 }
@@ -2562,36 +2590,41 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
               }
               logAndProgress(`✅ Saved lazy video: ${filename}`)
             } catch (err) {
-              errorCount++
-              runLifecycle.incrementRunCounter(currentRunLog, 'failures')
-              recordRunReason('lazyVideoError')
               addRunFailedBytes(bytesDownloadedForFile)
               addRunFailedLazyVideoBytes(bytesDownloadedForFile)
               const relativePath = getDatasetRelativePath(finalPath)
-              const structuralFailure = isStructuralLazyVideoFailure(
-                err.message
-              )
-              const quarantinePath = fs.existsSync(tmpPath)
-                ? moveFailedLazyVideoToQuarantine(tmpPath, finalPath)
-                : getQuarantineMirrorPath(finalPath)
-              const skipReason = String(err.message || '').includes(
-                'tail_decode_error'
-              )
-                ? 'upstream_tail_decode_error'
-                : 'lazy_video_error'
-              const addedPermanentSkip = structuralFailure
+              const permanentFailure = getPermanentLazyVideoFailure(err.message)
+              const skipReason = permanentFailure?.reason || 'lazy_video_error'
+              let quarantinePath = getQuarantineMirrorPath(finalPath)
+              if (fs.existsSync(tmpPath)) {
+                if (permanentFailure && !permanentFailure.preservePartial) {
+                  removeFileIfExists(tmpPath)
+                } else {
+                  quarantinePath = moveFailedLazyVideoToQuarantine(
+                    tmpPath,
+                    finalPath
+                  )
+                }
+              }
+              const addedPermanentSkip = permanentFailure
                 ? addPermanentSkip({
                     relativePath,
                     sourceUrl: url,
                     mediaPageUrl,
                     filename,
                     reason: skipReason,
-                    note:
-                      skipReason === 'upstream_tail_decode_error'
-                        ? 'Fully downloaded but tail decode failed; skipping future reruns unless manually cleared.'
-                        : `Lazy video failed during validation: ${err.message}`,
+                    note: permanentFailure.note,
                   })
                 : false
+              if (permanentFailure) {
+                duplicateCount++
+                runLifecycle.incrementRunCounter(currentRunLog, 'duplicates')
+                recordRunReason('skipPermanent')
+              } else {
+                errorCount++
+                runLifecycle.incrementRunCounter(currentRunLog, 'failures')
+                recordRunReason('lazyVideoError')
+              }
               recordFailedSeenMedia(folders.logDir, {
                 relativePath,
                 filename,
@@ -2605,7 +2638,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
               const manifestUpdated = ensureQuarantineManifestEntry(finalPath, {
                 reason: skipReason,
                 reasons: [skipReason],
-                outcome: 'failed',
+                outcome: permanentFailure ? 'permanent_skip' : 'failed',
                 error: err.message,
                 sourceUrl: url,
                 mediaPageUrl,
@@ -2613,14 +2646,14 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
                 expectedBytes: responseContentLength,
               })
               updateQuarantineManifestForRepairAttempt(finalPath, {
-                outcome: 'failed',
+                outcome: permanentFailure ? 'permanent_skip' : 'failed',
                 error: err.message,
                 sourceUrl: url,
                 mediaPageUrl,
                 bytesDownloaded: bytesDownloadedForFile,
                 expectedBytes: responseContentLength,
               })
-              recordRunError('lazy_video_error', {
+              const eventDetails = {
                 modelName,
                 filename,
                 mediaUrl: url,
@@ -2636,27 +2669,30 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
                 quarantinePath,
                 manifestUpdated: Boolean(manifestUpdated),
                 addedPermanentSkip,
-              })
-              appendRunEvent('lazy_video_error', {
-                modelName,
-                filename,
-                mediaUrl: url,
-                mediaPageUrl,
-                savedPath: relativePath,
-                error: err.message,
-                bytesDownloaded: bytesDownloadedForFile,
-                responseContentLength,
-                responseEndedCleanly,
-                responseWasAborted,
-                responseCloseBeforeEnd,
-                hadQuarantineMirror,
-                quarantinePath,
-                manifestUpdated,
-                addedPermanentSkip,
-              })
-              logAndProgress(`❌ Lazy failed: ${filename} - ${err.message}`)
+                reason: skipReason,
+              }
+              if (!permanentFailure) {
+                recordRunError('lazy_video_error', eventDetails)
+              }
+              appendRunEvent(
+                permanentFailure
+                  ? 'lazy_video_permanent_skip'
+                  : 'lazy_video_error',
+                eventDetails
+              )
+              if (permanentFailure) {
+                appendRunEvent('skip_permanent', {
+                  ...eventDetails,
+                  preNavigation: false,
+                })
+              }
+              logAndProgress(
+                permanentFailure
+                  ? `Permanent video skip: ${filename} - ${err.message}`
+                  : `❌ Lazy failed: ${filename} - ${err.message}`
+              )
               if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath)
-              if (!addedPermanentSkip) {
+              if (!permanentFailure) {
                 knownFilenames.delete(filename) // allow retry in future runs
               }
             } finally {
@@ -2804,6 +2840,7 @@ async function runMilkmaidCli(argvInput = process.argv.slice(2)) {
 }
 
 module.exports = {
+  getPermanentLazyVideoFailure,
   normalizeMilkmaidRunOptions,
   parseCliArgs,
   runMilkmaidScrape,

@@ -41,6 +41,7 @@ const { fetchCoomerFansPosts } = require('./sourceAdapters/coomerFans')
 const { fetchCoomerKemonoPosts } = require('./sourceAdapters/coomerKemono')
 const { fetchRedditPosts } = require('./sourceAdapters/reddit')
 const { registerParsedSourceForModel } = require('./run-scrape-interactive')
+const { getPermanentLazyVideoFailure } = require('../milkmaid/milkmaid')
 const runLifecycle = require('./runLifecycle')
 
 async function withConsoleSilenced(callback) {
@@ -83,6 +84,22 @@ async function assertRouted(url, expected) {
 }
 
 async function main() {
+  assert.deepStrictEqual(getPermanentLazyVideoFailure('HTTP 404'), {
+    reason: 'upstream_media_missing',
+    note: 'Upstream media returned HTTP 404; skipping future reruns unless manually cleared.',
+    preservePartial: false,
+  })
+  assert.deepStrictEqual(getPermanentLazyVideoFailure('HTTP 410'), {
+    reason: 'upstream_media_missing',
+    note: 'Upstream media returned HTTP 410; skipping future reruns unless manually cleared.',
+    preservePartial: false,
+  })
+  assert.strictEqual(getPermanentLazyVideoFailure('HTTP 429'), null)
+  assert.strictEqual(
+    getPermanentLazyVideoFailure('No lazy download progress for 90000ms'),
+    null
+  )
+
   const reddit = await assertRouted(
     'https://www.reddit.com/user/abigailgray256/submitted/',
     {
