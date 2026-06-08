@@ -50,7 +50,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 5
+const RESPONSE_CACHE_VERSION = 6
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
@@ -529,7 +529,8 @@ async function processFileForResponse(username, userDir, item) {
     height = 0,
     duration = 0,
     videoDate,
-    imageDate
+    imageDate,
+    hasAudio
   let metaUpdated = false
   const hit = metaCache.get(username, item.folder, item.filename, stat)
   if (hit) {
@@ -538,6 +539,7 @@ async function processFileForResponse(username, userDir, item) {
     duration = hit.duration || 0
     videoDate = hit.videoDate
     imageDate = hit.imageDate
+    hasAudio = hit.hasAudio
     // Backfill EXIF dates for entries cached before EXIF support landed.
     // Sentinel: `null` means "tried and got nothing", so we don't retry next scan.
     if (
@@ -557,19 +559,26 @@ async function processFileForResponse(username, userDir, item) {
       metaUpdated = true
     }
 
-    // Backfill video dimensions for entries cached before ffprobe started
-    // recording width/height. One re-probe per video, then it sticks.
-    if (isVideo && hit.width === undefined) {
+    // Backfill video dimensions and audio presence for entries cached
+    // before ffprobe started recording either. One re-probe per video,
+    // then it sticks — `hasAudio === undefined` means we haven't asked
+    // ffprobe yet, while `false` is a real recorded answer.
+    if (
+      isVideo &&
+      (hit.width === undefined || hit.hasAudio === undefined)
+    ) {
       const probed = await mediaDates
         .probeVideoFile(item.filePath)
         .catch(() => ({}))
       width = probed.width || 0
       height = probed.height || 0
+      hasAudio = probed.hasAudio === true
       metaCache.set(username, item.folder, item.filename, stat, {
         duration,
         ...(videoDate !== undefined && { videoDate }),
         width,
         height,
+        hasAudio,
       })
       metaUpdated = true
     }
@@ -582,6 +591,7 @@ async function processFileForResponse(username, userDir, item) {
       videoDate = probed.videoDate || undefined
       width = probed.width || 0
       height = probed.height || 0
+      hasAudio = probed.hasAudio === true
     } else if (IMAGE_EXTS_IN.has(ext)) {
       // sharp metadata and exif parse can run in parallel — both read the file
       // header. exifr returns null for formats with no EXIF (most PNGs, GIFs).
@@ -606,6 +616,7 @@ async function processFileForResponse(username, userDir, item) {
             ...(videoDate !== undefined && { videoDate }),
             width,
             height,
+            hasAudio,
           }
         : { width, height, imageDate }
     )
@@ -640,6 +651,11 @@ async function processFileForResponse(username, userDir, item) {
       duration,
       width,
       height,
+      // hasAudio is only meaningful for videos; for images it stays
+      // undefined and the client ignores it. The lightbox uses this +
+      // duration to decide whether to render a clip as a GIF-style
+      // muted/no-controls/preload=auto element.
+      ...(isVideo && { hasAudio: hasAudio === true }),
       previewUrl:
         type === 'video'
           ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`

@@ -2702,23 +2702,40 @@
         loadPswp().then((PhotoSwipe) => {
           const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
-              // preload="none" + a poster image: the slide opens *instantly*
-              // showing the cached GIF/JPEG preview, while no bytes are
-              // fetched until syncVideos() activates the slide. Earlier
-              // versions used preload="metadata" on every slide, which kicked
-              // off three simultaneous range requests for huge MP4s the
-              // moment the lightbox opened — the active slide had to fight
-              // for bandwidth and visibly stalled.
+              // Two rendering modes:
+              //
+              // 1) GIF-like (short clips < 10 s, or videos with no audio
+              //    track): muted + autoplay + loop + no controls +
+              //    preload="auto". The file is small, so eager-loading is
+              //    fine, and muted autoplay is unrestricted on iOS. Looks
+              //    and feels like an animated GIF — no UI chrome, instant
+              //    playback as soon as the slide opens.
+              //
+              // 2) Regular: preload="none" + poster + controls visible.
+              //    syncVideos() promotes preload to "auto" and calls play()
+              //    when the slide becomes active, and demotes neighbours
+              //    so they don't compete for bandwidth.
+              const gifLike =
+                (typeof item.duration === 'number' && item.duration > 0 && item.duration < 10) ||
+                item.hasAudio === false
               const wrap = document.createElement('div')
               wrap.className = 'pswp-video-wrap'
               const video = document.createElement('video')
-              video.controls = true
               video.loop = true
               video.playsInline = true
-              video.preload = 'none'
-              if (item.previewUrl || item.thumbUrl)
-                video.poster = item.previewUrl || item.thumbUrl
               video.src = item.url
+              if (gifLike) {
+                video.muted = true
+                video.autoplay = true
+                video.preload = 'auto'
+                video.controls = false
+                video.setAttribute('data-gif-like', '1')
+              } else {
+                video.controls = true
+                video.preload = 'none'
+                if (item.previewUrl || item.thumbUrl)
+                  video.poster = item.previewUrl || item.thumbUrl
+              }
               wrap.appendChild(video)
               return { html: wrap.outerHTML, _item: item }
             }
@@ -3150,23 +3167,23 @@
               const inActive =
                 v.closest('.pswp__item.pswp__item--current') ||
                 v.closest('.pswp__item--active')
+              const gifLike = v.dataset.gifLike === '1'
               if (inActive) {
-                // Promote preload then call load() — setting the attribute
-                // alone doesn't restart the loading state machine, but
-                // load() does, and it's a no-op if the browser had already
-                // started fetching. Then play() — the user's click into
-                // the lightbox is the gesture that authorizes audio.
-                if (v.preload !== 'auto') {
+                if (!gifLike && v.preload !== 'auto') {
+                  // Regular videos start with preload="none" — promote
+                  // and load() so playback bytes start flowing. GIF-like
+                  // clips already have preload="auto" baked in.
                   v.preload = 'auto'
                   v.load()
                 }
                 v.play().catch(() => {})
               } else {
-                if (v.preload !== 'none') v.preload = 'none'
                 v.pause()
-                try {
-                  v.currentTime = 0
-                } catch {}
+                try { v.currentTime = 0 } catch {}
+                // Only demote regular videos — leaving a GIF-like clip
+                // at "auto" keeps its tiny file warm for when the user
+                // swipes back to it.
+                if (!gifLike && v.preload !== 'none') v.preload = 'none'
               }
             })
           }

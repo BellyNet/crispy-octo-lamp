@@ -143,16 +143,29 @@ async function probeVideoFile(filePath) {
 
     let width = 0
     let height = 0
+    let hasAudio = false
     for (const stream of info?.streams || []) {
-      if (stream?.codec_type === 'video' && stream.width && stream.height) {
+      if (
+        !width &&
+        stream?.codec_type === 'video' &&
+        stream.width &&
+        stream.height
+      ) {
         width = stream.width
         height = stream.height
-        break
+      } else if (stream?.codec_type === 'audio') {
+        hasAudio = true
       }
     }
-    return { duration, videoDate, width, height }
+    return { duration, videoDate, width, height, hasAudio }
   } catch {
-    return { duration: null, videoDate: null, width: 0, height: 0 }
+    return {
+      duration: null,
+      videoDate: null,
+      width: 0,
+      height: 0,
+      hasAudio: false,
+    }
   }
 }
 
