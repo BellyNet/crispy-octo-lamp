@@ -44,6 +44,7 @@ Tagger/final
 # *.ps1 ignore above is meant to skip local one-offs and node_modules' .ps1
 # shims, not the repo's own automation. Keep them tracked.
 !deploy-dashboard.ps1
+!nightly-maintenance.ps1
 !update-nas.ps1
 !update-repo.ps1
 

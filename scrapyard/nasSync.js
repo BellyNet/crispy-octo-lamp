@@ -9,8 +9,6 @@ const {
   mergeNasMp4Entries,
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
-const { transcodeWebmInUserDir } = require('./transcodeWebm')
-const { faststartInUserDir } = require('./faststartMp4')
 
 const LOCAL_REGISTRY_PATH = path.join(__dirname, '..', 'model_aliases.json')
 
@@ -59,22 +57,11 @@ async function syncModelToNas({
   const localModelDir = path.join(datasetDir, modelName)
   const nasModelDir = path.join(nasDatasetDir, modelName)
 
-  // Convert any .webm files to iOS-friendly .mp4 BEFORE pushing — iPhone
-  // Safari can't decode VP9/Opus/WebM at all, so anything left in .webm
-  // is invisible to mobile dashboard visitors. Failures here don't block
-  // the sync; the original .webm stays in place and still gets robocopied.
-  await transcodeWebmInUserDir(localModelDir, { log }).catch((err) => {
-    log.warn?.(`Pre-sync webm transcode failed: ${err.message}`)
-  })
-
-  // Remux any non-faststart .mp4/.m4v in place so the browser doesn't
-  // have to round-trip the file tail before playback can begin. Pure
-  // remux (no re-encode), so it's fast and lossless. Same try/catch
-  // pattern: failures don't block the sync.
-  await faststartInUserDir(localModelDir, { log }).catch((err) => {
-    log.warn?.(`Pre-sync faststart pass failed: ${err.message}`)
-  })
-
+  // Note: per-scrape webm transcode + faststart remux used to live here,
+  // but they slowed every model sync and ate ffmpeg cycles on content
+  // that may never be viewed. They now run only via the nightly
+  // maintenance script (nightly-maintenance.ps1) or by invoking the
+  // CLIs directly (scrapyard/transcodeWebm.js, scrapyard/faststartMp4.js).
   const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /XC /XN /XO /R:2 /W:5`
   const result = await runRobocopy(command)
 
