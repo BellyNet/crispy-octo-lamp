@@ -51,7 +51,13 @@ echo "[remote] Compose:"
 $DOCKER compose version
 
 echo "[remote] Rebuilding..."
-$DOCKER compose up -d --build
+# --force-recreate so a deploy always restarts the container, even when
+# the build layers all hit cache and produce the same image hash. Without
+# this, a code change that gets baked into a same-hash image is silently
+# not picked up by the running container — the build succeeds and the
+# script reports "Deploy complete." but the dashboard keeps running the
+# old code.
+$DOCKER compose up -d --build --force-recreate
 
 echo "[remote] Containers:"
 $DOCKER compose ps
