@@ -8,7 +8,7 @@ const DEFAULT_REDDIT_PAGE_SIZE = 100
 const REDDIT_RSS_USER_AGENT =
   'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
 const DEFAULT_REDDIT_FALLBACK_DELAY_MS = 0
-const DEFAULT_REDDIT_HTML_DELAY_MS = 1500
+const DEFAULT_REDDIT_HTML_DELAY_MS = 6500
 const DEFAULT_REDDIT_HTML_RATE_LIMIT_DELAY_MS = 30000
 const DEFAULT_REDDIT_HTML_MAX_RETRIES = 1
 const REDDIT_DISCOVERY_PROGRESS_EVERY_POSTS = 25
@@ -1117,6 +1117,16 @@ async function preflightRedditSource(source, deps = {}) {
 
 async function fetchRedditPosts(source, options = {}, deps = {}) {
   if (typeof deps.fetchHtml === 'function') {
+    const htmlDelayMs = getRedditHtmlDelayMs(deps)
+    deps.logger?.log?.(
+      `Reddit HTML pacing: one listing/gallery request every ${(
+        htmlDelayMs / 1000
+      ).toFixed(1)}s`
+    )
+    deps.appendRunEvent?.('reddit_html_throttle_configured', {
+      delayMs: htmlDelayMs,
+      scope: 'listing_and_gallery',
+    })
     let oldHtmlListingPosts = 0
     try {
       const posts = await fetchRedditPostsFromOldHtml(source, options, {

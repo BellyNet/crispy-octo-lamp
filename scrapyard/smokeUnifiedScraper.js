@@ -373,6 +373,14 @@ async function main() {
         event.reason === 'empty_listing'
     )
   )
+  assert(
+    redditDiscoveryEvents.some(
+      (event) =>
+        event.type === 'reddit_html_throttle_configured' &&
+        event.delayMs === 0 &&
+        event.scope === 'listing_and_gallery'
+    )
+  )
 
   const redditAccessEvents = []
   let redditAccessFetchCount = 0
