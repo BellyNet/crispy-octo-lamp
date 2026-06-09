@@ -2718,47 +2718,24 @@
         loadPswp().then((PhotoSwipe) => {
           const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
-              // Two rendering modes:
-              //
-              // 1) GIF-like (short clips < 10 s, or videos with no audio
-              //    track): muted + autoplay + loop + no controls +
-              //    preload="auto". The file is small, so eager-loading is
-              //    fine, and muted autoplay is unrestricted on iOS. Looks
-              //    and feels like an animated GIF — no UI chrome, instant
-              //    playback as soon as the slide opens.
-              //
-              // 2) Regular: preload="none" + poster + controls visible.
-              //    syncVideos() promotes preload to "auto" and calls play()
-              //    when the slide becomes active, and demotes neighbours
-              //    so they don't compete for bandwidth.
-              const gifLike =
-                (typeof item.duration === 'number' && item.duration > 0 && item.duration < 10) ||
-                item.hasAudio === false
-              // Build the wrapping HTML as a literal string. The previous
-              // version used setAttribute on a detached element and read
-              // wrap.outerHTML — boolean content attributes don't always
-              // round-trip cleanly through outerHTML → PhotoSwipe's
-              // innerHTML reparse (notably `muted`, which iOS needs as a
-              // content attribute on the *parsed* element for unrestricted
-              // autoplay). A literal string skips all of that.
+              // One rendering path for every video: loop, playsinline,
+              // controls visible. The cached GIF preview doubles as the
+              // poster so the slide is never a black box. preload starts
+              // at "metadata" so first-frame + duration land fast without
+              // pulling the whole file; syncVideos() promotes the active
+              // slide to "auto" + play() when it becomes current, and
+              // demotes neighbours to "none" so adjacent videos don't
+              // compete for bandwidth.
               const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
               const src = esc(item.url)
-              let html
-              if (gifLike) {
-                html =
-                  `<div class="pswp-video-wrap">` +
-                    `<video src="${src}" loop muted autoplay playsinline preload="auto" data-gif-like="1"></video>` +
-                  `</div>`
-              } else {
-                const poster = item.thumbUrl || item.previewUrl
-                const posterAttr = poster ? ` poster="${esc(poster)}"` : ''
-                html =
-                  `<div class="pswp-video-wrap">` +
-                    `<video src="${src}" loop playsinline preload="none" controls${posterAttr}></video>` +
-                  `</div>`
-              }
+              const poster = item.thumbUrl || item.previewUrl
+              const posterAttr = poster ? ` poster="${esc(poster)}"` : ''
+              const html =
+                `<div class="pswp-video-wrap">` +
+                  `<video src="${src}" loop playsinline controls preload="metadata"${posterAttr}></video>` +
+                `</div>`
               return { html, _item: item }
             }
             return {
@@ -3189,42 +3166,21 @@
               const inActive =
                 v.closest('.pswp__item.pswp__item--current') ||
                 v.closest('.pswp__item--active')
-              const gifLike = v.dataset.gifLike === '1'
               if (inActive) {
-                if (gifLike) {
-                  // Belt and suspenders: even though the literal HTML has
-                  // `muted autoplay`, Chrome and PhotoSwipe-injected DOM
-                  // sometimes drop the autoplay path silently and the user
-                  // ends up staring at a frozen first frame. Force the
-                  // mute property, kick load() to start fetching, then
-                  // play() — and if the play promise rejects (Chrome's
-                  // autoplay policy got stricter while we weren't looking),
-                  // fall back to showing controls so at least the user
-                  // can hit play manually instead of being stuck.
-                  v.muted = true
-                  if (v.readyState < 2) v.load()
-                  const p = v.play()
-                  if (p && typeof p.catch === 'function') {
-                    p.catch(() => {
-                      v.controls = true
-                    })
-                  }
-                } else {
-                  if (v.preload !== 'auto') {
-                    // Regular videos start with preload="none" — promote
-                    // and load() so playback bytes start flowing.
-                    v.preload = 'auto'
-                    v.load()
-                  }
-                  v.play().catch(() => {})
-                }
+                // Promote to eager loading and kick play(). Setting the
+                // preload property alone doesn't restart the loading
+                // state machine, so call load() when the element is still
+                // empty (readyState < HAVE_CURRENT_DATA). play() returns
+                // a promise that Chrome may reject if autoplay policy
+                // blocks unmuted media — the user can hit the visible
+                // controls' play button in that case.
+                if (v.preload !== 'auto') v.preload = 'auto'
+                if (v.readyState < 2) v.load()
+                v.play().catch(() => {})
               } else {
                 v.pause()
                 try { v.currentTime = 0 } catch {}
-                // Only demote regular videos — leaving a GIF-like clip
-                // at "auto" keeps its tiny file warm for when the user
-                // swipes back to it.
-                if (!gifLike && v.preload !== 'none') v.preload = 'none'
+                if (v.preload !== 'none') v.preload = 'none'
               }
             })
           }
