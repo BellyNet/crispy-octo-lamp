@@ -11,6 +11,7 @@ const {
 } = require('./nasMp4Index')
 
 const LOCAL_REGISTRY_PATH = path.join(__dirname, '..', 'model_aliases.json')
+const MUTABLE_MODEL_METADATA_FILES = ['.media-dates.json']
 
 function runRobocopy(command) {
   return new Promise((resolve) => {
@@ -46,6 +47,60 @@ function pushRegistryToNas({
   }
 }
 
+function syncModelMetadataToNas({
+  modelName,
+  datasetDir,
+  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+} = {}) {
+  if (!modelName || !datasetDir) {
+    return { copied: 0, skipped: MUTABLE_MODEL_METADATA_FILES.length }
+  }
+
+  const localModelDir = path.join(datasetDir, modelName)
+  const nasModelDir = path.join(nasDatasetDir, modelName)
+  let copied = 0
+  let skipped = 0
+
+  for (const fileName of MUTABLE_MODEL_METADATA_FILES) {
+    const sourcePath = path.join(localModelDir, fileName)
+    if (!fs.existsSync(sourcePath)) {
+      skipped += 1
+      continue
+    }
+
+    fs.mkdirSync(nasModelDir, { recursive: true })
+    fs.copyFileSync(sourcePath, path.join(nasModelDir, fileName))
+    copied += 1
+  }
+
+  return { copied, skipped }
+}
+
+function syncAllModelMetadataToNas({
+  datasetDir,
+  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+} = {}) {
+  if (!datasetDir || !fs.existsSync(datasetDir)) {
+    return { models: 0, copied: 0, skipped: 0 }
+  }
+
+  let models = 0
+  let copied = 0
+  let skipped = 0
+  for (const entry of fs.readdirSync(datasetDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const result = syncModelMetadataToNas({
+      modelName: entry.name,
+      datasetDir,
+      nasDatasetDir,
+    })
+    if (result.copied > 0) models += 1
+    copied += result.copied
+    skipped += result.skipped
+  }
+  return { models, copied, skipped }
+}
+
 async function syncModelToNas({
   modelName,
   datasetDir,
@@ -72,6 +127,7 @@ async function syncModelToNas({
     return result
   }
 
+  syncModelMetadataToNas({ modelName, datasetDir, nasDatasetDir })
   mergeNasMp4Entries(
     collectMp4RelativePaths(localModelDir, datasetDir),
     datasetDir
@@ -84,6 +140,8 @@ async function syncModelToNas({
 
 module.exports = {
   runRobocopy,
+  syncAllModelMetadataToNas,
+  syncModelMetadataToNas,
   syncModelToNas,
   pushRegistryToNas,
 }

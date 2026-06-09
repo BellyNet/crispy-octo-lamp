@@ -169,7 +169,10 @@ function createMediaSavePipeline(options = {}) {
       modelName,
       entry,
       destination,
-      reasonCounter: kind === 'video' ? 'savedVideo' : `saved${kind[0].toUpperCase()}${kind.slice(1)}`,
+      reasonCounter:
+        kind === 'video'
+          ? 'savedVideo'
+          : `saved${kind[0].toUpperCase()}${kind.slice(1)}`,
     })
     return stats
   }
@@ -299,7 +302,13 @@ function createMediaSavePipeline(options = {}) {
         savedPath: duplicateRecordSeen ? bitwiseMatch.activeRefs[0] : null,
         recordSeen: duplicateRecordSeen,
       })
-      return { status: 'duplicate', reason, hash, match: bitwiseMatch }
+      return {
+        status: 'duplicate',
+        reason,
+        hash,
+        match: bitwiseMatch,
+        sizeBytes: buffer.length,
+      }
     }
 
     let visualHash = null
@@ -325,7 +334,13 @@ function createMediaSavePipeline(options = {}) {
           savedPath: duplicateRecordSeen ? visualMatch.activeRefs[0] : null,
           recordSeen: duplicateRecordSeen,
         })
-        return { status: 'duplicate', reason, visualHash, match: visualMatch }
+        return {
+          status: 'duplicate',
+          reason,
+          visualHash,
+          match: visualMatch,
+          sizeBytes: buffer.length,
+        }
       }
 
       const fuzzyMatch =
@@ -354,7 +369,13 @@ function createMediaSavePipeline(options = {}) {
           savedPath: duplicateRecordSeen ? fuzzyMatch.activeRefs[0] : null,
           recordSeen: duplicateRecordSeen,
         })
-        return { status: 'duplicate', reason, visualHash, match: fuzzyMatch }
+        return {
+          status: 'duplicate',
+          reason,
+          visualHash,
+          match: fuzzyMatch,
+          sizeBytes: buffer.length,
+        }
       }
 
       const pendingMatch =
@@ -383,7 +404,13 @@ function createMediaSavePipeline(options = {}) {
           savedPath: duplicateRecordSeen ? pendingMatch.activeRefs[0] : null,
           recordSeen: duplicateRecordSeen,
         })
-        return { status: 'duplicate', reason, visualHash, match: pendingMatch }
+        return {
+          status: 'duplicate',
+          reason,
+          visualHash,
+          match: pendingMatch,
+          sizeBytes: buffer.length,
+        }
       }
 
       if (
@@ -415,7 +442,12 @@ function createMediaSavePipeline(options = {}) {
         savedPath: relativePath,
         recordSeen: duplicateRecordSeen,
       })
-      return { status: 'duplicate', reason, destination }
+      return {
+        status: 'duplicate',
+        reason,
+        destination,
+        sizeBytes: buffer.length,
+      }
     }
 
     try {

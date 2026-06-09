@@ -2757,6 +2757,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
     browser = null
 
     saveVisualHashCache()
+    mediaDates.flushAllSidecars()
 
     await maybePauseForErrorReview(modelName, errorCount, reviewErrors)
 

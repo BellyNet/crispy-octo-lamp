@@ -6,6 +6,10 @@ const {
   mergeNasMp4Entries,
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
+const {
+  syncAllModelMetadataToNas,
+  syncModelMetadataToNas,
+} = require('./nasSync')
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
@@ -91,6 +95,18 @@ exec(`powershell -Command "${cmd}"`, (err, stdout, stderr) => {
   const mergeRoot = modelName ? path.join(baseLocal, modelName) : baseLocal
   mergeNasMp4Entries(collectMp4RelativePaths(mergeRoot, baseLocal), baseLocal)
   syncNasMp4IndexToMirror(baseNAS, baseLocal)
+  if (isPush) {
+    syncAllModelMetadataToNas({
+      datasetDir: baseLocal,
+      nasDatasetDir: baseNAS,
+    })
+  } else if (modelName) {
+    syncModelMetadataToNas({
+      modelName,
+      datasetDir: baseLocal,
+      nasDatasetDir: baseNAS,
+    })
+  }
 
   if (!isPush || (!cleanupGifDerivedMp4s && !cleanupMirroredMp4s)) {
     console.log('Sync complete!')

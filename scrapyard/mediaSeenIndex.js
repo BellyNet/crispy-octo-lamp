@@ -253,6 +253,8 @@ function createMediaSeenIndex(options = {}) {
       sourceUsername: details.sourceUsername || null,
       sourceSubreddit: details.sourceSubreddit || null,
       postId: details.postId || details.sourcePostId || null,
+      title: details.title || details.sourceTitle || null,
+      originalName: details.originalName || null,
       uploadedDate: normalizeIsoDate(details.uploadedDate),
       status,
       recordedAt,

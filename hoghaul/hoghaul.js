@@ -1329,7 +1329,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
-  await hoghaulSavePipeline.saveImageLikeMedia({
+  const result = await hoghaulSavePipeline.saveImageLikeMedia({
     modelName,
     folders,
     entry,
@@ -1353,6 +1353,9 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     pendingVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
     saveVisualHashCacheOnSave: true,
   })
+  if (result.status === 'duplicate' && Number(result.sizeBytes || 0) > 0) {
+    noteDuplicateDownloadBytes(result.sizeBytes)
+  }
 }
 
 async function saveVideoMedia(modelName, folders, entry) {
@@ -2005,6 +2008,7 @@ async function run(argvInput = process.argv.slice(2)) {
 
   saveBitwiseHashCache()
   saveVisualHashCache()
+  mediaDates.flushAllSidecars()
 
   if (skipNasSync) {
     console.log('NAS sync skipped by --skip-nas-sync')

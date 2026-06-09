@@ -149,6 +149,8 @@ function getMediaEntrySourceDetails(entry = {}) {
     sourceUsername: entry.sourceUsername || null,
     sourceSubreddit: entry.sourceSubreddit || null,
     postId: entry.postId || null,
+    title: entry.title || null,
+    originalName: entry.originalName || null,
   }
 }
 
@@ -160,6 +162,7 @@ function getMediaEntryHashMetadata(entry = {}) {
     sourceUsername: entry.sourceUsername || null,
     sourceSubreddit: entry.sourceSubreddit || null,
     sourcePostId: entry.postId || null,
+    sourceTitle: entry.title || null,
     sourceMediaPageUrl: entry.mediaPageUrl || null,
   }
 }

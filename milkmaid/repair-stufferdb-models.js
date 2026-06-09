@@ -4,6 +4,7 @@ const os = require('os')
 const minimist = require('minimist')
 const { spawn } = require('child_process')
 const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
+const { syncModelMetadataToNas } = require('../scrapyard/nasSync')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -699,6 +700,11 @@ async function syncPendingModelsToNas(state) {
 
     try {
       const command = await runRobocopyModelSync(sourcePath, targetPath)
+      syncModelMetadataToNas({
+        modelName,
+        datasetDir: datasetRoot,
+        nasDatasetDir: nasDatasetRoot,
+      })
       synced.push({ model: modelName, sourcePath, targetPath, command })
       pendingAfterRun.delete(modelName)
     } catch (err) {

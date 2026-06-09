@@ -34,6 +34,8 @@
     "update:all-models": "node scrapyard/run-all-source-updates.js",
     "report:repair-failures": "node milkmaid/report-repair-failures.js",
     "audit:missing-media": "node audit/audit-missing-media-refs.js",
+    "audit:exact-media-dupes": "node audit/audit-exact-media-duplicates.js",
+    "audit:scrape-dupes": "node audit/audit-scrape-duplicates.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
     "repair": "node scrapyard/run-scrape.js repair",
     "repair:tail-decode": "node audit/run-session-repair.js",
