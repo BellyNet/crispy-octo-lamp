@@ -27,10 +27,12 @@ const {
 } = require('./sourceFrontier')
 const {
   getMediaEntrySeenDetails,
+  getMediaEntrySourceDetails,
   getMediaEntryUrls,
   isLikelyMediaUrl,
   normalizeMediaEntry,
 } = require('./mediaEntries')
+const { syncModelMetadataToNas } = require('./nasSync')
 const {
   getStufferDbFallbackUrls,
   normalizeStufferDbCategoryUrl,
@@ -84,6 +86,55 @@ async function assertRouted(url, expected) {
 }
 
 async function main() {
+  assert.deepStrictEqual(
+    getMediaEntrySourceDetails({
+      sourceSite: 'reddit',
+      postId: 'abc123',
+      title: 'Saved post title',
+      originalName: 'original-file',
+    }),
+    {
+      sourceSite: 'reddit',
+      sourceService: null,
+      sourceUserId: null,
+      sourceUsername: null,
+      sourceSubreddit: null,
+      postId: 'abc123',
+      title: 'Saved post title',
+      originalName: 'original-file',
+    }
+  )
+
+  const metadataSyncRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'metadata-sync-smoke-')
+  )
+  const metadataLocalRoot = path.join(metadataSyncRoot, 'local')
+  const metadataNasRoot = path.join(metadataSyncRoot, 'nas')
+  const metadataModelDir = path.join(metadataLocalRoot, 'sample_model')
+  fs.mkdirSync(metadataModelDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(metadataModelDir, '.media-dates.json'),
+    JSON.stringify({ __version: 4, 'images/a.jpg': { source: { title: 'A' } } })
+  )
+  assert.deepStrictEqual(
+    syncModelMetadataToNas({
+      modelName: 'sample_model',
+      datasetDir: metadataLocalRoot,
+      nasDatasetDir: metadataNasRoot,
+    }),
+    { copied: 1, skipped: 0 }
+  )
+  assert.strictEqual(
+    JSON.parse(
+      fs.readFileSync(
+        path.join(metadataNasRoot, 'sample_model', '.media-dates.json'),
+        'utf8'
+      )
+    )['images/a.jpg'].source.title,
+    'A'
+  )
+  fs.rmSync(metadataSyncRoot, { recursive: true, force: true })
+
   assert.deepStrictEqual(getPermanentLazyVideoFailure('HTTP 404'), {
     reason: 'upstream_media_missing',
     note: 'Upstream media returned HTTP 404; skipping future reruns unless manually cleared.',

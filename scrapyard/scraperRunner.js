@@ -157,6 +157,10 @@ function summarizeRuns(runs = []) {
       totals.processed += Number(summary.processed || 0)
       totals.expectedMedia += Number(summary.expectedMedia || 0)
       totals.savedBytes += Number(summary.savedBytes || 0)
+      totals.downloadBytes += Number(summary.downloadBytes || 0)
+      totals.duplicateDownloadBytes += Number(
+        summary.duplicateDownloadBytes || 0
+      )
       totals.durationMs += Number(summary.durationMs || 0)
       return totals
     },
@@ -170,6 +174,8 @@ function summarizeRuns(runs = []) {
       processed: 0,
       expectedMedia: 0,
       savedBytes: 0,
+      downloadBytes: 0,
+      duplicateDownloadBytes: 0,
       durationMs: 0,
     }
   )
@@ -189,6 +195,8 @@ function formatModelSummaryLine(result) {
       `dupes ${totals.duplicates}`,
       `failed ${totals.errors}`,
       `downloaded ${formatBytes(totals.savedBytes)}`,
+      `network ${formatBytes(totals.downloadBytes)}`,
+      `dupe traffic ${formatBytes(totals.duplicateDownloadBytes)}`,
     ].join(' | '),
     '------------------------------------------------------------------',
   ].join('\n')
@@ -1546,6 +1554,7 @@ function buildAllSourceRunOptions(argv, modelName, parsedSource) {
 
 function summarizeSourceRunSummary(summary) {
   const stats = getStatsFromRunSummary(summary)
+  const transfer = summary?.transfer || {}
   return {
     status: summary?.status || null,
     saved: Number(stats?.saved || summary?.successCount || 0),
@@ -1555,6 +1564,8 @@ function summarizeSourceRunSummary(summary) {
     processed: Number(stats?.processed || summary?.mediaCount || 0),
     expectedMedia: Number(stats?.expectedMedia || summary?.mediaCount || 0),
     savedBytes: Number(stats?.savedBytes || 0),
+    downloadBytes: Number(transfer.downloadBytes || 0),
+    duplicateDownloadBytes: Number(transfer.duplicateDownloadBytes || 0),
     durationMs: Number(summary?.durationMs || 0),
     finishedAt: summary?.finishedAt || summary?.updatedAt || null,
     logPath: summary?.logPath || null,
@@ -1642,6 +1653,10 @@ function calculateAllSourceTotals(results) {
         totals.processed += Number(run.summary?.processed || 0)
         totals.expectedMedia += Number(run.summary?.expectedMedia || 0)
         totals.savedBytes += Number(run.summary?.savedBytes || 0)
+        totals.downloadBytes += Number(run.summary?.downloadBytes || 0)
+        totals.duplicateDownloadBytes += Number(
+          run.summary?.duplicateDownloadBytes || 0
+        )
         totals.durationMs += Number(run.summary?.durationMs || 0)
       }
       return totals
@@ -1656,9 +1671,52 @@ function calculateAllSourceTotals(results) {
       processed: 0,
       expectedMedia: 0,
       savedBytes: 0,
+      downloadBytes: 0,
+      duplicateDownloadBytes: 0,
       durationMs: 0,
     }
   )
+}
+
+function formatAllSourceSummary(report) {
+  const totals = report.totals || calculateAllSourceTotals(report.results || [])
+  const completedModels = (report.results || []).filter(
+    (result) =>
+      result.runs?.length === result.sources?.length &&
+      result.runs.every((run) => run.ok)
+  ).length
+  const successfulRuns = Math.max(totals.runs - totals.failures, 0)
+  const wallDurationMs = Math.max(
+    Date.parse(report.finishedAt || new Date().toISOString()) -
+      Date.parse(report.startedAt || report.generatedAt || new Date()),
+    0
+  )
+
+  return [
+    '',
+    '==================================================================',
+    'ENTIRE SCRAPE TOTAL',
+    '==================================================================',
+    [
+      `wall time ${formatDuration(wallDurationMs)}`,
+      `models ${completedModels}/${report.selectedModels}`,
+      `sources ${successfulRuns}/${totals.runs}`,
+    ].join(' | '),
+    [
+      `processed ${totals.processed}/${totals.expectedMedia}`,
+      `saved ${totals.saved}`,
+      `skipped ${totals.skipped}`,
+      `dupes ${totals.duplicates}`,
+      `failed ${totals.errors}`,
+      `source failures ${totals.failures}`,
+    ].join(' | '),
+    [
+      `saved payload ${formatBytes(totals.savedBytes)}`,
+      `network ${formatBytes(totals.downloadBytes)}`,
+      `duplicate traffic ${formatBytes(totals.duplicateDownloadBytes)}`,
+    ].join(' | '),
+    '==================================================================',
+  ].join('\n')
 }
 
 function writeAllSourceReport(report, latestReportPath, latestTextPath) {
@@ -1669,7 +1727,7 @@ function writeAllSourceReport(report, latestReportPath, latestTextPath) {
     `Generated: ${report.generatedAt}`,
     `Registry: ${report.registryPath}`,
     `Selected models: ${report.selectedModels}`,
-    `Totals: models=${report.results.length} runs=${report.totals.runs} saved=${report.totals.saved} skipped=${report.totals.skipped} dupes=${report.totals.duplicates} errors=${report.totals.errors} failures=${report.totals.failures} bytes=${runLifecycle.formatBytes(report.totals.savedBytes)} time=${formatDuration(report.totals.durationMs)}`,
+    `Totals: models=${report.results.length} runs=${report.totals.runs} saved=${report.totals.saved} skipped=${report.totals.skipped} dupes=${report.totals.duplicates} errors=${report.totals.errors} failures=${report.totals.failures} savedBytes=${runLifecycle.formatBytes(report.totals.savedBytes)} networkBytes=${runLifecycle.formatBytes(report.totals.downloadBytes)} duplicateDownloadBytes=${runLifecycle.formatBytes(report.totals.duplicateDownloadBytes)} sourceTime=${formatDuration(report.totals.durationMs)}`,
     '',
   ]
 
@@ -1715,6 +1773,7 @@ async function runAllSourceUpdates(argvInput = {}) {
   const delayMs = Number.parseInt(getOption(argv, 'delay-ms'), 10) || 0
   const report = {
     generatedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
     registryPath: allRegistryPath,
     totalModelsInRegistry: queue.length,
     selectedModels: selectedQueue.length,
@@ -1756,7 +1815,9 @@ async function runAllSourceUpdates(argvInput = {}) {
     }
   }
 
+  report.finishedAt = new Date().toISOString()
   writeAllSourceReport(report, latestReportPath, latestTextPath)
+  console.log(formatAllSourceSummary(report))
   console.log('')
   console.log(`Latest report: ${latestReportPath}`)
 
@@ -1846,6 +1907,8 @@ module.exports = {
   runSync,
   runSourceBatch,
   runStufferDbBatch,
+  calculateAllSourceTotals,
+  formatAllSourceSummary,
   runAllSourceUpdates,
   runScraperCli,
 }

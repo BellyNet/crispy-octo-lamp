@@ -2,7 +2,7 @@ const path = require('path')
 const { exec } = require('child_process')
 const fs = require('fs')
 
-const { pushRegistryToNas } = require('./nasSync')
+const { pushRegistryToNas, syncModelMetadataToNas } = require('./nasSync')
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') }) // ← LOAD .env
 
@@ -37,6 +37,11 @@ try {
     if (exitCode > 3) {
       console.error(`❌ Sync failed:`, stderr || stdout)
     } else {
+      syncModelMetadataToNas({
+        modelName: model,
+        datasetDir: localBase,
+        nasDatasetDir: nasBase,
+      })
       pushRegistryToNas({ nasDatasetDir: nasBase })
       console.log(`✅ Sync completed with exit code ${exitCode}`)
     }
