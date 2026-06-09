@@ -818,19 +818,23 @@
       }
       /* Chrome-toggle button — collapses every non-essential bit of UI
          (counter, arrows, zoom/fullscreen buttons, date slider, info /
-         caption panels and their toggles) behind a single tap so the
-         fullscreen view is just the media + native mute control + this
-         toggle + the close button. */
-      .pswp__pswp-chrome-toggle svg {
-        opacity: 0.75;
-        transition: opacity 0.15s;
+         caption panels) behind a single tap so the fullscreen view is
+         just the media + native mute control + this toggle + the close
+         button. */
+      .pswp__pswp-chrome-toggle {
+        color: #fff;
       }
-      .pswp__pswp-chrome-toggle:hover svg,
-      .pswp__pswp-chrome-toggle.pswp-chrome-active svg {
+      .pswp__pswp-chrome-toggle svg {
+        opacity: 0.85;
+        transition: opacity 0.15s, transform 0.2s ease;
+      }
+      .pswp__pswp-chrome-toggle:hover svg {
         opacity: 1;
       }
-      .pswp__pswp-chrome-toggle.pswp-chrome-active {
-        color: var(--accent);
+      /* Active = chrome shown → chevron points up. */
+      .pswp:not(.pswp--chrome-hidden) .pswp__pswp-chrome-toggle svg {
+        transform: rotate(180deg);
+        opacity: 1;
       }
       .pswp.pswp--chrome-hidden .pswp__counter,
       .pswp.pswp--chrome-hidden .pswp__button--zoom,
@@ -838,12 +842,26 @@
       .pswp.pswp--chrome-hidden .pswp__button--arrow--prev,
       .pswp.pswp--chrome-hidden .pswp__button--arrow--next,
       .pswp.pswp--chrome-hidden .pswp__pswp-flag-button,
-      .pswp.pswp--chrome-hidden .pswp__pswp-info-button,
-      .pswp.pswp--chrome-hidden .pswp__pswp-caption-button,
       .pswp.pswp--chrome-hidden .pswp__pswp-date-slider,
       .pswp.pswp--chrome-hidden .pswp__pswp-info-panel,
       .pswp.pswp--chrome-hidden .pswp__pswp-caption {
         display: none !important;
+      }
+
+      /* Force white icon color on every custom PhotoSwipe button. Without
+         this they pick up the page's text color, which is the dark-mode
+         "text on light background" in some setups and renders the icons
+         as nearly-black against the lightbox background. */
+      .pswp__pswp-flag-button,
+      .pswp__pswp-info-button,
+      .pswp__pswp-caption-button,
+      .pswp__pswp-chrome-toggle {
+        color: #fff;
+      }
+      /* Active flag = bright red. Important wins against the .pswp--chrome
+         color rule above. */
+      .pswp__pswp-flag-button.pswp-flag-active {
+        color: #ff6868 !important;
       }
 
       /* Info button style */
@@ -858,32 +876,78 @@
       .pswp__pswp-info-button.pswp-info-active {
         color: var(--accent);
       }
-      /* Info panel — slides up from bottom */
+      /* Info panel pinned to the bottom of the lightbox. Always visible
+         while chrome is shown — gated only by .pswp--chrome-hidden on the
+         root (which display:nones it entirely). */
       .pswp__pswp-info-panel {
         position: absolute;
         bottom: 0;
         left: 0;
         right: 0;
-        padding: 14px 60px;
-        background: rgba(10, 10, 15, 0.88);
+        padding: 14px 60px 16px;
+        background: linear-gradient(
+          to top,
+          rgba(8, 8, 14, 0.92) 0%,
+          rgba(8, 8, 14, 0.78) 70%,
+          rgba(8, 8, 14, 0.35) 100%
+        );
         backdrop-filter: blur(10px);
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        display: flex; /* always flex so transition works */
-        align-items: center;
-        gap: 14px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
         font-size: 13px;
         color: var(--text);
-        transform: translateY(100%);
-        opacity: 0;
-        pointer-events: none;
-        transition:
-          transform 0.22s ease,
-          opacity 0.22s ease;
-      }
-      .pswp__pswp-info-panel.pswp-info-visible {
-        transform: translateY(0);
-        opacity: 1;
         pointer-events: auto;
+        z-index: 1050;
+      }
+      .pswp-info-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .pswp-info-row .pswp-info-meta,
+      .pswp-info-row .pswp-info-date,
+      .pswp-info-row .pswp-info-added,
+      .pswp-info-row .pswp-info-filename {
+        flex-shrink: 0;
+      }
+      /* Post title is the headline of the info panel — large, white, on
+         its own line, links underlined on hover. */
+      .pswp-info-post-headline {
+        font-size: 16px;
+        line-height: 1.35;
+        font-weight: 600;
+        color: #fff;
+        word-break: break-word;
+      }
+      .pswp-info-post-headline a {
+        color: inherit;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+      }
+      .pswp-info-post-headline a:hover {
+        border-bottom-color: var(--accent);
+        color: var(--accent);
+      }
+      /* LoRA caption inside the info panel, second in priority. Multi-line. */
+      .pswp-info-caption-block {
+        font-size: 13px;
+        line-height: 1.5;
+        color: rgba(240, 240, 245, 0.92);
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 6.5em;
+        overflow-y: auto;
+      }
+      .pswp-info-post-meta {
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
       }
       .pswp-info-filename {
         flex: 1;
@@ -1782,6 +1846,28 @@
         return { key: 'sd', label: 'SD' }
       }
 
+      // Coomerfans titles tend to come in as "<screenname> / <real title>"
+      // (and sometimes just "<screenname> /" with nothing after). The
+      // screen-name prefix is always the current model's name, so it's
+      // pure noise inside that model's gallery. Strip it.
+      function cleanPostTitle(item) {
+        if (!item || !item.post || typeof item.post.title !== 'string') return ''
+        let t = item.post.title.trim()
+        if (!t) return ''
+        const name = (currentUsername || '').trim()
+        if (name) {
+          const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+          // Tolerate the username being followed by `/`, `-`, `|`, `·`, `:`
+          // (with or without whitespace) — every separator we've seen in the
+          // wild collapses to the same "<name> <sep> <title>" pattern.
+          t = t.replace(
+            new RegExp(`^${escaped}\\s*[\\/\\-\\|·:]\\s*`, 'i'),
+            ''
+          ).trim()
+        }
+        return t
+      }
+
       // ─── USERS ────────────────────────────────────────────────────────────
       let usersData = [] // [{ name, sources }]
 
@@ -2611,7 +2697,8 @@
         card.dataset.index = i
         // Native tooltip with the post title — works at any card size, the
         // only inline render path on S/M where there isn't room for text.
-        if (item.post && item.post.title) card.title = item.post.title
+        const cleanedCardTitle = cleanPostTitle(item)
+        if (cleanedCardTitle) card.title = cleanedCardTitle
         if (item.flagged) {
           const ribbon = document.createElement('div')
           ribbon.className = 'card-flag-ribbon'
@@ -2682,10 +2769,10 @@
 
         // Post title strip pinned to the bottom of the thumb. Visible only
         // when the grid is in Large mode (CSS-gated by body.card-size-large).
-        if (item.post && item.post.title) {
+        if (cleanedCardTitle) {
           const titleEl = document.createElement('div')
           titleEl.className = 'card-post-title'
-          titleEl.textContent = item.post.title
+          titleEl.textContent = cleanedCardTitle
           thumb.appendChild(titleEl)
         }
 
@@ -2865,13 +2952,16 @@
             dataSource,
             index: startIndex,
             bgOpacity: 0.97,
-            padding: { top: 44, bottom: 0, left: 44, right: 44 },
+            // Full-bleed: chrome floats over the media. Close button and
+            // chrome-toggle sit absolutely at top-right, info panel sits
+            // absolutely at the bottom and only paints when chrome is
+            // shown — so there's no need to reserve padding for them.
+            padding: { top: 0, bottom: 0, left: 0, right: 0 },
             loop: true,
             wheelToZoom: true,
           })
 
           let infoPanelEl = null
-          let captionPanelEl = null
 
           // Caption fetch cache for this lightbox instance — keyed by item URL.
           // Avoids re-fetching when the user swipes back and forth.
@@ -3006,7 +3096,12 @@
               })
             }
 
-            // Info panel — slides up from bottom when ⓘ is pressed
+            // Info panel — pinned to the bottom of the lightbox whenever
+            // chrome is shown. Layout, top to bottom:
+            //   1. Post title (headline — large, linked to the post URL)
+            //   2. LoRA caption block (always when present, even on desktop)
+            //   3. Compact meta row (badges, date+source, dimensions,
+            //      duration, size, filename, added date, FLAGGED chip)
             pswp.ui.registerElement({
               name: 'pswp-info-panel',
               appendTo: 'root',
@@ -3017,17 +3112,67 @@
                   if (!item) return
                   el.replaceChildren()
 
+                  // 1. Headline — post title. Strip a leading
+                  //    `<username> / ` prefix (common in Coomerfans titles)
+                  //    so the user's screen-name doesn't repeat itself.
+                  const cleanTitle = cleanPostTitle(item)
+                  if (cleanTitle || item.post?.url) {
+                    const headline = document.createElement('div')
+                    headline.className = 'pswp-info-post-headline'
+                    const text = cleanTitle || item.post.url
+                    if (item.post && item.post.url) {
+                      const a = document.createElement('a')
+                      a.href = item.post.url
+                      a.target = '_blank'
+                      a.rel = 'noopener noreferrer'
+                      a.textContent = text
+                      a.title = item.post.url
+                      a.addEventListener('click', (e) => e.stopPropagation())
+                      headline.appendChild(a)
+                    } else {
+                      headline.textContent = text
+                    }
+                    el.appendChild(headline)
+                  }
+
+                  // 2. LoRA caption block. Render synchronously with the
+                  //    panel, fill in once the fetch resolves. Guard
+                  //    against stale slide updates with currIndex check.
+                  if (item.hasCaption) {
+                    const capBlock = document.createElement('div')
+                    capBlock.className = 'pswp-info-caption-block'
+                    capBlock.textContent = 'Loading caption…'
+                    el.appendChild(capBlock)
+                    const idxAtStart = pswp.currIndex
+                    loadCaption(item).then((text) => {
+                      if (pswp.currIndex !== idxAtStart) return
+                      if (text) capBlock.textContent = text
+                      else capBlock.remove()
+                    })
+                  }
+
+                  // 3. Meta row.
+                  const row = document.createElement('div')
+                  row.className = 'pswp-info-row'
+
                   const typeBadge = document.createElement('span')
                   typeBadge.className = `type-badge ${item.type}`
                   typeBadge.textContent =
                     item.type === 'image' ? 'img' : item.type
-                  el.appendChild(typeBadge)
+                  row.appendChild(typeBadge)
+
+                  if (item.post && item.post.site) {
+                    const siteSpan = document.createElement('span')
+                    siteSpan.className = 'pswp-info-post-meta'
+                    siteSpan.textContent = item.post.site
+                    row.appendChild(siteSpan)
+                  }
 
                   if (item.flagged) {
                     const fb = document.createElement('span')
                     fb.className = 'pswp-info-flagged'
                     fb.textContent = 'FLAGGED'
-                    el.appendChild(fb)
+                    row.appendChild(fb)
                   }
 
                   const dateSpan = document.createElement('span')
@@ -3040,17 +3185,8 @@
                     srcSpan.textContent = `[${SOURCE_TIPS[item.source] || item.source}]`
                     dateSpan.appendChild(srcSpan)
                   }
-                  el.appendChild(dateSpan)
+                  row.appendChild(dateSpan)
 
-                  const nameSpan = document.createElement('span')
-                  nameSpan.className = 'pswp-info-filename'
-                  nameSpan.textContent = item.filename
-                  el.appendChild(nameSpan)
-
-                  // Compact metadata line. For videos, show the resolution tier
-                  // (HD/FHD/4K) instead of the raw W×H — the actual dimensions
-                  // are kept on the title attribute for hover. Images still show
-                  // dimensions since there's no equivalent tier to surface.
                   const metaBits = []
                   const tier =
                     item.type === 'video'
@@ -3069,182 +3205,31 @@
                     metaSpan.textContent = metaBits.join(' · ')
                     if (tier && item.width && item.height)
                       metaSpan.title = `${item.width}×${item.height}`
-                    el.appendChild(metaSpan)
+                    row.appendChild(metaSpan)
                   }
 
                   if (item.addedMs) {
                     const addedSpan = document.createElement('span')
                     addedSpan.className = 'pswp-info-added'
                     addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
-                    el.appendChild(addedSpan)
+                    row.appendChild(addedSpan)
                   }
 
-                  // Post title (and link back to the original post when we
-                  // have a URL). Always shown when present — this is the
-                  // "scraped from" line, not the LoRA training caption.
-                  if (item.post && (item.post.title || item.post.url)) {
-                    const postEl = document.createElement('span')
-                    postEl.className = 'pswp-info-post'
-                    const titleText = item.post.title || item.post.url
-                    if (item.post.url) {
-                      const a = document.createElement('a')
-                      a.href = item.post.url
-                      a.target = '_blank'
-                      a.rel = 'noopener noreferrer'
-                      a.textContent = titleText
-                      a.title = item.post.url
-                      // Keep PhotoSwipe from intercepting the click.
-                      a.addEventListener('click', (e) => e.stopPropagation())
-                      postEl.appendChild(a)
-                    } else {
-                      postEl.textContent = titleText
-                    }
-                    el.appendChild(postEl)
-                  }
+                  const nameSpan = document.createElement('span')
+                  nameSpan.className = 'pswp-info-filename'
+                  nameSpan.textContent = item.filename
+                  row.appendChild(nameSpan)
 
-                  // Caption (mobile only — desktop has the dedicated sidebar).
-                  // Stamped synchronously with the rest of the panel, then filled
-                  // in once the fetch resolves. Guarded against stale slide updates.
-                  if (
-                    item.hasCaption &&
-                    window.matchMedia('(max-width: 900px)').matches
-                  ) {
-                    const capSpan = document.createElement('span')
-                    capSpan.className = 'pswp-info-caption'
-                    capSpan.textContent = '…'
-                    el.appendChild(capSpan)
-                    const idxAtStart = pswp.currIndex
-                    loadCaption(item).then((text) => {
-                      if (pswp.currIndex !== idxAtStart) return
-                      capSpan.textContent = text || ''
-                      if (!text) capSpan.remove()
-                    })
-                  }
+                  el.appendChild(row)
                 }
                 pswp.on('change', update)
                 update()
               },
             })
 
-            // Caption sidebar — desktop only (≥901px). Hidden entirely when the
-            // current slide has no caption so the media gets the full viewport.
-            // The toggle button (below) also hides itself in that case.
-            let captionBtnEl = null
-            pswp.ui.registerElement({
-              name: 'pswp-caption',
-              appendTo: 'root',
-              onInit(el) {
-                captionPanelEl = el
-                el.classList.add('pswp-caption-visible') // visible by default
-                const update = async () => {
-                  const item = filtered[pswp.currIndex]
-                  if (!item) return
-                  const hasPost = !!(item.post && (item.post.title || item.post.url))
-                  // Sidebar is opened when the slide has either a LoRA caption
-                  // file or a scraped post title — the panel can render either
-                  // section, or both stacked.
-                  if (!item.hasCaption && !hasPost) {
-                    el.classList.remove('pswp-caption-visible')
-                    el.style.display = 'none'
-                    el.replaceChildren()
-                    if (captionBtnEl) {
-                      captionBtnEl.style.display = 'none'
-                      captionBtnEl.classList.remove('pswp-caption-active')
-                    }
-                    return
-                  }
-                  if (captionBtnEl) captionBtnEl.style.display = ''
-                  el.style.display = ''
-                  el.classList.add('pswp-caption-visible')
-                  if (captionBtnEl)
-                    captionBtnEl.classList.add('pswp-caption-active')
-
-                  el.replaceChildren()
-
-                  // Post-title section — rendered first so it sits above the
-                  // LoRA caption when both are present.
-                  if (hasPost) {
-                    const postLabel = document.createElement('div')
-                    postLabel.className = 'pswp__pswp-caption-label'
-                    postLabel.textContent =
-                      item.post.site ? `Post · ${item.post.site}` : 'Post'
-                    el.appendChild(postLabel)
-                    const postBody = document.createElement('div')
-                    postBody.className = 'pswp-caption-post'
-                    const postTitleText = item.post.title || item.post.url
-                    if (item.post.url) {
-                      const a = document.createElement('a')
-                      a.href = item.post.url
-                      a.target = '_blank'
-                      a.rel = 'noopener noreferrer'
-                      a.textContent = postTitleText
-                      a.title = item.post.url
-                      a.addEventListener('click', (e) => e.stopPropagation())
-                      postBody.appendChild(a)
-                    } else {
-                      postBody.textContent = postTitleText
-                    }
-                    el.appendChild(postBody)
-                  }
-
-                  if (!item.hasCaption) return
-
-                  const label = document.createElement('div')
-                  label.className = 'pswp__pswp-caption-label'
-                  label.textContent = 'Caption'
-                  if (hasPost) label.style.marginTop = '14px'
-                  el.appendChild(label)
-                  const body = document.createElement('div')
-                  body.textContent = 'Loading…'
-                  body.className = 'pswp__pswp-caption-empty'
-                  el.appendChild(body)
-                  const idxAtStart = pswp.currIndex
-                  const text = await loadCaption(item)
-                  if (pswp.currIndex !== idxAtStart) return
-                  if (text) {
-                    body.className = ''
-                    body.textContent = text
-                  } else {
-                    // hasCaption was true but fetch failed. Leave the panel
-                    // open if we also have a post-title section to show;
-                    // otherwise drop back to the hidden state.
-                    body.remove()
-                    label.remove()
-                    if (!hasPost) {
-                      el.classList.remove('pswp-caption-visible')
-                      el.style.display = 'none'
-                      if (captionBtnEl) {
-                        captionBtnEl.style.display = 'none'
-                        captionBtnEl.classList.remove('pswp-caption-active')
-                      }
-                    }
-                  }
-                }
-                pswp.on('change', update)
-                update()
-              },
-            })
-
-            // Caption toggle button — only meaningful on desktop, but harmless on
-            // mobile (where the sidebar is hidden via CSS). Hidden by the panel's
-            // update() handler whenever the current slide has no caption.
-            pswp.ui.registerElement({
-              name: 'pswp-caption-button',
-              order: 8,
-              isButton: true,
-              title: 'Caption',
-              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><line x1="5.5" y1="9" x2="14.5" y2="9"/><line x1="5.5" y1="12" x2="11" y2="12"/></svg>',
-              onInit(el) {
-                captionBtnEl = el
-              },
-              onClick(e, el) {
-                if (!captionPanelEl) return
-                const on = captionPanelEl.classList.toggle(
-                  'pswp-caption-visible'
-                )
-                el.classList.toggle('pswp-caption-active', on)
-              },
-            })
+            // (The previous caption sidebar and its toggle button are gone:
+            // the bottom info panel now carries both the post title and
+            // the LoRA caption, gated by the single chrome-toggle below.)
 
             // Flag-for-deletion toggle. POSTs to /api/users/:user/flag, updates
             // the in-memory item, refreshes the card's red ribbon in the grid.
@@ -3310,38 +3295,24 @@
               },
             })
 
-            // ⓘ toggle button
-            pswp.ui.registerElement({
-              name: 'pswp-info-button',
-              order: 9,
-              isButton: true,
-              title: 'Info',
-              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.5" r="1" fill="currentColor"/></svg>',
-              onClick(e, el) {
-                if (!infoPanelEl) return
-                const on = infoPanelEl.classList.toggle('pswp-info-visible')
-                el.classList.toggle('pswp-info-active', on)
-              },
-            })
-
-            // Chrome toggle — collapses all the non-essential chrome by
-            // default. Lives at the right edge of the top bar (order 19,
-            // just left of the close button at 20) so it lands next to the
-            // mute control on touch devices where the video chrome floats
-            // top-right. Hidden state is applied in afterInit since
-            // `pswp.element` doesn't exist yet during `uiRegister`.
+            // Single chrome toggle (chevron) — collapses every non-essential
+            // bit of UI behind one tap so the fullscreen view is just media
+            // + native mute + this + close. Tapping it reveals the date
+            // slider, info panel (post title + caption + meta), counter,
+            // and arrows all at once. Lives at order 19, just left of
+            // close (20). Icon flips up/down via CSS based on whether the
+            // root carries .pswp--chrome-hidden.
             pswp.ui.registerElement({
               name: 'pswp-chrome-toggle',
               order: 19,
               isButton: true,
               title: 'Show controls',
-              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="4.5" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="10"  cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r="1.2" fill="currentColor" stroke="none"/></svg>',
+              html: '<svg width="22" height="22" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 8 10 13 15 8"/></svg>',
               onClick(e, el) {
                 const root = pswp.element
                 if (!root) return
                 const hidden = root.classList.toggle('pswp--chrome-hidden')
                 el.title = hidden ? 'Show controls' : 'Hide controls'
-                el.classList.toggle('pswp-chrome-active', !hidden)
               },
             })
           })
@@ -3351,28 +3322,23 @@
           })
 
           // Drive video state per-slide:
-          //   • Active slide  → preload="auto", play().
-          //   • Adjacent ±1   → preload="none", paused, rewound to 0.
+          //   • Current slide  → preload="auto", muted, play().
+          //   • Anything else  → paused, rewound to 0, preload="none".
           //
-          // Toggling preload on adjacent slides is the difference between
-          // "instant" playback and "click play and wait" — with three
-          // simultaneous .mp4 fetches against the NAS, the active slide was
-          // getting starved of bandwidth and Chrome was logging the slower
-          // adjacent fetches as 503s when it cancelled them on slide change.
+          // The previous DOM-class selector (`.pswp__item--current/--active`)
+          // never matched in PhotoSwipe v5 — the library doesn't add those
+          // classes — so play() was effectively only being honored by the
+          // <video autoplay> attribute on initial open. That made clicking
+          // a card *appear* to work and swiping silently fail. Going
+          // through `pswp.currSlide.holderElement` is the canonical way
+          // to find the live current slide.
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
-            root.querySelectorAll('.pswp__item video').forEach((v) => {
-              const inActive =
-                v.closest('.pswp__item.pswp__item--current') ||
-                v.closest('.pswp__item--active')
-              if (inActive) {
-                // Force the muted property in JS too: setting the muted
-                // *attribute* in HTML controls defaultMuted, not the
-                // live muted state, and some browser versions need both
-                // for reliable autoplay. preload="auto" + load() kicks
-                // the loader; play() returns a promise we still .catch
-                // defensively but with muted=true Chrome won't reject.
+            const currentVideo =
+              pswp.currSlide?.holderElement?.querySelector('video') || null
+            root.querySelectorAll('video').forEach((v) => {
+              if (v === currentVideo) {
                 v.muted = true
                 if (v.preload !== 'auto') v.preload = 'auto'
                 if (v.readyState < 2) v.load()
@@ -3384,23 +3350,17 @@
               }
             })
           }
-          pswp.on('change', syncVideos)
-          pswp.on('afterInit', syncVideos)
-          // `change` fires as soon as currIndex moves, but the new slide's
-          // <video> element may not be mounted/active in the DOM yet — so on
-          // a swipe the play() call lands on the old slide and the new one
-          // sits frozen on its poster. `slideActivate` (and contentActivate)
-          // fire after the slide has been promoted to active, which is the
-          // moment when querying `.pswp__item--active video` actually finds
-          // the slide the user is now looking at.
-          pswp.on('slideActivate', syncVideos)
-          pswp.on('contentActivate', syncVideos)
+          // Schedule for the next animation frame so the new slide's
+          // holderElement is in the DOM by the time we query it.
+          const scheduleSync = () => requestAnimationFrame(syncVideos)
+          pswp.on('change', scheduleSync)
+          pswp.on('afterInit', scheduleSync)
+          pswp.on('slideActivate', scheduleSync)
+          pswp.on('contentActivate', scheduleSync)
           pswp.on('close', () => {
             const root = pswp.element
             if (!root) return
-            root.querySelectorAll('video').forEach((v) => {
-              v.pause()
-            })
+            root.querySelectorAll('video').forEach((v) => v.pause())
           })
 
           pswp.init()
