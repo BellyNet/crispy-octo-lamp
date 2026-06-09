@@ -52,7 +52,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 7
+const RESPONSE_CACHE_VERSION = 8
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
@@ -658,20 +658,21 @@ async function processFileForResponse(username, userDir, item) {
       // duration to decide whether to render a clip as a GIF-style
       // muted/no-controls/preload=auto element.
       ...(isVideo && { hasAudio: hasAudio === true }),
-      // previewUrl is the animated GIF (or null for non-videos). Only used
-      // in places where motion is desirable — e.g. hover-to-preview on a
-      // grid card, the home-grid cover when no static cover is cached.
       previewUrl:
         type === 'video'
           ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
           : null,
-      // thumbUrl is the unified *static* thumbnail used by every card in
-      // the grid. For videos that means a one-frame JPEG extracted from
-      // the source by ffmpeg (cached on disk like every other thumb). The
-      // grid used to point video thumbs at /thumbnail/ (the animated GIF),
-      // which made the browser auto-decode 40–90 GIF loops at once and
-      // pegged CPU on desktop and crashed mobile tabs.
-      thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+      // Video grid cards point at the pre-generated animated GIF preview
+      // (nightly job + /thumbnail/ route, ~2 s 280 px 6 fps, cached on
+      // disk). Browsers handle hundreds of these cheaply (Giphy/Tenor),
+      // and we already pay the encoding cost once at generation time.
+      // Images and gifs use the static /thumb/ JPEG. The ffmpeg-static
+      // /thumb/ path stays available as a fallback in case a card's
+      // animated preview is missing.
+      thumbUrl:
+        type === 'video'
+          ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
+          : `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
       // True iff a same-stem .txt sidecar exists next to this file (LoRA
       // training caption). The full text is fetched on-demand from /api/caption
       // so the per-model response doesn't balloon for large datasets.
