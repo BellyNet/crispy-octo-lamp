@@ -2718,14 +2718,22 @@
         loadPswp().then((PhotoSwipe) => {
           const dataSource = filtered.map((item) => {
             if (item.type === 'video') {
-              // One rendering path for every video: loop, playsinline,
-              // controls visible. The cached GIF preview doubles as the
-              // poster so the slide is never a black box. preload starts
-              // at "metadata" so first-frame + duration land fast without
-              // pulling the whole file; syncVideos() promotes the active
-              // slide to "auto" + play() when it becomes current, and
-              // demotes neighbours to "none" so adjacent videos don't
-              // compete for bandwidth.
+              // Every video: muted + autoplay + loop + playsinline +
+              // controls visible.
+              //
+              // Why muted: Chrome's autoplay policy refuses unmuted
+              // play() without a fresh, unconsumed user gesture, and the
+              // card-click gesture doesn't reliably survive PhotoSwipe's
+              // async init chain — the result was clips frozen on the
+              // first frame until the user manually hit play. Every
+              // major social site (Reels, TikTok, Twitter video) ships
+              // this exact pattern: muted autoplay, with the unmute
+              // button one click away in the standard controls.
+              //
+              // preload="metadata" loads the duration + first frame
+              // fast; syncVideos promotes the active slide to "auto" and
+              // calls play(), and the cached animated GIF preview is the
+              // poster so the slide is never black.
               const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
@@ -2734,7 +2742,7 @@
               const posterAttr = poster ? ` poster="${esc(poster)}"` : ''
               const html =
                 `<div class="pswp-video-wrap">` +
-                  `<video src="${src}" loop playsinline controls preload="metadata"${posterAttr}></video>` +
+                  `<video src="${src}" loop muted autoplay playsinline controls preload="metadata"${posterAttr}></video>` +
                 `</div>`
               return { html, _item: item }
             }
@@ -3167,13 +3175,13 @@
                 v.closest('.pswp__item.pswp__item--current') ||
                 v.closest('.pswp__item--active')
               if (inActive) {
-                // Promote to eager loading and kick play(). Setting the
-                // preload property alone doesn't restart the loading
-                // state machine, so call load() when the element is still
-                // empty (readyState < HAVE_CURRENT_DATA). play() returns
-                // a promise that Chrome may reject if autoplay policy
-                // blocks unmuted media — the user can hit the visible
-                // controls' play button in that case.
+                // Force the muted property in JS too: setting the muted
+                // *attribute* in HTML controls defaultMuted, not the
+                // live muted state, and some browser versions need both
+                // for reliable autoplay. preload="auto" + load() kicks
+                // the loader; play() returns a promise we still .catch
+                // defensively but with muted=true Chrome won't reject.
+                v.muted = true
                 if (v.preload !== 'auto') v.preload = 'auto'
                 if (v.readyState < 2) v.load()
                 v.play().catch(() => {})
