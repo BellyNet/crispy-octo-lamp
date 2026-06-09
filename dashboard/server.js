@@ -52,7 +52,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 8
+const RESPONSE_CACHE_VERSION = 9
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
@@ -633,6 +633,28 @@ async function processFileForResponse(username, userDir, item) {
     item.filePath,
     { cachedVideoDate: videoDate, cachedImageDate: imageDate, stat }
   )
+
+  // Pull the post-side metadata (title, source site, link back to the post)
+  // from the per-model .media-dates.json sidecar. Only included when at least
+  // a title or a URL is present, so the response stays compact for items
+  // without any source info.
+  let post = null
+  const sourceMeta = mediaDates.getSourceFromSidecar(
+    userDir,
+    item.folder,
+    item.filename
+  )
+  if (sourceMeta) {
+    const title = typeof sourceMeta.title === 'string' ? sourceMeta.title.trim() : ''
+    const url = sourceMeta.mediaPageUrl || sourceMeta.mediaUrl || null
+    if (title || url) {
+      post = {}
+      if (title) post.title = title
+      if (sourceMeta.site) post.site = sourceMeta.site
+      if (url) post.url = url
+    }
+  }
+
   return {
     record: {
       filename: item.filename,
@@ -641,6 +663,7 @@ async function processFileForResponse(username, userDir, item) {
       url: `/media/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
       date: dateMeta.date,
       source: dateMeta.source,
+      ...(post && { post }),
       mediaDateMs:
         dateMeta.source && dateMeta.source !== 'filesystem' && dateMeta.date
           ? new Date(dateMeta.date).getTime()

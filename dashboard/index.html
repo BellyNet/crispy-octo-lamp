@@ -501,6 +501,38 @@
         opacity: 1;
       }
 
+      /* Post title pinned to the bottom of the thumb. Hidden by default and
+         only shown on Large cards — S/M are too cramped, so those rely on
+         the native tooltip (set via card.title). Always present in the DOM
+         so a card-size change doesn't require re-rendering. */
+      .card-post-title {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 14px 8px 6px;
+        font-size: 11px;
+        line-height: 1.3;
+        color: #f0f0f5;
+        background: linear-gradient(
+          to top,
+          rgba(0, 0, 0, 0.78) 0%,
+          rgba(0, 0, 0, 0.45) 60%,
+          transparent 100%
+        );
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        z-index: 2;
+        pointer-events: none;
+        display: none;
+      }
+      body.card-size-large .card-post-title {
+        display: -webkit-box;
+      }
+
       .card-thumb {
         flex: 1;
         overflow: hidden;
@@ -784,6 +816,36 @@
           font-size: 9px;
         }
       }
+      /* Chrome-toggle button — collapses every non-essential bit of UI
+         (counter, arrows, zoom/fullscreen buttons, date slider, info /
+         caption panels and their toggles) behind a single tap so the
+         fullscreen view is just the media + native mute control + this
+         toggle + the close button. */
+      .pswp__pswp-chrome-toggle svg {
+        opacity: 0.75;
+        transition: opacity 0.15s;
+      }
+      .pswp__pswp-chrome-toggle:hover svg,
+      .pswp__pswp-chrome-toggle.pswp-chrome-active svg {
+        opacity: 1;
+      }
+      .pswp__pswp-chrome-toggle.pswp-chrome-active {
+        color: var(--accent);
+      }
+      .pswp.pswp--chrome-hidden .pswp__counter,
+      .pswp.pswp--chrome-hidden .pswp__button--zoom,
+      .pswp.pswp--chrome-hidden .pswp__button--fs,
+      .pswp.pswp--chrome-hidden .pswp__button--arrow--prev,
+      .pswp.pswp--chrome-hidden .pswp__button--arrow--next,
+      .pswp.pswp--chrome-hidden .pswp__pswp-flag-button,
+      .pswp.pswp--chrome-hidden .pswp__pswp-info-button,
+      .pswp.pswp--chrome-hidden .pswp__pswp-caption-button,
+      .pswp.pswp--chrome-hidden .pswp__pswp-date-slider,
+      .pswp.pswp--chrome-hidden .pswp__pswp-info-panel,
+      .pswp.pswp--chrome-hidden .pswp__pswp-caption {
+        display: none !important;
+      }
+
       /* Info button style */
       .pswp__pswp-info-button svg {
         opacity: 0.75;
@@ -851,6 +913,26 @@
         font-variant-numeric: tabular-nums;
         flex-shrink: 0;
       }
+      .pswp-info-post {
+        order: 5;
+        width: 100%;
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--text);
+        white-space: normal;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        margin-top: 4px;
+      }
+      .pswp-info-post a {
+        color: var(--text);
+        text-decoration: none;
+        border-bottom: 1px dotted rgba(255, 255, 255, 0.35);
+      }
+      .pswp-info-post a:hover {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
       .pswp-info-flagged {
         font-size: 10px;
         font-weight: 800;
@@ -917,6 +999,19 @@
       .pswp__pswp-caption-empty {
         color: var(--muted);
         font-style: italic;
+      }
+      .pswp-caption-post {
+        margin-bottom: 4px;
+        word-break: break-word;
+      }
+      .pswp-caption-post a {
+        color: var(--text);
+        text-decoration: none;
+        border-bottom: 1px dotted rgba(255, 255, 255, 0.35);
+      }
+      .pswp-caption-post a:hover {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
       }
       .pswp__pswp-caption-label {
         font-size: 10px;
@@ -2514,6 +2609,9 @@
         const card = document.createElement('div')
         card.className = 'media-card' + (item.flagged ? ' flagged' : '')
         card.dataset.index = i
+        // Native tooltip with the post title — works at any card size, the
+        // only inline render path on S/M where there isn't room for text.
+        if (item.post && item.post.title) card.title = item.post.title
         if (item.flagged) {
           const ribbon = document.createElement('div')
           ribbon.className = 'card-flag-ribbon'
@@ -2581,6 +2679,15 @@
         const overlay = document.createElement('div')
         overlay.className = 'card-overlay'
         thumb.appendChild(overlay)
+
+        // Post title strip pinned to the bottom of the thumb. Visible only
+        // when the grid is in Large mode (CSS-gated by body.card-size-large).
+        if (item.post && item.post.title) {
+          const titleEl = document.createElement('div')
+          titleEl.className = 'card-post-title'
+          titleEl.textContent = item.post.title
+          thumb.appendChild(titleEl)
+        }
 
         const footer = document.createElement('div')
         footer.className = 'card-footer'
@@ -2972,6 +3079,29 @@
                     el.appendChild(addedSpan)
                   }
 
+                  // Post title (and link back to the original post when we
+                  // have a URL). Always shown when present — this is the
+                  // "scraped from" line, not the LoRA training caption.
+                  if (item.post && (item.post.title || item.post.url)) {
+                    const postEl = document.createElement('span')
+                    postEl.className = 'pswp-info-post'
+                    const titleText = item.post.title || item.post.url
+                    if (item.post.url) {
+                      const a = document.createElement('a')
+                      a.href = item.post.url
+                      a.target = '_blank'
+                      a.rel = 'noopener noreferrer'
+                      a.textContent = titleText
+                      a.title = item.post.url
+                      // Keep PhotoSwipe from intercepting the click.
+                      a.addEventListener('click', (e) => e.stopPropagation())
+                      postEl.appendChild(a)
+                    } else {
+                      postEl.textContent = titleText
+                    }
+                    el.appendChild(postEl)
+                  }
+
                   // Caption (mobile only — desktop has the dedicated sidebar).
                   // Stamped synchronously with the rest of the panel, then filled
                   // in once the fetch resolves. Guarded against stale slide updates.
@@ -3009,8 +3139,11 @@
                 const update = async () => {
                   const item = filtered[pswp.currIndex]
                   if (!item) return
-                  // No caption: hide the panel and the button. Media is full-bleed.
-                  if (!item.hasCaption) {
+                  const hasPost = !!(item.post && (item.post.title || item.post.url))
+                  // Sidebar is opened when the slide has either a LoRA caption
+                  // file or a scraped post title — the panel can render either
+                  // section, or both stacked.
+                  if (!item.hasCaption && !hasPost) {
                     el.classList.remove('pswp-caption-visible')
                     el.style.display = 'none'
                     el.replaceChildren()
@@ -3020,7 +3153,6 @@
                     }
                     return
                   }
-                  // Has a caption: show the button, render the panel.
                   if (captionBtnEl) captionBtnEl.style.display = ''
                   el.style.display = ''
                   el.classList.add('pswp-caption-visible')
@@ -3028,9 +3160,39 @@
                     captionBtnEl.classList.add('pswp-caption-active')
 
                   el.replaceChildren()
+
+                  // Post-title section — rendered first so it sits above the
+                  // LoRA caption when both are present.
+                  if (hasPost) {
+                    const postLabel = document.createElement('div')
+                    postLabel.className = 'pswp__pswp-caption-label'
+                    postLabel.textContent =
+                      item.post.site ? `Post · ${item.post.site}` : 'Post'
+                    el.appendChild(postLabel)
+                    const postBody = document.createElement('div')
+                    postBody.className = 'pswp-caption-post'
+                    const postTitleText = item.post.title || item.post.url
+                    if (item.post.url) {
+                      const a = document.createElement('a')
+                      a.href = item.post.url
+                      a.target = '_blank'
+                      a.rel = 'noopener noreferrer'
+                      a.textContent = postTitleText
+                      a.title = item.post.url
+                      a.addEventListener('click', (e) => e.stopPropagation())
+                      postBody.appendChild(a)
+                    } else {
+                      postBody.textContent = postTitleText
+                    }
+                    el.appendChild(postBody)
+                  }
+
+                  if (!item.hasCaption) return
+
                   const label = document.createElement('div')
                   label.className = 'pswp__pswp-caption-label'
                   label.textContent = 'Caption'
+                  if (hasPost) label.style.marginTop = '14px'
                   el.appendChild(label)
                   const body = document.createElement('div')
                   body.textContent = 'Loading…'
@@ -3043,13 +3205,18 @@
                     body.className = ''
                     body.textContent = text
                   } else {
-                    // hasCaption was true but fetch failed — keep panel hidden
-                    // rather than showing a broken empty state.
-                    el.classList.remove('pswp-caption-visible')
-                    el.style.display = 'none'
-                    if (captionBtnEl) {
-                      captionBtnEl.style.display = 'none'
-                      captionBtnEl.classList.remove('pswp-caption-active')
+                    // hasCaption was true but fetch failed. Leave the panel
+                    // open if we also have a post-title section to show;
+                    // otherwise drop back to the hidden state.
+                    body.remove()
+                    label.remove()
+                    if (!hasPost) {
+                      el.classList.remove('pswp-caption-visible')
+                      el.style.display = 'none'
+                      if (captionBtnEl) {
+                        captionBtnEl.style.display = 'none'
+                        captionBtnEl.classList.remove('pswp-caption-active')
+                      }
                     }
                   }
                 }
@@ -3156,6 +3323,31 @@
                 el.classList.toggle('pswp-info-active', on)
               },
             })
+
+            // Chrome toggle — collapses all the non-essential chrome by
+            // default. Lives at the right edge of the top bar (order 19,
+            // just left of the close button at 20) so it lands next to the
+            // mute control on touch devices where the video chrome floats
+            // top-right. Hidden state is applied in afterInit since
+            // `pswp.element` doesn't exist yet during `uiRegister`.
+            pswp.ui.registerElement({
+              name: 'pswp-chrome-toggle',
+              order: 19,
+              isButton: true,
+              title: 'Show controls',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="4.5" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="10"  cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r="1.2" fill="currentColor" stroke="none"/></svg>',
+              onClick(e, el) {
+                const root = pswp.element
+                if (!root) return
+                const hidden = root.classList.toggle('pswp--chrome-hidden')
+                el.title = hidden ? 'Show controls' : 'Hide controls'
+                el.classList.toggle('pswp-chrome-active', !hidden)
+              },
+            })
+          })
+
+          pswp.on('afterInit', () => {
+            if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
           // Drive video state per-slide:
@@ -3194,6 +3386,15 @@
           }
           pswp.on('change', syncVideos)
           pswp.on('afterInit', syncVideos)
+          // `change` fires as soon as currIndex moves, but the new slide's
+          // <video> element may not be mounted/active in the DOM yet — so on
+          // a swipe the play() call lands on the old slide and the new one
+          // sits frozen on its poster. `slideActivate` (and contentActivate)
+          // fire after the slide has been promoted to active, which is the
+          // moment when querying `.pswp__item--active video` actually finds
+          // the slide the user is now looking at.
+          pswp.on('slideActivate', syncVideos)
+          pswp.on('contentActivate', syncVideos)
           pswp.on('close', () => {
             const root = pswp.element
             if (!root) return
@@ -3212,6 +3413,19 @@
       const MOBILE_COLS = { small: 4, medium: 2, large: 1 }
       const isMobile = () => window.matchMedia('(max-width: 640px)').matches
 
+      // CSS gates the inline post-title overlay on body.card-size-large.
+      function applyCardSizeClass(size) {
+        document.body.classList.remove(
+          'card-size-small',
+          'card-size-medium',
+          'card-size-large'
+        )
+        document.body.classList.add(`card-size-${size}`)
+      }
+      applyCardSizeClass(
+        document.querySelector('.size-btn.active')?.dataset.size || 'small'
+      )
+
       sizeBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
           sizeBtns.forEach((b) => b.classList.toggle('active', b === btn))
@@ -3226,6 +3440,7 @@
               CARD_SIZES[btn.dataset.size]
             )
           }
+          applyCardSizeClass(btn.dataset.size)
         })
       })
 

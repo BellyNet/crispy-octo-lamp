@@ -416,6 +416,13 @@ function resolveDateFromSidecar(userDir, folder, filename) {
   return resolveBestDateRecord(record)
 }
 
+function getSourceFromSidecar(userDir, folder, filename) {
+  const entry = loadSidecar(userDir)
+  const record = entry.data[`${folder}/${filename}`]
+  const src = record && record.source
+  return src && typeof src === 'object' ? src : null
+}
+
 function flushAllSidecars() {
   for (const [userDir] of _sidecars) flushSidecar(userDir)
 }
@@ -424,6 +431,7 @@ module.exports = {
   recordImageDates,
   recordVideoDates,
   resolveDateFromSidecar,
+  getSourceFromSidecar,
   resolveBestDateRecord,
   extractVideoDateFromFile,
   extractImageDateFromBuffer,
