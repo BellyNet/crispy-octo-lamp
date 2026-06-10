@@ -816,9 +816,24 @@
       .pswp.pswp--chrome-hidden .pswp__button--arrow--next,
       .pswp.pswp--chrome-hidden .pswp__pswp-flag-button,
       .pswp.pswp--chrome-hidden .pswp__pswp-date-slider,
-      .pswp.pswp--chrome-hidden .pswp__pswp-info-panel,
       .pswp.pswp--chrome-hidden .pswp__pswp-caption {
         display: none !important;
+      }
+      /* Info panel stays visible at the bottom in both states; the meta
+         row inside it (dates, FLAGGED chip) is gated behind the chrome
+         toggle so the default view shows only the post title + caption. */
+      .pswp.pswp--chrome-hidden .pswp-info-row {
+        display: none !important;
+      }
+      .pswp.pswp--chrome-hidden .pswp__pswp-info-panel {
+        padding-bottom: 10px;
+      }
+
+      /* Force white on every PhotoSwipe button so SVGs that use
+         `currentColor` (close, our custom ones) actually render white
+         instead of inheriting the gray PhotoSwipe sets as the default. */
+      .pswp .pswp__button {
+        color: #fff !important;
       }
 
       /* Force white icon color on every custom PhotoSwipe button.
@@ -1830,25 +1845,27 @@
       }
 
       // Coomerfans titles tend to come in as "<screenname> / <real title>"
-      // (and sometimes just "<screenname> /" with nothing after). The
-      // screen-name prefix is always the current model's name, so it's
-      // pure noise inside that model's gallery. Strip it.
-      function cleanPostTitle(item) {
-        if (!item || !item.post || typeof item.post.title !== 'string') return ''
-        let t = item.post.title.trim()
+      // (and sometimes just "<screenname> /" with nothing after). LoRA
+      // captions can carry the same prefix as a trigger word. Either
+      // way, inside that model's gallery the screen-name is pure noise
+      // — strip it.
+      function stripUsernamePrefix(text) {
+        if (typeof text !== 'string') return ''
+        let t = text.trim()
         if (!t) return ''
         const name = (currentUsername || '').trim()
-        if (name) {
-          const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
-          // Tolerate the username being followed by `/`, `-`, `|`, `·`, `:`
-          // (with or without whitespace) — every separator we've seen in the
-          // wild collapses to the same "<name> <sep> <title>" pattern.
-          t = t.replace(
-            new RegExp(`^${escaped}\\s*[\\/\\-\\|·:]\\s*`, 'i'),
-            ''
-          ).trim()
-        }
+        if (!name) return t
+        const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+        // Tolerate any of `/`, `-`, `|`, `·`, `:`, `,` (with or without
+        // whitespace) as the separator. Run twice in case the caption
+        // doubles the prefix ("name, name, real text").
+        const re = new RegExp(`^${escaped}\\s*[\\/\\-\\|·:,]\\s*`, 'i')
+        t = t.replace(re, '').trim()
+        t = t.replace(re, '').trim()
         return t
+      }
+      function cleanPostTitle(item) {
+        return stripUsernamePrefix(item?.post?.title)
       }
 
       // ─── USERS ────────────────────────────────────────────────────────────
@@ -3119,9 +3136,10 @@
                     el.appendChild(headline)
                   }
 
-                  // 2. LoRA caption block. Render synchronously with the
-                  //    panel, fill in once the fetch resolves. Guard
-                  //    against stale slide updates with currIndex check.
+                  // 2. LoRA caption block. Strip the leading "<model>,"
+                  //    trigger word so the visible caption reads as
+                  //    natural text. Render synchronously with the
+                  //    panel, fill in once the fetch resolves.
                   if (item.hasCaption) {
                     const capBlock = document.createElement('div')
                     capBlock.className = 'pswp-info-caption-block'
@@ -3130,7 +3148,8 @@
                     const idxAtStart = pswp.currIndex
                     loadCaption(item).then((text) => {
                       if (pswp.currIndex !== idxAtStart) return
-                      if (text) capBlock.textContent = text
+                      const cleaned = stripUsernamePrefix(text)
+                      if (cleaned) capBlock.textContent = cleaned
                       else capBlock.remove()
                     })
                   }
@@ -3301,22 +3320,41 @@
 
           // Per-slide video state. The HTML `autoplay muted playsinline`
           // attributes do the heavy lifting on first mount; this catches
-          // the swipe-to-next case where the new slide's video is
-          // already mounted but paused.
+          // the cases where it doesn't — chiefly first-click on Chrome
+          // desktop, where play() can reject if the video hasn't loaded
+          // a frame yet. The canplay listener retries once data lands.
           //
           // Crucially we DO NOT call v.load() — that aborts whatever
           // autoplay was doing and leaves the video stuck on its first
           // frame. We also bail when currentVideo is null (content
           // hasn't been appended yet) so we don't pause the very video
           // we're about to want to play.
+          const tryPlay = (v) => {
+            v.muted = true
+            const p = v.play()
+            if (p && typeof p.catch === 'function') {
+              p.catch(() => {
+                const onReady = () => {
+                  v.removeEventListener('canplay', onReady)
+                  v.removeEventListener('loadedmetadata', onReady)
+                  // Only retry if this is still the current slide's
+                  // video — otherwise we'd resurrect a paused thumb.
+                  if (pswp.currSlide?.holderElement?.contains(v)) {
+                    v.play().catch(() => {})
+                  }
+                }
+                v.addEventListener('canplay', onReady, { once: true })
+                v.addEventListener('loadedmetadata', onReady, { once: true })
+              })
+            }
+          }
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
             const currentVideo =
               pswp.currSlide?.holderElement?.querySelector('video') || null
             if (!currentVideo) return
-            currentVideo.muted = true
-            currentVideo.play().catch(() => {})
+            tryPlay(currentVideo)
             root.querySelectorAll('video').forEach((v) => {
               if (v !== currentVideo) {
                 try { v.pause() } catch {}
