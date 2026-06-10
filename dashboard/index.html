@@ -706,48 +706,50 @@
         padding: 0 12px;
         user-select: none;
       }
-      /* Date-position timeline — pinned just below the PhotoSwipe top bar
-         so it doesn't fight with the native <video> scrubber at the bottom.
-         Clicking or dragging the track jumps to the filtered item whose
-         date is nearest to that point on the line. Hidden entirely when
-         the lightbox has no usable date range. */
+      /* Date-position timeline — lives inline inside the PhotoSwipe top
+         bar so the media stays full-bleed underneath. Track grows to
+         fill the space between the counter (left) and close (right);
+         the current date hovers above the thumb while scrubbing. */
       .pswp__pswp-date-slider {
-        position: absolute;
-        top: 44px;
-        left: 0;
-        right: 0;
-        z-index: 1020;
         display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 12px 22px 16px;
+        align-items: center;
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: 0 12px;
+        height: 44px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        background: linear-gradient(
-          to bottom,
-          rgba(10, 10, 15, 0.78) 0%,
-          rgba(10, 10, 15, 0.42) 60%,
-          transparent 100%
-        );
         user-select: none;
-        pointer-events: none; /* only the track itself takes pointer events */
+        pointer-events: none;
+        position: relative;
       }
       .pswp-date-slider-label {
-        text-align: center;
-        font-size: 13px;
+        position: absolute;
+        bottom: -22px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 3px 8px;
+        font-size: 11px;
         font-weight: 600;
         color: var(--text);
-        letter-spacing: 0.02em;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-        line-height: 1;
+        background: rgba(0, 0, 0, 0.75);
+        border-radius: 4px;
+        line-height: 1.2;
+        white-space: nowrap;
         pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+      .pswp-date-slider-track:hover ~ .pswp-date-slider-label,
+      .pswp-date-slider-track.pswp-date-slider-active ~ .pswp-date-slider-label {
+        opacity: 1;
       }
       .pswp-date-slider-track {
         position: relative;
+        flex: 1 1 auto;
         height: 4px;
         background: rgba(255, 255, 255, 0.18);
         border-radius: 2px;
         cursor: pointer;
-        margin: 0 4px;
         pointer-events: auto;
         touch-action: none;
       }
@@ -797,23 +799,11 @@
         transition: none;
       }
       .pswp-date-slider-range {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: var(--muted);
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        pointer-events: none;
+        display: none; /* no room inside the 44px top bar */
       }
       @media (max-width: 640px) {
         .pswp__pswp-date-slider {
-          padding: 10px 14px 12px;
-        }
-        .pswp-date-slider-label {
-          font-size: 12px;
-        }
-        .pswp-date-slider-range {
-          font-size: 9px;
+          margin: 0 6px;
         }
       }
       /* Chrome-toggle button — collapses every non-essential bit of UI
@@ -848,20 +838,30 @@
         display: none !important;
       }
 
-      /* Force white icon color on every custom PhotoSwipe button. Without
-         this they pick up the page's text color, which is the dark-mode
-         "text on light background" in some setups and renders the icons
-         as nearly-black against the lightbox background. */
+      /* Force white icon color on every custom PhotoSwipe button.
+         PhotoSwipe v5's default `.pswp__button .pswp__icn` rule wins on
+         specificity, so we use !important to keep our icons readable. */
       .pswp__pswp-flag-button,
-      .pswp__pswp-info-button,
-      .pswp__pswp-caption-button,
+      .pswp__pswp-link-button,
       .pswp__pswp-chrome-toggle {
-        color: #fff;
+        color: #fff !important;
       }
-      /* Active flag = bright red. Important wins against the .pswp--chrome
-         color rule above. */
-      .pswp__pswp-flag-button.pswp-flag-active {
+      .pswp__pswp-flag-button svg,
+      .pswp__pswp-link-button svg,
+      .pswp__pswp-chrome-toggle svg {
+        color: #fff;
+        stroke: #fff;
+        fill: none;
+      }
+      .pswp__pswp-flag-button.pswp-flag-active,
+      .pswp__pswp-flag-button.pswp-flag-active svg {
         color: #ff6868 !important;
+        stroke: #ff6868 !important;
+      }
+      /* The dots inside the mute SVG use fill="currentColor"; keep them
+         working when we force stroke above. */
+      .pswp-video-mute svg [fill="currentColor"] {
+        fill: currentColor;
       }
 
       /* Info button style */
@@ -1014,12 +1014,95 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
       }
       .pswp-video-wrap video {
         max-width: 100%;
         max-height: 100%;
         outline: none;
         border-radius: 4px;
+      }
+      /* Minimal auto-hiding chrome we draw ourselves now that `controls`
+         is gone. Scrubber pinned to the bottom of the video box, mute
+         button in the top-left corner of the same box. Both fade
+         together — the wrap toggles a single is-visible class. */
+      .pswp-video-chrome {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+        z-index: 5;
+      }
+      .pswp-video-wrap.is-chrome-visible .pswp-video-chrome {
+        opacity: 1;
+      }
+      .pswp-video-mute {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.55);
+        color: #fff;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+        transition: background 0.15s;
+      }
+      .pswp-video-mute:hover {
+        background: rgba(0, 0, 0, 0.75);
+      }
+      .pswp-video-progress {
+        position: absolute;
+        left: 16px;
+        right: 16px;
+        bottom: 18px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.22);
+        border-radius: 2px;
+        pointer-events: auto;
+        cursor: pointer;
+        touch-action: none;
+      }
+      /* Generous invisible tap target above/below the visible bar. */
+      .pswp-video-progress::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: -14px;
+        bottom: -14px;
+      }
+      .pswp-video-progress-fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        background: var(--accent);
+        border-radius: 2px;
+      }
+      .pswp-video-progress-thumb {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        transform: translate(-50%, -50%);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .pswp-video-wrap.is-chrome-visible .pswp-video-progress-thumb,
+      .pswp-video-progress:hover .pswp-video-progress-thumb {
+        opacity: 1;
       }
       @media (max-width: 640px) {
         .pswp__pswp-info-panel {
@@ -2934,9 +3017,14 @@
               const src = esc(item.url)
               const poster = item.thumbUrl || item.previewUrl
               const posterAttr = poster ? ` poster="${esc(poster)}"` : ''
+              // No `controls` — we draw our own minimal chrome (mute +
+              // scrubber) over the video so the only persistent UI is
+              // the scrubber, and it auto-hides after a few seconds of
+              // inactivity. Native controls don't auto-hide on desktop
+              // and the user found them in the way.
               const html =
                 `<div class="pswp-video-wrap">` +
-                  `<video src="${src}" loop muted autoplay playsinline controls preload="metadata"${posterAttr}></video>` +
+                  `<video src="${src}" loop muted autoplay playsinline preload="metadata"${posterAttr}></video>` +
                 `</div>`
               return { html, _item: item }
             }
@@ -2998,7 +3086,11 @@
             if (filtered.length > 1) {
               pswp.ui.registerElement({
                 name: 'pswp-date-slider',
-                appendTo: 'root',
+                // Inline in the top bar between counter (left, order ~5)
+                // and the buttons on the right (close at 20). order 10
+                // lands it between them with flex:1 so it stretches.
+                appendTo: 'bar',
+                order: 10,
                 onInit(el) {
                   const last = filtered.length - 1
                   // Items may have a null .date (rare — older entries before
@@ -3008,8 +3100,10 @@
                     it.date ||
                     (it.addedMs ? new Date(it.addedMs).toISOString() : null)
 
-                  const label = document.createElement('div')
-                  label.className = 'pswp-date-slider-label'
+                  // Track first, label after — the label uses a sibling
+                  // selector (.track ~ .label) to fade in only while the
+                  // user is hovering or scrubbing the track. Range
+                  // labels are dropped (no room inside the 44px bar).
                   const track = document.createElement('div')
                   track.className = 'pswp-date-slider-track'
                   const fill = document.createElement('div')
@@ -3017,14 +3111,9 @@
                   const thumb = document.createElement('div')
                   thumb.className = 'pswp-date-slider-thumb'
                   track.append(fill, thumb)
-                  const range = document.createElement('div')
-                  range.className = 'pswp-date-slider-range'
-                  const rangeStart = document.createElement('span')
-                  rangeStart.textContent = formatDateShort(itemDateISO(filtered[0]))
-                  const rangeEnd = document.createElement('span')
-                  rangeEnd.textContent = formatDateShort(itemDateISO(filtered[last]))
-                  range.append(rangeStart, rangeEnd)
-                  el.append(label, track, range)
+                  const label = document.createElement('div')
+                  label.className = 'pswp-date-slider-label'
+                  el.append(track, label)
 
                   // Position thumb + fill + label from the current slide's
                   // index. Driven by PhotoSwipe `change` events and by the
@@ -3112,26 +3201,15 @@
                   if (!item) return
                   el.replaceChildren()
 
-                  // 1. Headline — post title. Strip a leading
-                  //    `<username> / ` prefix (common in Coomerfans titles)
-                  //    so the user's screen-name doesn't repeat itself.
+                  // 1. Headline — post title only. Plain text (no link);
+                  //    the source URL has its own dedicated link button
+                  //    in the top bar. Only rendered when we have real
+                  //    text after stripping the "<modelname> /" prefix.
                   const cleanTitle = cleanPostTitle(item)
-                  if (cleanTitle || item.post?.url) {
+                  if (cleanTitle) {
                     const headline = document.createElement('div')
                     headline.className = 'pswp-info-post-headline'
-                    const text = cleanTitle || item.post.url
-                    if (item.post && item.post.url) {
-                      const a = document.createElement('a')
-                      a.href = item.post.url
-                      a.target = '_blank'
-                      a.rel = 'noopener noreferrer'
-                      a.textContent = text
-                      a.title = item.post.url
-                      a.addEventListener('click', (e) => e.stopPropagation())
-                      headline.appendChild(a)
-                    } else {
-                      headline.textContent = text
-                    }
+                    headline.textContent = cleanTitle
                     el.appendChild(headline)
                   }
 
@@ -3151,22 +3229,12 @@
                     })
                   }
 
-                  // 3. Meta row.
+                  // 3. Meta row — kept deliberately sparse: media date,
+                  //    added date, and the FLAGGED chip when set. The
+                  //    file's type, dimensions, duration, size, source
+                  //    site and filename all live on the card already.
                   const row = document.createElement('div')
                   row.className = 'pswp-info-row'
-
-                  const typeBadge = document.createElement('span')
-                  typeBadge.className = `type-badge ${item.type}`
-                  typeBadge.textContent =
-                    item.type === 'image' ? 'img' : item.type
-                  row.appendChild(typeBadge)
-
-                  if (item.post && item.post.site) {
-                    const siteSpan = document.createElement('span')
-                    siteSpan.className = 'pswp-info-post-meta'
-                    siteSpan.textContent = item.post.site
-                    row.appendChild(siteSpan)
-                  }
 
                   if (item.flagged) {
                     const fb = document.createElement('span')
@@ -3175,37 +3243,11 @@
                     row.appendChild(fb)
                   }
 
-                  const dateSpan = document.createElement('span')
-                  dateSpan.className = 'pswp-info-date'
-                  dateSpan.textContent = formatDate(item.date)
-                  if (item.source) {
-                    dateSpan.appendChild(document.createTextNode(' '))
-                    const srcSpan = document.createElement('span')
-                    srcSpan.className = 'pswp-info-src'
-                    srcSpan.textContent = `[${SOURCE_TIPS[item.source] || item.source}]`
-                    dateSpan.appendChild(srcSpan)
-                  }
-                  row.appendChild(dateSpan)
-
-                  const metaBits = []
-                  const tier =
-                    item.type === 'video'
-                      ? resolutionTier(item.width, item.height)
-                      : null
-                  if (tier) metaBits.push(tier.label)
-                  else if (item.width && item.height)
-                    metaBits.push(`${item.width}×${item.height}`)
-                  const dur = formatDuration(item.duration)
-                  if (dur) metaBits.push(dur)
-                  const sz = formatFileSize(item.size)
-                  if (sz) metaBits.push(sz)
-                  if (metaBits.length) {
-                    const metaSpan = document.createElement('span')
-                    metaSpan.className = 'pswp-info-meta'
-                    metaSpan.textContent = metaBits.join(' · ')
-                    if (tier && item.width && item.height)
-                      metaSpan.title = `${item.width}×${item.height}`
-                    row.appendChild(metaSpan)
+                  if (item.date) {
+                    const dateSpan = document.createElement('span')
+                    dateSpan.className = 'pswp-info-date'
+                    dateSpan.textContent = `Posted ${formatDate(item.date)}`
+                    row.appendChild(dateSpan)
                   }
 
                   if (item.addedMs) {
@@ -3214,11 +3256,6 @@
                     addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
                     row.appendChild(addedSpan)
                   }
-
-                  const nameSpan = document.createElement('span')
-                  nameSpan.className = 'pswp-info-filename'
-                  nameSpan.textContent = item.filename
-                  row.appendChild(nameSpan)
 
                   el.appendChild(row)
                 }
@@ -3230,6 +3267,41 @@
             // (The previous caption sidebar and its toggle button are gone:
             // the bottom info panel now carries both the post title and
             // the LoRA caption, gated by the single chrome-toggle below.)
+
+            // Open-source-post link button. Shows up only when the item
+            // has a mediaPageUrl / mediaUrl on its sidecar `source`. We
+            // mount the button always (so PhotoSwipe doesn't reflow on
+            // every slide change) and toggle `display` per slide.
+            let linkBtnEl = null
+            const refreshLinkBtn = () => {
+              const item = filtered[pswp.currIndex]
+              if (!item || !linkBtnEl) return
+              const url = item.post && item.post.url
+              if (url) {
+                linkBtnEl.style.display = ''
+                linkBtnEl.dataset.url = url
+                linkBtnEl.title = `Open source: ${url}`
+              } else {
+                linkBtnEl.style.display = 'none'
+                delete linkBtnEl.dataset.url
+              }
+            }
+            pswp.ui.registerElement({
+              name:     'pswp-link-button',
+              order:    8,
+              isButton: true,
+              title:    'Open source post',
+              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4h4v4"/><path d="M16 4l-7 7"/><path d="M14 11v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
+              onInit(el) {
+                linkBtnEl = el
+                refreshLinkBtn()
+                pswp.on('change', refreshLinkBtn)
+              },
+              onClick() {
+                const url = linkBtnEl?.dataset?.url
+                if (url) window.open(url, '_blank', 'noopener,noreferrer')
+              },
+            })
 
             // Flag-for-deletion toggle. POSTs to /api/users/:user/flag, updates
             // the in-memory item, refreshes the card's red ribbon in the grid.
@@ -3321,17 +3393,150 @@
             if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
-          // Drive video state per-slide:
-          //   • Current slide  → preload="auto", muted, play().
-          //   • Anything else  → paused, rewound to 0, preload="none".
-          //
-          // The previous DOM-class selector (`.pswp__item--current/--active`)
-          // never matched in PhotoSwipe v5 — the library doesn't add those
-          // classes — so play() was effectively only being honored by the
-          // <video autoplay> attribute on initial open. That made clicking
-          // a card *appear* to work and swiping silently fail. Going
-          // through `pswp.currSlide.holderElement` is the canonical way
-          // to find the live current slide.
+          // ── Custom minimal video chrome ──────────────────────────
+          // One attach per <video> element. Mute button (top-left) +
+          // scrubber (bottom). Both fade together; visibility is
+          // toggled by .is-chrome-visible on the .pswp-video-wrap.
+          const attachVideoChrome = (wrap) => {
+            const video = wrap.querySelector('video')
+            if (!video || wrap.dataset.chromeAttached) return
+            wrap.dataset.chromeAttached = '1'
+
+            const chrome = document.createElement('div')
+            chrome.className = 'pswp-video-chrome'
+            chrome.innerHTML =
+              '<button type="button" class="pswp-video-mute" title="Toggle mute" aria-label="Toggle mute">' +
+                '<svg class="pswp-video-mute-on"  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8v4h3l4 3V5L6 8H3z"/><line x1="13" y1="8" x2="17" y2="12"/><line x1="17" y1="8" x2="13" y2="12"/></svg>' +
+                '<svg class="pswp-video-mute-off" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M3 8v4h3l4 3V5L6 8H3z"/><path d="M13 7c1.6 1.5 1.6 4.5 0 6"/><path d="M15.5 5c2.4 2.4 2.4 7.6 0 10"/></svg>' +
+              '</button>' +
+              '<div class="pswp-video-progress">' +
+                '<div class="pswp-video-progress-fill"></div>' +
+                '<div class="pswp-video-progress-thumb"></div>' +
+              '</div>'
+            wrap.appendChild(chrome)
+
+            const muteBtn = chrome.querySelector('.pswp-video-mute')
+            const muteOn  = chrome.querySelector('.pswp-video-mute-on')
+            const muteOff = chrome.querySelector('.pswp-video-mute-off')
+            const bar     = chrome.querySelector('.pswp-video-progress')
+            const fill    = chrome.querySelector('.pswp-video-progress-fill')
+            const thumb   = chrome.querySelector('.pswp-video-progress-thumb')
+
+            const syncMuteIcon = () => {
+              muteOn.style.display  = video.muted ? '' : 'none'
+              muteOff.style.display = video.muted ? 'none' : ''
+            }
+            syncMuteIcon()
+            video.addEventListener('volumechange', syncMuteIcon)
+
+            // Auto-hide chrome after 2.5s of no interaction. Any tap or
+            // hover bumps the timer; toggling on the wrap shows/hides.
+            let hideTimer = null
+            const show = () => {
+              wrap.classList.add('is-chrome-visible')
+              clearTimeout(hideTimer)
+              hideTimer = setTimeout(
+                () => wrap.classList.remove('is-chrome-visible'),
+                2500
+              )
+            }
+            const hide = () => {
+              clearTimeout(hideTimer)
+              wrap.classList.remove('is-chrome-visible')
+            }
+            wrap._showVideoChrome = show
+            wrap._hideVideoChrome = hide
+
+            // Tapping the wrap (outside the chrome controls) toggles the
+            // chrome. Tapping a control bumps the auto-hide timer.
+            wrap.addEventListener('click', (e) => {
+              if (chrome.contains(e.target)) {
+                show()
+                return
+              }
+              if (wrap.classList.contains('is-chrome-visible')) hide()
+              else show()
+            })
+            wrap.addEventListener('pointermove', show)
+
+            muteBtn.addEventListener('click', (e) => {
+              e.stopPropagation()
+              video.muted = !video.muted
+              syncMuteIcon()
+              show()
+            })
+
+            // Scrubber: pointer X on the bar → seek. fill + thumb update
+            // continuously from `timeupdate` so the bar reflects the
+            // current playback position.
+            const seekFromX = (clientX) => {
+              const rect = bar.getBoundingClientRect()
+              if (!rect.width || !video.duration) return
+              const pct = Math.max(
+                0,
+                Math.min(1, (clientX - rect.left) / rect.width)
+              )
+              video.currentTime = pct * video.duration
+              fill.style.width  = `${pct * 100}%`
+              thumb.style.left  = `${pct * 100}%`
+            }
+            let scrubbing = false
+            bar.addEventListener('pointerdown', (e) => {
+              e.stopPropagation()
+              scrubbing = true
+              try { bar.setPointerCapture(e.pointerId) } catch {}
+              seekFromX(e.clientX)
+              show()
+            })
+            bar.addEventListener('pointermove', (e) => {
+              if (scrubbing) {
+                seekFromX(e.clientX)
+                show()
+              }
+            })
+            const releaseScrub = (e) => {
+              if (!scrubbing) return
+              scrubbing = false
+              try { bar.releasePointerCapture(e.pointerId) } catch {}
+            }
+            bar.addEventListener('pointerup', releaseScrub)
+            bar.addEventListener('pointercancel', releaseScrub)
+
+            video.addEventListener('timeupdate', () => {
+              if (!video.duration) return
+              const pct = (video.currentTime / video.duration) * 100
+              fill.style.width = `${pct}%`
+              thumb.style.left = `${pct}%`
+            })
+
+            // First-mount: surface the chrome briefly so the user sees
+            // it exists, then fade.
+            show()
+          }
+
+          // Drive video state per-slide. Current slide → muted + play().
+          // Robust against the "first-load doesn't autoplay on desktop"
+          // case: if the video hasn't loaded enough data yet, attach a
+          // one-shot canplay listener that will retry play() the moment
+          // it's ready, as long as the slide is still current.
+          const playWhenReady = (v) => {
+            v.muted = true
+            const tryPlay = () => {
+              if (pswp.currSlide?.holderElement?.contains(v)) {
+                v.play().catch(() => {})
+              }
+            }
+            tryPlay()
+            if (v.readyState < 3) {
+              const onReady = () => {
+                v.removeEventListener('canplay', onReady)
+                v.removeEventListener('loadedmetadata', onReady)
+                tryPlay()
+              }
+              v.addEventListener('canplay', onReady, { once: true })
+              v.addEventListener('loadedmetadata', onReady, { once: true })
+            }
+          }
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
@@ -3339,24 +3544,44 @@
               pswp.currSlide?.holderElement?.querySelector('video') || null
             root.querySelectorAll('video').forEach((v) => {
               if (v === currentVideo) {
-                v.muted = true
                 if (v.preload !== 'auto') v.preload = 'auto'
                 if (v.readyState < 2) v.load()
-                v.play().catch(() => {})
+                playWhenReady(v)
               } else {
                 v.pause()
                 try { v.currentTime = 0 } catch {}
                 if (v.preload !== 'none') v.preload = 'none'
               }
             })
+            // Reveal the scrubber on the now-current slide so the user
+            // sees there's a scrubber to interact with; it auto-hides.
+            const currentWrap =
+              pswp.currSlide?.holderElement?.querySelector('.pswp-video-wrap')
+            if (currentWrap?._showVideoChrome) currentWrap._showVideoChrome()
           }
-          // Schedule for the next animation frame so the new slide's
-          // holderElement is in the DOM by the time we query it.
           const scheduleSync = () => requestAnimationFrame(syncVideos)
           pswp.on('change', scheduleSync)
           pswp.on('afterInit', scheduleSync)
           pswp.on('slideActivate', scheduleSync)
           pswp.on('contentActivate', scheduleSync)
+          // Attach chrome to every video as soon as its content lands in
+          // the DOM. contentAppend fires once per HTML content; we also
+          // sweep on contentActivate as a belt-and-suspenders.
+          pswp.on('contentAppend', (e) => {
+            const el = e.content?.element
+            if (!el) return
+            const wrap = el.classList?.contains('pswp-video-wrap')
+              ? el
+              : el.querySelector?.('.pswp-video-wrap')
+            if (wrap) attachVideoChrome(wrap)
+          })
+          pswp.on('contentActivate', (e) => {
+            const el = e.content?.element
+            const wrap = el?.classList?.contains('pswp-video-wrap')
+              ? el
+              : el?.querySelector?.('.pswp-video-wrap')
+            if (wrap) attachVideoChrome(wrap)
+          })
           pswp.on('close', () => {
             const root = pswp.element
             if (!root) return
