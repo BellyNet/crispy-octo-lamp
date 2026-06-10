@@ -3328,95 +3328,124 @@
             if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
-          // Per-slide video state. Chrome desktop has been refusing the
-          // initial autoplay even with `<video autoplay muted>`, likely
-          // because PhotoSwipe's opening animation has the slide hidden
-          // (display:none / visibility:hidden / off-screen transform)
-          // at the moment Chrome's autoplay policy checks visibility.
-          // The MutationObserver below catches every <video> the second
-          // it lands in the lightbox DOM and primes it; once the slide
-          // becomes visible we then call play() across multiple
-          // PhotoSwipe lifecycle events so something always wins.
+          // Autoplay on first click was failing across every theory
+          // tried (HTML attribute alone, openingAnimationEnd hook,
+          // canplay listener) so we stop guessing at PhotoSwipe's
+          // lifecycle and just brute-force it: a MutationObserver
+          // catches every <video> the instant it lands in the DOM, and
+          // for the current slide's video we start a polling loop that
+          // calls play() every 100ms for up to 3 seconds OR until the
+          // video is actually playing. This survives any combination
+          // of timing/visibility issues with PhotoSwipe's open
+          // animation, Chrome's autoplay policy quirks, and slow data
+          // loading.
           //
-          // We never call v.load() — that aborts in-flight autoplay and
-          // leaves the video frozen on its first frame.
+          // We never call v.load() — that aborts in-flight autoplay
+          // and leaves the video frozen on its first frame (which is
+          // exactly the bug the user was hitting).
           const primeVideo = (v) => {
             v.muted = true
             v.autoplay = true
             v.playsInline = true
           }
-          const tryPlay = (v) => {
+          const playPolls = new WeakMap()
+          const pollPlay = (v) => {
             if (!v) return
+            const prev = playPolls.get(v)
+            if (prev) clearInterval(prev)
             primeVideo(v)
-            const p = v.play()
-            if (p && typeof p.catch === 'function') {
-              p.catch(() => {
-                const retry = () => {
-                  v.removeEventListener('canplay', retry)
-                  v.removeEventListener('loadedmetadata', retry)
-                  v.removeEventListener('loadeddata', retry)
-                  if (pswp.currSlide?.holderElement?.contains(v)) {
-                    v.play().catch(() => {})
-                  }
-                }
-                v.addEventListener('canplay', retry, { once: true })
-                v.addEventListener('loadedmetadata', retry, { once: true })
-                v.addEventListener('loadeddata', retry, { once: true })
-              })
-            }
+            // First synchronous attempt — usually wins on the second
+            // slide and later.
+            v.play().catch(() => {})
+            let attempts = 0
+            const interval = setInterval(() => {
+              attempts++
+              const isCurrent =
+                pswp.currSlide?.holderElement?.contains(v) === true
+              const isPlaying =
+                !v.paused && !v.ended && v.readyState >= 2
+              if (attempts > 30 || !isCurrent || isPlaying) {
+                clearInterval(interval)
+                playPolls.delete(v)
+                return
+              }
+              v.play().catch(() => {})
+            }, 100)
+            playPolls.set(v, interval)
           }
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
             const currentVideo =
               pswp.currSlide?.holderElement?.querySelector('video') || null
-            if (!currentVideo) return
-            tryPlay(currentVideo)
+            if (currentVideo) pollPlay(currentVideo)
             root.querySelectorAll('video').forEach((v) => {
               if (v !== currentVideo) {
                 try { v.pause() } catch {}
+                const prev = playPolls.get(v)
+                if (prev) {
+                  clearInterval(prev)
+                  playPolls.delete(v)
+                }
               }
             })
           }
+          // Hit every PhotoSwipe event that could plausibly mean the
+          // current slide is ready. Each one independently kicks the
+          // poller; the first to succeed wins and the rest no-op.
           pswp.on('change', syncVideos)
           pswp.on('afterInit', syncVideos)
           pswp.on('contentActivate', syncVideos)
-          // openingAnimationEnd fires once the lightbox is fully painted
-          // and the active slide is visible — by that point Chrome's
-          // autoplay visibility check will pass.
+          pswp.on('slideActivate', syncVideos)
           pswp.on('openingAnimationEnd', syncVideos)
+          pswp.on('initialZoomInEnd', syncVideos)
 
-          // MutationObserver catches every <video> the moment it's
-          // appended to the lightbox DOM — earlier than any PhotoSwipe
-          // event — so we can prime it (set the JS-side properties
-          // alongside the HTML attributes) before Chrome decides
-          // whether to honor autoplay.
+          // MutationObserver primes every video the instant it lands in
+          // the lightbox DOM and starts polling it if it's the current
+          // slide. This is earlier than any PhotoSwipe event and survives
+          // PhotoSwipe internally cloning/moving the slide DOM during
+          // the open animation.
           const mountObserver = new MutationObserver((records) => {
             for (const r of records) {
               for (const node of r.addedNodes) {
                 if (node.nodeType !== 1) continue
-                if (node.tagName === 'VIDEO') primeVideo(node)
-                node.querySelectorAll?.('video').forEach(primeVideo)
+                const vids =
+                  node.tagName === 'VIDEO'
+                    ? [node]
+                    : Array.from(node.querySelectorAll?.('video') || [])
+                for (const v of vids) {
+                  primeVideo(v)
+                  if (pswp.currSlide?.holderElement?.contains(v)) {
+                    pollPlay(v)
+                  }
+                }
               }
             }
           })
 
-          // Tap-to-toggle native controls. Video starts with no controls
-          // attribute; first tap adds it (native player with mute, play,
-          // scrubber, fullscreen), second tap removes it.
+          // Tap-to-toggle native controls + kick off a play poll the
+          // moment PhotoSwipe says it's about to append this content.
+          // contentAppend fires just BEFORE container.appendChild, so
+          // we schedule the poll on the next microtask — by then the
+          // video is in the DOM and pollPlay can actually find it via
+          // pswp.currSlide.holderElement.contains(v).
           pswp.on('contentAppend', (e) => {
             const el = e.content?.element
             const wrap = el?.classList?.contains('pswp-video-wrap')
               ? el
               : el?.querySelector?.('.pswp-video-wrap')
-            if (!wrap || wrap.dataset.tapBound) return
-            wrap.dataset.tapBound = '1'
+            if (!wrap) return
             const video = wrap.querySelector('video')
             if (!video) return
             primeVideo(video)
+            queueMicrotask(() => {
+              if (pswp.currSlide?.holderElement?.contains(video)) {
+                pollPlay(video)
+              }
+            })
+            if (wrap.dataset.tapBound) return
+            wrap.dataset.tapBound = '1'
             wrap.addEventListener('click', (ev) => {
-              // The click came from the native controls themselves —
-              // let the browser handle it; don't toggle off mid-scrub.
               if (ev.target !== wrap && ev.target !== video) return
               if (video.hasAttribute('controls')) {
                 video.removeAttribute('controls')
@@ -3425,7 +3454,12 @@
               }
             })
           })
-          // Kick off the MutationObserver once pswp.element exists.
+          // Start the MutationObserver on afterInit — by then
+          // pswp.element exists. PhotoSwipe defers appending the
+          // actual content (including <video>) until *after* its
+          // opening animation completes (heavy-append is gated by
+          // `pswp.opener.isOpen`), so we observe BEFORE that append
+          // happens and catch the video the instant it lands.
           pswp.on('afterInit', () => {
             if (pswp.element) {
               mountObserver.observe(pswp.element, {
@@ -3438,7 +3472,11 @@
             try { mountObserver.disconnect() } catch {}
             const root = pswp.element
             if (!root) return
-            root.querySelectorAll('video').forEach((v) => v.pause())
+            root.querySelectorAll('video').forEach((v) => {
+              v.pause()
+              const prev = playPolls.get(v)
+              if (prev) clearInterval(prev)
+            })
           })
 
           pswp.init()
