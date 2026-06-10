@@ -3196,18 +3196,26 @@
             // Open-source-post link button. Shows up only when the item
             // has a mediaPageUrl / mediaUrl on its sidecar `source`. We
             // mount the button always (so PhotoSwipe doesn't reflow on
-            // every slide change) and toggle `display` per slide.
+            // every slide change) and toggle visibility per slide.
+            //
+            // Use visibility:hidden (not display:none) so toggling it
+            // doesn't reflow the top bar's flex layout. Refresh on
+            // every lifecycle event that could change the current slide
+            // — `change` doesn't fire on initial open, so onInit alone
+            // would leave the button stuck.
             let linkBtnEl = null
             const refreshLinkBtn = () => {
-              const item = filtered[pswp.currIndex]
-              if (!item || !linkBtnEl) return
-              const url = item.post && item.post.url
+              if (!linkBtnEl) return
+              const item = filtered[pswp.currIndex] || filtered[0]
+              const url = item && item.post && item.post.url
               if (url) {
-                linkBtnEl.style.display = ''
+                linkBtnEl.style.visibility = 'visible'
+                linkBtnEl.style.pointerEvents = 'auto'
                 linkBtnEl.dataset.url = url
                 linkBtnEl.title = `Open source: ${url}`
               } else {
-                linkBtnEl.style.display = 'none'
+                linkBtnEl.style.visibility = 'hidden'
+                linkBtnEl.style.pointerEvents = 'none'
                 delete linkBtnEl.dataset.url
               }
             }
@@ -3221,6 +3229,8 @@
                 linkBtnEl = el
                 refreshLinkBtn()
                 pswp.on('change', refreshLinkBtn)
+                pswp.on('afterInit', refreshLinkBtn)
+                pswp.on('contentActivate', refreshLinkBtn)
               },
               onClick() {
                 const url = linkBtnEl?.dataset?.url
