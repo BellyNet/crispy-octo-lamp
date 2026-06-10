@@ -501,10 +501,9 @@
         opacity: 1;
       }
 
-      /* Post title pinned to the bottom of the thumb. Hidden by default and
-         only shown on Large cards — S/M are too cramped, so those rely on
-         the native tooltip (set via card.title). Always present in the DOM
-         so a card-size change doesn't require re-rendering. */
+      /* Post title pinned to the bottom of the thumb. Visible at every
+         card size — S/M get a single line truncated with ellipsis,
+         L can wrap to two. */
       .card-post-title {
         position: absolute;
         left: 0;
@@ -520,17 +519,17 @@
           rgba(0, 0, 0, 0.45) 60%,
           transparent 100%
         );
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         z-index: 2;
         pointer-events: none;
-        display: none;
       }
       body.card-size-large .card-post-title {
+        white-space: normal;
         display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
       }
 
       .card-thumb {
@@ -2290,6 +2289,11 @@
         }
       }
       window.addEventListener('keydown', (e) => {
+        // When the lightbox is open, the keyboard belongs to PhotoSwipe
+        // (arrows = prev/next slide, Esc = close, etc). Bail out so we
+        // don't move the sidebar highlight underneath the open viewer.
+        if (document.querySelector('.pswp--open')) return
+
         // Don't hijack typing in inputs other than the user-search itself.
         const t = e.target
         const inOtherInput =
