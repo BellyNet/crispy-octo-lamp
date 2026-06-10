@@ -722,26 +722,10 @@
         pointer-events: none;
         position: relative;
       }
+      /* No floating label — the thumb's native tooltip carries the
+         current date so nothing pokes below the bar onto the media. */
       .pswp-date-slider-label {
-        position: absolute;
-        bottom: -22px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 3px 8px;
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--text);
-        background: rgba(0, 0, 0, 0.75);
-        border-radius: 4px;
-        line-height: 1.2;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.18s ease;
-      }
-      .pswp-date-slider-track:hover ~ .pswp-date-slider-label,
-      .pswp-date-slider-track.pswp-date-slider-active ~ .pswp-date-slider-label {
-        opacity: 1;
+        display: none;
       }
       .pswp-date-slider-track {
         position: relative;
@@ -839,29 +823,28 @@
       }
 
       /* Force white icon color on every custom PhotoSwipe button.
-         PhotoSwipe v5's default `.pswp__button .pswp__icn` rule wins on
-         specificity, so we use !important to keep our icons readable. */
-      .pswp__pswp-flag-button,
-      .pswp__pswp-link-button,
-      .pswp__pswp-chrome-toggle {
+         PhotoSwipe v5's `.pswp__button { color: rgba(127,127,127,1) }`
+         was painting our currentColor strokes gray. We win with a more
+         specific selector + !important on both color and stroke. */
+      .pswp button.pswp__button.pswp__pswp-flag-button,
+      .pswp button.pswp__button.pswp__pswp-link-button,
+      .pswp button.pswp__button.pswp__pswp-chrome-toggle {
         color: #fff !important;
       }
-      .pswp__pswp-flag-button svg,
-      .pswp__pswp-link-button svg,
-      .pswp__pswp-chrome-toggle svg {
-        color: #fff;
-        stroke: #fff;
-        fill: none;
+      .pswp button.pswp__button.pswp__pswp-flag-button svg,
+      .pswp button.pswp__button.pswp__pswp-link-button svg,
+      .pswp button.pswp__button.pswp__pswp-chrome-toggle svg,
+      .pswp button.pswp__button.pswp__pswp-flag-button svg *,
+      .pswp button.pswp__button.pswp__pswp-link-button svg *,
+      .pswp button.pswp__button.pswp__pswp-chrome-toggle svg * {
+        stroke: #fff !important;
+        color: #fff !important;
       }
-      .pswp__pswp-flag-button.pswp-flag-active,
-      .pswp__pswp-flag-button.pswp-flag-active svg {
+      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active,
+      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg,
+      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg * {
         color: #ff6868 !important;
         stroke: #ff6868 !important;
-      }
-      /* The dots inside the mute SVG use fill="currentColor"; keep them
-         working when we force stroke above. */
-      .pswp-video-mute svg [fill="currentColor"] {
-        fill: currentColor;
       }
 
       /* Info button style */
@@ -1021,88 +1004,6 @@
         max-height: 100%;
         outline: none;
         border-radius: 4px;
-      }
-      /* Minimal auto-hiding chrome we draw ourselves now that `controls`
-         is gone. Scrubber pinned to the bottom of the video box, mute
-         button in the top-left corner of the same box. Both fade
-         together — the wrap toggles a single is-visible class. */
-      .pswp-video-chrome {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.18s ease;
-        z-index: 5;
-      }
-      .pswp-video-wrap.is-chrome-visible .pswp-video-chrome {
-        opacity: 1;
-      }
-      .pswp-video-mute {
-        position: absolute;
-        top: 12px;
-        left: 12px;
-        width: 38px;
-        height: 38px;
-        border-radius: 50%;
-        background: rgba(0, 0, 0, 0.55);
-        color: #fff;
-        border: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        pointer-events: auto;
-        transition: background 0.15s;
-      }
-      .pswp-video-mute:hover {
-        background: rgba(0, 0, 0, 0.75);
-      }
-      .pswp-video-progress {
-        position: absolute;
-        left: 16px;
-        right: 16px;
-        bottom: 18px;
-        height: 4px;
-        background: rgba(255, 255, 255, 0.22);
-        border-radius: 2px;
-        pointer-events: auto;
-        cursor: pointer;
-        touch-action: none;
-      }
-      /* Generous invisible tap target above/below the visible bar. */
-      .pswp-video-progress::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: -14px;
-        bottom: -14px;
-      }
-      .pswp-video-progress-fill {
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 0;
-        background: var(--accent);
-        border-radius: 2px;
-      }
-      .pswp-video-progress-thumb {
-        position: absolute;
-        top: 50%;
-        left: 0;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: var(--accent);
-        transform: translate(-50%, -50%);
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-        opacity: 0;
-        transition: opacity 0.15s;
-      }
-      .pswp-video-wrap.is-chrome-visible .pswp-video-progress-thumb,
-      .pswp-video-progress:hover .pswp-video-progress-thumb {
-        opacity: 1;
       }
       @media (max-width: 640px) {
         .pswp__pswp-info-panel {
@@ -3015,18 +2916,11 @@
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
               const src = esc(item.url)
-              // No `poster` — the animated-GIF preview was sometimes
-              // sitting on top of a video that had been told to play
-              // but hadn't yet rendered its first frame, making it
-              // look like autoplay was broken. With preload="auto"
-              // and no poster, the very first thing the user sees is
-              // the actual playing video.
-              //
-              // No `controls` — we draw our own minimal chrome (mute +
-              // scrubber) over the video so the only persistent UI is
-              // the scrubber, and it auto-hides after a few seconds of
-              // inactivity. Native controls don't auto-hide on desktop
-              // and the user found them in the way.
+              // No `poster`, no `controls` initially. Tap on the video
+              // toggles the native controls (wired up in contentAppend
+              // below). The autoplay+muted+playsinline trio is what
+              // every social-app video player does; let it do its job
+              // without us calling load() or pause() in the middle.
               const html =
                 `<div class="pswp-video-wrap">` +
                   `<video src="${src}" loop muted autoplay playsinline preload="auto"></video>` +
@@ -3127,9 +3021,12 @@
                     const pct = pswp.currIndex / last
                     thumb.style.left = `${pct * 100}%`
                     fill.style.width = `${pct * 100}%`
-                    label.textContent = formatDateShort(
+                    const date = formatDateShort(
                       itemDateISO(filtered[pswp.currIndex])
                     )
+                    label.textContent = date
+                    thumb.title = date
+                    track.title = date
                   }
                   pswp.on('change', updateFromIndex)
                   updateFromIndex()
@@ -3398,187 +3295,56 @@
             if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
-          // ── Custom minimal video chrome ──────────────────────────
-          // One attach per <video> element. Mute button (top-left) +
-          // scrubber (bottom). Both fade together; visibility is
-          // toggled by .is-chrome-visible on the .pswp-video-wrap.
-          const attachVideoChrome = (wrap) => {
-            const video = wrap.querySelector('video')
-            if (!video || wrap.dataset.chromeAttached) return
-            wrap.dataset.chromeAttached = '1'
-
-            const chrome = document.createElement('div')
-            chrome.className = 'pswp-video-chrome'
-            chrome.innerHTML =
-              '<button type="button" class="pswp-video-mute" title="Toggle mute" aria-label="Toggle mute">' +
-                '<svg class="pswp-video-mute-on"  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8v4h3l4 3V5L6 8H3z"/><line x1="13" y1="8" x2="17" y2="12"/><line x1="17" y1="8" x2="13" y2="12"/></svg>' +
-                '<svg class="pswp-video-mute-off" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M3 8v4h3l4 3V5L6 8H3z"/><path d="M13 7c1.6 1.5 1.6 4.5 0 6"/><path d="M15.5 5c2.4 2.4 2.4 7.6 0 10"/></svg>' +
-              '</button>' +
-              '<div class="pswp-video-progress">' +
-                '<div class="pswp-video-progress-fill"></div>' +
-                '<div class="pswp-video-progress-thumb"></div>' +
-              '</div>'
-            wrap.appendChild(chrome)
-
-            const muteBtn = chrome.querySelector('.pswp-video-mute')
-            const muteOn  = chrome.querySelector('.pswp-video-mute-on')
-            const muteOff = chrome.querySelector('.pswp-video-mute-off')
-            const bar     = chrome.querySelector('.pswp-video-progress')
-            const fill    = chrome.querySelector('.pswp-video-progress-fill')
-            const thumb   = chrome.querySelector('.pswp-video-progress-thumb')
-
-            const syncMuteIcon = () => {
-              muteOn.style.display  = video.muted ? '' : 'none'
-              muteOff.style.display = video.muted ? 'none' : ''
-            }
-            syncMuteIcon()
-            video.addEventListener('volumechange', syncMuteIcon)
-
-            // Auto-hide chrome after 2.5s of no interaction. Any tap or
-            // hover bumps the timer; toggling on the wrap shows/hides.
-            let hideTimer = null
-            const show = () => {
-              wrap.classList.add('is-chrome-visible')
-              clearTimeout(hideTimer)
-              hideTimer = setTimeout(
-                () => wrap.classList.remove('is-chrome-visible'),
-                2500
-              )
-            }
-            const hide = () => {
-              clearTimeout(hideTimer)
-              wrap.classList.remove('is-chrome-visible')
-            }
-            wrap._showVideoChrome = show
-            wrap._hideVideoChrome = hide
-
-            // Tapping the wrap (outside the chrome controls) toggles the
-            // chrome. Tapping a control bumps the auto-hide timer.
-            wrap.addEventListener('click', (e) => {
-              if (chrome.contains(e.target)) {
-                show()
-                return
-              }
-              if (wrap.classList.contains('is-chrome-visible')) hide()
-              else show()
-            })
-            wrap.addEventListener('pointermove', show)
-
-            muteBtn.addEventListener('click', (e) => {
-              e.stopPropagation()
-              video.muted = !video.muted
-              syncMuteIcon()
-              show()
-            })
-
-            // Scrubber: pointer X on the bar → seek. fill + thumb update
-            // continuously from `timeupdate` so the bar reflects the
-            // current playback position.
-            const seekFromX = (clientX) => {
-              const rect = bar.getBoundingClientRect()
-              if (!rect.width || !video.duration) return
-              const pct = Math.max(
-                0,
-                Math.min(1, (clientX - rect.left) / rect.width)
-              )
-              video.currentTime = pct * video.duration
-              fill.style.width  = `${pct * 100}%`
-              thumb.style.left  = `${pct * 100}%`
-            }
-            let scrubbing = false
-            bar.addEventListener('pointerdown', (e) => {
-              e.stopPropagation()
-              scrubbing = true
-              try { bar.setPointerCapture(e.pointerId) } catch {}
-              seekFromX(e.clientX)
-              show()
-            })
-            bar.addEventListener('pointermove', (e) => {
-              if (scrubbing) {
-                seekFromX(e.clientX)
-                show()
-              }
-            })
-            const releaseScrub = (e) => {
-              if (!scrubbing) return
-              scrubbing = false
-              try { bar.releasePointerCapture(e.pointerId) } catch {}
-            }
-            bar.addEventListener('pointerup', releaseScrub)
-            bar.addEventListener('pointercancel', releaseScrub)
-
-            video.addEventListener('timeupdate', () => {
-              if (!video.duration) return
-              const pct = (video.currentTime / video.duration) * 100
-              fill.style.width = `${pct}%`
-              thumb.style.left = `${pct}%`
-            })
-
-            // Stay hidden until the user explicitly taps the video.
-          }
-
-          // Drive video state per-slide. Current slide → muted + play().
-          // Robust against the "first-load doesn't autoplay on desktop"
-          // case: if the video hasn't loaded enough data yet, attach a
-          // one-shot canplay listener that will retry play() the moment
-          // it's ready, as long as the slide is still current.
-          const playWhenReady = (v) => {
-            v.muted = true
-            const tryPlay = () => {
-              if (pswp.currSlide?.holderElement?.contains(v)) {
-                v.play().catch(() => {})
-              }
-            }
-            tryPlay()
-            if (v.readyState < 3) {
-              const onReady = () => {
-                v.removeEventListener('canplay', onReady)
-                v.removeEventListener('loadedmetadata', onReady)
-                tryPlay()
-              }
-              v.addEventListener('canplay', onReady, { once: true })
-              v.addEventListener('loadedmetadata', onReady, { once: true })
-            }
-          }
+          // Per-slide video state. The HTML `autoplay muted playsinline`
+          // attributes do the heavy lifting on first mount; this catches
+          // the swipe-to-next case where the new slide's video is
+          // already mounted but paused.
+          //
+          // Crucially we DO NOT call v.load() — that aborts whatever
+          // autoplay was doing and leaves the video stuck on its first
+          // frame. We also bail when currentVideo is null (content
+          // hasn't been appended yet) so we don't pause the very video
+          // we're about to want to play.
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
             const currentVideo =
               pswp.currSlide?.holderElement?.querySelector('video') || null
+            if (!currentVideo) return
+            currentVideo.muted = true
+            currentVideo.play().catch(() => {})
             root.querySelectorAll('video').forEach((v) => {
-              if (v === currentVideo) {
-                if (v.preload !== 'auto') v.preload = 'auto'
-                if (v.readyState < 2) v.load()
-                playWhenReady(v)
-              } else {
-                v.pause()
-                try { v.currentTime = 0 } catch {}
-                if (v.preload !== 'none') v.preload = 'none'
+              if (v !== currentVideo) {
+                try { v.pause() } catch {}
               }
             })
           }
-          const scheduleSync = () => requestAnimationFrame(syncVideos)
-          pswp.on('change', scheduleSync)
-          pswp.on('afterInit', scheduleSync)
-          pswp.on('slideActivate', scheduleSync)
-          pswp.on('contentActivate', scheduleSync)
-          // Attach chrome to every video as soon as its content lands in
-          // the DOM. contentAppend fires once per HTML content; we also
-          // sweep on contentActivate as a belt-and-suspenders.
+          pswp.on('change', syncVideos)
+          pswp.on('afterInit', syncVideos)
+          pswp.on('contentActivate', syncVideos)
+
+          // Tap-to-toggle native controls. Video starts with no controls
+          // attribute; first tap adds it (native player with mute, play,
+          // scrubber, fullscreen), second tap removes it.
           pswp.on('contentAppend', (e) => {
-            const el = e.content?.element
-            if (!el) return
-            const wrap = el.classList?.contains('pswp-video-wrap')
-              ? el
-              : el.querySelector?.('.pswp-video-wrap')
-            if (wrap) attachVideoChrome(wrap)
-          })
-          pswp.on('contentActivate', (e) => {
             const el = e.content?.element
             const wrap = el?.classList?.contains('pswp-video-wrap')
               ? el
               : el?.querySelector?.('.pswp-video-wrap')
-            if (wrap) attachVideoChrome(wrap)
+            if (!wrap || wrap.dataset.tapBound) return
+            wrap.dataset.tapBound = '1'
+            const video = wrap.querySelector('video')
+            if (!video) return
+            wrap.addEventListener('click', (ev) => {
+              // The click came from the native controls themselves —
+              // let the browser handle it; don't toggle off mid-scrub.
+              if (ev.target !== wrap && ev.target !== video) return
+              if (video.hasAttribute('controls')) {
+                video.removeAttribute('controls')
+              } else {
+                video.setAttribute('controls', '')
+              }
+            })
           })
           pswp.on('close', () => {
             const root = pswp.element
