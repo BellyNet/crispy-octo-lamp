@@ -3015,8 +3015,13 @@
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
               const src = esc(item.url)
-              const poster = item.thumbUrl || item.previewUrl
-              const posterAttr = poster ? ` poster="${esc(poster)}"` : ''
+              // No `poster` — the animated-GIF preview was sometimes
+              // sitting on top of a video that had been told to play
+              // but hadn't yet rendered its first frame, making it
+              // look like autoplay was broken. With preload="auto"
+              // and no poster, the very first thing the user sees is
+              // the actual playing video.
+              //
               // No `controls` — we draw our own minimal chrome (mute +
               // scrubber) over the video so the only persistent UI is
               // the scrubber, and it auto-hides after a few seconds of
@@ -3024,7 +3029,7 @@
               // and the user found them in the way.
               const html =
                 `<div class="pswp-video-wrap">` +
-                  `<video src="${src}" loop muted autoplay playsinline preload="metadata"${posterAttr}></video>` +
+                  `<video src="${src}" loop muted autoplay playsinline preload="auto"></video>` +
                 `</div>`
               return { html, _item: item }
             }
