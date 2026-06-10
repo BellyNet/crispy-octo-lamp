@@ -322,6 +322,57 @@ function resolveBestDateRecord(record) {
   return { date: null, source: null }
 }
 
+function recordExistingMetadata(
+  userDir,
+  relativePath,
+  uploadedDate,
+  sourceMeta = null
+) {
+  const key = String(relativePath || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+  if (!key || key.startsWith('../')) return false
+
+  const source = normalizeSourceMeta(sourceMeta)
+  if (!source) return false
+
+  const entry = loadSidecar(userDir)
+  const existingRecord =
+    entry.data[key] && typeof entry.data[key] === 'object'
+      ? entry.data[key]
+      : {}
+  const existingSource =
+    existingRecord.source && typeof existingRecord.source === 'object'
+      ? existingRecord.source
+      : {}
+  const mergedSource = {}
+  for (const field of new Set([
+    ...Object.keys(existingSource),
+    ...Object.keys(source),
+  ])) {
+    mergedSource[field] = source[field] || existingSource[field] || null
+  }
+
+  const nextRecord = {
+    ...existingRecord,
+    video: existingRecord.video || null,
+    image: existingRecord.image || null,
+    filename:
+      existingRecord.filename ||
+      extractFilenameDate(path.basename(key)) ||
+      null,
+    uploaded:
+      existingRecord.uploaded || (uploadedDate ? toISO(uploadedDate) : null),
+    source: mergedSource,
+    comments: existingRecord.comments || [],
+    commentCount: existingRecord.commentCount ?? null,
+  }
+  nextRecord.resolved = resolveBestDateRecord(nextRecord)
+  entry.data[key] = nextRecord
+  scheduleSidecarFlush(userDir)
+  return true
+}
+
 async function recordImageDates(
   userDir,
   folder,
@@ -428,6 +479,7 @@ function flushAllSidecars() {
 }
 
 module.exports = {
+  recordExistingMetadata,
   recordImageDates,
   recordVideoDates,
   resolveDateFromSidecar,

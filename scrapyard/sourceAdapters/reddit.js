@@ -37,8 +37,21 @@ function htmlDecode(value) {
     .replace(/&gt;/g, '>')
 }
 
-function stripTags(value) {
-  return htmlDecode(String(value || '').replace(/<[^>]+>/g, ' '))
+function cleanRedditText(value) {
+  let cleaned = String(value || '')
+    .replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/i, '$1')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const decoded = htmlDecode(cleaned)
+    if (decoded === cleaned) break
+    cleaned = decoded
+  }
+
+  return cleaned
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -92,6 +105,11 @@ function getPostPageUrl(source, post) {
   return post.permalink
     ? new URL(post.permalink, source.origin).toString()
     : `${source.origin}/comments/${post.id}`
+}
+
+function getRedditPostTitle(post = {}) {
+  const title = cleanRedditText(post.title)
+  return title || getTitleFromPermalink(post.permalink)
 }
 
 function filenameFromMediaUrl(mediaUrl) {
@@ -298,7 +316,7 @@ function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
     sourceUsername: source.username || source.userId || null,
     sourceSubreddit: getRedditSubreddit(post),
     postId: String(post.id || ''),
-    title: post.title || null,
+    title: getRedditPostTitle(post),
     mediaPageUrl: getPostPageUrl(source, post),
     mediaPageUrls: getRedditMediaPageUrls(source, post),
     mediaUrl,
@@ -409,7 +427,7 @@ async function resolveRedgifsEntry(
     sourceUsername: source.username || source.userId || null,
     sourceSubreddit: getRedditSubreddit(post),
     postId: String(post.id || ''),
-    title: post.title || null,
+    title: getRedditPostTitle(post),
     mediaPageUrl: getPostPageUrl(source, post),
     mediaPageUrls: getRedditMediaPageUrls(source, post),
     mediaUrl,
@@ -639,7 +657,12 @@ function getTitleFromPermalink(permalink) {
     .split('/')
     .filter(Boolean)
   const slug = parts[parts.length - 1] || ''
-  return slug ? slug.replace(/_/g, ' ') : null
+  if (!slug) return null
+  let decodedSlug = slug
+  try {
+    decodedSlug = decodeURIComponent(slug)
+  } catch {}
+  return cleanRedditText(decodedSlug.replace(/_/g, ' ')) || null
 }
 
 function parseOldRedditListingPosts(source, html) {
@@ -670,7 +693,9 @@ function parseOldRedditListingPosts(source, html) {
     posts.push({
       id,
       name: `t3_${id}`,
-      title: getTitleFromPermalink(permalink),
+      title:
+        cleanRedditText(attrs['data-title']) ||
+        getTitleFromPermalink(permalink),
       subreddit: attrs['data-subreddit'] || null,
       subreddit_name_prefixed:
         attrs['data-subreddit-prefixed'] || attrs['data-subreddit'] || null,
@@ -784,6 +809,7 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
         posts.push({
           ...enrichedPost,
           id: String(enrichedPost.id || ''),
+          title: getRedditPostTitle(enrichedPost),
           published: getRedditPostDate(enrichedPost),
           mediaEntries,
         })
@@ -947,7 +973,7 @@ function parseRssEntries(xml, source) {
 
       return {
         id,
-        title: stripTags(extractXmlTag(block, 'title')),
+        title: cleanRedditText(extractXmlTag(block, 'title')),
         permalink,
         subreddit,
         subreddit_name_prefixed: subreddit ? `r/${subreddit}` : null,
@@ -1239,6 +1265,7 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
         return {
           ...post,
           id: String(post.id || ''),
+          title: getRedditPostTitle(post),
           published: getRedditPostDate(post),
           mediaEntries,
         }
@@ -1427,6 +1454,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
         return {
           ...post,
           id: String(post.id || ''),
+          title: getRedditPostTitle(post),
           published: getRedditPostDate(post),
           mediaEntries,
         }
@@ -1437,6 +1465,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
       posts.push({
         ...post,
         id: String(post.id || ''),
+        title: getRedditPostTitle(post),
         published: getRedditPostDate(post),
         mediaEntries: post.mediaEntries || [],
       })
@@ -1479,6 +1508,7 @@ module.exports = {
   getPostPageUrl,
   getRedditMediaEntries,
   getRedditPostDate,
+  getRedditPostTitle,
   getRedditSubreddit,
   preflightRedditSource,
 }

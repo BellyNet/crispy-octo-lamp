@@ -97,6 +97,12 @@ function createMediaSavePipeline(options = {}) {
     )
 
     if (recordSeen && folders?.logDir && duplicatePath) {
+      mediaSaver.recordExistingMetadata?.({
+        modelName,
+        relativePath: duplicatePath,
+        uploadedDate: entry.uploadedDate,
+        entry,
+      })
       recordSuccessfulSeenMedia(
         folders.logDir,
         mediaSaver.buildSeenRecord(entry, {

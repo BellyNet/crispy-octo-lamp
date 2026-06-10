@@ -1182,8 +1182,16 @@ async function getOversizedVideoSkip(entry) {
   }
 }
 
-function recordDuplicate(entry, savedPath, reason, folders, extra = null) {
+function recordDuplicate(
+  modelName,
+  entry,
+  savedPath,
+  reason,
+  folders,
+  extra = null
+) {
   hoghaulSavePipeline.recordDuplicate({
+    modelName,
     folders,
     entry,
     destination: {
@@ -1317,6 +1325,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
   const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
+      modelName,
       entry,
       seenMediaMatch.relativePath,
       'skip_seen_media',
@@ -1392,6 +1401,7 @@ async function saveVideoMedia(modelName, folders, entry) {
   const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
   if (seenMediaMatch) {
     recordDuplicate(
+      modelName,
       entry,
       seenMediaMatch.relativePath,
       'skip_seen_media',
@@ -1405,7 +1415,13 @@ async function saveVideoMedia(modelName, folders, entry) {
   }
 
   if (hoghaulSavePipeline.isKnownOrExisting(destination, entry)) {
-    recordDuplicate(entry, relativePath, 'skip_lazy_existing', folders)
+    recordDuplicate(
+      modelName,
+      entry,
+      relativePath,
+      'skip_lazy_existing',
+      folders
+    )
     return
   }
 
@@ -1440,6 +1456,7 @@ async function saveVideoMedia(modelName, folders, entry) {
     if (bitwiseMatch.isDuplicate) {
       noteDuplicateDownloadBytes(downloadedBytes)
       recordDuplicate(
+        modelName,
         entry,
         bitwiseMatch.activeRefs[0],
         'duplicate_bitwise',

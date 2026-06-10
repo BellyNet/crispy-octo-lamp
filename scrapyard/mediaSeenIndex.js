@@ -20,6 +20,77 @@ function normalizeIsoDate(value) {
   return null
 }
 
+const SEEN_RECORD_FIELDS = [
+  'relativePath',
+  'filename',
+  'mediaUrl',
+  'mediaUrls',
+  'mediaPageUrl',
+  'mediaPageUrls',
+  'sourceSite',
+  'sourceService',
+  'sourceUserId',
+  'sourceUsername',
+  'sourceSubreddit',
+  'postId',
+  'title',
+  'originalName',
+  'uploadedDate',
+  'status',
+  'error',
+  'quarantinePath',
+  'bytesDownloaded',
+  'expectedBytes',
+]
+
+const PRESERVED_SEEN_METADATA_FIELDS = [
+  'sourceSite',
+  'sourceService',
+  'sourceUserId',
+  'sourceUsername',
+  'sourceSubreddit',
+  'postId',
+  'title',
+  'originalName',
+  'uploadedDate',
+]
+
+function mergeSeenRecord(existing, payload) {
+  if (!existing || typeof existing !== 'object') return payload
+
+  const merged = {
+    ...existing,
+    ...payload,
+    recordedAt: existing.recordedAt || payload.recordedAt,
+  }
+  for (const field of PRESERVED_SEEN_METADATA_FIELDS) {
+    if (payload[field] == null && existing[field] != null) {
+      merged[field] = existing[field]
+    }
+  }
+  if (payload.status === 'saved') {
+    merged.savedAt = existing.savedAt || payload.savedAt
+    delete merged.failedAt
+    delete merged.error
+    delete merged.quarantinePath
+    delete merged.bytesDownloaded
+    delete merged.expectedBytes
+  } else if (payload.status === 'quarantined_failed') {
+    merged.failedAt = existing.failedAt || payload.failedAt
+    delete merged.savedAt
+  }
+  return merged
+}
+
+function seenRecordChanged(existing, next) {
+  if (!existing || typeof existing !== 'object') return true
+  return SEEN_RECORD_FIELDS.some(
+    (field) =>
+      JSON.stringify(existing[field] ?? null) !==
+      JSON.stringify(next[field] ?? null)
+  )
+}
+
 function createMediaSeenIndex(options = {}) {
   const datasetDir = options.datasetDir
   const existsLocallyOrOnNas = options.existsLocallyOrOnNas
@@ -276,21 +347,18 @@ function createMediaSeenIndex(options = {}) {
 
     let changed = false
     for (const normalizedMediaPageUrl of mediaPageUrls) {
-      if (
-        index.mediaPageUrls[normalizedMediaPageUrl]?.relativePath !==
-          relativePath ||
-        index.mediaPageUrls[normalizedMediaPageUrl]?.status !== status
-      ) {
-        index.mediaPageUrls[normalizedMediaPageUrl] = payload
+      const existing = index.mediaPageUrls[normalizedMediaPageUrl]
+      const next = mergeSeenRecord(existing, payload)
+      if (seenRecordChanged(existing, next)) {
+        index.mediaPageUrls[normalizedMediaPageUrl] = next
         changed = true
       }
     }
     for (const normalizedMediaUrl of mediaUrls) {
-      if (
-        index.mediaUrls[normalizedMediaUrl]?.relativePath !== relativePath ||
-        index.mediaUrls[normalizedMediaUrl]?.status !== status
-      ) {
-        index.mediaUrls[normalizedMediaUrl] = payload
+      const existing = index.mediaUrls[normalizedMediaUrl]
+      const next = mergeSeenRecord(existing, payload)
+      if (seenRecordChanged(existing, next)) {
+        index.mediaUrls[normalizedMediaUrl] = next
         changed = true
       }
     }

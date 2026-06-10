@@ -32,6 +32,8 @@ const {
   isLikelyMediaUrl,
   normalizeMediaEntry,
 } = require('./mediaEntries')
+const mediaDates = require('./mediaDates')
+const { createMediaSeenIndex } = require('./mediaSeenIndex')
 const { syncModelMetadataToNas } = require('./nasSync')
 const {
   getStufferDbFallbackUrls,
@@ -40,8 +42,14 @@ const {
   withStufferDbNewestFirst,
 } = require('./sourceAdapters/stufferdb')
 const { fetchCoomerFansPosts } = require('./sourceAdapters/coomerFans')
-const { fetchCoomerKemonoPosts } = require('./sourceAdapters/coomerKemono')
-const { fetchRedditPosts } = require('./sourceAdapters/reddit')
+const {
+  fetchCoomerKemonoPosts,
+  getMediaEntriesFromPost,
+} = require('./sourceAdapters/coomerKemono')
+const {
+  fetchRedditPosts,
+  getRedditPostTitle,
+} = require('./sourceAdapters/reddit')
 const { registerParsedSourceForModel } = require('./run-scrape-interactive')
 const { getPermanentLazyVideoFailure } = require('../milkmaid/milkmaid')
 const runLifecycle = require('./runLifecycle')
@@ -86,6 +94,19 @@ async function assertRouted(url, expected) {
 }
 
 async function main() {
+  assert.strictEqual(
+    getRedditPostTitle({
+      title: '<b>Tom &amp;amp; Jerry</b>\u0007',
+    }),
+    'Tom & Jerry'
+  )
+  assert.strictEqual(
+    getRedditPostTitle({
+      permalink: '/r/test/comments/abc123/a%20title_%26_more/',
+    }),
+    'a title & more'
+  )
+
   assert.deepStrictEqual(
     getMediaEntrySourceDetails({
       sourceSite: 'reddit',
@@ -114,8 +135,25 @@ async function main() {
   fs.mkdirSync(metadataModelDir, { recursive: true })
   fs.writeFileSync(
     path.join(metadataModelDir, '.media-dates.json'),
-    JSON.stringify({ __version: 4, 'images/a.jpg': { source: { title: 'A' } } })
+    JSON.stringify({
+      __version: 4,
+      'images/a.jpg': { source: { title: 'Shortened caption...' } },
+    })
   )
+  assert.strictEqual(
+    mediaDates.recordExistingMetadata(
+      metadataModelDir,
+      'images/a.jpg',
+      '2026-05-01T00:00:00.000Z',
+      {
+        sourceSite: 'coomerfans',
+        title: 'Full caption and details',
+        mediaUrl: 'https://img1.coomerfans.com/storage/a/b/one.jpg',
+      }
+    ),
+    true
+  )
+  mediaDates.flushAllSidecars()
   assert.deepStrictEqual(
     syncModelMetadataToNas({
       modelName: 'sample_model',
@@ -131,7 +169,30 @@ async function main() {
         'utf8'
       )
     )['images/a.jpg'].source.title,
-    'A'
+    'Full caption and details'
+  )
+
+  const metadataLogDir = path.join(metadataModelDir, 'log')
+  fs.mkdirSync(metadataLogDir, { recursive: true })
+  const seenIndex = createMediaSeenIndex({
+    datasetDir: metadataLocalRoot,
+    existsLocallyOrOnNas: () => true,
+  })
+  const seenDetails = {
+    relativePath: 'sample_model/images/a.jpg',
+    mediaUrl: 'https://img1.coomerfans.com/storage/a/b/one.jpg',
+    sourceSite: 'coomerfans',
+    title: 'Shortened caption...',
+  }
+  seenIndex.recordSuccessfulSeenMedia(metadataLogDir, seenDetails)
+  seenIndex.recordSuccessfulSeenMedia(metadataLogDir, {
+    ...seenDetails,
+    title: 'Full caption and details',
+  })
+  assert.strictEqual(
+    seenIndex.loadMediaSeenIndex(metadataLogDir).mediaUrls[seenDetails.mediaUrl]
+      .title,
+    'Full caption and details'
   )
   fs.rmSync(metadataSyncRoot, { recursive: true, force: true })
 
@@ -314,7 +375,7 @@ async function main() {
   )
 
   const coomerFansStatuses = []
-  await fetchCoomerFansPosts(
+  const coomerFansPosts = await fetchCoomerFansPosts(
     {
       origin: 'https://coomerfans.com',
       site: 'coomerfans',
@@ -327,7 +388,16 @@ async function main() {
       fetchHtml: async (url) => {
         if (url.includes('/p/1/123/onlyfans')) {
           return {
-            html: 'Added 2026-05-01 00:00:00 +0000 UTC https://img1.coomerfans.com/storage/a/b/one.mp4',
+            html: [
+              '<meta property="og:title" content="name_here / Shortened caption..." />',
+              '<meta property="og:description" content="name_here - Full fallback caption" />',
+              '<div class="post-wrap">',
+              '<h1>Shortened caption...</h1>',
+              '<span class="post-date">Added 2026-05-01 00:00:00 +0000 UTC</span>',
+              '<p>Full caption &amp; details</p>',
+              '<div class="post-body">https://img1.coomerfans.com/storage/a/b/one.mp4</div>',
+              '</div>',
+            ].join(''),
           }
         }
         if (url.includes('/p/2/123/onlyfans')) {
@@ -352,6 +422,29 @@ async function main() {
         'Fetching coomerfans pages: 1 page(s), 2 post(s), 2 media'
       )
     )
+  )
+  assert.strictEqual(
+    coomerFansPosts[0].mediaEntries[0].title,
+    'Full caption & details'
+  )
+
+  const coomerMediaEntries = getMediaEntriesFromPost(
+    {
+      origin: 'https://coomer.su',
+      site: 'coomer',
+      service: 'onlyfans',
+      userId: '123',
+    },
+    {
+      id: 'caption-test',
+      title: 'Short title',
+      content: '<p>Full caption &amp; details</p>',
+      file: { path: '/a/b/one.jpg' },
+    }
+  )
+  assert.strictEqual(
+    coomerMediaEntries[0].title,
+    'Short title - Full caption & details'
   )
 
   const coomerStatuses = []

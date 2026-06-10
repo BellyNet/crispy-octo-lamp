@@ -18,6 +18,28 @@ function normalizeCreatorName(value) {
     .toLowerCase()
 }
 
+function cleanPostText(value) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getPostTitleOrCaption(post = {}) {
+  const title = cleanPostText(post.title)
+  const caption = cleanPostText(post.content)
+  if (!title) return caption || null
+  if (!caption || caption === title) return title
+  return `${title} - ${caption}`
+}
+
 function getPostsApiUrl(source, offset = 0, pageSize = DEFAULT_PAGE_SIZE) {
   return `${source.origin}/api/v1/${source.service}/user/${encodeURIComponent(
     source.userId
@@ -47,6 +69,7 @@ function filenameFromMediaUrl(mediaUrl) {
 function getMediaEntriesFromPost(source, post, options = {}) {
   const postPublishedAt = parseResolvedDate(post.published)
   const mediaPageUrl = getPostPageUrl(source, post)
+  const title = getPostTitleOrCaption(post)
   const rawEntries = []
   if (post.file?.path) rawEntries.push(post.file)
   if (Array.isArray(post.attachments)) rawEntries.push(...post.attachments)
@@ -66,7 +89,7 @@ function getMediaEntriesFromPost(source, post, options = {}) {
       seen.add(key)
       return {
         postId: String(post.id || ''),
-        title: post.title || null,
+        title,
         mediaPageUrl,
         mediaPageUrls: [mediaPageUrl],
         mediaUrl,
@@ -235,6 +258,7 @@ module.exports = {
   findCreatorIdByName,
   getMediaEntriesFromPost,
   getMediaUrl,
+  getPostTitleOrCaption,
   getPostPageUrl,
   getPostsApiUrl,
   normalizeCreatorName,

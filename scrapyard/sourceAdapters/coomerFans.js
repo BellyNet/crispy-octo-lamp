@@ -13,11 +13,32 @@ function parseResolvedDate(date) {
 function htmlDecode(value) {
   return String(value || '')
     .replace(/&amp;/g, '&')
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+      String.fromCodePoint(Number.parseInt(code, 16))
+    )
+    .replace(/&#(\d+);/g, (_, code) =>
+      String.fromCodePoint(Number.parseInt(code, 10))
+    )
     .replace(/&#43;/g, '+')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+}
+
+function cleanPostText(value) {
+  return htmlDecode(
+    String(value || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(?:div|p|li)>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+  )
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function uniqueValues(values) {
@@ -119,19 +140,56 @@ function parseCoomerFansDate(html) {
   return match ? parseResolvedDate(match[1].replace(' UTC', '')) : null
 }
 
-function parseCoomerFansTitle(html) {
+function parseCoomerFansCaption(html, creatorName = '') {
+  const postWrap =
+    String(html || '').match(
+      /<div[^>]*class=["'][^"']*\bpost-wrap\b[^"']*["'][^>]*>([\s\S]*?)(?=<div[^>]*class=["'][^"']*\bpagination\b|$)/i
+    )?.[1] || ''
+  const postHeader = postWrap.split(
+    /<div[^>]*class=["'][^"']*\bpost-body\b[^"']*["'][^>]*>/i
+  )[0]
+  const bodyCaption = cleanPostText(
+    postHeader.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1]
+  )
+  if (bodyCaption) return bodyCaption
+
+  const description = cleanPostText(
+    String(html || '').match(
+      /<meta\s+property=["']og:description["']\s+content=["']([^"']*)["']/i
+    )?.[1]
+  )
+  if (!description) return null
+  const prefix = String(creatorName || '').trim()
+  return prefix
+    ? description.replace(
+        new RegExp(`^${escapeRegExp(prefix)}\\s*-\\s*`, 'i'),
+        ''
+      )
+    : description
+}
+
+function parseCoomerFansTitle(html, creatorName = '') {
+  const caption = parseCoomerFansCaption(html, creatorName)
+  if (caption) return caption
+
+  const heading = cleanPostText(
+    String(html || '').match(/<h1[^>]*>(.*?)<\/h1>/is)?.[1]
+  )
+  if (heading) return heading
+
   const ogTitle = String(html || '').match(
     /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i
   )?.[1]
-  if (ogTitle) return htmlDecode(ogTitle)
-  return htmlDecode(String(html || '').match(/<h1[^>]*>(.*?)<\/h1>/is)?.[1])
-    .replace(/<[^>]+>/g, ' ')
-    .trim()
+  const title = cleanPostText(ogTitle)
+  const prefix = String(creatorName || '').trim()
+  return prefix
+    ? title.replace(new RegExp(`^${escapeRegExp(prefix)}\\s*\\/\\s*`, 'i'), '')
+    : title
 }
 
 function parseCoomerFansMediaEntries(source, post, html) {
   const uploadedDate = parseCoomerFansDate(html)
-  const title = parseCoomerFansTitle(html) || null
+  const title = parseCoomerFansTitle(html, source.rawName) || null
   const mediaUrls = uniqueValues(
     extractRegexValues(
       html,
@@ -280,6 +338,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
 module.exports = {
   fetchCoomerFansPosts,
   getCoomerFansPageUrl,
+  parseCoomerFansCaption,
   parseCoomerFansMediaEntries,
   parseCoomerFansPostLinks,
   preflightCoomerFansSource,

@@ -137,6 +137,36 @@ function createMediaSaver({
     )
   }
 
+  function recordExistingMetadata({
+    modelName,
+    relativePath,
+    uploadedDate,
+    entry,
+  }) {
+    if (typeof mediaDates.recordExistingMetadata !== 'function') return false
+
+    const modelDir = getModelDir(modelName)
+    const absolutePath = path.resolve(
+      datasetDir,
+      String(relativePath || '').replace(/\//g, path.sep)
+    )
+    const modelRelativePath = path.relative(modelDir, absolutePath)
+    if (
+      !modelRelativePath ||
+      modelRelativePath.startsWith('..') ||
+      path.isAbsolute(modelRelativePath)
+    ) {
+      return false
+    }
+
+    return mediaDates.recordExistingMetadata(
+      modelDir,
+      modelRelativePath,
+      uploadedDate,
+      getMediaDateSourceMeta(entry)
+    )
+  }
+
   function applyRecordedTimestamp(filePath, recordedDate, fallbackDate) {
     return fileRecords.applyFileTimestamp(
       filePath,
@@ -343,6 +373,7 @@ function createMediaSaver({
   return {
     recordImageDates,
     recordVideoDates,
+    recordExistingMetadata,
     applyRecordedTimestamp,
     buildHashMetadata,
     getDatasetRelativePath,
