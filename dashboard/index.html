@@ -3509,9 +3509,7 @@
               thumb.style.left = `${pct}%`
             })
 
-            // First-mount: surface the chrome briefly so the user sees
-            // it exists, then fade.
-            show()
+            // Stay hidden until the user explicitly taps the video.
           }
 
           // Drive video state per-slide. Current slide → muted + play().
@@ -3553,11 +3551,6 @@
                 if (v.preload !== 'none') v.preload = 'none'
               }
             })
-            // Reveal the scrubber on the now-current slide so the user
-            // sees there's a scrubber to interact with; it auto-hides.
-            const currentWrap =
-              pswp.currSlide?.holderElement?.querySelector('.pswp-video-wrap')
-            if (currentWrap?._showVideoChrome) currentWrap._showVideoChrome()
           }
           const scheduleSync = () => requestAnimationFrame(syncVideos)
           pswp.on('change', scheduleSync)
