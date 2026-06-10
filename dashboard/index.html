@@ -3318,33 +3318,40 @@
             if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
-          // Per-slide video state. The HTML `autoplay muted playsinline`
-          // attributes do the heavy lifting on first mount; this catches
-          // the cases where it doesn't — chiefly first-click on Chrome
-          // desktop, where play() can reject if the video hasn't loaded
-          // a frame yet. The canplay listener retries once data lands.
+          // Per-slide video state. Chrome desktop has been refusing the
+          // initial autoplay even with `<video autoplay muted>`, likely
+          // because PhotoSwipe's opening animation has the slide hidden
+          // (display:none / visibility:hidden / off-screen transform)
+          // at the moment Chrome's autoplay policy checks visibility.
+          // The MutationObserver below catches every <video> the second
+          // it lands in the lightbox DOM and primes it; once the slide
+          // becomes visible we then call play() across multiple
+          // PhotoSwipe lifecycle events so something always wins.
           //
-          // Crucially we DO NOT call v.load() — that aborts whatever
-          // autoplay was doing and leaves the video stuck on its first
-          // frame. We also bail when currentVideo is null (content
-          // hasn't been appended yet) so we don't pause the very video
-          // we're about to want to play.
-          const tryPlay = (v) => {
+          // We never call v.load() — that aborts in-flight autoplay and
+          // leaves the video frozen on its first frame.
+          const primeVideo = (v) => {
             v.muted = true
+            v.autoplay = true
+            v.playsInline = true
+          }
+          const tryPlay = (v) => {
+            if (!v) return
+            primeVideo(v)
             const p = v.play()
             if (p && typeof p.catch === 'function') {
               p.catch(() => {
-                const onReady = () => {
-                  v.removeEventListener('canplay', onReady)
-                  v.removeEventListener('loadedmetadata', onReady)
-                  // Only retry if this is still the current slide's
-                  // video — otherwise we'd resurrect a paused thumb.
+                const retry = () => {
+                  v.removeEventListener('canplay', retry)
+                  v.removeEventListener('loadedmetadata', retry)
+                  v.removeEventListener('loadeddata', retry)
                   if (pswp.currSlide?.holderElement?.contains(v)) {
                     v.play().catch(() => {})
                   }
                 }
-                v.addEventListener('canplay', onReady, { once: true })
-                v.addEventListener('loadedmetadata', onReady, { once: true })
+                v.addEventListener('canplay', retry, { once: true })
+                v.addEventListener('loadedmetadata', retry, { once: true })
+                v.addEventListener('loadeddata', retry, { once: true })
               })
             }
           }
@@ -3364,6 +3371,25 @@
           pswp.on('change', syncVideos)
           pswp.on('afterInit', syncVideos)
           pswp.on('contentActivate', syncVideos)
+          // openingAnimationEnd fires once the lightbox is fully painted
+          // and the active slide is visible — by that point Chrome's
+          // autoplay visibility check will pass.
+          pswp.on('openingAnimationEnd', syncVideos)
+
+          // MutationObserver catches every <video> the moment it's
+          // appended to the lightbox DOM — earlier than any PhotoSwipe
+          // event — so we can prime it (set the JS-side properties
+          // alongside the HTML attributes) before Chrome decides
+          // whether to honor autoplay.
+          const mountObserver = new MutationObserver((records) => {
+            for (const r of records) {
+              for (const node of r.addedNodes) {
+                if (node.nodeType !== 1) continue
+                if (node.tagName === 'VIDEO') primeVideo(node)
+                node.querySelectorAll?.('video').forEach(primeVideo)
+              }
+            }
+          })
 
           // Tap-to-toggle native controls. Video starts with no controls
           // attribute; first tap adds it (native player with mute, play,
@@ -3377,6 +3403,7 @@
             wrap.dataset.tapBound = '1'
             const video = wrap.querySelector('video')
             if (!video) return
+            primeVideo(video)
             wrap.addEventListener('click', (ev) => {
               // The click came from the native controls themselves —
               // let the browser handle it; don't toggle off mid-scrub.
@@ -3388,7 +3415,17 @@
               }
             })
           })
+          // Kick off the MutationObserver once pswp.element exists.
+          pswp.on('afterInit', () => {
+            if (pswp.element) {
+              mountObserver.observe(pswp.element, {
+                childList: true,
+                subtree: true,
+              })
+            }
+          })
           pswp.on('close', () => {
+            try { mountObserver.disconnect() } catch {}
             const root = pswp.element
             if (!root) return
             root.querySelectorAll('video').forEach((v) => v.pause())
