@@ -1014,8 +1014,9 @@
         position: relative;
       }
       .pswp-video-wrap video {
-        max-width: 100%;
-        max-height: 100%;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
         outline: none;
         border-radius: 4px;
       }
@@ -2967,6 +2968,27 @@
             padding: { top: 0, bottom: 0, left: 0, right: 0 },
             loop: true,
             wheelToZoom: true,
+            // PhotoSwipe caps its built-in `fit` zoom at 1.0, so small
+            // images sat at their actual pixel size in the middle of a
+            // huge viewport. Drop the cap: scale so that the smaller
+            // axis fills the viewport, matching the video's
+            // `object-fit: contain` behavior. The max-zoom raises
+            // proportionally so pinch-zoom still has room.
+            initialZoomLevel: (z) => {
+              const pa = z.panAreaSize, es = z.elementSize
+              if (!pa || !es || !es.x || !es.y) return 1
+              return Math.min(pa.x / es.x, pa.y / es.y)
+            },
+            secondaryZoomLevel: (z) => {
+              const pa = z.panAreaSize, es = z.elementSize
+              if (!pa || !es || !es.x || !es.y) return 2
+              return Math.min(pa.x / es.x, pa.y / es.y) * 2
+            },
+            maxZoomLevel: (z) => {
+              const pa = z.panAreaSize, es = z.elementSize
+              if (!pa || !es || !es.x || !es.y) return 4
+              return Math.min(pa.x / es.x, pa.y / es.y) * 4
+            },
           })
 
           let infoPanelEl = null
