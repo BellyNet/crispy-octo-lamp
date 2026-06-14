@@ -732,7 +732,9 @@ async function main() {
           url,
         }
       },
-      redgifsClient: {},
+      redgifsClient: {
+        parseRedgifsId: () => null,
+      },
       redditHtmlDelayMs: 0,
       redditHtmlMaxRetries: 0,
       appendRunEvent: (type, payload) =>
@@ -760,6 +762,86 @@ async function main() {
         event.type === 'reddit_html_throttle_configured' &&
         event.delayMs === 0 &&
         event.scope === 'listing_and_gallery'
+    )
+  )
+
+  const redditGalleryEvents = []
+  const redditGalleryProgress = []
+  const redditGalleryStatuses = []
+  const redditGalleryPosts = await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'gallery_user',
+      username: 'gallery_user',
+    },
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (/\/comments\/gallery1/i.test(url)) {
+          return {
+            html: '<img src="https://i.redd.it/gallery-image.jpg">',
+            byteLength: 50,
+            statusCode: 200,
+            url,
+          }
+        }
+        return {
+          html: [
+            '<div class="thing" data-fullname="t3_gallery1"',
+            ' data-permalink="/r/test/comments/gallery1/title/"',
+            ' data-url="https://www.reddit.com/gallery/gallery1"',
+            ' data-is-gallery="true" data-timestamp="1710000000000"',
+            ' data-subreddit="test"></div>',
+          ].join(''),
+          byteLength: 250,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: {
+        parseRedgifsId: () => null,
+      },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        redditGalleryEvents.push({ type, ...payload }),
+      onDiscoveryProgress: (details) => redditGalleryProgress.push(details),
+      logger: {
+        log: () => {},
+        warn: () => {},
+        status: (line) => redditGalleryStatuses.push(line),
+      },
+    }
+  )
+  assert.strictEqual(redditGalleryPosts.length, 1)
+  assert.strictEqual(redditGalleryPosts[0].mediaEntries.length, 1)
+  assert(
+    redditGalleryEvents.some(
+      (event) =>
+        event.type === 'reddit_gallery_hydration_started' &&
+        event.galleryCount === 1
+    )
+  )
+  assert(
+    redditGalleryEvents.some(
+      (event) =>
+        event.type === 'reddit_html_request_started' &&
+        event.requestKind === 'gallery/post'
+    )
+  )
+  assert(
+    redditGalleryEvents.some(
+      (event) =>
+        event.type === 'reddit_gallery_hydration_post_finished' &&
+        event.mediaUrlCount === 1
+    )
+  )
+  assert.strictEqual(redditGalleryProgress.at(-1).current, 1)
+  assert(
+    redditGalleryStatuses.some((line) =>
+      String(line).includes('Resolving Reddit gallery 1/1')
     )
   )
 

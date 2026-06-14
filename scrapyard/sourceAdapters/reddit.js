@@ -568,13 +568,25 @@ function getRedditHtmlMaxRetries(deps = {}) {
   )
 }
 
-async function waitForOldRedditHtmlSlot(deps = {}) {
+async function waitForOldRedditHtmlSlot(deps = {}, details = {}) {
   const delayMs = getRedditHtmlDelayMs(deps)
-  if (delayMs <= 0) return
+  if (delayMs <= 0) return 0
   const now = Date.now()
   const waitMs = Math.max(lastOldRedditHtmlFetchAt + delayMs - now, 0)
-  if (waitMs > 0) await sleep(waitMs)
+  if (waitMs > 0) {
+    const requestKind = details.requestKind || 'HTML'
+    deps.logger?.status?.(
+      `Reddit ${requestKind}: waiting ${(waitMs / 1000).toFixed(1)}s for the paced request slot`
+    )
+    deps.appendRunEvent?.('reddit_html_throttle_wait', {
+      requestKind,
+      waitMs,
+      url: details.url || null,
+    })
+    await sleep(waitMs)
+  }
   lastOldRedditHtmlFetchAt = Date.now()
+  return waitMs
 }
 
 function isRedditRateLimitError(err) {
@@ -610,14 +622,44 @@ async function fetchRedditHtmlWithRetry(url, requestOptions, deps = {}) {
     throw new Error('fetchRedditHtmlWithRetry requires fetchHtml')
   }
   const maxRetries = getRedditHtmlMaxRetries(deps)
+  const requestKind =
+    deps.redditHtmlRequestKind ||
+    (/\.rss(?:[?#]|$)/i.test(url)
+      ? 'RSS listing'
+      : /\/user\/[^/]+\/submitted/i.test(url)
+        ? 'HTML listing'
+        : 'gallery/post')
   let lastError = null
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    await waitForOldRedditHtmlSlot(deps)
+    await waitForOldRedditHtmlSlot(deps, { requestKind, url })
+    const startedAt = Date.now()
+    deps.logger?.status?.(`Fetching Reddit ${requestKind}...`)
+    deps.appendRunEvent?.('reddit_html_request_started', {
+      requestKind,
+      attempt: attempt + 1,
+      url,
+    })
     try {
-      return await deps.fetchHtml(url, requestOptions)
+      const response = await deps.fetchHtml(url, requestOptions)
+      deps.appendRunEvent?.('reddit_html_request_finished', {
+        requestKind,
+        attempt: attempt + 1,
+        url: response.url || url,
+        statusCode: response.statusCode || null,
+        byteLength: response.byteLength || 0,
+        durationMs: Date.now() - startedAt,
+      })
+      return response
     } catch (err) {
       lastError = err
+      deps.appendRunEvent?.('reddit_html_request_failed', {
+        requestKind,
+        attempt: attempt + 1,
+        url,
+        durationMs: Date.now() - startedAt,
+        error: err.message,
+      })
       if (!isRedditRateLimitError(err) || attempt >= maxRetries) throw err
       await waitForRedditRateLimitRetry(err, attempt + 1, deps)
     }
@@ -737,7 +779,10 @@ async function enrichOldRedditHtmlPostMedia(source, post, deps = {}) {
   if (!post.is_gallery) return post
   const postUrl = new URL(post.permalink, getOldRedditOrigin(source))
   postUrl.searchParams.set('over18', '1')
-  const { html } = await fetchOldRedditHtml(postUrl.toString(), deps)
+  const { html } = await fetchOldRedditHtml(postUrl.toString(), {
+    ...deps,
+    redditHtmlRequestKind: 'gallery/post',
+  })
   return {
     ...post,
     htmlMediaUrls: extractOldRedditImageUrls(html),
@@ -790,7 +835,46 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
 
     const shouldCollect = page >= (Number(options.startPage) || 0)
     if (shouldCollect) {
-      for (const post of filteredPage.posts) {
+      const remainingPosts =
+        Number.isFinite(options.maxPosts) && options.maxPosts > 0
+          ? Math.max(options.maxPosts - posts.length, 0)
+          : filteredPage.posts.length
+      const postsToProcess = filteredPage.posts.slice(0, remainingPosts)
+      const galleryCount = postsToProcess.filter(
+        (post) => post.is_gallery
+      ).length
+      const estimatedGalleryWaitMs = galleryCount * getRedditHtmlDelayMs(deps)
+      if (galleryCount > 0) {
+        deps.logger?.log?.(
+          `Resolving ${galleryCount} Reddit gallery post(s) with paced requests; estimated throttle time ${Math.ceil(estimatedGalleryWaitMs / 1000)}s`
+        )
+        deps.appendRunEvent?.('reddit_gallery_hydration_started', {
+          page: page + 1,
+          galleryCount,
+          delayMs: getRedditHtmlDelayMs(deps),
+          estimatedWaitMs: estimatedGalleryWaitMs,
+        })
+      }
+      const pageStartPostCount = posts.length
+      const pageTargetPostCount = Math.max(
+        pageStartPostCount + postsToProcess.length,
+        1
+      )
+      let hydratedGalleryCount = 0
+      for (const post of postsToProcess) {
+        const galleryIndex = post.is_gallery ? hydratedGalleryCount + 1 : null
+        const galleryStartedAt = post.is_gallery ? Date.now() : null
+        if (post.is_gallery) {
+          deps.logger?.status?.(
+            `Resolving Reddit gallery ${galleryIndex}/${galleryCount}: ${post.id}`
+          )
+          deps.appendRunEvent?.('reddit_gallery_hydration_post_started', {
+            page: page + 1,
+            postId: String(post.id || ''),
+            current: galleryIndex,
+            total: galleryCount,
+          })
+        }
         const enrichedPost = await enrichOldRedditHtmlPostMedia(
           source,
           post,
@@ -801,6 +885,19 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
           )
           return post
         })
+        if (post.is_gallery) {
+          hydratedGalleryCount += 1
+          deps.appendRunEvent?.('reddit_gallery_hydration_post_finished', {
+            page: page + 1,
+            postId: String(post.id || ''),
+            current: hydratedGalleryCount,
+            total: galleryCount,
+            mediaUrlCount: Array.isArray(enrichedPost.htmlMediaUrls)
+              ? enrichedPost.htmlMediaUrls.length
+              : 0,
+            durationMs: Date.now() - galleryStartedAt,
+          })
+        }
         const mediaEntries = await getRedditMediaEntries(
           source,
           enrichedPost,
@@ -813,6 +910,14 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
           published: getRedditPostDate(enrichedPost),
           mediaEntries,
         })
+        emitDiscoveryProgress(deps, {
+          mode: 'reddit html',
+          pages: page + 1,
+          posts: posts.length,
+          media: countPostMedia(posts),
+          current: posts.length,
+          total: pageTargetPostCount,
+        })
         if (
           Number.isFinite(options.maxPosts) &&
           options.maxPosts > 0 &&
@@ -820,6 +925,13 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
         ) {
           return posts
         }
+      }
+      if (galleryCount > 0) {
+        deps.appendRunEvent?.('reddit_gallery_hydration_finished', {
+          page: page + 1,
+          galleryCount,
+          durationEstimateMs: estimatedGalleryWaitMs,
+        })
       }
     }
 
