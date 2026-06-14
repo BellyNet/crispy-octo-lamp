@@ -32,7 +32,10 @@ const mirrorRoot = argv['mirror-root']
   ? path.resolve(String(argv['mirror-root']))
   : null
 const reportDir = path.resolve(
-  String(argv['report-dir'] || path.join(process.cwd(), 'tmp', 'cleanup-mirrored-mp4'))
+  String(
+    argv['report-dir'] ||
+      path.join(process.cwd(), 'tmp', 'cleanup-mirrored-mp4')
+  )
 )
 const reportPath = path.join(reportDir, 'remove-mirrored-mp4s-latest.json')
 
@@ -50,12 +53,16 @@ function main() {
     fs.existsSync(path.join(mirrorRoot, match.relativePath))
   )
   const skippedMissingMirrorPaths = matches
-    .filter((match) => !fs.existsSync(path.join(mirrorRoot, match.relativePath)))
+    .filter(
+      (match) => !fs.existsSync(path.join(mirrorRoot, match.relativePath))
+    )
     .map((match) => match.relativePath)
-  const deletedRelativePaths = verifiedMatches.map((match) => match.relativePath)
-  const affectedModels = Array.from(new Set(matches.map((match) => match.model))).sort((a, b) =>
-    a.localeCompare(b)
+  const deletedRelativePaths = verifiedMatches.map(
+    (match) => match.relativePath
   )
+  const affectedModels = Array.from(
+    new Set(matches.map((match) => match.model))
+  ).sort((a, b) => a.localeCompare(b))
 
   const report = {
     generatedAt: new Date().toISOString(),

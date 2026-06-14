@@ -20,6 +20,8 @@ const {
   normalizeMilkmaidRunOptions,
   parseRunnerArgs,
 } = require('./scraperOptions')
+const { createDatasetPaths } = require('./datasetPaths')
+const { syncModelToNas } = require('./nasSync')
 const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
@@ -1528,6 +1530,7 @@ Options:
 function buildAllSourceRunOptions(argv, modelName, parsedSource) {
   const options = {
     model: modelName,
+    'skip-nas-sync': true,
     'source-incremental-overlap-pages': getOption(
       argv,
       'source-incremental-overlap-pages'
@@ -1540,10 +1543,6 @@ function buildAllSourceRunOptions(argv, modelName, parsedSource) {
     getOption(argv, 'keep-history') === 'false'
   )
   if (keepHistory) options['keep-history'] = true
-  if (isTruthy(getOption(argv, 'skip-nas-sync'))) {
-    options['skip-nas-sync'] = true
-  }
-
   if (parsedSource?.scraper !== 'hoghaul') return options
 
   return {
@@ -1573,12 +1572,20 @@ function summarizeSourceRunSummary(summary) {
 }
 
 async function runAllSourceModelUpdate(item, context = {}) {
-  const { argv, stopOnError } = context
+  const {
+    argv,
+    stopOnError,
+    runSource = runScrape,
+    syncModel = syncModelToNas,
+    datasetPaths = createDatasetPaths(),
+    error = console.error,
+  } = context
   const result = {
     model: item.model,
     startedAt: new Date().toISOString(),
     sources: item.sources,
     runs: [],
+    nasSync: null,
     finishedAt: null,
   }
 
@@ -1612,7 +1619,7 @@ async function runAllSourceModelUpdate(item, context = {}) {
     }
 
     const sourceStartedAtMs = Date.now()
-    const code = await runScrape(
+    const code = await runSource(
       source.url,
       buildAllSourceRunOptions(argv, item.model, parsedSource)
     )
@@ -1633,6 +1640,47 @@ async function runAllSourceModelUpdate(item, context = {}) {
     result.runs.push(run)
 
     if (code !== 0 && stopOnError) break
+  }
+
+  const skipNasSync =
+    isTruthy(getOption(argv, 'skip-nas-sync')) ||
+    isTruthy(getOption(argv, 'dry-run'))
+  if (skipNasSync) {
+    result.nasSync = {
+      ok: true,
+      skipped: true,
+      reason: isTruthy(getOption(argv, 'dry-run'))
+        ? 'dry-run'
+        : 'skip-nas-sync',
+    }
+  } else if (result.runs.length === 0) {
+    result.nasSync = {
+      ok: true,
+      skipped: true,
+      reason: 'no-source-runs',
+    }
+  } else {
+    try {
+      const syncResult = await syncModel({
+        modelName: item.model,
+        datasetDir: datasetPaths.datasetDir,
+        nasDatasetDir: datasetPaths.nasDatasetDir,
+      })
+      result.nasSync = {
+        ok: syncResult?.ok !== false,
+        skipped: false,
+        code: syncResult?.code ?? 0,
+        cleanup: syncResult?.cleanup || null,
+      }
+    } catch (err) {
+      result.nasSync = {
+        ok: false,
+        skipped: false,
+        code: null,
+        error: err.message,
+      }
+      error(`NAS sync failed for ${item.model}: ${err.message}`)
+    }
   }
 
   result.finishedAt = new Date().toISOString()
@@ -1659,6 +1707,13 @@ function calculateAllSourceTotals(results) {
         )
         totals.durationMs += Number(run.summary?.durationMs || 0)
       }
+      if (result.nasSync?.ok === false) totals.nasSyncFailures += 1
+      totals.localMp4sDeleted += Number(
+        result.nasSync?.cleanup?.deletedFiles || 0
+      )
+      totals.localBytesReclaimed += Number(
+        result.nasSync?.cleanup?.deletedBytes || 0
+      )
       return totals
     },
     {
@@ -1674,6 +1729,9 @@ function calculateAllSourceTotals(results) {
       downloadBytes: 0,
       duplicateDownloadBytes: 0,
       durationMs: 0,
+      nasSyncFailures: 0,
+      localMp4sDeleted: 0,
+      localBytesReclaimed: 0,
     }
   )
 }
@@ -1683,7 +1741,8 @@ function formatAllSourceSummary(report) {
   const completedModels = (report.results || []).filter(
     (result) =>
       result.runs?.length === result.sources?.length &&
-      result.runs.every((run) => run.ok)
+      result.runs.every((run) => run.ok) &&
+      result.nasSync?.ok !== false
   ).length
   const successfulRuns = Math.max(totals.runs - totals.failures, 0)
   const wallDurationMs = Math.max(
@@ -1709,11 +1768,14 @@ function formatAllSourceSummary(report) {
       `dupes ${totals.duplicates}`,
       `failed ${totals.errors}`,
       `source failures ${totals.failures}`,
+      `NAS sync failures ${totals.nasSyncFailures}`,
+      `local MP4s removed ${totals.localMp4sDeleted}`,
     ].join(' | '),
     [
       `saved payload ${formatBytes(totals.savedBytes)}`,
       `network ${formatBytes(totals.downloadBytes)}`,
       `duplicate traffic ${formatBytes(totals.duplicateDownloadBytes)}`,
+      `local reclaimed ${formatBytes(totals.localBytesReclaimed)}`,
     ].join(' | '),
     '==================================================================',
   ].join('\n')
@@ -1733,8 +1795,13 @@ function writeAllSourceReport(report, latestReportPath, latestTextPath) {
 
   for (const item of report.results) {
     const failedRuns = item.runs.filter((run) => !run.ok).length
+    const syncStatus = item.nasSync?.skipped
+      ? `skipped (${item.nasSync.reason})`
+      : item.nasSync?.ok
+        ? 'ok'
+        : `failed (${item.nasSync?.code ?? 'unknown'})`
     lines.push(
-      `${item.model} :: sources=${item.runs.length}/${item.sources.length} :: ${failedRuns ? 'fail' : 'ok'}`
+      `${item.model} :: sources=${item.runs.length}/${item.sources.length} :: ${failedRuns || item.nasSync?.ok === false ? 'fail' : 'ok'} :: nas-sync=${syncStatus}${item.nasSync?.error ? ` (${item.nasSync.error})` : ''} :: local-mp4s-removed=${item.nasSync?.cleanup?.deletedFiles || 0} :: local-reclaimed=${formatBytes(item.nasSync?.cleanup?.deletedBytes || 0)}`
     )
     for (const run of item.runs) {
       lines.push(
@@ -1804,7 +1871,8 @@ async function runAllSourceUpdates(argvInput = {}) {
     report.results.push(result)
     writeAllSourceReport(report, latestReportPath, latestTextPath)
 
-    const failed = result.runs.some((run) => !run.ok)
+    const failed =
+      result.runs.some((run) => !run.ok) || result.nasSync?.ok === false
     if (stopOnError && failed) {
       console.log('Stopping on first error because --stop-on-error was set.')
       break
@@ -1821,7 +1889,10 @@ async function runAllSourceUpdates(argvInput = {}) {
   console.log('')
   console.log(`Latest report: ${latestReportPath}`)
 
-  return report.results.some((result) => result.runs.some((run) => !run.ok))
+  return report.results.some(
+    (result) =>
+      result.runs.some((run) => !run.ok) || result.nasSync?.ok === false
+  )
     ? 1
     : 0
 }
@@ -1897,6 +1968,7 @@ module.exports = {
   inferCanonicalModel,
   isSuccessfulRunStatus,
   buildAllSourceQueue,
+  buildAllSourceRunOptions,
   buildScraperArgs,
   buildScraperOptions,
   applyScrapePositionalFallback,
@@ -1907,6 +1979,7 @@ module.exports = {
   runSync,
   runSourceBatch,
   runStufferDbBatch,
+  runAllSourceModelUpdate,
   calculateAllSourceTotals,
   formatAllSourceSummary,
   runAllSourceUpdates,

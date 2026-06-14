@@ -9,12 +9,14 @@ const { collectOversizedVideoTargets } = require('./run-scrape-interactive')
 const {
   applyScrapePositionalFallback,
   buildAllSourceQueue,
+  buildAllSourceRunOptions,
   buildRepairArgs,
   buildScraperOptions,
   buildSyncArgs,
   getTemporarilyDisabledSourceReason,
   isSuccessfulRunStatus,
   runScrape,
+  runAllSourceModelUpdate,
   runScraperCli,
 } = require('./scraperRunner')
 const { parseSourceUrl } = require('./sourceRouter')
@@ -34,7 +36,7 @@ const {
 } = require('./mediaEntries')
 const mediaDates = require('./mediaDates')
 const { createMediaSeenIndex } = require('./mediaSeenIndex')
-const { syncModelMetadataToNas } = require('./nasSync')
+const { evictVerifiedLocalMp4s, syncModelMetadataToNas } = require('./nasSync')
 const {
   getStufferDbFallbackUrls,
   normalizeStufferDbCategoryUrl,
@@ -50,6 +52,13 @@ const {
   fetchRedditPosts,
   getRedditPostTitle,
 } = require('./sourceAdapters/reddit')
+const {
+  buildRedditSourceMeta,
+  buildSeenIndexByRelativePath,
+  buildStufferSourceMeta,
+  getModelProfileSource,
+  sourceMetaFromSeenRecord,
+} = require('./legacySourceBackfill')
 const { registerParsedSourceForModel } = require('./run-scrape-interactive')
 const { getPermanentLazyVideoFailure } = require('../milkmaid/milkmaid')
 const runLifecycle = require('./runLifecycle')
@@ -94,6 +103,97 @@ async function assertRouted(url, expected) {
 }
 
 async function main() {
+  assert.deepStrictEqual(
+    buildStufferSourceMeta('20230329200009-5564aa10-la.jpg'),
+    {
+      site: 'stufferdb',
+      originalName: '20230329200009-5564aa10-la.jpg',
+      mediaUrl:
+        'https://cdn.stufferdb.com/_data/i/upload/2023/03/29/20230329200009-5564aa10-la.jpg',
+    }
+  )
+  assert.deepStrictEqual(
+    buildStufferSourceMeta('20211214175048-d185061d.mp4'),
+    {
+      site: 'stufferdb',
+      originalName: '20211214175048-d185061d.mp4',
+      mediaUrl:
+        'https://stufferai.com/upload/2021/12/14/20211214175048-d185061d.mp4',
+    }
+  )
+  assert.deepStrictEqual(
+    buildRedditSourceMeta('StuffersNSFW_abigailgray256_1spqp2x_1-la.png'),
+    {
+      site: 'reddit',
+      postId: '1spqp2x',
+      mediaPageUrl: 'https://www.reddit.com/comments/1spqp2x/',
+    }
+  )
+  assert.deepStrictEqual(buildRedditSourceMeta('bbwgonewild_1tmaqav.mp4'), {
+    site: 'reddit',
+    postId: '1tmaqav',
+    mediaPageUrl: 'https://www.reddit.com/comments/1tmaqav/',
+  })
+  const legacySeenByPath = buildSeenIndexByRelativePath(
+    {
+      mediaPageUrls: {
+        page: {
+          relativePath: 'sample_model/images/a.jpg',
+          mediaPageUrl: 'https://www.reddit.com/comments/abc123/',
+          sourceSite: 'reddit',
+          postId: 'abc123',
+          title: 'Recovered title',
+        },
+      },
+      mediaUrls: {
+        media: {
+          relativePath: 'sample_model/images/a.jpg',
+          mediaUrl: 'https://i.redd.it/a.jpg',
+        },
+      },
+    },
+    'sample_model'
+  )
+  assert.deepStrictEqual(
+    sourceMetaFromSeenRecord(legacySeenByPath.get('images/a.jpg')),
+    {
+      site: 'reddit',
+      service: null,
+      userId: null,
+      username: null,
+      subreddit: null,
+      postId: 'abc123',
+      title: 'Recovered title',
+      originalName: null,
+      mediaPageUrl: 'https://www.reddit.com/comments/abc123/',
+      mediaUrl: 'https://i.redd.it/a.jpg',
+    }
+  )
+  assert.deepStrictEqual(
+    getModelProfileSource(
+      {
+        sources: {
+          coomer: [
+            {
+              url: 'https://coomerfans.com/u/onlyfans/123/sample_model',
+              service: 'onlyfans',
+              userId: '123',
+              discoveredAs: 'sample_model',
+            },
+          ],
+        },
+      },
+      '2892ac-01976408-260d-7799-a25f-f3ad52122664.jpg'
+    ),
+    {
+      site: 'coomerfans',
+      service: 'onlyfans',
+      userId: '123',
+      username: 'sample_model',
+      mediaPageUrl: 'https://coomerfans.com/u/onlyfans/123/sample_model',
+    }
+  )
+
   assert.strictEqual(
     getRedditPostTitle({
       title: '<b>Tom &amp;amp; Jerry</b>\u0007',
@@ -172,6 +272,62 @@ async function main() {
     'Full caption and details'
   )
 
+  const mp4CleanupRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'nas-mp4-cleanup-smoke-')
+  )
+  const mp4LocalRoot = path.join(mp4CleanupRoot, 'local')
+  const mp4NasRoot = path.join(mp4CleanupRoot, 'nas')
+  const mp4ModelName = 'sample_model'
+  const mp4LocalVideoDir = path.join(mp4LocalRoot, mp4ModelName, 'webm')
+  const mp4NasVideoDir = path.join(mp4NasRoot, mp4ModelName, 'webm')
+  fs.mkdirSync(mp4LocalVideoDir, { recursive: true })
+  fs.mkdirSync(mp4NasVideoDir, { recursive: true })
+  fs.writeFileSync(path.join(mp4LocalVideoDir, 'verified.mp4'), 'verified')
+  fs.writeFileSync(path.join(mp4NasVideoDir, 'verified.mp4'), 'verified')
+  fs.writeFileSync(path.join(mp4LocalVideoDir, 'mismatch.mp4'), 'local')
+  fs.writeFileSync(path.join(mp4NasVideoDir, 'mismatch.mp4'), 'different')
+  fs.writeFileSync(path.join(mp4LocalVideoDir, 'missing.mp4'), 'missing')
+  fs.writeFileSync(path.join(mp4LocalVideoDir, 'verified.webm'), 'webm')
+  fs.writeFileSync(path.join(mp4NasVideoDir, 'verified.webm'), 'webm')
+  const mp4Cleanup = evictVerifiedLocalMp4s({
+    modelName: mp4ModelName,
+    datasetDir: mp4LocalRoot,
+    nasDatasetDir: mp4NasRoot,
+  })
+  assert.strictEqual(mp4Cleanup.scannedFiles, 4)
+  assert.strictEqual(mp4Cleanup.verifiedFiles, 2)
+  assert.strictEqual(mp4Cleanup.deletedFiles, 1)
+  assert.strictEqual(mp4Cleanup.missingOnNas, 1)
+  assert.strictEqual(mp4Cleanup.sizeMismatches, 1)
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4LocalVideoDir, 'verified.mp4')),
+    false
+  )
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4LocalVideoDir, 'mismatch.mp4')),
+    true
+  )
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4LocalVideoDir, 'missing.mp4')),
+    true
+  )
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4LocalVideoDir, 'verified.webm')),
+    true
+  )
+  const nasMp4Index = JSON.parse(
+    fs.readFileSync(path.join(mp4LocalRoot, 'nas-mp4-index.v1.json'), 'utf8')
+  )
+  assert.deepStrictEqual(nasMp4Index.entries, [
+    'sample_model/webm/verified.mp4',
+    'sample_model/webm/verified.webm',
+  ])
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4NasRoot, 'nas-mp4-index.v1.json')),
+    true
+  )
+  fs.rmSync(mp4CleanupRoot, { recursive: true, force: true })
+
   const metadataLogDir = path.join(metadataModelDir, 'log')
   fs.mkdirSync(metadataLogDir, { recursive: true })
   const seenIndex = createMediaSeenIndex({
@@ -222,6 +378,87 @@ async function main() {
   )
   assert.strictEqual(isSuccessfulRunStatus('no_new_posts'), true)
   assert.strictEqual(isSuccessfulRunStatus('failed'), false)
+  const redditBatchOptions = buildAllSourceRunOptions({}, 'test_model', reddit)
+  assert.strictEqual(redditBatchOptions['skip-nas-sync'], true)
+  let batchSourceRuns = 0
+  let batchSyncRuns = 0
+  const batchResult = await withConsoleSilenced(() =>
+    runAllSourceModelUpdate(
+      {
+        model: 'test_model',
+        sources: [
+          {
+            sourceKey: 'reddit',
+            label: 'reddit:first',
+            url: 'https://www.reddit.com/user/first/submitted/',
+          },
+          {
+            sourceKey: 'stufferdb',
+            label: 'stufferdb:second',
+            url: 'https://stufferdb.com/category/second',
+          },
+        ],
+      },
+      {
+        argv: {},
+        stopOnError: false,
+        runSource: async (_url, options) => {
+          batchSourceRuns += 1
+          assert.strictEqual(options['skip-nas-sync'], true)
+          return 0
+        },
+        syncModel: async ({ modelName }) => {
+          batchSyncRuns += 1
+          assert.strictEqual(modelName, 'test_model')
+          return {
+            ok: true,
+            code: 1,
+            cleanup: {
+              deletedFiles: 2,
+              deletedBytes: 2048,
+            },
+          }
+        },
+        datasetPaths: {
+          datasetDir: 'local-dataset',
+          nasDatasetDir: 'nas-dataset',
+        },
+      }
+    )
+  )
+  assert.strictEqual(batchSourceRuns, 2)
+  assert.strictEqual(batchSyncRuns, 1)
+  assert.strictEqual(batchResult.nasSync.ok, true)
+  assert.strictEqual(batchResult.nasSync.cleanup.deletedFiles, 2)
+  const failedBatchSyncResult = await withConsoleSilenced(() =>
+    runAllSourceModelUpdate(
+      {
+        model: 'test_model',
+        sources: [
+          {
+            sourceKey: 'reddit',
+            label: 'reddit:first',
+            url: 'https://www.reddit.com/user/first/submitted/',
+          },
+        ],
+      },
+      {
+        argv: {},
+        stopOnError: false,
+        runSource: async () => 0,
+        syncModel: async () => {
+          throw new Error('NAS unavailable')
+        },
+        error: () => {},
+        datasetPaths: {
+          datasetDir: 'local-dataset',
+          nasDatasetDir: 'nas-dataset',
+        },
+      }
+    )
+  )
+  assert.strictEqual(failedBatchSyncResult.nasSync.ok, false)
+  assert.strictEqual(failedBatchSyncResult.nasSync.error, 'NAS unavailable')
   await assertRouted('https://coomerfans.com/u/onlyfans/123/name_here', {
     scraper: 'hoghaul',
     sourceType: 'coomerfans',

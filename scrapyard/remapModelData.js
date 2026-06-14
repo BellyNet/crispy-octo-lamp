@@ -101,7 +101,9 @@ async function main() {
         refMap,
       })
       if (!handled) {
-        throw new Error(`Refusing to overwrite existing file: ${destinationPath}`)
+        throw new Error(
+          `Refusing to overwrite existing file: ${destinationPath}`
+        )
       }
       continue
     }
@@ -166,7 +168,10 @@ function handleExistingDestination({ filePath, destinationPath, refMap }) {
     const target = readJsonFile(destinationPath, null)
     const preferred = preferRunSummary(target, source)
     if (preferred !== null) {
-      fs.writeFileSync(destinationPath, JSON.stringify(preferred, null, 2) + '\n')
+      fs.writeFileSync(
+        destinationPath,
+        JSON.stringify(preferred, null, 2) + '\n'
+      )
     }
     fs.unlinkSync(filePath)
     return true
@@ -269,7 +274,10 @@ function mergeMediaDates(target, source) {
   const merged = { ...(target || {}) }
   for (const [key, value] of Object.entries(source || {})) {
     if (key === '__version') {
-      merged.__version = Math.max(Number(merged.__version) || 0, Number(value) || 0)
+      merged.__version = Math.max(
+        Number(merged.__version) || 0,
+        Number(value) || 0
+      )
       continue
     }
     if (!Object.prototype.hasOwnProperty.call(merged, key)) {
@@ -282,7 +290,8 @@ function mergeMediaDates(target, source) {
 function remapSeenMediaRecord(record, refMap) {
   if (!record || typeof record !== 'object') return record
   const normalizedRelativePath = normalizePath(record.relativePath)
-  const nextRelativePath = refMap.get(normalizedRelativePath) || normalizedRelativePath
+  const nextRelativePath =
+    refMap.get(normalizedRelativePath) || normalizedRelativePath
   return {
     ...record,
     relativePath: nextRelativePath,
@@ -306,7 +315,11 @@ function mergeSeenMediaIndexes(target, source, refMap) {
   )
 
   return {
-    version: Math.max(Number(targetIndex.version) || 0, Number(sourceIndex.version) || 0, 1),
+    version: Math.max(
+      Number(targetIndex.version) || 0,
+      Number(sourceIndex.version) || 0,
+      1
+    ),
     updatedAt: new Date().toISOString(),
     mediaPageUrls: {
       ...sourcePageUrls,
@@ -323,8 +336,10 @@ function preferRunSummary(target, source) {
   if (!target) return source
   if (!source) return target
 
-  const targetFinished = typeof target.finishedAt === 'string' ? Date.parse(target.finishedAt) : NaN
-  const sourceFinished = typeof source.finishedAt === 'string' ? Date.parse(source.finishedAt) : NaN
+  const targetFinished =
+    typeof target.finishedAt === 'string' ? Date.parse(target.finishedAt) : NaN
+  const sourceFinished =
+    typeof source.finishedAt === 'string' ? Date.parse(source.finishedAt) : NaN
 
   if (!Number.isNaN(targetFinished) || !Number.isNaN(sourceFinished)) {
     if (Number.isNaN(sourceFinished)) return target
@@ -332,8 +347,10 @@ function preferRunSummary(target, source) {
     return sourceFinished > targetFinished ? source : target
   }
 
-  const targetStarted = typeof target.startedAt === 'string' ? Date.parse(target.startedAt) : NaN
-  const sourceStarted = typeof source.startedAt === 'string' ? Date.parse(source.startedAt) : NaN
+  const targetStarted =
+    typeof target.startedAt === 'string' ? Date.parse(target.startedAt) : NaN
+  const sourceStarted =
+    typeof source.startedAt === 'string' ? Date.parse(source.startedAt) : NaN
   if (Number.isNaN(targetStarted)) return source
   if (Number.isNaN(sourceStarted)) return target
   return sourceStarted > targetStarted ? source : target

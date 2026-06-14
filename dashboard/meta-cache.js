@@ -21,7 +21,9 @@ class MetaCache {
   _entry(username) {
     if (!this._users.has(username)) {
       let data = {}
-      try { data = JSON.parse(fs.readFileSync(this._file(username), 'utf8')) } catch {}
+      try {
+        data = JSON.parse(fs.readFileSync(this._file(username), 'utf8'))
+      } catch {}
       this._users.set(username, { data, dirty: false })
     }
     return this._users.get(username)

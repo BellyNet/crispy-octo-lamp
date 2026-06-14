@@ -41,7 +41,9 @@ const registryPath = path.resolve(
   String(argv.registry || path.join(rootDir, 'model_aliases.json'))
 )
 const datasetRoot = path.resolve(
-  String(argv['dataset-root'] || path.join(appDataRoot, '.slopvault', 'dataset'))
+  String(
+    argv['dataset-root'] || path.join(appDataRoot, '.slopvault', 'dataset')
+  )
 )
 const logDir = path.resolve(
   String(argv['log-dir'] || path.join(rootDir, 'tmp', 'repair-stufferdb'))
@@ -50,7 +52,9 @@ const latestReportPath = path.join(logDir, 'repair-stufferdb-latest.json')
 const latestTextPath = path.join(logDir, 'repair-stufferdb-latest.txt')
 const statePath = path.join(logDir, 'repair-stufferdb-state.json')
 const nasDatasetRoot = path.resolve(
-  String(argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+  String(
+    argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset'
+  )
 )
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
 const singleModel = argv.model ? String(argv.model).trim() : null
@@ -61,8 +65,7 @@ const explicitModels = String(argv.models || '')
 const startFrom = argv['start-from'] ? String(argv['start-from']).trim() : null
 const rawArgv = process.argv.slice(2)
 const shouldScrape =
-  rawArgv.includes('--scrape') ||
-  parseBooleanEnv(process.env.npm_config_scrape)
+  rawArgv.includes('--scrape') || parseBooleanEnv(process.env.npm_config_scrape)
 const skipNasSync =
   rawArgv.includes('--skip-nas-sync') ||
   parseBooleanEnv(process.env.npm_config_skip_nas_sync)
@@ -110,7 +113,9 @@ async function main() {
   for (let index = 0; index < selectedQueue.length; index += 1) {
     const item = selectedQueue[index]
     console.log('')
-    console.log(`[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`)
+    console.log(
+      `[${index + 1}/${selectedQueue.length}] Repairing ${item.model}`
+    )
 
     const result = await runModelRepair(item)
     report.results.push(result)
@@ -305,7 +310,11 @@ async function runModelRepair(item) {
 
   result.hashPrune = await runCommand(
     process.execPath,
-    [path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'), '--model', item.model],
+    [
+      path.join(rootDir, 'scrapyard', 'pruneModelHashes.js'),
+      '--model',
+      item.model,
+    ],
     { cwd: rootDir, label: `prune:${item.model}` }
   )
 
@@ -428,8 +437,14 @@ function getModelLogDir(modelName) {
 
 function readLocalRunErrors(modelName) {
   const logDirPath = getModelLogDir(modelName)
-  const latestJsonPath = path.join(logDirPath, 'milkmaid-run-errors-latest.json')
-  const latestHtmlPath = path.join(logDirPath, 'milkmaid-run-errors-latest.html')
+  const latestJsonPath = path.join(
+    logDirPath,
+    'milkmaid-run-errors-latest.json'
+  )
+  const latestHtmlPath = path.join(
+    logDirPath,
+    'milkmaid-run-errors-latest.html'
+  )
   const payload = readJsonIfExists(latestJsonPath)
 
   return [
@@ -437,7 +452,9 @@ function readLocalRunErrors(modelName) {
       ? {
           kind: 'latest_json',
           path: latestJsonPath,
-          errorCount: Number(payload?.errorCount || payload?.errors?.length || 0),
+          errorCount: Number(
+            payload?.errorCount || payload?.errors?.length || 0
+          ),
         }
       : null,
     fs.existsSync(latestHtmlPath)
@@ -479,9 +496,15 @@ function modelNeedsAttention(result) {
     ? getRunErrorCount(result.lastRunSummary)
     : 0
   const lingeringLogErrors =
-    !result.validation?.clean && result.localRunErrors.some((item) => item.kind === 'latest_json')
+    !result.validation?.clean &&
+    result.localRunErrors.some((item) => item.kind === 'latest_json')
 
-  return scrapeFailed || validationFailed || currentRunErrorCount > 0 || lingeringLogErrors
+  return (
+    scrapeFailed ||
+    validationFailed ||
+    currentRunErrorCount > 0 ||
+    lingeringLogErrors
+  )
 }
 
 function getRunErrorCount(summary) {
@@ -555,7 +578,11 @@ function writeReport(report) {
       ].join(' :: ')
     )
 
-    if (shouldScrape && item.lastRunSummary && !item.lastRunSummary.parseError) {
+    if (
+      shouldScrape &&
+      item.lastRunSummary &&
+      !item.lastRunSummary.parseError
+    ) {
       lines.push(
         `  scrape saved=${item.lastRunSummary.successCount || 0} dupes=${item.lastRunSummary.duplicateCount || 0} errors=${item.lastRunSummary.errorCount || 0}`
       )
@@ -587,29 +614,26 @@ function writeReport(report) {
 }
 
 function calculateTotals(results) {
-  return (Array.isArray(results) ? results : []).reduce(
-    (totals, item) => {
-      totals.modelsProcessed += 1
-      if (item.needsAttention) {
-        totals.modelsNeedingAttention += 1
-      } else {
-        totals.modelsClean += 1
-      }
+  return (Array.isArray(results) ? results : []).reduce((totals, item) => {
+    totals.modelsProcessed += 1
+    if (item.needsAttention) {
+      totals.modelsNeedingAttention += 1
+    } else {
+      totals.modelsClean += 1
+    }
 
-      if (shouldScrape) {
-        const summary = item?.lastRunSummary
-        if (summary && !summary.parseError) {
-          totals.filesSaved += Number(summary.successCount || 0)
-          totals.sourceItemsHandled += Number(summary.combinedTotal || 0)
-          totals.duplicates += Number(summary.duplicateCount || 0)
-          totals.runErrors += Number(summary.errorCount || 0)
-        }
+    if (shouldScrape) {
+      const summary = item?.lastRunSummary
+      if (summary && !summary.parseError) {
+        totals.filesSaved += Number(summary.successCount || 0)
+        totals.sourceItemsHandled += Number(summary.combinedTotal || 0)
+        totals.duplicates += Number(summary.duplicateCount || 0)
+        totals.runErrors += Number(summary.errorCount || 0)
       }
+    }
 
-      return totals
-    },
-    buildEmptyTotals()
-  )
+    return totals
+  }, buildEmptyTotals())
 }
 
 function loadState() {
@@ -793,7 +817,9 @@ function writeErrorsToCheckSummary(report) {
 
     const detailParts = []
     if (item.scrape.status === 'failed') {
-      detailParts.push(`scrape failed across ${item.scrape.runs || 0} source run(s)`)
+      detailParts.push(
+        `scrape failed across ${item.scrape.runs || 0} source run(s)`
+      )
     }
     if (item.validation?.summary) {
       const summaryBits = item.validation.summary
@@ -838,7 +864,9 @@ function writeErrorsToCheckSummary(report) {
   }
 
   for (const pendingModel of report?.nasSync?.pendingAfterRun || []) {
-    if (report?.nasSync?.failed?.some((entry) => entry.model === pendingModel)) {
+    if (
+      report?.nasSync?.failed?.some((entry) => entry.model === pendingModel)
+    ) {
       continue
     }
     items.push({

@@ -88,33 +88,57 @@ async function remuxFaststart(filePath, { log = console } = {}) {
     await execFileAsync(
       ff,
       [
-        '-y', '-hide_banner', '-loglevel', 'warning',
-        '-i', filePath,
-        '-c', 'copy',
-        '-movflags', '+faststart',
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'warning',
+        '-i',
+        filePath,
+        '-c',
+        'copy',
+        '-movflags',
+        '+faststart',
         tmpPath,
       ],
       { timeout: 10 * 60 * 1000, maxBuffer: 4 << 20 }
     )
   } catch (err) {
-    try { fs.unlinkSync(tmpPath) } catch {}
-    return { ok: false, srcPath: filePath, reason: 'ffmpeg-failed', err: err.message }
+    try {
+      fs.unlinkSync(tmpPath)
+    } catch {}
+    return {
+      ok: false,
+      srcPath: filePath,
+      reason: 'ffmpeg-failed',
+      err: err.message,
+    }
   }
 
   let outStat
-  try { outStat = fs.statSync(tmpPath) } catch {
+  try {
+    outStat = fs.statSync(tmpPath)
+  } catch {
     return { ok: false, srcPath: filePath, reason: 'no-output' }
   }
   // Refuse anything wildly different from the source size — a sanity gate
   // against catastrophically truncated outputs.
   const srcSize = fs.statSync(filePath).size
   if (outStat.size < Math.min(1024, srcSize * 0.5)) {
-    try { fs.unlinkSync(tmpPath) } catch {}
+    try {
+      fs.unlinkSync(tmpPath)
+    } catch {}
     return { ok: false, srcPath: filePath, reason: 'output-too-small' }
   }
 
-  try { fs.renameSync(tmpPath, filePath) } catch (err) {
-    return { ok: false, srcPath: filePath, reason: 'rename-failed', err: err.message }
+  try {
+    fs.renameSync(tmpPath, filePath)
+  } catch (err) {
+    return {
+      ok: false,
+      srcPath: filePath,
+      reason: 'rename-failed',
+      err: err.message,
+    }
   }
   return { ok: true, srcPath: filePath }
 }
@@ -181,7 +205,11 @@ if (require.main === module) {
     require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
     const APPDATA =
       process.env.APPDATA ||
-      path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
+      path.join(
+        process.env.HOME || process.env.USERPROFILE,
+        'AppData',
+        'Roaming'
+      )
     // DATASET_DIR wins over .env-supplied LOCAL_DATASET_DIR so the same
     // script can sweep the NAS mount via `DATASET_DIR=Z:\\dataset node …`.
     const datasetDir =
@@ -199,7 +227,9 @@ if (require.main === module) {
     if (only) {
       userDirs = [path.join(datasetDir, only)]
     } else {
-      const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+      const entries = await fs.promises.readdir(datasetDir, {
+        withFileTypes: true,
+      })
       userDirs = entries
         .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
         .map((e) => path.join(datasetDir, e.name))

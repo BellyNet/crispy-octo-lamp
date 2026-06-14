@@ -170,8 +170,7 @@ function backfillModel(modelName) {
     .readdirSync(logDir)
     .filter(
       (name) =>
-        (name.startsWith('milkmaid-run-') ||
-          name.startsWith('hoghaul-run-')) &&
+        (name.startsWith('milkmaid-run-') || name.startsWith('hoghaul-run-')) &&
         name.endsWith('.jsonl') &&
         !name.includes('errors')
     )
@@ -220,6 +219,8 @@ function consumeRunLog(logPath, modelName, index) {
         sourceUsername: event.sourceUsername || null,
         sourceSubreddit: event.sourceSubreddit || null,
         postId: event.postId || null,
+        title: event.title || null,
+        originalName: event.originalName || null,
         uploadedDate: normalizeIsoDate(event.uploadedDate),
       }
       if (candidate.filename) {
@@ -263,6 +264,8 @@ function consumeRunLog(logPath, modelName, index) {
       sourceUsername: candidate.sourceUsername || null,
       sourceSubreddit: candidate.sourceSubreddit || null,
       postId: candidate.postId || null,
+      title: candidate.title || null,
+      originalName: candidate.originalName || null,
       uploadedDate: candidate.uploadedDate || null,
     }
 

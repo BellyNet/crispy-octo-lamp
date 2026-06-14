@@ -39,8 +39,13 @@ const MEDIA_FOLDERS = ['images', 'gif', 'webm']
 // here, ~4.7k .m4v files in the dataset are silently filtered out at scan time
 // and never reach the UI.
 const MEDIA_EXTS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif',
-  '.mp4', '.m4v', '.webm',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.mp4',
+  '.m4v',
+  '.webm',
 ])
 
 fs.mkdirSync(THUMB_DIR, { recursive: true })
@@ -67,7 +72,9 @@ function readFlagsForUser(userDir) {
   try {
     const data = JSON.parse(fs.readFileSync(flagsPathFor(userDir), 'utf8'))
     return data && typeof data === 'object' && data.flags ? data : { flags: {} }
-  } catch { return { flags: {} } }
+  } catch {
+    return { flags: {} }
+  }
 }
 function writeFlagsForUser(userDir, data) {
   const p = flagsPathFor(userDir)
@@ -447,8 +454,8 @@ function computeStatsFromResponse(allMedia) {
     }
     const sz = m.size || 0
     totalBytes += sz
-    if      (m.type === 'image') bytesImages += sz
-    else if (m.type === 'gif')   bytesGifs   += sz
+    if (m.type === 'image') bytesImages += sz
+    else if (m.type === 'gif') bytesGifs += sz
     else if (m.type === 'video') bytesVideos += sz
   }
   return {
@@ -565,10 +572,7 @@ async function processFileForResponse(username, userDir, item) {
     // before ffprobe started recording either. One re-probe per video,
     // then it sticks — `hasAudio === undefined` means we haven't asked
     // ffprobe yet, while `false` is a real recorded answer.
-    if (
-      isVideo &&
-      (hit.width === undefined || hit.hasAudio === undefined)
-    ) {
+    if (isVideo && (hit.width === undefined || hit.hasAudio === undefined)) {
       const probed = await mediaDates
         .probeVideoFile(item.filePath)
         .catch(() => ({}))
@@ -645,7 +649,8 @@ async function processFileForResponse(username, userDir, item) {
     item.filename
   )
   if (sourceMeta) {
-    const title = typeof sourceMeta.title === 'string' ? sourceMeta.title.trim() : ''
+    const title =
+      typeof sourceMeta.title === 'string' ? sourceMeta.title.trim() : ''
     const url = sourceMeta.mediaPageUrl || sourceMeta.mediaUrl || null
     if (title || url) {
       post = {}
@@ -769,7 +774,9 @@ async function scanModel(username, { force = false } = {}) {
   // in O(n) — far cheaper than re-reading the sidecar per file.
   const flagsData = readFlagsForUser(userDir)
   for (const m of allMedia) {
-    m.flagged = !!(flagsData.flags && flagsData.flags[`${m.folder}/${m.filename}`])
+    m.flagged = !!(
+      flagsData.flags && flagsData.flags[`${m.folder}/${m.filename}`]
+    )
   }
 
   allMedia.sort(
@@ -1002,10 +1009,10 @@ app.get('/api/users', async (_req, res) => {
           latestAddedMs: s.latestAddedMs || 0,
           fileCount: s.fileCount || 0,
           yearCounts: s.yearCounts || {},
-          totalBytes:   s.totalBytes   || 0,
-          bytesImages:  s.bytesImages  || 0,
-          bytesGifs:    s.bytesGifs    || 0,
-          bytesVideos:  s.bytesVideos  || 0,
+          totalBytes: s.totalBytes || 0,
+          bytesImages: s.bytesImages || 0,
+          bytesGifs: s.bytesGifs || 0,
+          bytesVideos: s.bytesVideos || 0,
         }
       })
     )
@@ -1090,18 +1097,24 @@ app.post('/api/users/:username/flag', async (req, res) => {
   data.flags = data.flags || {}
   const key = `${folder}/${filename}`
   if (flagged) {
-    if (!data.flags[key]) data.flags[key] = { flagged: true, addedAt: new Date().toISOString() }
+    if (!data.flags[key])
+      data.flags[key] = { flagged: true, addedAt: new Date().toISOString() }
   } else {
     delete data.flags[key]
   }
-  try { writeFlagsForUser(userDir, data) }
-  catch (err) { return res.status(500).json({ error: err.message }) }
+  try {
+    writeFlagsForUser(userDir, data)
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
+  }
 
   // 2. Patch the response caches in place so the next read reflects the change
   //    without a full rescan. The sidecar mtime is also in the fingerprint, so
   //    even if these mutations are missed somehow, the next tick will resync.
   const patchItem = (response) => {
-    const it = response && response.find((m) => m.folder === folder && m.filename === filename)
+    const it =
+      response &&
+      response.find((m) => m.folder === folder && m.filename === filename)
     if (it) it.flagged = flagged
   }
   const memHit = mediaResponseCache.get(username)
@@ -1218,10 +1231,18 @@ async function generateThumb(srcPath, dstPath) {
         await execFileAsync(
           ffmpegPath,
           [
-            '-y', '-hide_banner', '-loglevel', 'error',
-            '-ss', '0.5', '-i', srcPath,
-            '-frames:v', '1',
-            '-q:v', '4',
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-ss',
+            '0.5',
+            '-i',
+            srcPath,
+            '-frames:v',
+            '1',
+            '-q:v',
+            '4',
             raw,
           ],
           { timeout: 30000 }
@@ -1235,7 +1256,9 @@ async function generateThumb(srcPath, dstPath) {
           .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
           .toFile(tmp)
       } finally {
-        try { await fs.promises.unlink(raw) } catch {}
+        try {
+          await fs.promises.unlink(raw)
+        } catch {}
       }
     } else {
       await sharp(srcPath, { failOn: 'none', animated: false })

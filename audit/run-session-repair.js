@@ -36,7 +36,10 @@ const slopvaultRoot = path.resolve(
 const datasetRoot = path.join(slopvaultRoot, 'dataset')
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const quarantineDatasetRoot = path.join(quarantineRoot, 'dataset')
-const quarantineManifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
+const quarantineManifestPath = path.join(
+  quarantineRoot,
+  'quarantine-manifest.json'
+)
 const salvageOutputRoot = path.join(quarantineRoot, 'salvaged')
 const targetModel = argv.model ? String(argv.model).trim().toLowerCase() : ''
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
@@ -50,7 +53,9 @@ const latestSummaryPath = path.join(reportDir, 'session-repair-latest.json')
 const checkpointPath = path.join(reportDir, 'session-repair-checkpoint.json')
 const statePath = path.join(reportDir, 'session-repair-state.json')
 const nasDatasetRoot = path.resolve(
-  String(argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+  String(
+    argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset'
+  )
 )
 
 main().catch((err) => {
@@ -337,11 +342,15 @@ function filterCandidatesByTouchedModels(items, lastCompletedAt) {
   )
 
   if (touchedModels.size === 0) return []
-  return items.filter((item) => touchedModels.has(String(item.model || '').trim()))
+  return items.filter((item) =>
+    touchedModels.has(String(item.model || '').trim())
+  )
 }
 
 async function runSalvageBatch() {
-  const args = [path.join(rootDir, 'audit', 'salvage-quarantine-tail-videos.js')]
+  const args = [
+    path.join(rootDir, 'audit', 'salvage-quarantine-tail-videos.js'),
+  ]
   if (argv.model) {
     args.push('--model', String(argv.model))
   }
@@ -366,22 +375,35 @@ function promoteSalvageResult(result, manifest) {
   const manifestItem = manifest.items.find(
     (item) =>
       normalizePath(item?.relativePath) === relativePath ||
-      normalizePath(item?.quarantinePath) === normalizePath(result.quarantinePath)
+      normalizePath(item?.quarantinePath) ===
+        normalizePath(result.quarantinePath)
   )
 
-  if (result.status !== 'salvaged' || !result.outputTailDecodeOk || !result.outputPath) {
+  if (
+    result.status !== 'salvaged' ||
+    !result.outputTailDecodeOk ||
+    !result.outputPath
+  ) {
     return {
       model: modelName,
       relativePath,
-      status: result.status === 'failed' ? 'salvage_failed' : `skipped_${result.status}`,
+      status:
+        result.status === 'failed'
+          ? 'salvage_failed'
+          : `skipped_${result.status}`,
       quarantinePath: result.quarantinePath || null,
       outputPath: result.outputPath || null,
     }
   }
 
-  const datasetPath = path.join(datasetRoot, relativePath.replace(/\//g, path.sep))
+  const datasetPath = path.join(
+    datasetRoot,
+    relativePath.replace(/\//g, path.sep)
+  )
   const quarantinePath =
-    result.quarantinePath || manifestItem?.quarantinePath || path.join(quarantineDatasetRoot, relativePath.replace(/\//g, path.sep))
+    result.quarantinePath ||
+    manifestItem?.quarantinePath ||
+    path.join(quarantineDatasetRoot, relativePath.replace(/\//g, path.sep))
   const outputPath = path.resolve(String(result.outputPath))
 
   if (!fs.existsSync(outputPath)) {
@@ -707,7 +729,9 @@ function printLiveSummary(summary) {
     console.log(`NAS sync attempted: ${summary.nasSync.attempted.length}`)
     console.log(`NAS sync ok: ${summary.nasSync.synced.length}`)
     console.log(`NAS sync failed: ${summary.nasSync.failed.length}`)
-    console.log(`NAS sync still pending: ${summary.nasSync.pendingAfterRun.length}`)
+    console.log(
+      `NAS sync still pending: ${summary.nasSync.pendingAfterRun.length}`
+    )
   }
   console.log(
     `Unresolved tail-decode quarantines: ${summary.unresolved.unresolvedTailDecodeCount}`
@@ -735,7 +759,9 @@ function writeErrorsToCheckSummary(summary) {
   }
 
   for (const pendingModel of summary?.nasSync?.pendingAfterRun || []) {
-    if (summary?.nasSync?.failed?.some((entry) => entry.model === pendingModel)) {
+    if (
+      summary?.nasSync?.failed?.some((entry) => entry.model === pendingModel)
+    ) {
       continue
     }
     items.push({

@@ -28,6 +28,7 @@
     "evict:nas-media": "node scrapyard/evictLocalNasBackedMedia.js",
     "evict:nas-media:apply": "node scrapyard/evictLocalNasBackedMedia.js --apply",
     "backfill:seen-media": "node milkmaid/backfill-seen-media-index.js",
+    "backfill:legacy-sources": "node scrapyard/backfillLegacyMediaSources.js",
     "repair:stufferdb": "node milkmaid/repair-stufferdb-models.js --scrape",
     "repair:scrape-only": "node milkmaid/repair-stufferdb-models.js --scrape-only",
     "update:stufferdb": "node scrapyard/run-stufferdb-batch.js",

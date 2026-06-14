@@ -110,7 +110,9 @@ function main() {
   const modelNames =
     requestedModels.length > 0 ? requestedModels : getAllModelNames()
   const bucket = String(getOption('bucket') || 'webm').trim()
-  const mode = String(getOption('mode') || '').trim().toLowerCase()
+  const mode = String(getOption('mode') || '')
+    .trim()
+    .toLowerCase()
   const shouldApply = isTruthy(getOption('apply')) || mode === 'apply'
   const dryRun = !shouldApply
 

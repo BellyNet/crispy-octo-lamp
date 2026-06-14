@@ -62,14 +62,17 @@ function main() {
   const skippedMissingMirrorPaths = mirrorRoot
     ? matches
         .filter(
-          (match) => !fs.existsSync(path.join(mirrorRoot, match.mp4RelativePath))
+          (match) =>
+            !fs.existsSync(path.join(mirrorRoot, match.mp4RelativePath))
         )
         .map((match) => match.mp4RelativePath)
     : []
-  const deletedRelativePaths = verifiedMatches.map((match) => match.mp4RelativePath)
-  const affectedModels = Array.from(new Set(matches.map((match) => match.model))).sort(
-    (a, b) => a.localeCompare(b)
+  const deletedRelativePaths = verifiedMatches.map(
+    (match) => match.mp4RelativePath
   )
+  const affectedModels = Array.from(
+    new Set(matches.map((match) => match.model))
+  ).sort((a, b) => a.localeCompare(b))
 
   const report = {
     generatedAt: new Date().toISOString(),

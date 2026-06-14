@@ -125,14 +125,18 @@ function mergePostRecord(sourceState, record = {}) {
 
   const existing = sourceState.posts?.[postId] || {}
   if (!sourceState.posts) sourceState.posts = {}
-  const createdUtc = Number(record.createdUtc || record.created_utc || 0) || null
+  const createdUtc =
+    Number(record.createdUtc || record.created_utc || 0) || null
   const mediaUrls = uniqueValues([existing.mediaUrls, record.mediaUrls])
   const mediaPageUrls = uniqueValues([
     existing.mediaPageUrls,
     record.mediaPageUrls,
     record.mediaPageUrl,
   ])
-  const relativePaths = uniqueValues([existing.relativePaths, record.relativePaths])
+  const relativePaths = uniqueValues([
+    existing.relativePaths,
+    record.relativePaths,
+  ])
 
   sourceState.posts[postId] = {
     ...existing,
@@ -153,7 +157,8 @@ function mergePostRecord(sourceState, record = {}) {
   const postCreatedUtc = sourceState.posts[postId].createdUtc
   if (
     postCreatedUtc &&
-    (!sourceState.latestCreatedUtc || postCreatedUtc > sourceState.latestCreatedUtc)
+    (!sourceState.latestCreatedUtc ||
+      postCreatedUtc > sourceState.latestCreatedUtc)
   ) {
     sourceState.latestCreatedUtc = postCreatedUtc
     sourceState.latestPostId = postId
@@ -164,7 +169,9 @@ function mergePostRecord(sourceState, record = {}) {
 
 function sourceMatchesRecord(source, record = {}) {
   if (normalizeKey(record.sourceSite) !== 'reddit') return false
-  const sourceUser = normalizeKey(source.username || source.userId || source.rawName)
+  const sourceUser = normalizeKey(
+    source.username || source.userId || source.rawName
+  )
   if (!sourceUser) return true
   const recordUsers = [
     record.sourceUsername,
@@ -215,7 +222,11 @@ function activeRecordExists(record, datasetPaths) {
   return fs.existsSync(absolutePath)
 }
 
-function backfillRedditSourceStateFromSeenIndex(modelLogDir, source, options = {}) {
+function backfillRedditSourceStateFromSeenIndex(
+  modelLogDir,
+  source,
+  options = {}
+) {
   const seenIndex = readSeenIndex(modelLogDir)
   if (!seenIndex) {
     return { changed: false, sources: 0, posts: 0, records: 0 }
@@ -310,7 +321,9 @@ function recordRedditSourceCheck(modelLogDir, source, details = {}) {
 
   let mergedPosts = 0
   for (const post of details.posts || []) {
-    const mediaEntries = Array.isArray(post.mediaEntries) ? post.mediaEntries : []
+    const mediaEntries = Array.isArray(post.mediaEntries)
+      ? post.mediaEntries
+      : []
     const merged = mergePostRecord(sourceState, {
       postId: post.id,
       title: post.title,

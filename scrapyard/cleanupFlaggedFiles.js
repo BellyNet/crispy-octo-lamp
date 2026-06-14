@@ -23,7 +23,7 @@ const minimist = require('minimist')
 
 const args = minimist(process.argv.slice(2), {
   boolean: ['apply', 'hard'],
-  string:  ['user', 'dataset'],
+  string: ['user', 'dataset'],
 })
 
 const slopvaultRoot = path.join(
@@ -35,7 +35,7 @@ const datasetDir = path.resolve(
 )
 
 const FLAGS_FILENAME = '.dashboard-flags.json'
-const TRASH_DIRNAME  = '.dashboard-trash'
+const TRASH_DIRNAME = '.dashboard-trash'
 
 function listModelDirs() {
   if (!fs.existsSync(datasetDir)) {
@@ -57,7 +57,9 @@ function listModelDirs() {
 
 function readFlags(userDir) {
   try {
-    const data = JSON.parse(fs.readFileSync(path.join(userDir, FLAGS_FILENAME), 'utf8'))
+    const data = JSON.parse(
+      fs.readFileSync(path.join(userDir, FLAGS_FILENAME), 'utf8')
+    )
     return data && data.flags && typeof data.flags === 'object' ? data : null
   } catch {
     return null
@@ -96,18 +98,20 @@ function moveToTrash(filePath, runTimestamp) {
 
 function main() {
   const targets = args.user ? [args.user] : listModelDirs()
-  const apply   = !!args.apply
-  const hard    = !!args.hard
-  const runTs   = new Date().toISOString().replace(/[:.]/g, '-')
+  const apply = !!args.apply
+  const hard = !!args.hard
+  const runTs = new Date().toISOString().replace(/[:.]/g, '-')
 
   console.log('')
   console.log(`Dataset: ${datasetDir}`)
-  console.log(`Mode:    ${apply ? (hard ? 'APPLY (HARD DELETE)' : `APPLY (move to ${TRASH_DIRNAME}/${runTs}/)`) : 'dry-run (no changes)'}`)
+  console.log(
+    `Mode:    ${apply ? (hard ? 'APPLY (HARD DELETE)' : `APPLY (move to ${TRASH_DIRNAME}/${runTs}/)`) : 'dry-run (no changes)'}`
+  )
   console.log(`Models:  ${targets.length}`)
   console.log('')
 
   let totalFlagged = 0
-  let totalActed   = 0
+  let totalActed = 0
   let totalMissing = 0
   let totalSkipped = 0
 
@@ -139,7 +143,8 @@ function main() {
         continue
       }
 
-      const flaggedAt = meta && meta.addedAt ? `  [flagged ${meta.addedAt.slice(0, 10)}]` : ''
+      const flaggedAt =
+        meta && meta.addedAt ? `  [flagged ${meta.addedAt.slice(0, 10)}]` : ''
       if (!apply) {
         console.log(`  - ${relKey}${flaggedAt}`)
         continue
@@ -172,7 +177,10 @@ function main() {
   if (apply) console.log(`  ${hard ? 'Deleted' : 'Trashed'}: ${totalActed}`)
   console.log(`  Missing:  ${totalMissing}`)
   console.log(`  Skipped:  ${totalSkipped}`)
-  if (!apply) console.log('  Re-run with --apply to act on these. Without --hard the files go to a per-run trash dir first.')
+  if (!apply)
+    console.log(
+      '  Re-run with --apply to act on these. Without --hard the files go to a per-run trash dir first.'
+    )
   console.log('')
 }
 

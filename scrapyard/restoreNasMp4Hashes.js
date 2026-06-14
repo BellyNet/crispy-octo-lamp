@@ -38,16 +38,26 @@ if (argv.help) {
   process.exit(0)
 }
 
-const datasetRoot = path.resolve(String(argv['dataset-root'] || getDefaultDatasetRoot()))
-const nasRoot = path.resolve(String(argv['nas-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset'))
+const datasetRoot = path.resolve(
+  String(argv['dataset-root'] || getDefaultDatasetRoot())
+)
+const nasRoot = path.resolve(
+  String(argv['nas-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+)
 const reportDir = path.resolve(
-  String(argv['report-dir'] || path.join(process.cwd(), 'tmp', 'restore-nas-mp4-hashes'))
+  String(
+    argv['report-dir'] ||
+      path.join(process.cwd(), 'tmp', 'restore-nas-mp4-hashes')
+  )
 )
 const reportPath = path.join(reportDir, 'restore-nas-mp4-hashes-latest.json')
 const inputReportPath = argv['input-report']
   ? path.resolve(String(argv['input-report']))
   : null
-const progressEvery = Math.max(Number.parseInt(String(argv['progress-every'] || '25'), 10) || 25, 1)
+const progressEvery = Math.max(
+  Number.parseInt(String(argv['progress-every'] || '25'), 10) || 25,
+  1
+)
 
 main().catch((error) => {
   console.error(error.message || String(error))
@@ -82,15 +92,20 @@ async function main() {
 
   for (const relativePath of indexEntries) {
     stats.scannedCount += 1
-    const absoluteNasPath = path.join(nasRoot, relativePath.replace(/\//g, path.sep))
+    const absoluteNasPath = path.join(
+      nasRoot,
+      relativePath.replace(/\//g, path.sep)
+    )
     if (!fs.existsSync(absoluteNasPath)) {
       stats.missingFileCount += 1
       stats.missingFiles.push(relativePath)
       continue
     }
 
-    const needBitwise = mode !== 'visual' && !existingBitwiseRefs.has(relativePath)
-    const needVisual = mode !== 'bitwise' && !existingVisualRefs.has(relativePath)
+    const needBitwise =
+      mode !== 'visual' && !existingBitwiseRefs.has(relativePath)
+    const needVisual =
+      mode !== 'bitwise' && !existingVisualRefs.has(relativePath)
     if (!needBitwise && !needVisual) {
       continue
     }

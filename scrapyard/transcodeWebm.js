@@ -52,10 +52,14 @@ async function hasAudioStream(srcPath) {
     const { stdout } = await execFileAsync(
       ffprobeForTranscode,
       [
-        '-v', 'error',
-        '-select_streams', 'a:0',
-        '-show_entries', 'stream=codec_name',
-        '-of', 'csv=p=0',
+        '-v',
+        'error',
+        '-select_streams',
+        'a:0',
+        '-show_entries',
+        'stream=codec_name',
+        '-of',
+        'csv=p=0',
         srcPath,
       ],
       { timeout: 10000 }
@@ -68,7 +72,10 @@ async function hasAudioStream(srcPath) {
 
 // Convert one .webm → .mp4 in the same folder. Returns a result object
 // describing what happened; never throws so the caller can keep going.
-async function transcodeWebmFile(srcPath, { backupDir = null, log = console } = {}) {
+async function transcodeWebmFile(
+  srcPath,
+  { backupDir = null, log = console } = {}
+) {
   const ff = await ensureFfmpeg()
   if (!ff) return { ok: false, srcPath, reason: 'no-ffmpeg' }
   if (!srcPath.toLowerCase().endsWith('.webm'))
@@ -91,35 +98,56 @@ async function transcodeWebmFile(srcPath, { backupDir = null, log = console } = 
   // and a fair number of mobile-captured .webm clips come in at odd
   // heights like 480x853 that would otherwise fail to encode.
   const args = [
-    '-y', '-hide_banner', '-loglevel', 'warning',
-    '-i', srcPath,
-    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-    '-c:v', 'libx264',
-    '-crf', '20',
-    '-preset', 'medium',
-    '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'warning',
+    '-i',
+    srcPath,
+    '-vf',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+    '-c:v',
+    'libx264',
+    '-crf',
+    '20',
+    '-preset',
+    'medium',
+    '-pix_fmt',
+    'yuv420p',
+    '-movflags',
+    '+faststart',
     ...(hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']),
     tmpPath,
   ]
 
   try {
-    await execFileAsync(ff, args, { timeout: 30 * 60 * 1000, maxBuffer: 8 << 20 })
+    await execFileAsync(ff, args, {
+      timeout: 30 * 60 * 1000,
+      maxBuffer: 8 << 20,
+    })
   } catch (err) {
-    try { fs.unlinkSync(tmpPath) } catch {}
+    try {
+      fs.unlinkSync(tmpPath)
+    } catch {}
     return { ok: false, srcPath, reason: 'ffmpeg-failed', err: err.message }
   }
 
   let outStat
-  try { outStat = fs.statSync(tmpPath) } catch {
+  try {
+    outStat = fs.statSync(tmpPath)
+  } catch {
     return { ok: false, srcPath, reason: 'no-output' }
   }
   if (outStat.size < 1024) {
-    try { fs.unlinkSync(tmpPath) } catch {}
+    try {
+      fs.unlinkSync(tmpPath)
+    } catch {}
     return { ok: false, srcPath, reason: 'output-too-small' }
   }
 
-  try { fs.renameSync(tmpPath, dstPath) } catch (err) {
+  try {
+    fs.renameSync(tmpPath, dstPath)
+  } catch (err) {
     return { ok: false, srcPath, reason: 'rename-failed', err: err.message }
   }
 
@@ -165,7 +193,9 @@ async function transcodeWebmInUserDir(userDir, { log = console } = {}) {
 
   const ff = await ensureFfmpeg()
   if (!ff) {
-    log.warn?.(`ffmpeg not found — skipping ${targets.length} .webm file(s) in ${userDir}`)
+    log.warn?.(
+      `ffmpeg not found — skipping ${targets.length} .webm file(s) in ${userDir}`
+    )
     return []
   }
 
@@ -195,7 +225,11 @@ if (require.main === module) {
     require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
     const APPDATA =
       process.env.APPDATA ||
-      path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
+      path.join(
+        process.env.HOME || process.env.USERPROFILE,
+        'AppData',
+        'Roaming'
+      )
     // DATASET_DIR wins over the .env-supplied LOCAL_DATASET_DIR so callers
     // can target the NAS mount (e.g. `DATASET_DIR=Z:\\dataset node …`) for
     // a one-shot pass over files that only exist on the NAS side.
@@ -214,7 +248,9 @@ if (require.main === module) {
     if (only) {
       userDirs = [path.join(datasetDir, only)]
     } else {
-      const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+      const entries = await fs.promises.readdir(datasetDir, {
+        withFileTypes: true,
+      })
       userDirs = entries
         .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
         .map((e) => path.join(datasetDir, e.name))
@@ -230,7 +266,9 @@ if (require.main === module) {
       ok += results.filter((r) => r.ok).length
       failed += results.filter((r) => !r.ok).length
     }
-    console.log(`\nDone. ${ok}/${total} succeeded${failed ? `, ${failed} failed` : ''}`)
+    console.log(
+      `\nDone. ${ok}/${total} succeeded${failed ? `, ${failed} failed` : ''}`
+    )
   })().catch((err) => {
     console.error(err)
     process.exit(1)

@@ -7,6 +7,7 @@ const { exec } = require('child_process')
 const {
   collectMp4RelativePaths,
   mergeNasMp4Entries,
+  normalizePath,
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
 
@@ -101,6 +102,72 @@ function syncAllModelMetadataToNas({
   return { models, copied, skipped }
 }
 
+function evictVerifiedLocalMp4s({
+  modelName,
+  datasetDir,
+  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+} = {}) {
+  const localModelDir = path.join(datasetDir, modelName)
+  const relativeVideoPaths = collectMp4RelativePaths(localModelDir, datasetDir)
+  const verifiedRelativePaths = []
+  const deleteCandidates = []
+  let missingOnNas = 0
+  let sizeMismatches = 0
+
+  for (const relativePath of relativeVideoPaths) {
+    const localPath = path.join(datasetDir, relativePath)
+    const nasPath = path.join(nasDatasetDir, relativePath)
+
+    if (!fs.existsSync(nasPath)) {
+      missingOnNas += 1
+      continue
+    }
+
+    const localStat = fs.statSync(localPath)
+    const nasStat = fs.statSync(nasPath)
+    if (
+      !localStat.isFile() ||
+      !nasStat.isFile() ||
+      localStat.size !== nasStat.size
+    ) {
+      sizeMismatches += 1
+      continue
+    }
+
+    const normalizedPath = normalizePath(relativePath)
+    verifiedRelativePaths.push(normalizedPath)
+    if (path.extname(localPath).toLowerCase() === '.mp4') {
+      deleteCandidates.push({ localPath, relativePath: normalizedPath })
+    }
+  }
+
+  if (verifiedRelativePaths.length > 0) {
+    mergeNasMp4Entries(verifiedRelativePaths, datasetDir)
+    syncNasMp4IndexToMirror(nasDatasetDir, datasetDir)
+  }
+
+  let deletedFiles = 0
+  let deletedBytes = 0
+  for (const candidate of deleteCandidates) {
+    const stat = fs.statSync(candidate.localPath)
+    fs.unlinkSync(candidate.localPath)
+    deletedFiles += 1
+    deletedBytes += stat.size
+  }
+
+  return {
+    scannedFiles: relativeVideoPaths.length,
+    verifiedFiles: verifiedRelativePaths.length,
+    deletedFiles,
+    deletedBytes,
+    missingOnNas,
+    sizeMismatches,
+    deletedRelativePaths: deleteCandidates.map(
+      (candidate) => candidate.relativePath
+    ),
+  }
+}
+
 async function syncModelToNas({
   modelName,
   datasetDir,
@@ -128,20 +195,31 @@ async function syncModelToNas({
   }
 
   syncModelMetadataToNas({ modelName, datasetDir, nasDatasetDir })
-  mergeNasMp4Entries(
-    collectMp4RelativePaths(localModelDir, datasetDir),
-    datasetDir
-  )
-  syncNasMp4IndexToMirror(nasDatasetDir, datasetDir)
+  const cleanup = evictVerifiedLocalMp4s({
+    modelName,
+    datasetDir,
+    nasDatasetDir,
+  })
   pushRegistryToNas({ nasDatasetDir, log })
+  if (cleanup.deletedFiles > 0) {
+    log.log(
+      `Removed ${cleanup.deletedFiles} verified local MP4(s) after NAS sync.`
+    )
+  }
+  if (cleanup.missingOnNas > 0 || cleanup.sizeMismatches > 0) {
+    log.warn?.(
+      `Kept ${cleanup.missingOnNas + cleanup.sizeMismatches} local video(s) that could not be verified on NAS.`
+    )
+  }
   log.log(successMessage)
-  return result
+  return { ...result, cleanup }
 }
 
 module.exports = {
   runRobocopy,
   syncAllModelMetadataToNas,
   syncModelMetadataToNas,
+  evictVerifiedLocalMp4s,
   syncModelToNas,
   pushRegistryToNas,
 }
