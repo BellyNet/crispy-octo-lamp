@@ -501,10 +501,9 @@
         opacity: 1;
       }
 
-      /* Post title pinned to the bottom of the thumb. Hidden by default and
-         only shown on Large cards — S/M are too cramped, so those rely on
-         the native tooltip (set via card.title). Always present in the DOM
-         so a card-size change doesn't require re-rendering. */
+      /* Post title pinned to the bottom of the thumb. Visible at every
+         card size — S/M get a single line truncated with ellipsis,
+         L can wrap to two. */
       .card-post-title {
         position: absolute;
         left: 0;
@@ -520,17 +519,17 @@
           rgba(0, 0, 0, 0.45) 60%,
           transparent 100%
         );
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         z-index: 2;
         pointer-events: none;
-        display: none;
       }
       body.card-size-large .card-post-title {
+        white-space: normal;
         display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
       }
 
       .card-thumb {
@@ -706,48 +705,34 @@
         padding: 0 12px;
         user-select: none;
       }
-      /* Date-position timeline — pinned just below the PhotoSwipe top bar
-         so it doesn't fight with the native <video> scrubber at the bottom.
-         Clicking or dragging the track jumps to the filtered item whose
-         date is nearest to that point on the line. Hidden entirely when
-         the lightbox has no usable date range. */
+      /* Date-position timeline — lives inline inside the PhotoSwipe top
+         bar so the media stays full-bleed underneath. Track grows to
+         fill the space between the counter (left) and close (right);
+         the current date hovers above the thumb while scrubbing. */
       .pswp__pswp-date-slider {
-        position: absolute;
-        top: 44px;
-        left: 0;
-        right: 0;
-        z-index: 1020;
         display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 12px 22px 16px;
+        align-items: center;
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: 0 12px;
+        height: 44px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        background: linear-gradient(
-          to bottom,
-          rgba(10, 10, 15, 0.78) 0%,
-          rgba(10, 10, 15, 0.42) 60%,
-          transparent 100%
-        );
         user-select: none;
-        pointer-events: none; /* only the track itself takes pointer events */
-      }
-      .pswp-date-slider-label {
-        text-align: center;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-        letter-spacing: 0.02em;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-        line-height: 1;
         pointer-events: none;
+        position: relative;
+      }
+      /* No floating label — the thumb's native tooltip carries the
+         current date so nothing pokes below the bar onto the media. */
+      .pswp-date-slider-label {
+        display: none;
       }
       .pswp-date-slider-track {
         position: relative;
+        flex: 1 1 auto;
         height: 4px;
         background: rgba(255, 255, 255, 0.18);
         border-radius: 2px;
         cursor: pointer;
-        margin: 0 4px;
         pointer-events: auto;
         touch-action: none;
       }
@@ -797,23 +782,11 @@
         transition: none;
       }
       .pswp-date-slider-range {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: var(--muted);
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        pointer-events: none;
+        display: none; /* no room inside the 44px top bar */
       }
       @media (max-width: 640px) {
         .pswp__pswp-date-slider {
-          padding: 10px 14px 12px;
-        }
-        .pswp-date-slider-label {
-          font-size: 12px;
-        }
-        .pswp-date-slider-range {
-          font-size: 9px;
+          margin: 0 6px;
         }
       }
       /* Chrome-toggle button — collapses every non-essential bit of UI
@@ -843,25 +816,49 @@
       .pswp.pswp--chrome-hidden .pswp__button--arrow--next,
       .pswp.pswp--chrome-hidden .pswp__pswp-flag-button,
       .pswp.pswp--chrome-hidden .pswp__pswp-date-slider,
-      .pswp.pswp--chrome-hidden .pswp__pswp-info-panel,
       .pswp.pswp--chrome-hidden .pswp__pswp-caption {
         display: none !important;
       }
-
-      /* Force white icon color on every custom PhotoSwipe button. Without
-         this they pick up the page's text color, which is the dark-mode
-         "text on light background" in some setups and renders the icons
-         as nearly-black against the lightbox background. */
-      .pswp__pswp-flag-button,
-      .pswp__pswp-info-button,
-      .pswp__pswp-caption-button,
-      .pswp__pswp-chrome-toggle {
-        color: #fff;
+      /* Info panel stays visible at the bottom in both states; the meta
+         row inside it (dates, FLAGGED chip) is gated behind the chrome
+         toggle so the default view shows only the post title + caption. */
+      .pswp.pswp--chrome-hidden .pswp-info-row {
+        display: none !important;
       }
-      /* Active flag = bright red. Important wins against the .pswp--chrome
-         color rule above. */
-      .pswp__pswp-flag-button.pswp-flag-active {
+      .pswp.pswp--chrome-hidden .pswp__pswp-info-panel {
+        padding-bottom: 10px;
+      }
+
+      /* Force white on every PhotoSwipe button so SVGs that use
+         `currentColor` (close, our custom ones) actually render white
+         instead of inheriting the gray PhotoSwipe sets as the default. */
+      .pswp .pswp__button {
+        color: #fff !important;
+      }
+
+      /* Force white icon color on every custom PhotoSwipe button.
+         PhotoSwipe v5's `.pswp__button { color: rgba(127,127,127,1) }`
+         was painting our currentColor strokes gray. We win with a more
+         specific selector + !important on both color and stroke. */
+      .pswp button.pswp__button.pswp__pswp-flag-button,
+      .pswp button.pswp__button.pswp__pswp-link-button,
+      .pswp button.pswp__button.pswp__pswp-chrome-toggle {
+        color: #fff !important;
+      }
+      .pswp button.pswp__button.pswp__pswp-flag-button svg,
+      .pswp button.pswp__button.pswp__pswp-link-button svg,
+      .pswp button.pswp__button.pswp__pswp-chrome-toggle svg,
+      .pswp button.pswp__button.pswp__pswp-flag-button svg *,
+      .pswp button.pswp__button.pswp__pswp-link-button svg *,
+      .pswp button.pswp__button.pswp__pswp-chrome-toggle svg * {
+        stroke: #fff !important;
+        color: #fff !important;
+      }
+      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active,
+      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg,
+      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg * {
         color: #ff6868 !important;
+        stroke: #ff6868 !important;
       }
 
       /* Info button style */
@@ -1014,10 +1011,12 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
       }
       .pswp-video-wrap video {
-        max-width: 100%;
-        max-height: 100%;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
         outline: none;
         border-radius: 4px;
       }
@@ -1847,25 +1846,27 @@
       }
 
       // Coomerfans titles tend to come in as "<screenname> / <real title>"
-      // (and sometimes just "<screenname> /" with nothing after). The
-      // screen-name prefix is always the current model's name, so it's
-      // pure noise inside that model's gallery. Strip it.
-      function cleanPostTitle(item) {
-        if (!item || !item.post || typeof item.post.title !== 'string') return ''
-        let t = item.post.title.trim()
+      // (and sometimes just "<screenname> /" with nothing after). LoRA
+      // captions can carry the same prefix as a trigger word. Either
+      // way, inside that model's gallery the screen-name is pure noise
+      // — strip it.
+      function stripUsernamePrefix(text) {
+        if (typeof text !== 'string') return ''
+        let t = text.trim()
         if (!t) return ''
         const name = (currentUsername || '').trim()
-        if (name) {
-          const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
-          // Tolerate the username being followed by `/`, `-`, `|`, `·`, `:`
-          // (with or without whitespace) — every separator we've seen in the
-          // wild collapses to the same "<name> <sep> <title>" pattern.
-          t = t.replace(
-            new RegExp(`^${escaped}\\s*[\\/\\-\\|·:]\\s*`, 'i'),
-            ''
-          ).trim()
-        }
+        if (!name) return t
+        const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+        // Tolerate any of `/`, `-`, `|`, `·`, `:`, `,` (with or without
+        // whitespace) as the separator. Run twice in case the caption
+        // doubles the prefix ("name, name, real text").
+        const re = new RegExp(`^${escaped}\\s*[\\/\\-\\|·:,]\\s*`, 'i')
+        t = t.replace(re, '').trim()
+        t = t.replace(re, '').trim()
         return t
+      }
+      function cleanPostTitle(item) {
+        return stripUsernamePrefix(item?.post?.title)
       }
 
       // ─── USERS ────────────────────────────────────────────────────────────
@@ -2306,6 +2307,11 @@
         }
       }
       window.addEventListener('keydown', (e) => {
+        // When the lightbox is open, the keyboard belongs to PhotoSwipe
+        // (arrows = prev/next slide, Esc = close, etc). Bail out so we
+        // don't move the sidebar highlight underneath the open viewer.
+        if (document.querySelector('.pswp--open')) return
+
         // Don't hijack typing in inputs other than the user-search itself.
         const t = e.target
         const inOtherInput =
@@ -2932,11 +2938,14 @@
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
               const src = esc(item.url)
-              const poster = item.thumbUrl || item.previewUrl
-              const posterAttr = poster ? ` poster="${esc(poster)}"` : ''
+              // No `poster`, no `controls` initially. Tap on the video
+              // toggles the native controls (wired up in contentAppend
+              // below). The autoplay+muted+playsinline trio is what
+              // every social-app video player does; let it do its job
+              // without us calling load() or pause() in the middle.
               const html =
                 `<div class="pswp-video-wrap">` +
-                  `<video src="${src}" loop muted autoplay playsinline controls preload="metadata"${posterAttr}></video>` +
+                  `<video src="${src}" loop muted autoplay playsinline preload="auto"></video>` +
                 `</div>`
               return { html, _item: item }
             }
@@ -2959,6 +2968,27 @@
             padding: { top: 0, bottom: 0, left: 0, right: 0 },
             loop: true,
             wheelToZoom: true,
+            // PhotoSwipe caps its built-in `fit` zoom at 1.0, so small
+            // images sat at their actual pixel size in the middle of a
+            // huge viewport. Drop the cap: scale so that the smaller
+            // axis fills the viewport, matching the video's
+            // `object-fit: contain` behavior. The max-zoom raises
+            // proportionally so pinch-zoom still has room.
+            initialZoomLevel: (z) => {
+              const pa = z.panAreaSize, es = z.elementSize
+              if (!pa || !es || !es.x || !es.y) return 1
+              return Math.min(pa.x / es.x, pa.y / es.y)
+            },
+            secondaryZoomLevel: (z) => {
+              const pa = z.panAreaSize, es = z.elementSize
+              if (!pa || !es || !es.x || !es.y) return 2
+              return Math.min(pa.x / es.x, pa.y / es.y) * 2
+            },
+            maxZoomLevel: (z) => {
+              const pa = z.panAreaSize, es = z.elementSize
+              if (!pa || !es || !es.x || !es.y) return 4
+              return Math.min(pa.x / es.x, pa.y / es.y) * 4
+            },
           })
 
           let infoPanelEl = null
@@ -2998,7 +3028,11 @@
             if (filtered.length > 1) {
               pswp.ui.registerElement({
                 name: 'pswp-date-slider',
-                appendTo: 'root',
+                // Inline in the top bar between counter (left, order ~5)
+                // and the buttons on the right (close at 20). order 10
+                // lands it between them with flex:1 so it stretches.
+                appendTo: 'bar',
+                order: 10,
                 onInit(el) {
                   const last = filtered.length - 1
                   // Items may have a null .date (rare — older entries before
@@ -3008,8 +3042,10 @@
                     it.date ||
                     (it.addedMs ? new Date(it.addedMs).toISOString() : null)
 
-                  const label = document.createElement('div')
-                  label.className = 'pswp-date-slider-label'
+                  // Track first, label after — the label uses a sibling
+                  // selector (.track ~ .label) to fade in only while the
+                  // user is hovering or scrubbing the track. Range
+                  // labels are dropped (no room inside the 44px bar).
                   const track = document.createElement('div')
                   track.className = 'pswp-date-slider-track'
                   const fill = document.createElement('div')
@@ -3017,14 +3053,9 @@
                   const thumb = document.createElement('div')
                   thumb.className = 'pswp-date-slider-thumb'
                   track.append(fill, thumb)
-                  const range = document.createElement('div')
-                  range.className = 'pswp-date-slider-range'
-                  const rangeStart = document.createElement('span')
-                  rangeStart.textContent = formatDateShort(itemDateISO(filtered[0]))
-                  const rangeEnd = document.createElement('span')
-                  rangeEnd.textContent = formatDateShort(itemDateISO(filtered[last]))
-                  range.append(rangeStart, rangeEnd)
-                  el.append(label, track, range)
+                  const label = document.createElement('div')
+                  label.className = 'pswp-date-slider-label'
+                  el.append(track, label)
 
                   // Position thumb + fill + label from the current slide's
                   // index. Driven by PhotoSwipe `change` events and by the
@@ -3033,9 +3064,12 @@
                     const pct = pswp.currIndex / last
                     thumb.style.left = `${pct * 100}%`
                     fill.style.width = `${pct * 100}%`
-                    label.textContent = formatDateShort(
+                    const date = formatDateShort(
                       itemDateISO(filtered[pswp.currIndex])
                     )
+                    label.textContent = date
+                    thumb.title = date
+                    track.title = date
                   }
                   pswp.on('change', updateFromIndex)
                   updateFromIndex()
@@ -3112,32 +3146,22 @@
                   if (!item) return
                   el.replaceChildren()
 
-                  // 1. Headline — post title. Strip a leading
-                  //    `<username> / ` prefix (common in Coomerfans titles)
-                  //    so the user's screen-name doesn't repeat itself.
+                  // 1. Headline — post title only. Plain text (no link);
+                  //    the source URL has its own dedicated link button
+                  //    in the top bar. Only rendered when we have real
+                  //    text after stripping the "<modelname> /" prefix.
                   const cleanTitle = cleanPostTitle(item)
-                  if (cleanTitle || item.post?.url) {
+                  if (cleanTitle) {
                     const headline = document.createElement('div')
                     headline.className = 'pswp-info-post-headline'
-                    const text = cleanTitle || item.post.url
-                    if (item.post && item.post.url) {
-                      const a = document.createElement('a')
-                      a.href = item.post.url
-                      a.target = '_blank'
-                      a.rel = 'noopener noreferrer'
-                      a.textContent = text
-                      a.title = item.post.url
-                      a.addEventListener('click', (e) => e.stopPropagation())
-                      headline.appendChild(a)
-                    } else {
-                      headline.textContent = text
-                    }
+                    headline.textContent = cleanTitle
                     el.appendChild(headline)
                   }
 
-                  // 2. LoRA caption block. Render synchronously with the
-                  //    panel, fill in once the fetch resolves. Guard
-                  //    against stale slide updates with currIndex check.
+                  // 2. LoRA caption block. Strip the leading "<model>,"
+                  //    trigger word so the visible caption reads as
+                  //    natural text. Render synchronously with the
+                  //    panel, fill in once the fetch resolves.
                   if (item.hasCaption) {
                     const capBlock = document.createElement('div')
                     capBlock.className = 'pswp-info-caption-block'
@@ -3146,27 +3170,18 @@
                     const idxAtStart = pswp.currIndex
                     loadCaption(item).then((text) => {
                       if (pswp.currIndex !== idxAtStart) return
-                      if (text) capBlock.textContent = text
+                      const cleaned = stripUsernamePrefix(text)
+                      if (cleaned) capBlock.textContent = cleaned
                       else capBlock.remove()
                     })
                   }
 
-                  // 3. Meta row.
+                  // 3. Meta row — kept deliberately sparse: media date,
+                  //    added date, and the FLAGGED chip when set. The
+                  //    file's type, dimensions, duration, size, source
+                  //    site and filename all live on the card already.
                   const row = document.createElement('div')
                   row.className = 'pswp-info-row'
-
-                  const typeBadge = document.createElement('span')
-                  typeBadge.className = `type-badge ${item.type}`
-                  typeBadge.textContent =
-                    item.type === 'image' ? 'img' : item.type
-                  row.appendChild(typeBadge)
-
-                  if (item.post && item.post.site) {
-                    const siteSpan = document.createElement('span')
-                    siteSpan.className = 'pswp-info-post-meta'
-                    siteSpan.textContent = item.post.site
-                    row.appendChild(siteSpan)
-                  }
 
                   if (item.flagged) {
                     const fb = document.createElement('span')
@@ -3175,37 +3190,11 @@
                     row.appendChild(fb)
                   }
 
-                  const dateSpan = document.createElement('span')
-                  dateSpan.className = 'pswp-info-date'
-                  dateSpan.textContent = formatDate(item.date)
-                  if (item.source) {
-                    dateSpan.appendChild(document.createTextNode(' '))
-                    const srcSpan = document.createElement('span')
-                    srcSpan.className = 'pswp-info-src'
-                    srcSpan.textContent = `[${SOURCE_TIPS[item.source] || item.source}]`
-                    dateSpan.appendChild(srcSpan)
-                  }
-                  row.appendChild(dateSpan)
-
-                  const metaBits = []
-                  const tier =
-                    item.type === 'video'
-                      ? resolutionTier(item.width, item.height)
-                      : null
-                  if (tier) metaBits.push(tier.label)
-                  else if (item.width && item.height)
-                    metaBits.push(`${item.width}×${item.height}`)
-                  const dur = formatDuration(item.duration)
-                  if (dur) metaBits.push(dur)
-                  const sz = formatFileSize(item.size)
-                  if (sz) metaBits.push(sz)
-                  if (metaBits.length) {
-                    const metaSpan = document.createElement('span')
-                    metaSpan.className = 'pswp-info-meta'
-                    metaSpan.textContent = metaBits.join(' · ')
-                    if (tier && item.width && item.height)
-                      metaSpan.title = `${item.width}×${item.height}`
-                    row.appendChild(metaSpan)
+                  if (item.date) {
+                    const dateSpan = document.createElement('span')
+                    dateSpan.className = 'pswp-info-date'
+                    dateSpan.textContent = `Posted ${formatDate(item.date)}`
+                    row.appendChild(dateSpan)
                   }
 
                   if (item.addedMs) {
@@ -3214,11 +3203,6 @@
                     addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
                     row.appendChild(addedSpan)
                   }
-
-                  const nameSpan = document.createElement('span')
-                  nameSpan.className = 'pswp-info-filename'
-                  nameSpan.textContent = item.filename
-                  row.appendChild(nameSpan)
 
                   el.appendChild(row)
                 }
@@ -3230,6 +3214,51 @@
             // (The previous caption sidebar and its toggle button are gone:
             // the bottom info panel now carries both the post title and
             // the LoRA caption, gated by the single chrome-toggle below.)
+
+            // Open-source-post link button. Shows up only when the item
+            // has a mediaPageUrl / mediaUrl on its sidecar `source`. We
+            // mount the button always (so PhotoSwipe doesn't reflow on
+            // every slide change) and toggle visibility per slide.
+            //
+            // Use visibility:hidden (not display:none) so toggling it
+            // doesn't reflow the top bar's flex layout. Refresh on
+            // every lifecycle event that could change the current slide
+            // — `change` doesn't fire on initial open, so onInit alone
+            // would leave the button stuck.
+            let linkBtnEl = null
+            const refreshLinkBtn = () => {
+              if (!linkBtnEl) return
+              const item = filtered[pswp.currIndex] || filtered[0]
+              const url = item && item.post && item.post.url
+              if (url) {
+                linkBtnEl.style.visibility = 'visible'
+                linkBtnEl.style.pointerEvents = 'auto'
+                linkBtnEl.dataset.url = url
+                linkBtnEl.title = `Open source: ${url}`
+              } else {
+                linkBtnEl.style.visibility = 'hidden'
+                linkBtnEl.style.pointerEvents = 'none'
+                delete linkBtnEl.dataset.url
+              }
+            }
+            pswp.ui.registerElement({
+              name:     'pswp-link-button',
+              order:    8,
+              isButton: true,
+              title:    'Open source post',
+              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4h4v4"/><path d="M16 4l-7 7"/><path d="M14 11v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
+              onInit(el) {
+                linkBtnEl = el
+                refreshLinkBtn()
+                pswp.on('change', refreshLinkBtn)
+                pswp.on('afterInit', refreshLinkBtn)
+                pswp.on('contentActivate', refreshLinkBtn)
+              },
+              onClick() {
+                const url = linkBtnEl?.dataset?.url
+                if (url) window.open(url, '_blank', 'noopener,noreferrer')
+              },
+            })
 
             // Flag-for-deletion toggle. POSTs to /api/users/:user/flag, updates
             // the in-memory item, refreshes the card's red ribbon in the grid.
@@ -3321,46 +3350,155 @@
             if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
-          // Drive video state per-slide:
-          //   • Current slide  → preload="auto", muted, play().
-          //   • Anything else  → paused, rewound to 0, preload="none".
+          // Autoplay on first click was failing across every theory
+          // tried (HTML attribute alone, openingAnimationEnd hook,
+          // canplay listener) so we stop guessing at PhotoSwipe's
+          // lifecycle and just brute-force it: a MutationObserver
+          // catches every <video> the instant it lands in the DOM, and
+          // for the current slide's video we start a polling loop that
+          // calls play() every 100ms for up to 3 seconds OR until the
+          // video is actually playing. This survives any combination
+          // of timing/visibility issues with PhotoSwipe's open
+          // animation, Chrome's autoplay policy quirks, and slow data
+          // loading.
           //
-          // The previous DOM-class selector (`.pswp__item--current/--active`)
-          // never matched in PhotoSwipe v5 — the library doesn't add those
-          // classes — so play() was effectively only being honored by the
-          // <video autoplay> attribute on initial open. That made clicking
-          // a card *appear* to work and swiping silently fail. Going
-          // through `pswp.currSlide.holderElement` is the canonical way
-          // to find the live current slide.
+          // We never call v.load() — that aborts in-flight autoplay
+          // and leaves the video frozen on its first frame (which is
+          // exactly the bug the user was hitting).
+          const primeVideo = (v) => {
+            v.muted = true
+            v.autoplay = true
+            v.playsInline = true
+          }
+          const playPolls = new WeakMap()
+          const pollPlay = (v) => {
+            if (!v) return
+            const prev = playPolls.get(v)
+            if (prev) clearInterval(prev)
+            primeVideo(v)
+            // First synchronous attempt — usually wins on the second
+            // slide and later.
+            v.play().catch(() => {})
+            let attempts = 0
+            const interval = setInterval(() => {
+              attempts++
+              const isCurrent =
+                pswp.currSlide?.holderElement?.contains(v) === true
+              const isPlaying =
+                !v.paused && !v.ended && v.readyState >= 2
+              if (attempts > 30 || !isCurrent || isPlaying) {
+                clearInterval(interval)
+                playPolls.delete(v)
+                return
+              }
+              v.play().catch(() => {})
+            }, 100)
+            playPolls.set(v, interval)
+          }
           const syncVideos = () => {
             const root = pswp.element
             if (!root) return
             const currentVideo =
               pswp.currSlide?.holderElement?.querySelector('video') || null
+            if (currentVideo) pollPlay(currentVideo)
             root.querySelectorAll('video').forEach((v) => {
-              if (v === currentVideo) {
-                v.muted = true
-                if (v.preload !== 'auto') v.preload = 'auto'
-                if (v.readyState < 2) v.load()
-                v.play().catch(() => {})
-              } else {
-                v.pause()
-                try { v.currentTime = 0 } catch {}
-                if (v.preload !== 'none') v.preload = 'none'
+              if (v !== currentVideo) {
+                try { v.pause() } catch {}
+                const prev = playPolls.get(v)
+                if (prev) {
+                  clearInterval(prev)
+                  playPolls.delete(v)
+                }
               }
             })
           }
-          // Schedule for the next animation frame so the new slide's
-          // holderElement is in the DOM by the time we query it.
-          const scheduleSync = () => requestAnimationFrame(syncVideos)
-          pswp.on('change', scheduleSync)
-          pswp.on('afterInit', scheduleSync)
-          pswp.on('slideActivate', scheduleSync)
-          pswp.on('contentActivate', scheduleSync)
+          // Hit every PhotoSwipe event that could plausibly mean the
+          // current slide is ready. Each one independently kicks the
+          // poller; the first to succeed wins and the rest no-op.
+          pswp.on('change', syncVideos)
+          pswp.on('afterInit', syncVideos)
+          pswp.on('contentActivate', syncVideos)
+          pswp.on('slideActivate', syncVideos)
+          pswp.on('openingAnimationEnd', syncVideos)
+          pswp.on('initialZoomInEnd', syncVideos)
+
+          // MutationObserver primes every video the instant it lands in
+          // the lightbox DOM and starts polling it if it's the current
+          // slide. This is earlier than any PhotoSwipe event and survives
+          // PhotoSwipe internally cloning/moving the slide DOM during
+          // the open animation.
+          const mountObserver = new MutationObserver((records) => {
+            for (const r of records) {
+              for (const node of r.addedNodes) {
+                if (node.nodeType !== 1) continue
+                const vids =
+                  node.tagName === 'VIDEO'
+                    ? [node]
+                    : Array.from(node.querySelectorAll?.('video') || [])
+                for (const v of vids) {
+                  primeVideo(v)
+                  if (pswp.currSlide?.holderElement?.contains(v)) {
+                    pollPlay(v)
+                  }
+                }
+              }
+            }
+          })
+
+          // Tap-to-toggle native controls + kick off a play poll the
+          // moment PhotoSwipe says it's about to append this content.
+          // contentAppend fires just BEFORE container.appendChild, so
+          // we schedule the poll on the next microtask — by then the
+          // video is in the DOM and pollPlay can actually find it via
+          // pswp.currSlide.holderElement.contains(v).
+          pswp.on('contentAppend', (e) => {
+            const el = e.content?.element
+            const wrap = el?.classList?.contains('pswp-video-wrap')
+              ? el
+              : el?.querySelector?.('.pswp-video-wrap')
+            if (!wrap) return
+            const video = wrap.querySelector('video')
+            if (!video) return
+            primeVideo(video)
+            queueMicrotask(() => {
+              if (pswp.currSlide?.holderElement?.contains(video)) {
+                pollPlay(video)
+              }
+            })
+            if (wrap.dataset.tapBound) return
+            wrap.dataset.tapBound = '1'
+            wrap.addEventListener('click', (ev) => {
+              if (ev.target !== wrap && ev.target !== video) return
+              if (video.hasAttribute('controls')) {
+                video.removeAttribute('controls')
+              } else {
+                video.setAttribute('controls', '')
+              }
+            })
+          })
+          // Start the MutationObserver on afterInit — by then
+          // pswp.element exists. PhotoSwipe defers appending the
+          // actual content (including <video>) until *after* its
+          // opening animation completes (heavy-append is gated by
+          // `pswp.opener.isOpen`), so we observe BEFORE that append
+          // happens and catch the video the instant it lands.
+          pswp.on('afterInit', () => {
+            if (pswp.element) {
+              mountObserver.observe(pswp.element, {
+                childList: true,
+                subtree: true,
+              })
+            }
+          })
           pswp.on('close', () => {
+            try { mountObserver.disconnect() } catch {}
             const root = pswp.element
             if (!root) return
-            root.querySelectorAll('video').forEach((v) => v.pause())
+            root.querySelectorAll('video').forEach((v) => {
+              v.pause()
+              const prev = playPolls.get(v)
+              if (prev) clearInterval(prev)
+            })
           })
 
           pswp.init()
