@@ -1496,6 +1496,19 @@ async function saveStufferDbMediaEntry({ modelName, folders, entry }) {
   })
 }
 
+function getActiveStufferDbCheckpoint(savedCheckpoint, fullSourceRefresh) {
+  if (fullSourceRefresh || !savedCheckpoint) return null
+  const mediaPageUrl = savedCheckpoint.mediaPageUrl
+    ? normalizeStufferDbPictureUrl(savedCheckpoint.mediaPageUrl)
+    : null
+  const id = savedCheckpoint.id || getStufferDbPictureId(mediaPageUrl)
+  if (!id || !mediaPageUrl) return null
+  return {
+    id: String(id),
+    mediaPageUrl,
+  }
+}
+
 async function scrapeGallery(browser, url, modelName, folders, options = {}) {
   const { base, images, webm } = folders
   const fullSourceRefresh = Boolean(options.fullSourceRefresh)
@@ -1509,16 +1522,13 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
   const savedCheckpoint = fullSourceRefresh
     ? null
     : getSourceCheckpoint(folders.logDir, sourceIdentity)
-  const checkpointMediaPageUrl = savedCheckpoint?.mediaPageUrl
-    ? normalizeStufferDbPictureUrl(savedCheckpoint.mediaPageUrl)
-    : null
-  const checkpointId =
-    savedCheckpoint?.id || getStufferDbPictureId(checkpointMediaPageUrl)
-  const checkpointActive = Boolean(
-    checkpointId &&
-      checkpointMediaPageUrl &&
-      getSuccessfulSeenMediaMatch(folders.logDir, checkpointMediaPageUrl, null)
+  const activeCheckpoint = getActiveStufferDbCheckpoint(
+    savedCheckpoint,
+    fullSourceRefresh
   )
+  const checkpointMediaPageUrl = activeCheckpoint?.mediaPageUrl || null
+  const checkpointId = activeCheckpoint?.id || null
+  const checkpointActive = Boolean(activeCheckpoint)
   let categoryInspectedCount = 0
   let unscannedCount = 0
   let unresolvedCount = 0
@@ -1528,6 +1538,16 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
   const visitedGallerySignatures = new Set()
   const seenCategoryPictureIds = new Set()
   url = withStufferDbNewestFirst(url)
+
+  if (checkpointActive) {
+    appendRunEvent('category_checkpoint_activated', {
+      modelName,
+      categoryId,
+      checkpointId,
+      mediaPageUrl: checkpointMediaPageUrl,
+      validation: 'persisted_chronological_marker',
+    })
+  }
 
   const page = await createScraperPage(browser, {
     site: 'stufferdb',
@@ -2841,6 +2861,7 @@ async function runMilkmaidCli(argvInput = process.argv.slice(2)) {
 }
 
 module.exports = {
+  getActiveStufferDbCheckpoint,
   getPermanentLazyVideoFailure,
   normalizeMilkmaidRunOptions,
   parseCliArgs,

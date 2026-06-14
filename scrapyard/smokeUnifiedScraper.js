@@ -60,7 +60,10 @@ const {
   sourceMetaFromSeenRecord,
 } = require('./legacySourceBackfill')
 const { registerParsedSourceForModel } = require('./run-scrape-interactive')
-const { getPermanentLazyVideoFailure } = require('../milkmaid/milkmaid')
+const {
+  getActiveStufferDbCheckpoint,
+  getPermanentLazyVideoFailure,
+} = require('../milkmaid/milkmaid')
 const runLifecycle = require('./runLifecycle')
 
 async function withConsoleSilenced(callback) {
@@ -120,6 +123,30 @@ async function main() {
       mediaUrl:
         'https://stufferai.com/upload/2021/12/14/20211214175048-d185061d.mp4',
     }
+  )
+  assert.deepStrictEqual(
+    getActiveStufferDbCheckpoint(
+      {
+        id: '660723',
+        mediaPageUrl:
+          'https://stufferdb.com/index?/picture?/660723/category/16772&acs=1',
+      },
+      false
+    ),
+    {
+      id: '660723',
+      mediaPageUrl: 'https://stufferdb.com/picture?/660723/category/16772',
+    }
+  )
+  assert.strictEqual(
+    getActiveStufferDbCheckpoint(
+      {
+        id: '660723',
+        mediaPageUrl: 'https://stufferdb.com/picture?/660723/category/16772',
+      },
+      true
+    ),
+    null
   )
   assert.deepStrictEqual(
     buildRedditSourceMeta('StuffersNSFW_abigailgray256_1spqp2x_1-la.png'),
