@@ -31,6 +31,12 @@ const {
   loadModelRegistry,
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
+const {
+  PAWCHIVE_HOST,
+  PAWCHIVE_ORIGIN,
+  getPawchiveProfileUrl,
+  getPawchiveUserUrl,
+} = require('../scrapyard/pawchive')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
@@ -61,8 +67,8 @@ const PLATFORMS = {
       `https://coomerfans.com/${service}/user/${username}`,
   },
   kemono: {
-    host: 'kemono.cr',
-    label: 'Kemono',
+    host: PAWCHIVE_HOST,
+    label: 'Pawchive',
     services: [
       'patreon',
       'fanbox',
@@ -74,10 +80,8 @@ const PLATFORMS = {
       'dlsite',
       'subscribestar',
     ],
-    profileUrl: (service, username) =>
-      `https://kemono.cr/api/v1/${service}/user/${encodeURIComponent(username)}/profile`,
-    userUrl: (service, username) =>
-      `https://kemono.cr/${service}/user/${username}`,
+    profileUrl: getPawchiveProfileUrl,
+    userUrl: getPawchiveUserUrl,
   },
 }
 
@@ -123,9 +127,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function lookupCreator(platform, service, username) {
   const cfg = PLATFORMS[platform]
   try {
+    const creatorId =
+      platform === 'kemono' && !/^\d+$/.test(String(username || ''))
+        ? await resolvePawchiveCreatorId(service, username)
+        : String(username)
+    if (!creatorId) return null
     const { status, body } = await httpsGet(
       cfg.host,
-      cfg.profileUrl(service, username)
+      cfg.profileUrl(service, creatorId)
     )
     if (status === 200) {
       try {
@@ -141,6 +150,45 @@ async function lookupCreator(platform, service, username) {
   }
 }
 
+let pawchiveCreatorsPromise = null
+
+function normalizeCreatorName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+async function loadPawchiveCreators() {
+  if (!pawchiveCreatorsPromise) {
+    pawchiveCreatorsPromise = httpsGet(
+      PAWCHIVE_HOST,
+      `${PAWCHIVE_ORIGIN}/api/v1/creators`
+    ).then(({ status, body }) => {
+      if (status !== 200) throw new Error(`HTTP ${status}`)
+      const creators = JSON.parse(body)
+      if (!Array.isArray(creators)) {
+        throw new Error('Pawchive creators response was not an array')
+      }
+      return creators
+    })
+  }
+  return pawchiveCreatorsPromise
+}
+
+async function resolvePawchiveCreatorId(service, username) {
+  const normalizedName = normalizeCreatorName(username)
+  if (!normalizedName) return null
+  const creators = await loadPawchiveCreators()
+  const creator = creators.find(
+    (item) =>
+      item?.service === service &&
+      normalizeCreatorName(item?.name) === normalizedName
+  )
+  return creator?.id ? String(creator.id) : null
+}
+
 async function probeUsername(platform, username) {
   const cfg = PLATFORMS[platform]
   const hits = []
@@ -148,11 +196,13 @@ async function probeUsername(platform, username) {
     try {
       const creator = await lookupCreator(platform, service, username)
       if (creator) {
+        const creatorId =
+          platform === 'kemono' ? String(creator.id || username) : username
         hits.push({
           platform,
           service,
-          username,
-          url: cfg.userUrl(service, username),
+          username: creator.name || username,
+          url: cfg.userUrl(service, creatorId),
           displayName: creator.name || username,
         })
       }
@@ -190,7 +240,7 @@ async function run() {
   })
 
   console.log('\n  ╔═══════════════════════════════════════════╗')
-  console.log('  ║   Batch Source Probe (coomer + kemono)    ║')
+  console.log('  ║   Batch Source Probe (coomer + Pawchive)  ║')
   console.log('  ╚═══════════════════════════════════════════╝\n')
   console.log(`  Registry:  ${registryPath}`)
   console.log(`  Report:    ${reportPath}`)
@@ -246,7 +296,7 @@ async function run() {
       )
     if (hasKemono)
       modelLines.push(
-        `  Kemono:  already set — ${entry.sources.kemono[0]?.url || entry.sources.kemono[0]}`
+        `  Pawchive: already set — ${entry.sources.kemono[0]?.url || entry.sources.kemono[0]}`
       )
 
     const modelHits = []

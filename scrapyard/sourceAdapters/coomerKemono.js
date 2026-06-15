@@ -4,8 +4,16 @@ const path = require('path')
 const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
 const { createBoundaryPageFilter } = require('../sourceFrontier')
+const {
+  PAWCHIVE_ORIGIN,
+  getPawchiveMediaUrl,
+  getPawchivePreviewUrl,
+} = require('../pawchive')
 
 const DEFAULT_PAGE_SIZE = 50
+const DEFAULT_POST_METADATA_CONCURRENCY = 4
+const MEDIA_EXTENSION_RE =
+  /\.(?:jpe?g|png|webp|gif|bmp|avif|mp4|m4v|webm|mov)$/i
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -19,25 +27,51 @@ function normalizeCreatorName(value) {
 }
 
 function cleanPostText(value) {
-  return String(value || '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:div|p|li)>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+  return decodeHtmlEntities(
+    String(value || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(?:div|p|li)>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+  )
     .replace(/\s+/g, ' ')
     .trim()
 }
 
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+      String.fromCodePoint(Number.parseInt(code, 16))
+    )
+    .replace(/&#(\d+);/g, (_, code) =>
+      String.fromCodePoint(Number.parseInt(code, 10))
+    )
+}
+
 function getPostTitleOrCaption(post = {}) {
   const title = cleanPostText(post.title)
-  const caption = cleanPostText(post.content)
+  const caption = getPostCaption(post)
   if (!title) return caption || null
   if (!caption || caption === title) return title
   return `${title} - ${caption}`
+}
+
+function getPostCaption(post = {}) {
+  const contentWithoutDownloadAnchors = String(post.content || '').replace(
+    /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>[\s\S]*?<\/a>/gi,
+    (anchor, href) => (getExternalMediaCandidate(href) ? ' ' : anchor)
+  )
+  return cleanPostText(contentWithoutDownloadAnchors)
+    .replace(/https?:\/\/[^\s<>"']+/gi, (url) =>
+      getExternalMediaCandidate(url.replace(/[),.;]+$/g, '')) ? ' ' : url
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function getPostsApiUrl(source, offset = 0, pageSize = DEFAULT_PAGE_SIZE) {
@@ -50,11 +84,38 @@ function getPostPageUrl(source, post) {
   return `${source.origin}/${source.service}/user/${source.userId}/post/${post.id}`
 }
 
-function getMediaUrl(source, media) {
+function getPostApiUrl(source, post) {
+  return `${source.origin}/api/v1/${source.service}/user/${encodeURIComponent(
+    source.userId
+  )}/post/${encodeURIComponent(post.id)}`
+}
+
+function getPostCommentsApiUrl(source, post) {
+  return `${getPostApiUrl(source, post)}/comments`
+}
+
+function getMediaUrl(source, media, post = {}) {
   const mediaPath = String(media?.path || '').trim()
   if (!mediaPath) return null
   if (/^https?:\/\//i.test(mediaPath)) return mediaPath
+  if (source.origin === PAWCHIVE_ORIGIN) {
+    return post.has_full === true
+      ? getPawchiveMediaUrl(mediaPath)
+      : getPawchivePreviewUrl(mediaPath)
+  }
   return `${source.origin}/data${mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`}`
+}
+
+function getPawchiveQualityMetadata(source, media, post = {}) {
+  if (source.origin !== PAWCHIVE_ORIGIN) return {}
+
+  const isFullResolution = post.has_full === true
+  return {
+    mediaQuality: isFullResolution ? 'full' : 'pawchive_preview',
+    needsFullResolution: !isFullResolution,
+    fullResolutionStatus: isFullResolution ? 'source_full' : 'pending',
+    fullResolutionUrl: getPawchiveMediaUrl(media?.path),
+  }
 }
 
 function filenameFromMediaUrl(mediaUrl) {
@@ -64,6 +125,126 @@ function filenameFromMediaUrl(mediaUrl) {
   } catch {
     return null
   }
+}
+
+function addPawchivePreviewSuffix(filename) {
+  const extension = path.extname(filename)
+  const basename = extension ? filename.slice(0, -extension.length) : filename
+  return `${basename}.pawchive-preview${extension}`
+}
+
+function sanitizeMediaFilename(value) {
+  const parsed = path.parse(
+    String(value || '')
+      .replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_')
+      .replace(/\s+/g, ' ')
+      .replace(/[. ]+$/g, '')
+      .trim()
+  )
+  if (!parsed.base || !parsed.ext || !MEDIA_EXTENSION_RE.test(parsed.ext)) {
+    return null
+  }
+  const stem = parsed.name.slice(0, 160).replace(/[. ]+$/g, '')
+  return stem ? `${stem}${parsed.ext.toLowerCase()}` : null
+}
+
+function getExternalMediaCandidate(rawUrl) {
+  let parsed
+  try {
+    parsed = new URL(decodeHtmlEntities(rawUrl))
+  } catch {
+    return null
+  }
+  if (!/^https?:$/.test(parsed.protocol)) return null
+
+  const originalUrl = parsed.toString()
+  const hostname = parsed.hostname.toLowerCase()
+  const originalName = decodeURIComponent(path.basename(parsed.pathname))
+  if (!MEDIA_EXTENSION_RE.test(originalName)) return null
+
+  if (
+    hostname === 'dropbox.com' ||
+    hostname === 'www.dropbox.com' ||
+    hostname.endsWith('.dropbox.com') ||
+    hostname === 'dl.dropboxusercontent.com'
+  ) {
+    parsed.hostname = 'dl.dropboxusercontent.com'
+    parsed.searchParams.delete('raw')
+    parsed.searchParams.set('dl', '1')
+  }
+
+  return {
+    downloadUrl: parsed.toString(),
+    originalUrl,
+    originalName,
+  }
+}
+
+function extractPostExternalUrls(post = {}) {
+  const urls = []
+  const add = (value) => {
+    const url = String(value || '').trim()
+    if (url) urls.push(url)
+  }
+  const embeds = Array.isArray(post.embed) ? post.embed : [post.embed]
+  for (const embed of embeds) add(embed?.url)
+
+  const content = String(post.content || '')
+  const hrefPattern = /\bhref\s*=\s*["']([^"']+)["']/gi
+  let match
+  while ((match = hrefPattern.exec(content)) !== null) add(match[1])
+
+  const text = cleanPostText(content)
+  const urlPattern = /https?:\/\/[^\s<>"']+/gi
+  while ((match = urlPattern.exec(text)) !== null) {
+    add(match[0].replace(/[),.;]+$/g, ''))
+  }
+  return Array.from(new Set(urls))
+}
+
+function getExternalMediaEntriesFromPost(source, post, options = {}) {
+  if (source.origin !== PAWCHIVE_ORIGIN) return []
+
+  const postPublishedAt = parseResolvedDate(post.published)
+  const mediaPageUrl = getPostPageUrl(source, post)
+  const title = getPostTitleOrCaption(post)
+  const normalizeUrl =
+    typeof options.normalizeUrl === 'function'
+      ? options.normalizeUrl
+      : (value) => String(value || '').trim()
+  const seen = new Set()
+
+  return extractPostExternalUrls(post)
+    .map((rawUrl) => {
+      const candidate = getExternalMediaCandidate(rawUrl)
+      if (!candidate) return null
+      const key = normalizeUrl(candidate.downloadUrl)
+      if (!key || seen.has(key)) return null
+      seen.add(key)
+
+      const filename = sanitizeMediaFilename(
+        `${String(post.id || 'post')}-${candidate.originalName}`
+      )
+      if (!filename) return null
+      return {
+        postId: String(post.id || ''),
+        title,
+        mediaPageUrl,
+        mediaPageUrls: [mediaPageUrl],
+        mediaUrl: candidate.downloadUrl,
+        mediaUrls: [candidate.downloadUrl, candidate.originalUrl],
+        sourceUrls: [candidate.originalUrl],
+        filename,
+        originalName: candidate.originalName,
+        uploadedDate: postPublishedAt,
+        mediaQuality: 'external_full',
+        needsFullResolution: false,
+        fullResolutionStatus: 'external_source',
+        pageMeta: post.pageMeta || null,
+        externalMedia: true,
+      }
+    })
+    .filter(Boolean)
 }
 
 function getMediaEntriesFromPost(source, post, options = {}) {
@@ -81,8 +262,14 @@ function getMediaEntriesFromPost(source, post, options = {}) {
   const seen = new Set()
   const entries = rawEntries
     .map((media) => {
-      const mediaUrl = getMediaUrl(source, media)
-      const filename = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
+      const mediaUrl = getMediaUrl(source, media, post)
+      const sourceFilename = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
+      const filename =
+        sourceFilename &&
+        source.origin === PAWCHIVE_ORIGIN &&
+        post.has_full !== true
+          ? addPawchivePreviewSuffix(sourceFilename)
+          : sourceFilename
       if (!mediaUrl || !filename) return null
       const key = normalizeUrl(mediaUrl)
       if (seen.has(key)) return null
@@ -97,9 +284,13 @@ function getMediaEntriesFromPost(source, post, options = {}) {
         filename,
         originalName: media.name || null,
         uploadedDate: postPublishedAt,
+        pageMeta: post.pageMeta || null,
+        ...getPawchiveQualityMetadata(source, media, post),
       }
     })
     .filter(Boolean)
+
+  entries.push(...getExternalMediaEntriesFromPost(source, post, options))
 
   return normalizeMediaEntries(entries, {
     sourceSite: source.site,
@@ -107,6 +298,103 @@ function getMediaEntriesFromPost(source, post, options = {}) {
     sourceUserId: source.userId,
     sourceUsername: source.username || source.rawName || source.userId,
   })
+}
+
+function normalizePawchiveComments(comments) {
+  if (!Array.isArray(comments)) return []
+  return comments
+    .map((comment) => ({
+      author: cleanPostText(comment?.commenter_name) || null,
+      posted: String(comment?.published || '').trim() || null,
+      text: cleanPostText(comment?.content),
+    }))
+    .filter((comment) => comment.text)
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const concurrency = Math.max(
+    Number.parseInt(String(limit || DEFAULT_POST_METADATA_CONCURRENCY), 10) ||
+      DEFAULT_POST_METADATA_CONCURRENCY,
+    1
+  )
+  const results = new Array(items.length)
+  let nextIndex = 0
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(items[index], index)
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  )
+  return results
+}
+
+async function enrichPawchivePosts(source, posts, deps = {}) {
+  if (
+    source.origin !== PAWCHIVE_ORIGIN ||
+    !posts.length ||
+    typeof deps.fetchJson !== 'function'
+  ) {
+    return posts
+  }
+
+  let completed = 0
+  let detailFailures = 0
+  let commentFailures = 0
+  const enriched = await mapWithConcurrency(
+    posts,
+    deps.postConcurrency || DEFAULT_POST_METADATA_CONCURRENCY,
+    async (post) => {
+      let detailedPost = post
+      if (post.detail_fetched !== true) {
+        try {
+          const result = await deps.fetchJson(getPostApiUrl(source, post))
+          if (result?.data && typeof result.data === 'object') {
+            detailedPost = { ...post, ...result.data }
+          }
+        } catch {
+          detailFailures += 1
+        }
+      }
+
+      let pageMeta = null
+      try {
+        const result = await deps.fetchJson(
+          getPostCommentsApiUrl(source, detailedPost)
+        )
+        const comments = normalizePawchiveComments(result?.data)
+        pageMeta = {
+          comments,
+          commentCount: Array.isArray(result?.data)
+            ? result.data.length
+            : comments.length,
+        }
+      } catch {
+        commentFailures += 1
+      }
+
+      completed += 1
+      deps.logger?.status?.(
+        `Fetching Pawchive metadata: ${completed}/${posts.length} post(s)`
+      )
+      return {
+        ...detailedPost,
+        ...(pageMeta ? { pageMeta } : {}),
+      }
+    }
+  )
+
+  if (detailFailures || commentFailures) {
+    deps.logger?.log?.(
+      `Pawchive metadata warnings: ${detailFailures} detail, ${commentFailures} comment request(s) failed`
+    )
+  }
+  return enriched
 }
 
 async function findCreatorIdByName(source, fetchJson) {
@@ -136,12 +424,12 @@ async function resolveKemonoCreatorIdForJson(source, deps = {}) {
   )
   if (!resolvedId) {
     throw new Error(
-      `Kemono rejected "${source.userId}" for ${source.service}. Kemono creator URLs usually need the numeric creator ID, and that username was not found in /api/v1/creators.`
+      `Pawchive rejected "${source.userId}" for ${source.service}. Pawchive creator URLs need the numeric creator ID, and that username was not found in /api/v1/creators.`
     )
   }
 
   deps.logger?.log?.(
-    `Resolved Kemono creator ${source.userId} -> ${resolvedId}`
+    `Resolved Pawchive creator ${source.userId} -> ${resolvedId}`
   )
   source.userId = resolvedId
   source.rawName = sanitizeToken(resolvedId)
@@ -184,6 +472,9 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
 
   const pageSize = deps.pageSize || DEFAULT_PAGE_SIZE
   const posts = []
+  let previewMediaSelected = 0
+  let linkedMediaSelected = 0
+  let commentsFetched = 0
   let page = options.startPage || 0
   let fetchedPages = 0
   const pageFilter = createBoundaryPageFilter(deps.sourceFrontier, {
@@ -222,11 +513,35 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
             Math.max(options.maxPosts - posts.length, 0)
           )
         : filteredPage.items
+    const enrichedPagePosts = await enrichPawchivePosts(
+      source,
+      selectedPagePosts,
+      {
+        ...deps,
+        postConcurrency: options.postConcurrency,
+      }
+    )
     posts.push(
-      ...selectedPagePosts.map((post) => ({
-        ...post,
-        mediaEntries: getMediaEntriesFromPost(source, post, deps),
-      }))
+      ...enrichedPagePosts.map((post) => {
+        if (source.origin === PAWCHIVE_ORIGIN && post.has_full !== true) {
+          previewMediaSelected +=
+            (post.file?.path ? 1 : 0) +
+            (Array.isArray(post.attachments)
+              ? post.attachments.filter((item) => item?.path).length
+              : 0)
+        }
+        const mediaEntries = getMediaEntriesFromPost(source, post, deps)
+        linkedMediaSelected += mediaEntries.filter(
+          (entry) => entry.externalMedia
+        ).length
+        commentsFetched += Array.isArray(post.pageMeta?.comments)
+          ? post.pageMeta.comments.length
+          : 0
+        return {
+          ...post,
+          mediaEntries,
+        }
+      })
     )
     fetchedPages += 1
     deps.logger?.status?.(
@@ -246,7 +561,15 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
 
   deps.logger?.statusDone?.(
     fetchedPages > 0
-      ? `Fetched ${source.site} pages: ${fetchedPages} page(s), ${posts.length} post(s)`
+      ? `Fetched ${source.site} pages: ${fetchedPages} page(s), ${posts.length} post(s)${
+          previewMediaSelected > 0
+            ? `, ${previewMediaSelected} Pawchive preview media selected`
+            : ''
+        }${
+          linkedMediaSelected > 0
+            ? `, ${linkedMediaSelected} linked media selected`
+            : ''
+        }${commentsFetched > 0 ? `, ${commentsFetched} comments fetched` : ''}`
       : ''
   )
   return posts
@@ -257,7 +580,10 @@ module.exports = {
   fetchCoomerKemonoPosts,
   findCreatorIdByName,
   getMediaEntriesFromPost,
+  getExternalMediaEntriesFromPost,
   getMediaUrl,
+  getPostApiUrl,
+  getPostCommentsApiUrl,
   getPostTitleOrCaption,
   getPostPageUrl,
   getPostsApiUrl,

@@ -17,6 +17,8 @@ function createMediaSavePipeline(options = {}) {
     onSaved = () => {},
     onQueued = () => {},
     onOutcome = () => {},
+    prepareDuplicateEntry = async ({ entry }) => entry,
+    shouldTreatVisualMatchAsDuplicate = async () => true,
   } = options
 
   if (!mediaSaver) {
@@ -325,12 +327,26 @@ function createMediaSavePipeline(options = {}) {
         visualHash && typeof getVisualDuplicationRecord === 'function'
           ? getVisualDuplicationRecord(visualHash)
           : null
-      if (visualMatch?.isDuplicate) {
+      if (
+        visualMatch?.isDuplicate &&
+        (await shouldTreatVisualMatchAsDuplicate({
+          entry,
+          buffer,
+          match: visualMatch,
+          reason: 'duplicate_visual',
+        }))
+      ) {
         const reason = 'duplicate_visual'
+        const duplicateEntry = await prepareDuplicateEntry({
+          entry,
+          buffer,
+          match: visualMatch,
+          reason,
+        })
         recordDuplicate({
           modelName,
           folders,
-          entry,
+          entry: duplicateEntry,
           destination,
           reason,
           extra: {
@@ -359,12 +375,26 @@ function createMediaSavePipeline(options = {}) {
               fuzzyVisualDistance
             )
           : null
-      if (fuzzyMatch?.isDuplicate) {
+      if (
+        fuzzyMatch?.isDuplicate &&
+        (await shouldTreatVisualMatchAsDuplicate({
+          entry,
+          buffer,
+          match: fuzzyMatch,
+          reason: 'duplicate_visual_fuzzy',
+        }))
+      ) {
         const reason = 'duplicate_visual_fuzzy'
+        const duplicateEntry = await prepareDuplicateEntry({
+          entry,
+          buffer,
+          match: fuzzyMatch,
+          reason,
+        })
         recordDuplicate({
           modelName,
           folders,
-          entry,
+          entry: duplicateEntry,
           destination,
           reason,
           extra: {

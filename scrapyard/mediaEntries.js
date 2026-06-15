@@ -103,6 +103,14 @@ function normalizeMediaEntry(entry, options = {}) {
     sourceUrls,
     filename,
     originalName: entry.originalName || null,
+    mediaQuality: entry.mediaQuality || null,
+    needsFullResolution:
+      typeof entry.needsFullResolution === 'boolean'
+        ? entry.needsFullResolution
+        : null,
+    fullResolutionStatus: entry.fullResolutionStatus || null,
+    fullResolutionUrl: entry.fullResolutionUrl || null,
+    fullResolutionResolvedPath: entry.fullResolutionResolvedPath || null,
     uploadedDate,
     extension: classification.ext,
     kind: entry.kind || classification.kind,
@@ -151,6 +159,7 @@ function getMediaEntrySourceDetails(entry = {}) {
     postId: entry.postId || null,
     title: entry.title || null,
     originalName: entry.originalName || null,
+    ...getMediaEntryQualityDetails(entry),
   }
 }
 
@@ -164,7 +173,26 @@ function getMediaEntryHashMetadata(entry = {}) {
     sourcePostId: entry.postId || null,
     sourceTitle: entry.title || null,
     sourceMediaPageUrl: entry.mediaPageUrl || null,
+    ...getMediaEntryQualityDetails(entry),
   }
+}
+
+function getMediaEntryQualityDetails(entry = {}) {
+  const details = {}
+  if (entry.mediaQuality) details.mediaQuality = entry.mediaQuality
+  if (typeof entry.needsFullResolution === 'boolean') {
+    details.needsFullResolution = entry.needsFullResolution
+  }
+  if (entry.fullResolutionStatus) {
+    details.fullResolutionStatus = entry.fullResolutionStatus
+  }
+  if (entry.fullResolutionUrl) {
+    details.fullResolutionUrl = entry.fullResolutionUrl
+  }
+  if (entry.fullResolutionResolvedPath) {
+    details.fullResolutionResolvedPath = entry.fullResolutionResolvedPath
+  }
+  return details
 }
 
 module.exports = {

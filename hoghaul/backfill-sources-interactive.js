@@ -5,7 +5,7 @@
  *
  * Unified interactive backfill for all three source types:
  *   - coomerfans.com  (OnlyFans, Fansly, Patreon, …)
- *   - kemono.cr  (Patreon, Fanbox, Gumroad, Discord, Fantia, …)
+ *   - pawchive.st (Patreon, Fanbox, Gumroad, Discord, Fantia, ...)
  *   - stufferdb  (manual URL paste only)
  *
  * For each model missing any source, auto-probes all known aliases against
@@ -16,6 +16,10 @@
  *
  * Options:
  *   --force     Re-review models that already have all sources
+ *   --auto      Run registry-wide exact username matching without prompts
+ *   --retry-auto Ignore remembered no-match results and try them again
+ *   --models=x  Limit auto-match and review to comma-separated models
+ *   --no-open   Print search/profile URLs without opening a browser
  *   --delay=300 Milliseconds between API requests (default: 300)
  */
 
@@ -31,16 +35,34 @@ const {
   loadModelRegistry,
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
+const {
+  PAWCHIVE_HOST,
+  PAWCHIVE_ORIGIN,
+  getPawchiveProfileUrl,
+  getPawchiveUserUrl,
+} = require('../scrapyard/pawchive')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
 const AUTO = !!argv.auto // auto-save canonical/alias username matches, skip everything else
+const RETRY_AUTO = !!argv['retry-auto']
+const OPEN_BROWSER = argv.open !== false
 const DELAY = parseInt(argv.delay ?? 300, 10)
+const MODEL_FILTER = new Set(
+  String(argv.models || argv.model || '')
+    .split(',')
+    .map(sanitize)
+    .filter(Boolean)
+)
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 const permanentSkipPath = path.join(
   __dirname,
   'source-backfill-permanent-skips.json'
+)
+const autoAttemptPath = path.join(
+  __dirname,
+  'source-backfill-auto-attempts.json'
 )
 
 // ─── PLATFORM CONFIG ──────────────────────────────────────────────────────────
@@ -65,8 +87,8 @@ const PLATFORMS = {
       `https://coomerfans.com/?q=${encodeURIComponent(name)}`,
   },
   kemono: {
-    host: 'kemono.cr',
-    label: 'Kemono',
+    host: PAWCHIVE_HOST,
+    label: 'Pawchive',
     services: [
       'patreon',
       'fanbox',
@@ -79,13 +101,11 @@ const PLATFORMS = {
       'subscribestar',
     ],
     urlPattern:
-      /^https?:\/\/(?:www\.)?kemono\.(?:cr|su|party)\/([^/]+)\/user\/([^/?#\s]+)/i,
+      /^https?:\/\/(?:www\.)?(?:pawchive\.st|kemono\.(?:cr|su|party))\/([^/]+)\/user\/([^/?#\s]+)/i,
     searchUrl: (name) =>
-      `https://kemono.cr/artists?q=${encodeURIComponent(name)}`,
-    profileUrl: (service, username) =>
-      `https://kemono.cr/api/v1/${service}/user/${encodeURIComponent(username)}/profile`,
-    userUrl: (service, username) =>
-      `https://kemono.cr/${service}/user/${username}`,
+      `${PAWCHIVE_ORIGIN}/artists?q=${encodeURIComponent(name)}`,
+    profileUrl: getPawchiveProfileUrl,
+    userUrl: getPawchiveUserUrl,
   },
   reddit: {
     host: 'www.reddit.com',
@@ -146,6 +166,10 @@ function httpsGet(host, url, headers = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+function isSelectedModel(canonicalName) {
+  return MODEL_FILTER.size === 0 || MODEL_FILTER.has(sanitize(canonicalName))
+}
+
 function loadPermanentSkips() {
   if (!fs.existsSync(permanentSkipPath)) {
     return { version: 1, updatedAt: null, skips: {} }
@@ -169,6 +193,81 @@ function loadPermanentSkips() {
 function savePermanentSkips(state) {
   state.updatedAt = new Date().toISOString()
   fs.writeFileSync(permanentSkipPath, JSON.stringify(state, null, 2) + '\n')
+}
+
+function loadAutoAttempts() {
+  if (!fs.existsSync(autoAttemptPath)) {
+    return { version: 1, updatedAt: null, attempts: {} }
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(autoAttemptPath, 'utf8'))
+    return {
+      version: 1,
+      updatedAt: parsed?.updatedAt || null,
+      attempts:
+        parsed?.attempts && typeof parsed.attempts === 'object'
+          ? parsed.attempts
+          : {},
+    }
+  } catch (err) {
+    console.warn(
+      `  Warning: could not parse auto-attempt file ${autoAttemptPath}: ${err.message}`
+    )
+    return { version: 1, updatedAt: null, attempts: {} }
+  }
+}
+
+function saveAutoAttempts(state) {
+  state.updatedAt = new Date().toISOString()
+  fs.writeFileSync(autoAttemptPath, JSON.stringify(state, null, 2) + '\n')
+}
+
+function getAutoAttemptSignature(canonicalName, entry, missingPlatforms) {
+  return JSON.stringify({
+    model: sanitize(canonicalName),
+    aliases: getModelUsernameSeeds(canonicalName, entry)
+      .map((value) => value.toLowerCase())
+      .sort(),
+    missingPlatforms: [...missingPlatforms].sort(),
+  })
+}
+
+function getRememberedAutoAttempt(state, canonicalName, platform, signature) {
+  const modelKey = sanitize(canonicalName)
+  const attempt = state.attempts?.[modelKey]?.[platform]
+  return ['no_match', 'ambiguous'].includes(attempt?.result) &&
+    attempt.signature === signature
+    ? attempt
+    : null
+}
+
+function rememberAutoResult(
+  state,
+  canonicalName,
+  platform,
+  signature,
+  usernames,
+  result,
+  candidates = []
+) {
+  const modelKey = sanitize(canonicalName)
+  if (!state.attempts[modelKey]) state.attempts[modelKey] = {}
+  state.attempts[modelKey][platform] = {
+    result,
+    attemptedAt: new Date().toISOString(),
+    candidates,
+    signature,
+    usernames,
+  }
+}
+
+function clearAutoAttempt(state, canonicalName, platform) {
+  const modelKey = sanitize(canonicalName)
+  if (!state.attempts?.[modelKey]?.[platform]) return
+  delete state.attempts[modelKey][platform]
+  if (Object.keys(state.attempts[modelKey]).length === 0) {
+    delete state.attempts[modelKey]
+  }
 }
 
 function getPermanentSkipEntry(state, canonicalName, platform) {
@@ -263,7 +362,12 @@ async function searchCoomer(query) {
 
 async function lookupKemono(service, username) {
   const cfg = PLATFORMS.kemono
-  const apiUrl = `https://kemono.cr/api/v1/${service}/user/${encodeURIComponent(username)}/profile`
+  const creatorId = /^\d+$/.test(String(username || ''))
+    ? String(username)
+    : await resolvePawchiveCreatorId(service, username)
+  if (!creatorId) return null
+
+  const apiUrl = cfg.profileUrl(service, creatorId)
   const { status, body } = await httpsGet(cfg.host, apiUrl)
   if (status === 200) {
     try {
@@ -274,6 +378,65 @@ async function lookupKemono(service, username) {
   }
   if (status === 404) return null
   throw new Error(`HTTP ${status}`)
+}
+
+let pawchiveCreatorsPromise = null
+
+function normalizeCreatorName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+async function loadPawchiveCreators() {
+  if (!pawchiveCreatorsPromise) {
+    const startedAt = Date.now()
+    process.stdout.write('  Loading Pawchive creator catalog...')
+    pawchiveCreatorsPromise = httpsGet(
+      PAWCHIVE_HOST,
+      `${PAWCHIVE_ORIGIN}/api/v1/creators`,
+      { Accept: 'application/json' }
+    )
+      .then(({ status, body }) => {
+        if (status !== 200) throw new Error(`HTTP ${status}`)
+        const creators = JSON.parse(body)
+        if (!Array.isArray(creators)) {
+          throw new Error('Pawchive creators response was not an array')
+        }
+        process.stdout.write(
+          ` ${creators.length.toLocaleString()} creators (${(
+            (Date.now() - startedAt) /
+            1000
+          ).toFixed(1)}s)\n`
+        )
+        return creators
+      })
+      .catch((err) => {
+        pawchiveCreatorsPromise = null
+        process.stdout.write(` failed: ${err.message}\n`)
+        throw err
+      })
+  }
+  return pawchiveCreatorsPromise
+}
+
+async function findPawchiveCreators(username, service = null) {
+  const normalizedName = normalizeCreatorName(username)
+  if (!normalizedName) return []
+  const creators = await loadPawchiveCreators()
+  return creators.filter(
+    (item) =>
+      (!service || item?.service === service) &&
+      PLATFORMS.kemono.services.includes(item?.service) &&
+      normalizeCreatorName(item?.name) === normalizedName
+  )
+}
+
+async function resolvePawchiveCreatorId(service, username) {
+  const creators = await findPawchiveCreators(username, service)
+  return creators[0]?.id ? String(creators[0].id) : null
 }
 
 async function lookupReddit(username) {
@@ -340,17 +503,32 @@ async function probeUsername(platform, username) {
       : []
   }
   // kemono — direct profile lookup per service
+  if (!/^\d+$/.test(String(username || ''))) {
+    const creators = await findPawchiveCreators(username)
+    return creators.map((creator) => ({
+      platform,
+      service: creator.service,
+      id: String(creator.id),
+      username: creator.name || username,
+      url: PLATFORMS.kemono.userUrl(creator.service, creator.id),
+      name: creator.name || username,
+    }))
+  }
+
+  // Numeric creator IDs do not identify their service, so try each one.
   const cfg = PLATFORMS.kemono
   const hits = []
   for (const service of cfg.services) {
     try {
       const creator = await lookupKemono(service, username)
       if (creator) {
+        const creatorId = String(creator.id || username)
         hits.push({
           platform,
           service,
-          username,
-          url: `https://kemono.cr/${service}/user/${username}`,
+          id: creatorId,
+          username: creator.name || username,
+          url: cfg.userUrl(service, creatorId),
           name: creator.name || username,
         })
       }
@@ -362,38 +540,17 @@ async function probeUsername(platform, username) {
   return hits
 }
 
-async function autoProbeModel(canonicalName, entry) {
-  const aliases = Array.isArray(entry?.aliases)
-    ? entry.aliases
-    : [canonicalName]
-  const usernames = [
-    ...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean)),
-  ]
-  const allHits = { coomer: [], kemono: [], reddit: [] }
-  for (const username of usernames) {
-    for (const platform of ['coomer', 'kemono', 'reddit']) {
-      try {
-        const hits = await probeUsername(platform, username)
-        allHits[platform].push(...hits)
-      } catch {
-        await sleep(DELAY * 2)
-      }
-    }
-  }
-  return allHits
-}
-
 function getModelUsernameSeeds(canonicalName, entry) {
   const aliases = Array.isArray(entry?.aliases) ? entry.aliases : []
   return [...new Set([canonicalName, ...aliases].map(sanitize).filter(Boolean))]
 }
 
 function isModelUsernameMatch(canonicalName, entry, hit) {
-  const username = sanitize(hit?.username).toLowerCase()
+  const username = normalizeCreatorName(hit?.username)
   if (!username) return false
 
   for (const seed of getModelUsernameSeeds(canonicalName, entry)) {
-    const normalizedSeed = seed.toLowerCase()
+    const normalizedSeed = normalizeCreatorName(seed)
     if (username === normalizedSeed) return true
   }
 
@@ -405,18 +562,27 @@ function addUniqueHit(targets, hit) {
   targets.push(hit)
 }
 
-async function autoProbeMatchingUsernames(canonicalName, entry, skipState) {
+async function autoProbeMatchingUsernames(canonicalName, entry, platforms) {
   const usernames = getModelUsernameSeeds(canonicalName, entry)
   const allHits = { coomer: [], kemono: [], reddit: [] }
-  if (!usernames.length) return allHits
+  const errors = { coomer: [], kemono: [], reddit: [] }
+  if (!usernames.length) return { allHits, errors }
 
-  for (const platform of getMissingSources(
-    canonicalName,
-    entry,
-    skipState,
-    false
-  )) {
+  if (
+    platforms.includes('kemono') &&
+    usernames.some((username) => !/^\d+$/.test(username))
+  ) {
+    try {
+      await loadPawchiveCreators()
+    } catch {
+      // The individual probe reports the error and can retry.
+    }
+  }
+
+  for (const platform of platforms) {
     for (const username of usernames) {
+      const startedAt = Date.now()
+      process.stdout.write(`    ${PLATFORMS[platform].label} "${username}"...`)
       try {
         const hits = await probeUsername(platform, username)
         for (const hit of hits) {
@@ -424,41 +590,168 @@ async function autoProbeMatchingUsernames(canonicalName, entry, skipState) {
             addUniqueHit(allHits[platform], hit)
           }
         }
-      } catch {
+        process.stdout.write(
+          ` ${hits.length} hit(s) (${((Date.now() - startedAt) / 1000).toFixed(
+            1
+          )}s)\n`
+        )
+      } catch (err) {
+        process.stdout.write(` error: ${err.message}\n`)
+        errors[platform].push({
+          username,
+          message: err.message,
+        })
         await sleep(DELAY * 2)
       }
     }
   }
 
-  return allHits
+  return { allHits, errors }
 }
 
-async function autoSaveDirectUsernameMatches(registry, skipState) {
+async function autoSaveDirectUsernameMatches(
+  registry,
+  skipState,
+  attemptState
+) {
   let saved = 0
   let probed = 0
+  let skipped = 0
+  let noMatches = 0
+  let ambiguous = 0
+  let failed = 0
+  const candidates = Object.entries(registry).filter(
+    ([canonicalName, entry]) =>
+      isSelectedModel(canonicalName) &&
+      getMissingSources(canonicalName, entry, skipState, false).length > 0
+  )
 
-  for (const [canonicalName, entry] of Object.entries(registry)) {
+  for (let index = 0; index < candidates.length; index += 1) {
+    const [canonicalName, entry] = candidates[index]
     const missing = getMissingSources(canonicalName, entry, skipState, false)
-    if (missing.length === 0) continue
+    const signature = getAutoAttemptSignature(canonicalName, entry, missing)
+    const usernames = getModelUsernameSeeds(canonicalName, entry)
+    const remembered = RETRY_AUTO
+      ? []
+      : missing.filter((platform) =>
+          getRememberedAutoAttempt(
+            attemptState,
+            canonicalName,
+            platform,
+            signature
+          )
+        )
+    const platformsToProbe = missing.filter(
+      (platform) => !remembered.includes(platform)
+    )
 
+    console.log(
+      `  [${index + 1}/${candidates.length}] ${canonicalName} | missing: ${missing
+        .map((platform) => PLATFORMS[platform].label)
+        .join(', ')}`
+    )
+
+    if (remembered.length > 0) {
+      console.log(
+        `    remembered no match: ${remembered
+          .map((platform) => {
+            const attempt = getRememberedAutoAttempt(
+              attemptState,
+              canonicalName,
+              platform,
+              signature
+            )
+            const attemptedAt = attempt?.attemptedAt
+              ? ` on ${attempt.attemptedAt}`
+              : ''
+            const result =
+              attempt?.result === 'ambiguous' ? 'ambiguous' : 'no match'
+            return `${PLATFORMS[platform].label} (${result})${attemptedAt}`
+          })
+          .join(', ')}`
+      )
+    }
+    if (platformsToProbe.length === 0) {
+      console.log('    status: skipped; aliases and missing sources unchanged')
+      skipped += 1
+      continue
+    }
+
+    console.log(
+      `    probing: ${platformsToProbe
+        .map((platform) => PLATFORMS[platform].label)
+        .join(', ')}`
+    )
     probed += 1
-    const hits = await autoProbeMatchingUsernames(
+    const { allHits, errors } = await autoProbeMatchingUsernames(
       canonicalName,
       entry,
-      skipState
+      platformsToProbe
     )
-    for (const platform of ['coomer', 'kemono', 'reddit']) {
-      if (!missing.includes(platform) || hits[platform].length === 0) continue
-      const hit = hits[platform][0]
-      resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
-      console.log(
-        `  auto-added ${platform}: ${canonicalName} -> ${hit.url} (${hit.username})`
+
+    for (const platform of platformsToProbe) {
+      const hits = allHits[platform]
+      if (hits.length === 1) {
+        const hit = hits[0]
+        resolveAndTrackModel(registryPath, canonicalName, platform, hit.url)
+        clearAutoAttempt(attemptState, canonicalName, platform)
+        console.log(
+          `    matched ${PLATFORMS[platform].label}: ${hit.url} (${hit.username})`
+        )
+        saved += 1
+        continue
+      }
+
+      if (hits.length > 1) {
+        rememberAutoResult(
+          attemptState,
+          canonicalName,
+          platform,
+          signature,
+          usernames,
+          'ambiguous',
+          hits.map((hit) => hit.url)
+        )
+        console.log(
+          `    ${PLATFORMS[platform].label}: ${hits.length} exact matches; remembered as ambiguous for manual review`
+        )
+        ambiguous += 1
+        continue
+      }
+
+      if (errors[platform].length > 0) {
+        console.log(
+          `    ${PLATFORMS[platform].label}: probe failed; will retry next run`
+        )
+        failed += 1
+        continue
+      }
+
+      rememberAutoResult(
+        attemptState,
+        canonicalName,
+        platform,
+        signature,
+        usernames,
+        'no_match'
       )
-      saved += 1
+      console.log(
+        `    ${PLATFORMS[platform].label}: no match; remembered for future runs`
+      )
+      noMatches += 1
     }
+    saveAutoAttempts(attemptState)
   }
 
-  return { probed, saved }
+  return {
+    ambiguous,
+    checked: candidates.length,
+    failed,
+    noMatches,
+    probed,
+    saved,
+    skipped,
+  }
 }
 
 // ─── URL PARSING ──────────────────────────────────────────────────────────────
@@ -482,7 +775,7 @@ function parseSourceUrl(input) {
     }
   }
 
-  // Kemono: /{service}/user/{username}
+  // Pawchive or legacy Kemono: /{service}/user/{creator-id}
   const kemonoM = str.match(PLATFORMS.kemono.urlPattern)
   if (kemonoM) {
     const service = kemonoM[1].toLowerCase()
@@ -492,7 +785,7 @@ function parseSourceUrl(input) {
         platform: 'kemono',
         service,
         username,
-        url: `https://kemono.cr/${service}/user/${username}`,
+        url: PLATFORMS.kemono.userUrl(service, username),
       }
     }
   }
@@ -530,6 +823,10 @@ function getYandexPath() {
 }
 
 function openInBrowser(url) {
+  if (!OPEN_BROWSER) {
+    console.log(`  Browser opening disabled: ${url}`)
+    return
+  }
   const browserPath = getYandexPath()
   execFile(browserPath, [url], (err) => {
     if (err)
@@ -609,21 +906,28 @@ async function promptPermanentSkip(
 async function run() {
   let registry = loadModelRegistry(registryPath)
   const permanentSkips = loadPermanentSkips()
+  const autoAttempts = loadAutoAttempts()
 
   console.log('\n  Running matching username source auto-backfill...')
+  if (RETRY_AUTO) {
+    console.log('  Retry mode: ignoring remembered no-match results.')
+  }
   const autoSummary = await autoSaveDirectUsernameMatches(
     registry,
-    permanentSkips
+    permanentSkips,
+    autoAttempts
   )
   if (autoSummary.saved > 0) {
     registry = loadModelRegistry(registryPath)
   }
   console.log(
-    `  Auto-backfill checked ${autoSummary.probed} model(s), added ${autoSummary.saved} source(s).`
+    `  Auto-backfill complete: ${autoSummary.checked} checked, ${autoSummary.probed} probed, ${autoSummary.skipped} remembered skips, ${autoSummary.noMatches} new no-matches, ${autoSummary.ambiguous} ambiguous, ${autoSummary.failed} failed, ${autoSummary.saved} added.`
   )
+  if (AUTO) return
 
   const toProcess = Object.entries(registry).filter(
     ([canonicalName, entry]) => {
+      if (!isSelectedModel(canonicalName)) return false
       if (FORCE) return true
       return (
         getMissingSources(canonicalName, entry, permanentSkips, true).length > 0
@@ -641,6 +945,8 @@ async function run() {
     console.log(
       '  Mode:     --auto (save canonical/alias username matches, skip rest)'
     )
+  if (RETRY_AUTO)
+    console.log('  Mode:     --retry-auto (retrying remembered no-matches)')
   console.log(`\n  Models needing sources: ${toProcess.length}\n`)
 
   if (toProcess.length === 0) {
@@ -667,7 +973,7 @@ async function run() {
         `  Coomer:    ${sourceStatusLabel(canonicalName, entry, 'coomer', permanentSkips)}`
       )
       console.log(
-        `  Kemono:    ${sourceStatusLabel(canonicalName, entry, 'kemono', permanentSkips)}`
+        `  Pawchive:  ${sourceStatusLabel(canonicalName, entry, 'kemono', permanentSkips)}`
       )
       console.log(
         `  Reddit:    ${sourceStatusLabel(canonicalName, entry, 'reddit', permanentSkips)}`
@@ -677,26 +983,7 @@ async function run() {
       )
 
       // ── Auto-probe coomer + kemono ─────────────────────────────────────────
-      const missing = []
-      if (needsSource(canonicalName, entry, 'coomer', permanentSkips))
-        missing.push('coomer')
-      if (needsSource(canonicalName, entry, 'kemono', permanentSkips))
-        missing.push('kemono')
-      if (needsSource(canonicalName, entry, 'reddit', permanentSkips))
-        missing.push('reddit')
-
-      let autoHits = { coomer: [], kemono: [], reddit: [] }
-      if (missing.length > 0) {
-        process.stdout.write(
-          `\n  Auto-probing ${missing.join(' + ')} for all aliases...`
-        )
-        autoHits = await autoProbeModel(canonicalName, entry)
-        const total =
-          autoHits.coomer.length +
-          autoHits.kemono.length +
-          autoHits.reddit.length
-        process.stdout.write(` ${total} hit(s)\n`)
-      }
+      const autoHits = { coomer: [], kemono: [], reddit: [] }
 
       let savedCoomer =
         hasSource(entry, 'coomer') ||
@@ -798,7 +1085,7 @@ async function run() {
               const parsed = parseSourceUrl(ans)
               if (!parsed) {
                 console.log(
-                  '  ❓ Unrecognized. Use y/s/p/m/q or paste a coomer/kemono/reddit/stufferdb URL.'
+                  '  ❓ Unrecognized. Use y/s/p/m/q or paste a coomer/pawchive/reddit/stufferdb URL.'
                 )
                 continue
               }
@@ -830,6 +1117,13 @@ async function run() {
                     parsed.username
                   )
                   found = !!creator
+                  if (creator?.id) {
+                    parsed.username = String(creator.id)
+                    parsed.url = PLATFORMS.kemono.userUrl(
+                      parsed.service,
+                      parsed.username
+                    )
+                  }
                   process.stdout.write(
                     found ? ` found\n` : ' not found (404)\n'
                   )
@@ -900,7 +1194,7 @@ async function run() {
         }
         if (!savedKemono) {
           const url = PLATFORMS.kemono.searchUrl(canonicalName)
-          console.log(`  Opening Kemono search: ${url}`)
+          console.log(`  Opening Pawchive search: ${url}`)
           openInBrowser(url)
         }
         if (!savedReddit) {
@@ -919,11 +1213,19 @@ async function run() {
           if (!savedStufferdb) still.push('stufferdb')
           if (still.length === 0) break
 
-          console.log(`\n  Still missing: ${still.join(', ')}`)
+          console.log(
+            `\n  Still missing: ${still
+              .map((platform) =>
+                platform === 'stufferdb'
+                  ? 'StufferDB'
+                  : PLATFORMS[platform].label
+              )
+              .join(', ')}`
+          )
           console.log(`  Commands:
-    <url>        paste coomer/kemono/reddit/stufferdb URL to validate + save
+    <url>        paste coomer/pawchive/reddit/stufferdb URL to validate + save
     c <username> probe Coomer for a specific username
-    k <username> probe Kemono for a specific username
+    k <username> probe Pawchive for a specific username
     r <username> probe Reddit for a specific username
     o            reopen current URL in browser
     s            skip this model (move to next)
@@ -1034,7 +1336,7 @@ async function run() {
           if (lower.startsWith('k ')) {
             const username =
               sanitize(raw.slice(2).trim()) || raw.slice(2).trim()
-            process.stdout.write(`  Checking Kemono "${username}"...`)
+            process.stdout.write(`  Checking Pawchive "${username}"...`)
             const hits = await probeUsername('kemono', username)
             process.stdout.write(` ${hits.length} hit(s)\n`)
             for (const hit of hits) {
@@ -1077,7 +1379,7 @@ async function run() {
               if (savedKemono) break
             }
             if (hits.length === 0)
-              console.log(`  No Kemono profiles found for "${username}".`)
+              console.log(`  No Pawchive profiles found for "${username}".`)
             continue
           }
 
@@ -1140,7 +1442,7 @@ async function run() {
           const parsed = parseSourceUrl(raw)
           if (!parsed) {
             console.log(
-              '  Unrecognized input. Paste a coomer/kemono/reddit/stufferdb URL, or use c/k/r/p commands.'
+              '  Unrecognized input. Paste a coomer/pawchive/reddit/stufferdb URL, or use c/k/r/p commands.'
             )
             continue
           }
@@ -1169,7 +1471,7 @@ async function run() {
             continue
           }
 
-          // Coomer or Kemono — validate then save
+          // Coomer or Pawchive - validate then save
           const platform = parsed.platform
           if (
             (platform === 'coomer' && savedCoomer) ||
@@ -1187,7 +1489,7 @@ async function run() {
                 ? 'coomerfans.com'
                 : platform === 'reddit'
                   ? 'www.reddit.com'
-                  : 'kemono.cr'
+                  : PAWCHIVE_HOST
             let found = false
             if (platform === 'reddit') {
               const creator = await lookupReddit(parsed.username)
@@ -1201,6 +1503,13 @@ async function run() {
                 parsed.username
               )
               found = !!creator
+              if (creator?.id) {
+                parsed.username = String(creator.id)
+                parsed.url = PLATFORMS.kemono.userUrl(
+                  parsed.service,
+                  parsed.username
+                )
+              }
               if (found)
                 process.stdout.write(
                   ` found (id="${creator.name || parsed.username}")\n`
@@ -1251,6 +1560,10 @@ async function run() {
 }
 
 run().catch((err) => {
+  if (/readline was closed/i.test(err.message)) {
+    console.log('\n  Input closed. Progress saved as you went.')
+    process.exit(0)
+  }
   console.error(`\n  ❌ Fatal: ${err.message}`)
   process.exit(1)
 })

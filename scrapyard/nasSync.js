@@ -13,6 +13,15 @@ const {
 
 const LOCAL_REGISTRY_PATH = path.join(__dirname, '..', 'model_aliases.json')
 const MUTABLE_MODEL_METADATA_FILES = ['.media-dates.json']
+const MAX_VERIFIED_SIZE_DELTA_BYTES = 32
+
+function hasAcceptableNasSize(localSize, nasSize) {
+  return (
+    Number.isFinite(localSize) &&
+    Number.isFinite(nasSize) &&
+    Math.abs(localSize - nasSize) <= MAX_VERIFIED_SIZE_DELTA_BYTES
+  )
+}
 
 function runRobocopy(command) {
   return new Promise((resolve) => {
@@ -128,7 +137,7 @@ function evictVerifiedLocalMp4s({
     if (
       !localStat.isFile() ||
       !nasStat.isFile() ||
-      localStat.size !== nasStat.size
+      !hasAcceptableNasSize(localStat.size, nasStat.size)
     ) {
       sizeMismatches += 1
       continue
@@ -216,6 +225,8 @@ async function syncModelToNas({
 }
 
 module.exports = {
+  MAX_VERIFIED_SIZE_DELTA_BYTES,
+  hasAcceptableNasSize,
   runRobocopy,
   syncAllModelMetadataToNas,
   syncModelMetadataToNas,

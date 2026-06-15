@@ -163,7 +163,8 @@ function createMediaSaver({
       modelDir,
       modelRelativePath,
       uploadedDate,
-      getMediaDateSourceMeta(entry)
+      getMediaDateSourceMeta(entry),
+      entry?.pageMeta || null
     )
   }
 
@@ -404,6 +405,14 @@ function getMediaDateSourceMeta(entry = {}) {
     originalName: entry.originalName || null,
     mediaPageUrl: entry.mediaPageUrl || null,
     mediaUrl: entry.mediaUrl || null,
+    mediaQuality: entry.mediaQuality || null,
+    needsFullResolution:
+      typeof entry.needsFullResolution === 'boolean'
+        ? entry.needsFullResolution
+        : null,
+    fullResolutionStatus: entry.fullResolutionStatus || null,
+    fullResolutionUrl: entry.fullResolutionUrl || null,
+    fullResolutionResolvedPath: entry.fullResolutionResolvedPath || null,
   }
 }
 

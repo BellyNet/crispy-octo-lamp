@@ -289,6 +289,14 @@ function normalizeSourceMeta(sourceMeta) {
     mediaPageUrl:
       sourceMeta.mediaPageUrl || sourceMeta.sourceMediaPageUrl || null,
     mediaUrl: sourceMeta.mediaUrl || null,
+    mediaQuality: sourceMeta.mediaQuality || null,
+    needsFullResolution:
+      typeof sourceMeta.needsFullResolution === 'boolean'
+        ? sourceMeta.needsFullResolution
+        : null,
+    fullResolutionStatus: sourceMeta.fullResolutionStatus || null,
+    fullResolutionUrl: sourceMeta.fullResolutionUrl || null,
+    fullResolutionResolvedPath: sourceMeta.fullResolutionResolvedPath || null,
   }
 
   return Object.values(normalized).some(Boolean) ? normalized : null
@@ -326,7 +334,8 @@ function recordExistingMetadata(
   userDir,
   relativePath,
   uploadedDate,
-  sourceMeta = null
+  sourceMeta = null,
+  pageMeta = null
 ) {
   const key = String(relativePath || '')
     .replace(/\\/g, '/')
@@ -345,12 +354,18 @@ function recordExistingMetadata(
     existingRecord.source && typeof existingRecord.source === 'object'
       ? existingRecord.source
       : {}
+  const comments = normalizeComments(pageMeta?.comments)
   const mergedSource = {}
   for (const field of new Set([
     ...Object.keys(existingSource),
     ...Object.keys(source),
   ])) {
-    mergedSource[field] = source[field] || existingSource[field] || null
+    mergedSource[field] =
+      source[field] !== null && source[field] !== undefined
+        ? source[field]
+        : existingSource[field] !== undefined
+          ? existingSource[field]
+          : null
   }
 
   const nextRecord = {
@@ -364,8 +379,13 @@ function recordExistingMetadata(
     uploaded:
       existingRecord.uploaded || (uploadedDate ? toISO(uploadedDate) : null),
     source: mergedSource,
-    comments: existingRecord.comments || [],
-    commentCount: existingRecord.commentCount ?? null,
+    comments: comments.length ? comments : existingRecord.comments || [],
+    commentCount:
+      typeof pageMeta?.commentCount === 'number'
+        ? pageMeta.commentCount
+        : Array.isArray(existingRecord.comments)
+          ? existingRecord.comments.length
+          : comments.length || null,
   }
   nextRecord.resolved = resolveBestDateRecord(nextRecord)
   entry.data[key] = nextRecord

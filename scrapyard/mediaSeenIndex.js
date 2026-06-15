@@ -35,6 +35,11 @@ const SEEN_RECORD_FIELDS = [
   'postId',
   'title',
   'originalName',
+  'mediaQuality',
+  'needsFullResolution',
+  'fullResolutionStatus',
+  'fullResolutionUrl',
+  'fullResolutionResolvedPath',
   'uploadedDate',
   'status',
   'error',
@@ -52,6 +57,11 @@ const PRESERVED_SEEN_METADATA_FIELDS = [
   'postId',
   'title',
   'originalName',
+  'mediaQuality',
+  'needsFullResolution',
+  'fullResolutionStatus',
+  'fullResolutionUrl',
+  'fullResolutionResolvedPath',
   'uploadedDate',
 ]
 
@@ -326,6 +336,14 @@ function createMediaSeenIndex(options = {}) {
       postId: details.postId || details.sourcePostId || null,
       title: details.title || details.sourceTitle || null,
       originalName: details.originalName || null,
+      mediaQuality: details.mediaQuality || null,
+      needsFullResolution:
+        typeof details.needsFullResolution === 'boolean'
+          ? details.needsFullResolution
+          : null,
+      fullResolutionStatus: details.fullResolutionStatus || null,
+      fullResolutionUrl: details.fullResolutionUrl || null,
+      fullResolutionResolvedPath: details.fullResolutionResolvedPath || null,
       uploadedDate: normalizeIsoDate(details.uploadedDate),
       status,
       recordedAt,

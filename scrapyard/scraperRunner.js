@@ -27,9 +27,7 @@ const runLifecycle = require('./runLifecycle')
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
 const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb']
-const temporarilyDisabledSources = new Map([
-  ['kemono', 'Kemono is temporarily unavailable'],
-])
+const temporarilyDisabledSources = new Map()
 const activeChildProcesses = new Set()
 let hardInterruptHandlersInstalled = false
 let hardInterruptInProgress = false
@@ -225,11 +223,11 @@ function printHelp() {
   console.log(`Usage:
   npm run scrape -- <source-url> [options]
   npm run scrape -- scrape <source-url> [options]
-  npm run scrape -- update <all|stufferdb|reddit|coomer|coomerfans|kemono> [options]
+  npm run scrape -- update <all|stufferdb|reddit|coomer|coomerfans|pawchive> [options]
   npm run scrape -- repair [options]
   npm run scrape -- sync <--push|--pull|--model <name>> [options]
 
-Runs the unified scraper launcher for one StufferDB, Reddit, Coomer, CoomerFans, or Kemono URL.
+Runs the unified scraper launcher for one StufferDB, Reddit, Coomer, CoomerFans, or Pawchive URL.
 With no URL, opens the interactive scrape launcher.
 
 Options:
@@ -796,7 +794,7 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
   const parsedSource = parseSourceUrl(inputUrl)
   if (!parsedSource) {
     error(
-      'Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Kemono.'
+      'Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Pawchive.'
     )
     return 1
   }
@@ -876,6 +874,7 @@ function getSourceLabel(sourceKey, url) {
   const parsed = parseSourceUrl(url)
   if (!parsed) return sourceKey
   if (parsed.sourceType === 'coomerfans') return 'coomerfans'
+  if (parsed.sourceType === 'kemono') return 'pawchive'
   return parsed.sourceType || sourceKey
 }
 
@@ -989,7 +988,7 @@ function buildSourceBatchOptions(argv) {
 }
 
 function printSourceBatchHelp() {
-  console.log(`Usage: node scrapyard/run-source-batch.js --source=<coomer|kemono> [options]
+  console.log(`Usage: node scrapyard/run-source-batch.js --source=<coomer|pawchive> [options]
 
 Options:
   --source <name>             Registry source key to run (required).
@@ -1022,11 +1021,14 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
     return 0
   }
 
-  const sourceKey = String(
+  const requestedSourceKey = String(
     sourceKeyProvided ? sourceKeyOrArgv : getOption(argv, 'source') || ''
   )
     .trim()
     .toLowerCase()
+  const sourceKey =
+    requestedSourceKey === 'pawchive' ? 'kemono' : requestedSourceKey
+  const sourceLabel = sourceKey === 'kemono' ? 'pawchive' : sourceKey
   if (!sourceKey) {
     printSourceBatchHelp()
     return 1
@@ -1051,11 +1053,11 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
   )
 
   if (targets.length === 0) {
-    console.log(`No ${sourceKey}-backed model sources found.`)
+    console.log(`No ${sourceLabel}-backed model sources found.`)
     return 0
   }
 
-  console.log(`Found ${targets.length} ${sourceKey}-backed model source(s).`)
+  console.log(`Found ${targets.length} ${sourceLabel}-backed model source(s).`)
 
   const delayMs = Number.parseInt(getOption(argv, 'delay-ms'), 10) || 0
   const sharedOptions = buildSourceBatchOptions(argv)
@@ -1502,7 +1504,7 @@ function printAllSourcesHelp() {
   console.log(`Usage: node scrapyard/run-all-source-updates.js [options]
 
 Runs every selected model source before moving to the next model.
-Registered Reddit, Kemono, Coomer/CoomerFans, and StufferDB sources are included.
+Registered Reddit, Pawchive, Coomer/CoomerFans, and StufferDB sources are included.
 
 Options:
   --model <name>              Update one model only.
@@ -1934,7 +1936,12 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
         'host-contains': 'coomerfans.com',
       })
     }
-    if (target === 'coomer' || target === 'kemono' || target === 'reddit') {
+    if (
+      target === 'coomer' ||
+      target === 'kemono' ||
+      target === 'pawchive' ||
+      target === 'reddit'
+    ) {
       return runSourceBatch(target, updateArgs)
     }
     printHelp()

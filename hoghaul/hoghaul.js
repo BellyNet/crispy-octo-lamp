@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const { createHash } = require('crypto')
 const pLimit = require('p-limit')
+const sharp = require('sharp')
 
 const { bannerHoghaul } = require('../banners.js')
 const mediaDates = require('../scrapyard/mediaDates')
@@ -176,6 +177,9 @@ const hoghaulSavePipeline = createMediaSavePipeline({
   onOutcome: ({ kind, label, reasonCounter }) => {
     noteMediaOutcome(kind, label, reasonCounter)
   },
+  prepareDuplicateEntry: resolvePawchivePreviewDuplicate,
+  shouldTreatVisualMatchAsDuplicate:
+    shouldTreatVisualMatchAsDuplicateForQuality,
 })
 const duplicateChecker = createDuplicateChecker({
   datasetDir,
@@ -282,6 +286,107 @@ function existsAtExactPath(filePath) {
 
 function existsLocallyOrOnNas(filePath) {
   return datasetPaths.existsLocallyOrOnNas(filePath)
+}
+
+async function resolvePawchivePreviewDuplicate({
+  entry,
+  buffer,
+  match,
+  reason,
+}) {
+  if (
+    reason !== 'duplicate_visual' ||
+    entry?.mediaQuality !== 'pawchive_preview' ||
+    entry?.needsFullResolution !== true ||
+    !Buffer.isBuffer(buffer)
+  ) {
+    return entry
+  }
+
+  let previewMetadata
+  try {
+    previewMetadata = await sharp(buffer).metadata()
+  } catch {
+    return entry
+  }
+
+  const previewPixels =
+    Number(previewMetadata.width || 0) * Number(previewMetadata.height || 0)
+  const previewLongEdge = Math.max(
+    Number(previewMetadata.width || 0),
+    Number(previewMetadata.height || 0)
+  )
+  if (!previewPixels || !previewLongEdge) return entry
+
+  for (const relativePath of match?.activeRefs || []) {
+    const localPath = datasetPaths.toDatasetAbsolutePath(relativePath)
+    const candidates = [
+      localPath,
+      path.join(
+        nasDatasetDir,
+        String(relativePath || '').replace(/\//g, path.sep)
+      ),
+    ]
+
+    for (const candidatePath of candidates) {
+      if (!fs.existsSync(candidatePath)) continue
+      try {
+        const existingMetadata = await sharp(candidatePath).metadata()
+        const existingPixels =
+          Number(existingMetadata.width || 0) *
+          Number(existingMetadata.height || 0)
+        const existingLongEdge = Math.max(
+          Number(existingMetadata.width || 0),
+          Number(existingMetadata.height || 0)
+        )
+        if (
+          existingPixels >= previewPixels * 1.25 &&
+          existingLongEdge > previewLongEdge
+        ) {
+          return {
+            ...entry,
+            needsFullResolution: false,
+            fullResolutionStatus: 'resolved_existing_visual_match',
+            fullResolutionResolvedPath: relativePath,
+          }
+        }
+      } catch {
+        // Keep checking other active references.
+      }
+    }
+  }
+
+  return entry
+}
+
+async function shouldTreatVisualMatchAsDuplicateForQuality({ entry, match }) {
+  if (entry?.mediaQuality !== 'full') return true
+
+  const activeRefs = Array.isArray(match?.activeRefs) ? match.activeRefs : []
+  if (activeRefs.length === 0) return true
+
+  return !activeRefs.every((relativePath) =>
+    isStoredPawchivePreview(relativePath)
+  )
+}
+
+function isStoredPawchivePreview(relativePath) {
+  const normalizedPath = String(relativePath || '').replace(/\\/g, '/')
+  if (/\.pawchive-preview\.[^/]+$/i.test(normalizedPath)) return true
+
+  const [modelName, ...modelParts] = normalizedPath.split('/').filter(Boolean)
+  if (!modelName || modelParts.length === 0) return false
+
+  const sidecarPath = path.join(datasetDir, modelName, '.media-dates.json')
+  if (!fs.existsSync(sidecarPath)) return false
+
+  try {
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'))
+    const record = sidecar[modelParts.join('/')]
+    return record?.source?.mediaQuality === 'pawchive_preview'
+  } catch {
+    return false
+  }
 }
 
 function parseResolvedDate(date) {
@@ -1042,6 +1147,7 @@ async function fetchPosts(source, options, deps = {}) {
     logger: pageLogger,
     normalizeUrl: normalizeSeenUrl,
     pageSize: API_PAGE_SIZE,
+    postConcurrency: options.postConcurrency,
     sourceFrontier: deps.sourceFrontier,
     sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
   })
@@ -1112,8 +1218,24 @@ async function getRemoteContentLength(mediaUrl) {
       response.headers?.['content-length'] || '',
       10
     )
-    return Number.isFinite(contentLength) && contentLength > 0
-      ? contentLength
+    if (Number.isFinite(contentLength) && contentLength > 0) {
+      return contentLength
+    }
+
+    if (new URL(mediaUrl).hostname !== 'dl.dropboxusercontent.com') {
+      return null
+    }
+    const rangeResponse = await requestBuffer(mediaUrl, {
+      headers: {
+        Accept: '*/*',
+        Range: 'bytes=0-0',
+      },
+    })
+    const contentRange = String(rangeResponse.headers?.['content-range'] || '')
+    const totalMatch = contentRange.match(/\/(\d+)$/)
+    const rangedLength = Number.parseInt(totalMatch?.[1] || '', 10)
+    return Number.isFinite(rangedLength) && rangedLength > 0
+      ? rangedLength
       : null
   } catch {
     return null
@@ -1585,7 +1707,11 @@ async function run(argvInput = process.argv.slice(2)) {
   )
   const postConcurrency = parsePositiveInteger(
     runOptions.postConcurrency || process.env.HOGHAUL_POST_CONCURRENCY,
-    source.site === 'coomerfans' ? 8 : 1
+    source.site === 'coomerfans'
+      ? 8
+      : source.origin === 'https://pawchive.st'
+        ? 4
+        : 1
   )
   const videoConcurrency = parsePositiveInteger(
     runOptions.videoConcurrency || process.env.HOGHAUL_VIDEO_CONCURRENCY,

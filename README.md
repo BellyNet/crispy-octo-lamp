@@ -33,7 +33,7 @@ npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyad
 - Concurrency can be tuned with `--media-concurrency=`, `--video-concurrency=`, and `--page-concurrency=`.
 - `milkmaid` writes into the local Slopvault dataset first.
 
-### 2. Scrape Coomer / Kemono / mixed-source models
+### 2. Scrape Coomer / Pawchive / mixed-source models
 
 Single model, direct URL:
 
@@ -45,7 +45,7 @@ Single model, rerun through the registry batch path:
 
 ```powershell
 npm run hoghaul:all-coomer -- --only-models=cakedupkayyla
-npm run hoghaul:all-kemono -- --only-models=satanpanties666
+npm run hoghaul:all-pawchive -- --only-models=candii_kayn
 ```
 
 All models:
@@ -59,7 +59,7 @@ Source-specific batches:
 ```powershell
 npm run update:stufferdb
 npm run hoghaul:all-coomer
-npm run hoghaul:all-kemono
+npm run hoghaul:all-pawchive
 ```
 
 Interactive launcher:
@@ -70,6 +70,10 @@ npm run scrape:interactive
 
 Notes:
 - CoomerFans URLs still live under `sources.coomer` in `model_aliases.json`.
+- Pawchive prefers full-resolution media for posts marked `has_full: true`. Otherwise it downloads Pawchive's preview derivative, which is usually 800px on the long edge and comparable to the current dataset's median resolution.
+- Pawchive previews are marked as needing a full-resolution upgrade. Run `npm run report:pawchive-previews` to list them and `npm run upgrade:pawchive-previews` to fully rescan Pawchive for newly available originals.
+- An exact visual match to a materially larger existing file marks a Pawchive preview as resolved. A later full-resolution asset is still downloaded when its only visual match is a stored preview.
+- Pawchive scrapes also download Dropbox shares and direct linked image/video files found in post content or embeds. Full post titles/captions and archived comments are stored in the media sidecar metadata.
 - Hoghaul repeat scrapes reuse seen-media, existing files, and hash checks, so reruns should skip already handled media quickly.
 - Useful Hoghaul tuning flags:
 
@@ -99,10 +103,10 @@ Rerun one Coomer model from registry sources:
 npm run hoghaul:all-coomer -- --only-models=heyyadriana
 ```
 
-Rerun one Kemono model from registry sources:
+Rerun one Pawchive model from registry sources:
 
 ```powershell
-npm run hoghaul:all-kemono -- --only-models=heyyadriana
+npm run hoghaul:all-pawchive -- --only-models=candii_kayn
 ```
 
 Local repair-only revisit without a fresh scrape:
@@ -275,6 +279,7 @@ npm run backfill:quarantine-manifest
 
 Use these for:
 - filling missing StufferDB source links
+- `backfill:sources-interactive` auto-matches every model first and reports progress per model. Clean no-match results are remembered in an ignored runtime state file and skipped until aliases or missing sources change; use `--retry-auto` to force retries.
 - extracting EXIF/uploaded dates into sidecars
 - normalizing the quarantine manifest
 
@@ -332,12 +337,12 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
   - batch scrape all `coomerfans.com` URLs stored under `sources.coomer`
 - `npm run hoghaul:all-coomer`
   - batch scrape all `sources.coomer` entries
-- `npm run hoghaul:all-kemono`
-  - batch scrape all `sources.kemono` entries
+- `npm run hoghaul:all-pawchive`
+  - batch scrape all Pawchive URLs stored under `sources.kemono`
 - `npm run update:stufferdb`
   - refresh/update StufferDB models from the registry
 - `npm run update:all-models`
-  - run all configured StufferDB, Coomer, and Kemono updates
+  - run all configured StufferDB, Coomer, and Pawchive updates
 - `npm run scrape:interactive`
   - interactive launcher for all-model, per-source, or pasted-URL scrapes
 - `npm run repair`

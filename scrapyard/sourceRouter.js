@@ -3,6 +3,11 @@
 const path = require('path')
 
 const { sanitize } = require('./modelRegistry')
+const {
+  PAWCHIVE_ORIGIN,
+  getPawchiveUserUrl,
+  isPawchiveOrKemonoHost,
+} = require('./pawchive')
 
 function parseHoghaulSourceUrl(inputUrl) {
   const parsed = new URL(String(inputUrl || '').trim())
@@ -11,7 +16,7 @@ function parseHoghaulSourceUrl(inputUrl) {
     ? 'coomerfans'
     : host.includes('coomer')
       ? 'coomer'
-      : host.includes('kemono')
+      : isPawchiveOrKemonoHost(host)
         ? 'kemono'
         : host.endsWith('reddit.com')
           ? 'reddit'
@@ -83,8 +88,11 @@ function parseHoghaulSourceUrl(inputUrl) {
   }
 
   return {
-    inputUrl: parsed.toString(),
-    origin: parsed.origin,
+    inputUrl:
+      site === 'kemono'
+        ? getPawchiveUserUrl(service, userId)
+        : parsed.toString(),
+    origin: site === 'kemono' ? PAWCHIVE_ORIGIN : parsed.origin,
     site,
     service,
     userId,
@@ -111,7 +119,7 @@ function parseSourceUrl(inputUrl) {
       host === 'reddit.com' ||
       host.endsWith('.reddit.com') ||
       host.includes('coomer') ||
-      host.includes('kemono')
+      isPawchiveOrKemonoHost(host)
     ) {
       const source = parseHoghaulSourceUrl(inputUrl)
       return {

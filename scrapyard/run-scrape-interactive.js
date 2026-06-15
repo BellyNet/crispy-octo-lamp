@@ -325,6 +325,7 @@ function getSourceLabel(sourceKey, url) {
   const parsed = parseSourceUrl(url)
   if (!parsed) return sourceKey
   if (parsed.sourceType === 'coomerfans') return 'coomerfans'
+  if (parsed.sourceType === 'kemono') return 'pawchive'
   return parsed.sourceType || sourceKey
 }
 
@@ -387,7 +388,7 @@ async function runModelAliasFlow(rl, sessionOptions) {
 
   const sourceAnswer = await ask(
     rl,
-    'Source to run: all, stufferdb, reddit, coomer, coomerfans, kemono, or number [all]: '
+    'Source to run: all, stufferdb, reddit, coomer, coomerfans, pawchive, or number [all]: '
   )
   const selectedTargets = selectModelSources(targets, sourceAnswer)
   if (!selectedTargets.length) {
@@ -436,7 +437,7 @@ async function runSingleUrlFlow(rl, sessionOptions) {
   const parsed = parseSourceUrl(rawUrl)
   if (!parsed) {
     console.log(
-      'Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Kemono.'
+      'Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Pawchive.'
     )
     return
   }
@@ -670,11 +671,11 @@ async function main() {
       console.log('')
       console.log('Scrape Launcher')
       console.log(
-        '1. Update all models (model-by-model: Reddit + Kemono + Coomer/CoomerFans + StufferDB)'
+        '1. Update all models (model-by-model: Reddit + Pawchive + Coomer/CoomerFans + StufferDB)'
       )
       console.log('2. Update all StufferDB models')
       console.log('3. Update all Coomer models')
-      console.log('4. Update all Kemono models (temporarily disabled)')
+      console.log('4. Update all Pawchive models')
       console.log('5. Set session Hoghaul options')
       console.log('6. Run a model/alias from registry')
       console.log('7. Paste one source URL and run it')

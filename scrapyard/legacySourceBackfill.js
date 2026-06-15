@@ -20,7 +20,7 @@ function inferSourceSite(...urls) {
       }
       if (host.includes('coomerfans')) return 'coomerfans'
       if (host.includes('coomer')) return 'coomer'
-      if (host.includes('kemono')) return 'kemono'
+      if (host.includes('kemono') || host.includes('pawchive')) return 'kemono'
       if (host.includes('reddit') || host.includes('redd.it')) return 'reddit'
       if (host) return host
     } catch {

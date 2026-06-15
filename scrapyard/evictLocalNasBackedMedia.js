@@ -5,6 +5,10 @@ const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
 const { mergeNasMp4Entries, normalizePath } = require('./nasMp4Index')
+const {
+  MAX_VERIFIED_SIZE_DELTA_BYTES,
+  hasAcceptableNasSize,
+} = require('./nasSync')
 
 const slopvaultRoot = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
@@ -125,7 +129,7 @@ function main() {
   const confirmedNasRelativePaths = []
 
   console.log(
-    `${dryRun ? 'Dry run' : 'Applying'} local eviction for bucket "${bucket}" against NAS root ${nasDatasetDir}`
+    `${dryRun ? 'Dry run' : 'Applying'} local eviction for bucket "${bucket}" against NAS root ${nasDatasetDir} (size tolerance ${MAX_VERIFIED_SIZE_DELTA_BYTES} bytes)`
   )
 
   for (const modelName of modelNames) {
@@ -150,7 +154,7 @@ function main() {
       }
 
       const nasStat = fs.statSync(nasFile)
-      if (localStat.size !== nasStat.size) {
+      if (!hasAcceptableNasSize(localStat.size, nasStat.size)) {
         skippedSizeMismatch += 1
         modelMismatch += 1
         continue

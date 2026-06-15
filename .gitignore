@@ -50,6 +50,7 @@ Tagger/final
 
 hoghaul/coomer_sources.json
 hoghaul/source-backfill-permanent-skips.json
+hoghaul/source-backfill-auto-attempts.json
 
 # Claude Code internals
 .claude/
