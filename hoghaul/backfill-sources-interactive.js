@@ -21,7 +21,6 @@
  *   --models=x  Limit auto-match and review to comma-separated models
  *   --no-open   Print search/profile URLs without opening a browser
  *   --delay=300 Milliseconds between API requests (default: 300)
- *   --reddit-delay=6500 Milliseconds between Reddit profile probes
  */
 
 const fs = require('fs')
@@ -127,16 +126,11 @@ const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
 const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb']
 const REDDIT_PROBE_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36'
-const REDDIT_PROBE_DELAY_MS = parseNonNegativeInteger(
-  argv['reddit-delay'],
-  6500
-)
 const REDDIT_PROBE_RETRY_DELAY_MS = parseNonNegativeInteger(
   argv['reddit-retry-delay'],
   30000
 )
 const REDDIT_PROBE_MAX_RETRIES = 2
-let lastRedditProbeAt = 0
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(host, url, headers = {}) {
@@ -213,6 +207,7 @@ function http2Get(url, headers = {}) {
         resolve({
           status: responseHeaders[':status'],
           body,
+          headers: responseHeaders,
         })
       )
     )
@@ -505,19 +500,31 @@ async function resolvePawchiveCreatorId(service, username) {
   return creators[0]?.id ? String(creators[0].id) : null
 }
 
-async function lookupReddit(username) {
+function getRedditUnavailableReason(response) {
+  const body = String(response?.body || '')
+  if (
+    response?.status === 403 &&
+    /(?:<title>[^<]*:\s*suspended<\/title>|interstitial-image-banned|alt=["']banned["'])/i.test(
+      body
+    )
+  ) {
+    return 'reddit_suspended'
+  }
+  if (
+    response?.status === 404 &&
+    /<title>[^<]*:\s*deleted<\/title>/i.test(body)
+  ) {
+    return 'reddit_deleted'
+  }
+  return null
+}
+
+async function probeReddit(username) {
   const cfg = PLATFORMS.reddit
   const cleanedUsername = String(username || '').replace(/^u_/, '')
-  if (!cleanedUsername) return null
+  if (!cleanedUsername) return { status: 'not_found' }
 
   for (let attempt = 0; attempt <= REDDIT_PROBE_MAX_RETRIES; attempt += 1) {
-    const waitMs = Math.max(
-      lastRedditProbeAt + REDDIT_PROBE_DELAY_MS - Date.now(),
-      0
-    )
-    if (waitMs > 0) await sleep(waitMs)
-    lastRedditProbeAt = Date.now()
-
     const response = await http2Get(cfg.probeUrl(cleanedUsername), {
       Accept: 'text/html,application/xhtml+xml',
       'Accept-Language': 'en-US,en;q=0.9',
@@ -527,25 +534,43 @@ async function lookupReddit(username) {
     })
     if (response.status === 200) {
       return {
+        status: 'found',
         username: cleanedUsername,
         url: cfg.userUrl(cleanedUsername),
       }
     }
-    if (response.status === 404) return null
-    if (
-      ![403, 429].includes(response.status) ||
-      attempt >= REDDIT_PROBE_MAX_RETRIES
-    ) {
+    const unavailableReason = getRedditUnavailableReason(response)
+    if (unavailableReason) {
+      return {
+        status: 'permanent_skip',
+        reason: unavailableReason,
+        username: cleanedUsername,
+      }
+    }
+    if (response.status === 404) return { status: 'not_found' }
+    if (response.status !== 429 || attempt >= REDDIT_PROBE_MAX_RETRIES) {
       throw new Error(`HTTP ${response.status}`)
     }
-    const retryDelay = REDDIT_PROBE_RETRY_DELAY_MS * (attempt + 1)
+    const retryAfterSeconds = Number.parseInt(
+      String(response.headers?.['retry-after'] || ''),
+      10
+    )
+    const retryDelay =
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : REDDIT_PROBE_RETRY_DELAY_MS * (attempt + 1)
     process.stdout.write(
       ` retrying HTTP ${response.status} in ${Math.round(retryDelay / 1000)}s...`
     )
     await sleep(retryDelay)
   }
 
-  return null
+  return { status: 'not_found' }
+}
+
+async function lookupReddit(username) {
+  const result = await probeReddit(username)
+  return result.status === 'found' ? result : null
 }
 
 async function probeUsername(platform, username) {
@@ -630,7 +655,8 @@ async function autoProbeMatchingUsernames(canonicalName, entry, platforms) {
   const usernames = getModelUsernameSeeds(canonicalName, entry)
   const allHits = { coomer: [], kemono: [], reddit: [] }
   const errors = { coomer: [], kemono: [], reddit: [] }
-  if (!usernames.length) return { allHits, errors }
+  const permanentSkips = { coomer: [], kemono: [], reddit: [] }
+  if (!usernames.length) return { allHits, errors, permanentSkips }
 
   if (
     platforms.includes('kemono') &&
@@ -648,7 +674,28 @@ async function autoProbeMatchingUsernames(canonicalName, entry, platforms) {
       const startedAt = Date.now()
       process.stdout.write(`    ${PLATFORMS[platform].label} "${username}"...`)
       try {
-        const hits = await probeUsername(platform, username)
+        const redditResult =
+          platform === 'reddit' ? await probeReddit(username) : null
+        const hits =
+          redditResult?.status === 'found'
+            ? [
+                {
+                  platform,
+                  service: 'submitted',
+                  username: redditResult.username,
+                  url: redditResult.url,
+                  name: redditResult.username,
+                },
+              ]
+            : redditResult
+              ? []
+              : await probeUsername(platform, username)
+        if (redditResult?.status === 'permanent_skip') {
+          permanentSkips.reddit.push({
+            username,
+            reason: redditResult.reason,
+          })
+        }
         for (const hit of hits) {
           if (isModelUsernameMatch(canonicalName, entry, hit)) {
             addUniqueHit(allHits[platform], hit)
@@ -670,7 +717,7 @@ async function autoProbeMatchingUsernames(canonicalName, entry, platforms) {
     }
   }
 
-  return { allHits, errors }
+  return { allHits, errors, permanentSkips }
 }
 
 async function autoSaveDirectUsernameMatches(
@@ -684,6 +731,7 @@ async function autoSaveDirectUsernameMatches(
   let noMatches = 0
   let ambiguous = 0
   let failed = 0
+  let permanentlySkipped = 0
   const candidates = Object.entries(registry).filter(
     ([canonicalName, entry]) =>
       isSelectedModel(canonicalName) &&
@@ -747,11 +795,8 @@ async function autoSaveDirectUsernameMatches(
         .join(', ')}`
     )
     probed += 1
-    const { allHits, errors } = await autoProbeMatchingUsernames(
-      canonicalName,
-      entry,
-      platformsToProbe
-    )
+    const { allHits, errors, permanentSkips } =
+      await autoProbeMatchingUsernames(canonicalName, entry, platformsToProbe)
 
     for (const platform of platformsToProbe) {
       const hits = allHits[platform]
@@ -791,6 +836,17 @@ async function autoSaveDirectUsernameMatches(
         continue
       }
 
+      if (permanentSkips[platform].length > 0) {
+        const skip = permanentSkips[platform][0]
+        markPermanentSkip(skipState, canonicalName, platform, skip.reason)
+        clearAutoAttempt(attemptState, canonicalName, platform)
+        console.log(
+          `    ${PLATFORMS[platform].label}: permanent skip (${skip.reason}, "${skip.username}")`
+        )
+        permanentlySkipped += 1
+        continue
+      }
+
       rememberAutoResult(
         attemptState,
         canonicalName,
@@ -812,6 +868,7 @@ async function autoSaveDirectUsernameMatches(
     checked: candidates.length,
     failed,
     noMatches,
+    permanentlySkipped,
     probed,
     saved,
     skipped,
@@ -985,7 +1042,7 @@ async function run() {
     registry = loadModelRegistry(registryPath)
   }
   console.log(
-    `  Auto-backfill complete: ${autoSummary.checked} checked, ${autoSummary.probed} probed, ${autoSummary.skipped} remembered skips, ${autoSummary.noMatches} new no-matches, ${autoSummary.ambiguous} ambiguous, ${autoSummary.failed} failed, ${autoSummary.saved} added.`
+    `  Auto-backfill complete: ${autoSummary.checked} checked, ${autoSummary.probed} probed, ${autoSummary.skipped} remembered skips, ${autoSummary.permanentlySkipped} permanent skips, ${autoSummary.noMatches} new no-matches, ${autoSummary.ambiguous} ambiguous, ${autoSummary.failed} failed, ${autoSummary.saved} added.`
   )
   if (AUTO) return
 
@@ -1623,7 +1680,7 @@ async function run() {
   }
 }
 
-module.exports = { lookupReddit }
+module.exports = { getRedditUnavailableReason, lookupReddit, probeReddit }
 
 if (require.main === module) {
   run().catch((err) => {
