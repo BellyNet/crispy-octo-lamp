@@ -21,10 +21,12 @@
  *   --models=x  Limit auto-match and review to comma-separated models
  *   --no-open   Print search/profile URLs without opening a browser
  *   --delay=300 Milliseconds between API requests (default: 300)
+ *   --reddit-delay=6500 Milliseconds between Reddit profile probes
  */
 
 const fs = require('fs')
 const https = require('https')
+const http2 = require('http2')
 const path = require('path')
 const readline = require('readline')
 const { execFile } = require('child_process')
@@ -116,17 +118,25 @@ const PLATFORMS = {
       `https://www.reddit.com/search/?q=${encodeURIComponent(name)}&type=users`,
     userUrl: (username) =>
       `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/`,
-    listingUrl: (username) =>
-      `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/.json?limit=1&raw_json=1`,
-    rssUrl: (username) =>
-      `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/.rss`,
+    probeUrl: (username) =>
+      `https://old.reddit.com/user/${encodeURIComponent(username)}/submitted/?over18=1`,
   },
 }
 
 const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
 const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb']
 const REDDIT_PROBE_USER_AGENT =
-  'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36'
+const REDDIT_PROBE_DELAY_MS = parseNonNegativeInteger(
+  argv['reddit-delay'],
+  6500
+)
+const REDDIT_PROBE_RETRY_DELAY_MS = parseNonNegativeInteger(
+  argv['reddit-retry-delay'],
+  30000
+)
+const REDDIT_PROBE_MAX_RETRIES = 2
+let lastRedditProbeAt = 0
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(host, url, headers = {}) {
@@ -164,7 +174,63 @@ function httpsGet(host, url, headers = {}) {
   })
 }
 
+function http2Get(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const client = http2.connect(parsed.origin)
+    let settled = false
+
+    const finish = (callback) => {
+      if (settled) return
+      settled = true
+      client.close()
+      callback()
+    }
+
+    client.on('error', (err) => finish(() => reject(err)))
+
+    const requestHeaders = {
+      ':method': 'GET',
+      ':path': `${parsed.pathname}${parsed.search}`,
+      ':authority': parsed.host,
+    }
+    for (const [name, value] of Object.entries(headers)) {
+      requestHeaders[name.toLowerCase()] = value
+    }
+
+    const req = client.request(requestHeaders)
+    let responseHeaders = {}
+    let body = ''
+    req.setEncoding('utf8')
+    req.on('response', (value) => {
+      responseHeaders = value
+    })
+    req.on('data', (chunk) => {
+      body += chunk
+    })
+    req.on('end', () =>
+      finish(() =>
+        resolve({
+          status: responseHeaders[':status'],
+          body,
+        })
+      )
+    )
+    req.on('error', (err) => finish(() => reject(err)))
+    req.setTimeout(10000, () => {
+      req.close(http2.constants.NGHTTP2_CANCEL)
+      finish(() => reject(new Error('timeout')))
+    })
+    req.end()
+  })
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+function parseNonNegativeInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
 
 function isSelectedModel(canonicalName) {
   return MODEL_FILTER.size === 0 || MODEL_FILTER.has(sanitize(canonicalName))
@@ -444,41 +510,39 @@ async function lookupReddit(username) {
   const cleanedUsername = String(username || '').replace(/^u_/, '')
   if (!cleanedUsername) return null
 
-  const listing = await httpsGet(cfg.host, cfg.listingUrl(cleanedUsername), {
-    Accept: 'application/json',
-    'User-Agent': REDDIT_PROBE_USER_AGENT,
-  })
-  if (listing.status === 200) {
-    try {
-      const data = JSON.parse(listing.body)
-      if (data?.kind === 'Listing' && data?.data) {
-        return {
-          username: cleanedUsername,
-          url: cfg.userUrl(cleanedUsername),
-        }
+  for (let attempt = 0; attempt <= REDDIT_PROBE_MAX_RETRIES; attempt += 1) {
+    const waitMs = Math.max(
+      lastRedditProbeAt + REDDIT_PROBE_DELAY_MS - Date.now(),
+      0
+    )
+    if (waitMs > 0) await sleep(waitMs)
+    lastRedditProbeAt = Date.now()
+
+    const response = await http2Get(cfg.probeUrl(cleanedUsername), {
+      Accept: 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Cookie: 'over18=1;',
+      Referer: 'https://old.reddit.com/',
+      'User-Agent': REDDIT_PROBE_USER_AGENT,
+    })
+    if (response.status === 200) {
+      return {
+        username: cleanedUsername,
+        url: cfg.userUrl(cleanedUsername),
       }
-    } catch {
-      return null
     }
-  }
-  if (listing.status === 404) return null
-
-  const rss = await httpsGet(cfg.host, cfg.rssUrl(cleanedUsername), {
-    Accept: 'application/atom+xml,text/xml,application/xml',
-    'User-Agent': REDDIT_PROBE_USER_AGENT,
-  })
-  if (rss.status === 404) return null
-  if (rss.status !== 200) throw new Error(`HTTP ${listing.status}`)
-
-  const categoryMatch = rss.body.match(
-    /<category\b[^>]*(?:term|label)=["']u[\/_]([^"']+)["']/i
-  )
-  const feedUsername = categoryMatch?.[1] || cleanedUsername
-  if (feedUsername) {
-    return {
-      username: feedUsername,
-      url: cfg.userUrl(feedUsername),
+    if (response.status === 404) return null
+    if (
+      ![403, 429].includes(response.status) ||
+      attempt >= REDDIT_PROBE_MAX_RETRIES
+    ) {
+      throw new Error(`HTTP ${response.status}`)
     }
+    const retryDelay = REDDIT_PROBE_RETRY_DELAY_MS * (attempt + 1)
+    process.stdout.write(
+      ` retrying HTTP ${response.status} in ${Math.round(retryDelay / 1000)}s...`
+    )
+    await sleep(retryDelay)
   }
 
   return null
@@ -1559,11 +1623,15 @@ async function run() {
   }
 }
 
-run().catch((err) => {
-  if (/readline was closed/i.test(err.message)) {
-    console.log('\n  Input closed. Progress saved as you went.')
-    process.exit(0)
-  }
-  console.error(`\n  ❌ Fatal: ${err.message}`)
-  process.exit(1)
-})
+module.exports = { lookupReddit }
+
+if (require.main === module) {
+  run().catch((err) => {
+    if (/readline was closed/i.test(err.message)) {
+      console.log('\n  Input closed. Progress saved as you went.')
+      process.exit(0)
+    }
+    console.error(`\n  ❌ Fatal: ${err.message}`)
+    process.exit(1)
+  })
+}
