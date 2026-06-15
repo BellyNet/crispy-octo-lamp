@@ -828,6 +828,14 @@
       .pswp.pswp--chrome-hidden .pswp__pswp-info-panel {
         padding-bottom: 10px;
       }
+      /* While the native video controls are visible, get the info panel
+         and date slider out of their way — the browser-drawn controls
+         live in the video element's shadow DOM and can't be re-z-indexed
+         from outside, so we hide the things in front of them instead. */
+      .pswp.pswp--video-controls .pswp__pswp-info-panel,
+      .pswp.pswp--video-controls .pswp__pswp-date-slider {
+        display: none !important;
+      }
 
       /* Force white on every PhotoSwipe button so SVGs that use
          `currentColor` (close, our custom ones) actually render white
@@ -3469,10 +3477,15 @@
             wrap.dataset.tapBound = '1'
             wrap.addEventListener('click', (ev) => {
               if (ev.target !== wrap && ev.target !== video) return
-              if (video.hasAttribute('controls')) {
+              const showing = video.hasAttribute('controls')
+              if (showing) {
                 video.removeAttribute('controls')
+                pswp.element?.classList.remove('pswp--video-controls')
               } else {
                 video.setAttribute('controls', '')
+                // Push the bottom info panel and top date slider out
+                // of the way so the native controls aren't covered.
+                pswp.element?.classList.add('pswp--video-controls')
               }
             })
           })
