@@ -226,11 +226,24 @@ async function askBatchOptions(rl, { includeStartFrom, includeHoghaul }) {
     .trim()
     .toLowerCase()
   const skipNasSync = skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes'
+  const fullSourceRefreshAnswer = includeHoghaul
+    ? (
+        await ask(
+          rl,
+          'Refresh all source pages and existing titles/comments? [y/N]: '
+        )
+      )
+        .trim()
+        .toLowerCase()
+    : ''
+  const fullSourceRefresh =
+    fullSourceRefreshAnswer === 'y' || fullSourceRefreshAnswer === 'yes'
 
   const options = {
     onlyModels,
     startFrom,
     skipNasSync,
+    fullSourceRefresh,
   }
 
   if (includeHoghaul) options.includeSessionHoghaul = true
@@ -310,6 +323,7 @@ function toRunnerBatchOptions(options, sessionOptions = {}) {
     'start-from': options.startFrom,
     ...sessionHoghaulOptions,
     'skip-nas-sync': options.skipNasSync,
+    'full-source-refresh': options.fullSourceRefresh,
   }
 }
 
