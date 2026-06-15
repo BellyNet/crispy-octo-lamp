@@ -370,8 +370,19 @@ function parseSkipPlatforms(input) {
   if (!normalized || normalized === 'all') return SOURCE_PLATFORMS
   return normalized
     .split(',')
-    .map((part) => part.trim())
+    .map((part) => {
+      const platform = part.trim()
+      return platform === 'pawchive' ? 'kemono' : platform
+    })
     .filter((part) => SOURCE_PLATFORMS.includes(part))
+}
+
+function getRequestedSkipPlatforms(requested, currentlyMissing) {
+  const missing = Array.isArray(currentlyMissing) ? currentlyMissing : []
+  if (!String(requested || '').trim()) return [...missing]
+  return parseSkipPlatforms(requested).filter((platform) =>
+    missing.includes(platform)
+  )
 }
 
 function getCoomerSearchResultTotal(html) {
@@ -1130,8 +1141,8 @@ async function promptPermanentSkip(
   defaultPlatform
 ) {
   const prompt = defaultPlatform
-    ? `  Permanently skip ${defaultPlatform} for ${canonicalName}? [y/N]: `
-    : `  Platform(s) to permanently skip for ${canonicalName} (coomer, kemono, reddit, stufferdb, all): `
+    ? `  Permanently skip ${PLATFORMS[defaultPlatform]?.label || defaultPlatform} for ${canonicalName}? [y/N]: `
+    : `  Platform(s) to permanently skip for ${canonicalName} (coomer, pawchive, reddit, stufferdb, all): `
   const answer = (await ask(rl, prompt)).trim().toLowerCase()
   if (defaultPlatform) {
     if (answer !== 'y' && answer !== 'yes') return []
@@ -1477,7 +1488,8 @@ async function run() {
     r <username> probe Reddit for a specific username
     o            reopen current URL in browser
     s            skip this model (move to next)
-    p <source>   permanently skip source for this model (or p all)
+    p            permanently skip all currently missing sources
+    p <source>   permanently skip one source (coomer/pawchive/reddit/stufferdb)
     q            quit`)
 
           if (currentUrl) console.log(`  Current URL: ${currentUrl}`)
@@ -1499,23 +1511,23 @@ async function run() {
 
           if (lower === 'p' || lower.startsWith('p ')) {
             const requested = lower === 'p' ? '' : raw.slice(2).trim()
-            const skipped =
-              requested.length > 0
-                ? parseSkipPlatforms(requested)
-                : await promptPermanentSkip(
-                    rl,
-                    permanentSkips,
-                    canonicalName,
-                    null
-                  )
-            if (requested.length > 0) {
-              for (const platform of skipped) {
-                markPermanentSkip(permanentSkips, canonicalName, platform)
-              }
+            const skipped = getRequestedSkipPlatforms(requested, still)
+            for (const platform of skipped) {
+              markPermanentSkip(permanentSkips, canonicalName, platform)
             }
             skipped.forEach(markPlatformHandled)
             if (skipped.length) {
-              console.log(`  Permanently skipped: ${skipped.join(', ')}`)
+              console.log(
+                `  Permanently skipped: ${skipped
+                  .map(
+                    (platform) =>
+                      PLATFORMS[platform]?.label ||
+                      (platform === 'stufferdb' ? 'StufferDB' : platform)
+                  )
+                  .join(', ')}`
+              )
+            } else {
+              console.log('  No currently missing source matched that name.')
             }
             continue
           }
@@ -1808,8 +1820,10 @@ async function run() {
 }
 
 module.exports = {
+  getRequestedSkipPlatforms,
   getRedditUnavailableReason,
   lookupReddit,
+  parseSkipPlatforms,
   printAutoBackfillReport,
   probeReddit,
 }
