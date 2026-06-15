@@ -732,6 +732,13 @@ async function autoSaveDirectUsernameMatches(
   let ambiguous = 0
   let failed = 0
   let permanentlySkipped = 0
+  const details = {
+    ambiguous: [],
+    failed: [],
+    matched: [],
+    noMatches: [],
+    permanentSkips: [],
+  }
   const candidates = Object.entries(registry).filter(
     ([canonicalName, entry]) =>
       isSelectedModel(canonicalName) &&
@@ -807,6 +814,12 @@ async function autoSaveDirectUsernameMatches(
         console.log(
           `    matched ${PLATFORMS[platform].label}: ${hit.url} (${hit.username})`
         )
+        details.matched.push({
+          model: canonicalName,
+          platform,
+          username: hit.username,
+          url: hit.url,
+        })
         saved += 1
         continue
       }
@@ -824,6 +837,11 @@ async function autoSaveDirectUsernameMatches(
         console.log(
           `    ${PLATFORMS[platform].label}: ${hits.length} exact matches; remembered as ambiguous for manual review`
         )
+        details.ambiguous.push({
+          model: canonicalName,
+          platform,
+          candidates: hits.map((hit) => hit.url),
+        })
         ambiguous += 1
         continue
       }
@@ -832,6 +850,11 @@ async function autoSaveDirectUsernameMatches(
         console.log(
           `    ${PLATFORMS[platform].label}: probe failed; will retry next run`
         )
+        details.failed.push({
+          model: canonicalName,
+          platform,
+          errors: errors[platform],
+        })
         failed += 1
         continue
       }
@@ -843,6 +866,12 @@ async function autoSaveDirectUsernameMatches(
         console.log(
           `    ${PLATFORMS[platform].label}: permanent skip (${skip.reason}, "${skip.username}")`
         )
+        details.permanentSkips.push({
+          model: canonicalName,
+          platform,
+          reason: skip.reason,
+          username: skip.username,
+        })
         permanentlySkipped += 1
         continue
       }
@@ -858,6 +887,11 @@ async function autoSaveDirectUsernameMatches(
       console.log(
         `    ${PLATFORMS[platform].label}: no match; remembered for future runs`
       )
+      details.noMatches.push({
+        model: canonicalName,
+        platform,
+        usernames,
+      })
       noMatches += 1
     }
     saveAutoAttempts(attemptState)
@@ -866,6 +900,7 @@ async function autoSaveDirectUsernameMatches(
   return {
     ambiguous,
     checked: candidates.length,
+    details,
     failed,
     noMatches,
     permanentlySkipped,
@@ -873,6 +908,97 @@ async function autoSaveDirectUsernameMatches(
     saved,
     skipped,
   }
+}
+
+function printAutoBackfillReport(summary) {
+  const { details } = summary
+  const matchedModels = new Set(details.matched.map((match) => match.model))
+    .size
+  const matchesByPlatform = SOURCE_PLATFORMS.map((platform) => ({
+    platform,
+    count: details.matched.filter((match) => match.platform === platform)
+      .length,
+  })).filter((entry) => entry.count > 0)
+  console.log('\n  Auto-match report')
+  console.log('  ' + '-'.repeat(62))
+  console.log(`  Models checked:           ${summary.checked}`)
+  console.log(`  Models actively probed:   ${summary.probed}`)
+  console.log(`  Previously remembered:    ${summary.skipped}`)
+  console.log(`  Models matched:           ${matchedModels}`)
+  console.log(`  Sources matched:          ${summary.saved}`)
+  if (matchesByPlatform.length > 0) {
+    console.log(
+      `  Matches by source:        ${matchesByPlatform
+        .map(
+          ({ platform, count }) =>
+            `${PLATFORMS[platform]?.label || platform} ${count}`
+        )
+        .join(', ')}`
+    )
+  }
+  console.log(`  Permanent source skips:   ${summary.permanentlySkipped}`)
+  console.log(`  Ambiguous source matches: ${summary.ambiguous}`)
+  console.log(`  Probe failures:           ${summary.failed}`)
+  console.log(`  New no-matches:           ${summary.noMatches}`)
+
+  if (details.matched.length > 0) {
+    console.log('\n  Matched sources:')
+    for (const match of details.matched) {
+      console.log(
+        `    ${match.model} [${PLATFORMS[match.platform].label}] ${match.username} -> ${match.url}`
+      )
+    }
+  }
+
+  if (details.permanentSkips.length > 0) {
+    console.log('\n  New permanent skips:')
+    for (const skip of details.permanentSkips) {
+      console.log(
+        `    ${skip.model} [${PLATFORMS[skip.platform].label}] ${skip.username}: ${skip.reason}`
+      )
+    }
+  }
+
+  if (details.ambiguous.length > 0) {
+    console.log('\n  Ambiguous matches requiring review:')
+    for (const result of details.ambiguous) {
+      console.log(
+        `    ${result.model} [${PLATFORMS[result.platform].label}] ${result.candidates.length} candidates`
+      )
+      for (const candidate of result.candidates) {
+        console.log(`      ${candidate}`)
+      }
+    }
+  }
+
+  if (details.failed.length > 0) {
+    console.log('\n  Failed probes:')
+    for (const failure of details.failed) {
+      const messages = failure.errors
+        .map((error) => `${error.username}: ${error.message}`)
+        .join('; ')
+      console.log(
+        `    ${failure.model} [${PLATFORMS[failure.platform].label}] ${messages}`
+      )
+    }
+  }
+
+  if (details.noMatches.length > 0) {
+    console.log('\n  New no-matches by source:')
+    for (const platform of SOURCE_PLATFORMS) {
+      const results = details.noMatches.filter(
+        (result) => result.platform === platform
+      )
+      if (results.length === 0) continue
+      console.log(
+        `    ${PLATFORMS[platform].label} (${results.length}): ${results
+          .map((result) => result.model)
+          .join(', ')}`
+      )
+    }
+  }
+
+  console.log('  ' + '-'.repeat(62))
 }
 
 // ─── URL PARSING ──────────────────────────────────────────────────────────────
@@ -1044,6 +1170,7 @@ async function run() {
   console.log(
     `  Auto-backfill complete: ${autoSummary.checked} checked, ${autoSummary.probed} probed, ${autoSummary.skipped} remembered skips, ${autoSummary.permanentlySkipped} permanent skips, ${autoSummary.noMatches} new no-matches, ${autoSummary.ambiguous} ambiguous, ${autoSummary.failed} failed, ${autoSummary.saved} added.`
   )
+  printAutoBackfillReport(autoSummary)
   if (AUTO) return
 
   const toProcess = Object.entries(registry).filter(
@@ -1680,7 +1807,12 @@ async function run() {
   }
 }
 
-module.exports = { getRedditUnavailableReason, lookupReddit, probeReddit }
+module.exports = {
+  getRedditUnavailableReason,
+  lookupReddit,
+  printAutoBackfillReport,
+  probeReddit,
+}
 
 if (require.main === module) {
   run().catch((err) => {
