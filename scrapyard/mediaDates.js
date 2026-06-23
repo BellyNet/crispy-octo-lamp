@@ -274,6 +274,50 @@ function normalizeComments(comments) {
     .filter((comment) => comment.text)
 }
 
+function cleanSourceTitle(value) {
+  return String(value || '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getRedditTitleFromPermalink(url) {
+  const rawUrl = String(url || '').trim()
+  if (!rawUrl) return null
+  let pathname = rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    if (!/(^|\.)reddit\.com$/i.test(parsed.hostname)) return null
+    pathname = parsed.pathname
+  } catch {
+    // Accept bare paths from older records.
+  }
+
+  const match = pathname.match(/\/comments\/[^/?#\s]+\/([^/?#]+)/i)
+  if (!match) return null
+  let slug = match[1]
+  try {
+    slug = decodeURIComponent(slug)
+  } catch {}
+  return cleanSourceTitle(slug.replace(/[_-]+/g, ' ')) || null
+}
+
+function getFallbackSourceTitle(sourceMeta) {
+  const site = String(
+    sourceMeta?.site || sourceMeta?.sourceSite || ''
+  ).toLowerCase()
+  if (site !== 'reddit') return null
+
+  return (
+    getRedditTitleFromPermalink(
+      sourceMeta.mediaPageUrl || sourceMeta.sourceMediaPageUrl
+    ) ||
+    (Array.isArray(sourceMeta.mediaPageUrls)
+      ? sourceMeta.mediaPageUrls.map(getRedditTitleFromPermalink).find(Boolean)
+      : null)
+  )
+}
+
 function normalizeSourceMeta(sourceMeta) {
   if (!sourceMeta || typeof sourceMeta !== 'object') return null
 
@@ -284,7 +328,7 @@ function normalizeSourceMeta(sourceMeta) {
     username: sourceMeta.username || sourceMeta.sourceUsername || null,
     subreddit: sourceMeta.subreddit || sourceMeta.sourceSubreddit || null,
     postId: sourceMeta.postId || sourceMeta.sourcePostId || null,
-    title: sourceMeta.title || null,
+    title: sourceMeta.title || getFallbackSourceTitle(sourceMeta) || null,
     originalName: sourceMeta.originalName || null,
     mediaPageUrl:
       sourceMeta.mediaPageUrl || sourceMeta.sourceMediaPageUrl || null,
@@ -512,5 +556,6 @@ module.exports = {
   extractFilenameDate,
   flushAllSidecars,
   findFfprobe,
+  getRedditTitleFromPermalink,
   SIDECAR_FILENAME,
 }

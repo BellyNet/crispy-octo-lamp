@@ -276,6 +276,7 @@ async function main() {
     JSON.stringify({
       __version: 4,
       'images/a.jpg': { source: { title: 'Shortened caption...' } },
+      'images/b.jpg': { source: { title: null } },
     })
   )
   assert.strictEqual(
@@ -305,6 +306,20 @@ async function main() {
     ),
     true
   )
+  assert.strictEqual(
+    mediaDates.recordExistingMetadata(
+      metadataModelDir,
+      'images/b.jpg',
+      '2026-05-02T00:00:00.000Z',
+      {
+        sourceSite: 'reddit',
+        mediaPageUrl:
+          'https://www.reddit.com/r/Feedism/comments/abc123/full_reddit_title_here/',
+        mediaUrl: 'https://i.redd.it/full-title.jpg',
+      }
+    ),
+    true
+  )
   mediaDates.flushAllSidecars()
   assert.deepStrictEqual(
     syncModelMetadataToNas({
@@ -321,7 +336,14 @@ async function main() {
     )
   )['images/a.jpg']
   const syncedMetadata = syncedRecord.source
+  const syncedRedditMetadata = JSON.parse(
+    fs.readFileSync(
+      path.join(metadataNasRoot, 'sample_model', '.media-dates.json'),
+      'utf8'
+    )
+  )['images/b.jpg'].source
   assert.strictEqual(syncedMetadata.title, 'Full caption and details')
+  assert.strictEqual(syncedRedditMetadata.title, 'full reddit title here')
   assert.strictEqual(syncedMetadata.needsFullResolution, false)
   assert.strictEqual(
     syncedMetadata.fullResolutionStatus,

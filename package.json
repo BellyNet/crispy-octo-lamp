@@ -42,6 +42,7 @@
     "audit:scrape-dupes": "node audit/audit-scrape-duplicates.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
     "repair": "node scrapyard/run-scrape.js repair",
+    "repair:reddit-titles": "node scrapyard/repairRedditMetadataTitles.js",
     "repair:tail-decode": "node audit/run-session-repair.js",
     "salvage:tail-video": "node audit/salvage-tail-videos.js --input",
     "salvage:tail-batch": "node audit/salvage-quarantine-tail-videos.js",
