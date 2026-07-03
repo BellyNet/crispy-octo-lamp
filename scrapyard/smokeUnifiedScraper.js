@@ -28,6 +28,10 @@ const {
   recordSourceCheckpoint,
 } = require('./sourceFrontier')
 const {
+  createIncrementalSourceState,
+  getRedditSourceStatePath,
+} = require('./redditSourceState')
+const {
   getMediaEntrySeenDetails,
   getMediaEntrySourceDetails,
   getMediaEntryUrls,
@@ -1354,6 +1358,89 @@ async function main() {
   assert.strictEqual(
     pageFilter.filterPage([{ id: 'older' }]).stopAfterPage,
     true
+  )
+
+  const redditStateDataset = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'reddit-state-smoke-')
+  )
+  const redditStateModelDir = path.join(redditStateDataset, 'sample_model')
+  const redditStateLogDir = path.join(redditStateModelDir, 'log')
+  fs.mkdirSync(path.join(redditStateModelDir, 'images'), { recursive: true })
+  fs.mkdirSync(redditStateLogDir, { recursive: true })
+  fs.writeFileSync(path.join(redditStateModelDir, 'images', 'old.jpg'), 'old')
+  fs.writeFileSync(path.join(redditStateModelDir, 'images', 'new.jpg'), 'new')
+  fs.writeFileSync(
+    getRedditSourceStatePath(redditStateLogDir),
+    JSON.stringify(
+      {
+        version: 1,
+        updatedAt: '2026-06-01T00:00:00.000Z',
+        sources: {
+          'submitted/sample_model': {
+            sourceSite: 'reddit',
+            sourceService: 'submitted',
+            sourceUserId: 'sample_model',
+            sourceUsername: 'sample_model',
+            sourceKey: 'submitted/sample_model',
+            latestPostId: 'oldpost',
+            latestCreatedUtc: 1769904000,
+            posts: {
+              oldpost: {
+                postId: 'oldpost',
+                createdUtc: 1769904000,
+                relativePaths: ['sample_model/images/old.jpg'],
+              },
+            },
+          },
+        },
+      },
+      null,
+      2
+    )
+  )
+  fs.writeFileSync(
+    path.join(redditStateLogDir, 'milkmaid-seen-media-index.json'),
+    JSON.stringify({
+      mediaUrls: {},
+      mediaPageUrls: {
+        'https://old.reddit.com/r/test/comments/newpost/new_title/': {
+          relativePath: 'sample_model/images/new.jpg',
+          sourceSite: 'reddit',
+          sourceService: 'submitted',
+          sourceUserId: 'sample_model',
+          sourceUsername: 'sample_model',
+          postId: 'newpost',
+          uploadedDate: '2026-06-20T00:00:00.000Z',
+          mediaPageUrl:
+            'https://old.reddit.com/r/test/comments/newpost/new_title/',
+          mediaUrl: 'https://i.redd.it/new.jpg',
+        },
+      },
+    })
+  )
+  const redditStateContext = createIncrementalSourceState(
+    redditStateLogDir,
+    {
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'sample_model',
+      username: 'sample_model',
+    },
+    {
+      datasetPaths: {
+        toDatasetAbsolutePath: (relativePath) =>
+          path.join(redditStateDataset, relativePath),
+        existsLocallyOrOnNas: fs.existsSync,
+      },
+    }
+  )
+  assert.strictEqual(
+    redditStateContext.incrementalState.latestPostId,
+    'newpost'
+  )
+  assert(
+    redditStateContext.incrementalState.knownPostIds.has('newpost'),
+    'expected Reddit incremental state to refresh from seen-media index'
   )
 
   const checkpointSource = {

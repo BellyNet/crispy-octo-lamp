@@ -278,13 +278,18 @@ function backfillRedditSourceStateFromSeenIndex(
 }
 
 function createIncrementalSourceState(modelLogDir, source, options = {}) {
-  const state = loadRedditSourceState(modelLogDir)
+  const initialState = loadRedditSourceState(modelLogDir)
+  let state = initialState
   let sourceState = state.sources[getSourceKey(source)]
 
-  if (!sourceState || Object.keys(sourceState.posts || {}).length === 0) {
-    backfillRedditSourceStateFromSeenIndex(modelLogDir, source, options)
-    const refreshedState = loadRedditSourceState(modelLogDir)
-    sourceState = refreshedState.sources[getSourceKey(source)]
+  const backfillResult = backfillRedditSourceStateFromSeenIndex(
+    modelLogDir,
+    source,
+    options
+  )
+  if (backfillResult.changed) {
+    state = loadRedditSourceState(modelLogDir)
+    sourceState = state.sources[getSourceKey(source)]
   }
 
   const posts = sourceState?.posts || {}
