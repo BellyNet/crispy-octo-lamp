@@ -61,6 +61,10 @@ function getPostTitleOrCaption(post = {}) {
   return `${title} - ${caption}`
 }
 
+function getPostFullText(post = {}) {
+  return getPostCaption(post) || cleanPostText(post.title) || null
+}
+
 function getPostCaption(post = {}) {
   const contentWithoutDownloadAnchors = String(post.content || '').replace(
     /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>[\s\S]*?<\/a>/gi,
@@ -233,6 +237,7 @@ function getExternalMediaEntriesFromPost(source, post, options = {}) {
     ...getLegacyKemonoPostPageUrls(source, post),
   ]
   const title = getPostTitleOrCaption(post)
+  const text = getPostFullText(post)
   const normalizeUrl =
     typeof options.normalizeUrl === 'function'
       ? options.normalizeUrl
@@ -254,6 +259,7 @@ function getExternalMediaEntriesFromPost(source, post, options = {}) {
       return {
         postId: String(post.id || ''),
         title,
+        text,
         mediaPageUrl,
         mediaPageUrls,
         mediaUrl: candidate.downloadUrl,
@@ -280,6 +286,7 @@ function getMediaEntriesFromPost(source, post, options = {}) {
     ...getLegacyKemonoPostPageUrls(source, post),
   ]
   const title = getPostTitleOrCaption(post)
+  const text = getPostFullText(post)
   const rawEntries = []
   if (post.file?.path) rawEntries.push(post.file)
   if (Array.isArray(post.attachments)) rawEntries.push(...post.attachments)
@@ -306,6 +313,7 @@ function getMediaEntriesFromPost(source, post, options = {}) {
       return {
         postId: String(post.id || ''),
         title,
+        text,
         mediaPageUrl,
         mediaPageUrls,
         mediaUrl,
@@ -363,12 +371,8 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results
 }
 
-async function enrichPawchivePosts(source, posts, deps = {}) {
-  if (
-    source.origin !== PAWCHIVE_ORIGIN ||
-    !posts.length ||
-    typeof deps.fetchJson !== 'function'
-  ) {
+async function enrichCoomerKemonoPosts(source, posts, deps = {}) {
+  if (!posts.length || typeof deps.fetchJson !== 'function') {
     return posts
   }
 
@@ -409,7 +413,7 @@ async function enrichPawchivePosts(source, posts, deps = {}) {
 
       completed += 1
       deps.logger?.status?.(
-        `Fetching Pawchive metadata: ${completed}/${posts.length} post(s)`
+        `Fetching ${source.site} metadata: ${completed}/${posts.length} post(s)`
       )
       return {
         ...detailedPost,
@@ -420,7 +424,7 @@ async function enrichPawchivePosts(source, posts, deps = {}) {
 
   if (detailFailures || commentFailures) {
     deps.logger?.log?.(
-      `Pawchive metadata warnings: ${detailFailures} detail, ${commentFailures} comment request(s) failed`
+      `${source.site} metadata warnings: ${detailFailures} detail, ${commentFailures} comment request(s) failed`
     )
   }
   return enriched
@@ -542,7 +546,7 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
             Math.max(options.maxPosts - posts.length, 0)
           )
         : filteredPage.items
-    const enrichedPagePosts = await enrichPawchivePosts(
+    const enrichedPagePosts = await enrichCoomerKemonoPosts(
       source,
       selectedPagePosts,
       {
@@ -568,6 +572,8 @@ async function fetchCoomerKemonoPosts(source, options = {}, deps = {}) {
           : 0
         return {
           ...post,
+          title: getPostTitleOrCaption(post),
+          text: getPostFullText(post),
           mediaEntries,
         }
       })

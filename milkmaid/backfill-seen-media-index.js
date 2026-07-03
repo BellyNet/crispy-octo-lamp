@@ -220,6 +220,7 @@ function consumeRunLog(logPath, modelName, index) {
         sourceSubreddit: event.sourceSubreddit || null,
         postId: event.postId || null,
         title: event.title || null,
+        text: event.text || null,
         originalName: event.originalName || null,
         uploadedDate: normalizeIsoDate(event.uploadedDate),
       }
@@ -265,6 +266,7 @@ function consumeRunLog(logPath, modelName, index) {
       sourceSubreddit: candidate.sourceSubreddit || null,
       postId: candidate.postId || null,
       title: candidate.title || null,
+      text: candidate.text || null,
       originalName: candidate.originalName || null,
       uploadedDate: candidate.uploadedDate || null,
     }

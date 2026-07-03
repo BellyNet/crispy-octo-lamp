@@ -207,6 +207,7 @@ function parseCoomerFansMediaEntries(source, post, html) {
       return {
         postId: String(post.id || ''),
         title,
+        text: title,
         mediaPageUrl: post.url,
         mediaPageUrls: [post.url],
         mediaUrl,
@@ -299,6 +300,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
             id: post.id,
             url: post.url,
             title: mediaEntries[0]?.title || null,
+            text: mediaEntries[0]?.text || null,
             published: mediaEntries[0]?.uploadedDate || null,
             mediaEntries,
           }

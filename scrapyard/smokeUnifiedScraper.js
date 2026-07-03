@@ -203,6 +203,7 @@ async function main() {
       subreddit: null,
       postId: 'abc123',
       title: 'Recovered title',
+      text: null,
       originalName: null,
       mediaPageUrl: 'https://www.reddit.com/comments/abc123/',
       mediaUrl: 'https://i.redd.it/a.jpg',
@@ -266,6 +267,7 @@ async function main() {
       sourceSubreddit: null,
       postId: 'abc123',
       title: 'Saved post title',
+      text: null,
       originalName: 'original-file',
     }
   )
@@ -293,6 +295,7 @@ async function main() {
       {
         sourceSite: 'coomerfans',
         title: 'Full caption and details',
+        text: 'Full body text for dashboard',
         mediaUrl: 'https://img1.coomerfans.com/storage/a/b/one.jpg',
         mediaQuality: 'pawchive_preview',
         needsFullResolution: false,
@@ -349,6 +352,7 @@ async function main() {
     )
   )['images/b.jpg'].source
   assert.strictEqual(syncedMetadata.title, 'Full caption and details')
+  assert.strictEqual(syncedMetadata.text, 'Full body text for dashboard')
   assert.strictEqual(syncedRedditMetadata.title, 'full reddit title here')
   assert.strictEqual(syncedMetadata.needsFullResolution, false)
   assert.strictEqual(
@@ -781,6 +785,10 @@ async function main() {
     'Full caption & details'
   )
   assert.strictEqual(
+    coomerFansPosts[0].mediaEntries[0].text,
+    'Full caption & details'
+  )
+  assert.strictEqual(
     parseCoomerFansCaption(
       [
         '<meta property="og:title" content="abigailgray256 / A little teaser from a set I never released! Tip $5 to see t.." />',
@@ -813,6 +821,7 @@ async function main() {
     coomerMediaEntries[0].title,
     'Short title - Full caption & details'
   )
+  assert.strictEqual(coomerMediaEntries[0].text, 'Full caption & details')
   const pawchivePreviewEntries = getMediaEntriesFromPost(
     {
       origin: 'https://pawchive.st',
@@ -926,6 +935,10 @@ async function main() {
     pawchiveLinkedEntries[0].title,
     'What Working Out Looks Like Now - Full post caption & details'
   )
+  assert.strictEqual(
+    pawchiveLinkedEntries[0].text,
+    'Full post caption & details'
+  )
   assert.strictEqual(pawchiveLinkedEntries[0].mediaQuality, 'external_full')
   assert.deepStrictEqual(pawchiveLinkedEntries[0].pageMeta.comments[0], {
     author: 'Patron',
@@ -976,6 +989,11 @@ async function main() {
     }
   )
   assert.strictEqual(enrichedPawchivePosts[0].mediaEntries.length, 0)
+  assert.strictEqual(
+    enrichedPawchivePosts[0].title,
+    'Full Pawchive title - Full Pawchive caption'
+  )
+  assert.strictEqual(enrichedPawchivePosts[0].text, 'Full Pawchive caption')
   assert.deepStrictEqual(enrichedPawchivePosts[0].pageMeta, {
     comments: [
       {
@@ -988,12 +1006,12 @@ async function main() {
   })
   assert(
     pawchiveMetadataStatuses.some((line) =>
-      String(line).includes('Fetching Pawchive metadata: 1/1 post(s)')
+      String(line).includes('Fetching kemono metadata: 1/1 post(s)')
     )
   )
 
   const coomerStatuses = []
-  await fetchCoomerKemonoPosts(
+  const coomerPosts = await fetchCoomerKemonoPosts(
     {
       origin: 'https://coomer.su',
       site: 'coomer',
@@ -1002,9 +1020,24 @@ async function main() {
     },
     {},
     {
-      fetchJson: async (url) => ({
-        data: url.includes('o=0') ? [{ id: '1', file: null }] : [],
-      }),
+      fetchJson: async (url) => {
+        if (url.includes('/post/1/comments')) return { data: [] }
+        if (url.includes('/post/1')) {
+          return {
+            data: {
+              id: '1',
+              title: 'Full detail title',
+              content: '<p>Full detail body</p>',
+              file: { path: '/a/b/full.jpg' },
+            },
+          }
+        }
+        return {
+          data: url.includes('o=0')
+            ? [{ id: '1', title: 'Listing title', file: null }]
+            : [],
+        }
+      },
       logger: {
         status: (line) => coomerStatuses.push(line),
         statusDone: (line) => coomerStatuses.push(line),
@@ -1017,6 +1050,16 @@ async function main() {
       String(line).includes('Fetching coomer pages: 1 page(s), 1 post(s)')
     )
   )
+  assert.strictEqual(
+    coomerPosts[0].title,
+    'Full detail title - Full detail body'
+  )
+  assert.strictEqual(coomerPosts[0].text, 'Full detail body')
+  assert.strictEqual(
+    coomerPosts[0].mediaEntries[0].title,
+    'Full detail title - Full detail body'
+  )
+  assert.strictEqual(coomerPosts[0].mediaEntries[0].text, 'Full detail body')
 
   const redditDiscoveryEvents = []
   const redditListingPages = []

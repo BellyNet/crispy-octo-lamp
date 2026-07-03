@@ -402,6 +402,7 @@ function getMediaDateSourceMeta(entry = {}) {
     sourceSubreddit: entry.sourceSubreddit || null,
     postId: entry.postId || null,
     title: entry.title || null,
+    text: entry.text || null,
     originalName: entry.originalName || null,
     mediaPageUrl: entry.mediaPageUrl || null,
     mediaUrl: entry.mediaUrl || null,

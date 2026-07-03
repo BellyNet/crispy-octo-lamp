@@ -96,6 +96,7 @@ function normalizeMediaEntry(entry, options = {}) {
     sourceSubreddit: sanitizeToken(entry.sourceSubreddit || entry.subreddit),
     postId: String(entry.postId || '').trim(),
     title: entry.title || null,
+    text: entry.text || null,
     mediaPageUrl: mediaPageUrls[0] || null,
     mediaPageUrls,
     mediaUrl,
@@ -158,6 +159,7 @@ function getMediaEntrySourceDetails(entry = {}) {
     sourceSubreddit: entry.sourceSubreddit || null,
     postId: entry.postId || null,
     title: entry.title || null,
+    text: entry.text || null,
     originalName: entry.originalName || null,
     ...getMediaEntryQualityDetails(entry),
   }
@@ -172,6 +174,7 @@ function getMediaEntryHashMetadata(entry = {}) {
     sourceSubreddit: entry.sourceSubreddit || null,
     sourcePostId: entry.postId || null,
     sourceTitle: entry.title || null,
+    sourceText: entry.text || null,
     sourceMediaPageUrl: entry.mediaPageUrl || null,
     ...getMediaEntryQualityDetails(entry),
   }

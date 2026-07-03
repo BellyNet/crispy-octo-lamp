@@ -45,6 +45,7 @@ function sourceMetaFromSeenRecord(record) {
     subreddit: record.sourceSubreddit || null,
     postId: record.postId || null,
     title: record.title || null,
+    text: record.text || null,
     originalName: record.originalName || null,
     mediaPageUrl,
     mediaUrl,
@@ -70,6 +71,7 @@ function buildSeenIndexByRelativePath(index, modelName) {
         mediaPageUrl: record.mediaPageUrl || previous?.mediaPageUrl || null,
         mediaUrl: record.mediaUrl || previous?.mediaUrl || null,
         title: record.title || previous?.title || null,
+        text: record.text || previous?.text || null,
       })
     }
   }

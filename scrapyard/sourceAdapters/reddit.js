@@ -112,6 +112,10 @@ function getRedditPostTitle(post = {}) {
   return title || getTitleFromPermalink(post.permalink)
 }
 
+function getRedditPostText(post = {}) {
+  return cleanRedditText(post.selftext || post.selftext_html)
+}
+
 function filenameFromMediaUrl(mediaUrl) {
   try {
     const name = decodeURIComponent(path.basename(new URL(mediaUrl).pathname))
@@ -317,6 +321,7 @@ function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
     sourceSubreddit: getRedditSubreddit(post),
     postId: String(post.id || ''),
     title: getRedditPostTitle(post),
+    text: getRedditPostText(post),
     mediaPageUrl: getPostPageUrl(source, post),
     mediaPageUrls: getRedditMediaPageUrls(source, post),
     mediaUrl,
@@ -428,6 +433,7 @@ async function resolveRedgifsEntry(
     sourceSubreddit: getRedditSubreddit(post),
     postId: String(post.id || ''),
     title: getRedditPostTitle(post),
+    text: getRedditPostText(post),
     mediaPageUrl: getPostPageUrl(source, post),
     mediaPageUrls: getRedditMediaPageUrls(source, post),
     mediaUrl,
@@ -907,6 +913,7 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
           ...enrichedPost,
           id: String(enrichedPost.id || ''),
           title: getRedditPostTitle(enrichedPost),
+          text: getRedditPostText(enrichedPost),
           published: getRedditPostDate(enrichedPost),
           mediaEntries,
         })
@@ -1378,6 +1385,7 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
           ...post,
           id: String(post.id || ''),
           title: getRedditPostTitle(post),
+          text: getRedditPostText(post),
           published: getRedditPostDate(post),
           mediaEntries,
         }
@@ -1567,6 +1575,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
           ...post,
           id: String(post.id || ''),
           title: getRedditPostTitle(post),
+          text: getRedditPostText(post),
           published: getRedditPostDate(post),
           mediaEntries,
         }
@@ -1578,6 +1587,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
         ...post,
         id: String(post.id || ''),
         title: getRedditPostTitle(post),
+        text: getRedditPostText(post),
         published: getRedditPostDate(post),
         mediaEntries: post.mediaEntries || [],
       })

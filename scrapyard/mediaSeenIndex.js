@@ -34,6 +34,7 @@ const SEEN_RECORD_FIELDS = [
   'sourceSubreddit',
   'postId',
   'title',
+  'text',
   'originalName',
   'mediaQuality',
   'needsFullResolution',
@@ -56,6 +57,7 @@ const PRESERVED_SEEN_METADATA_FIELDS = [
   'sourceSubreddit',
   'postId',
   'title',
+  'text',
   'originalName',
   'mediaQuality',
   'needsFullResolution',
@@ -335,6 +337,7 @@ function createMediaSeenIndex(options = {}) {
       sourceSubreddit: details.sourceSubreddit || null,
       postId: details.postId || details.sourcePostId || null,
       title: details.title || details.sourceTitle || null,
+      text: details.text || details.sourceText || null,
       originalName: details.originalName || null,
       mediaQuality: details.mediaQuality || null,
       needsFullResolution:

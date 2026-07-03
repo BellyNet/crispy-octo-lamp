@@ -329,6 +329,7 @@ function normalizeSourceMeta(sourceMeta) {
     subreddit: sourceMeta.subreddit || sourceMeta.sourceSubreddit || null,
     postId: sourceMeta.postId || sourceMeta.sourcePostId || null,
     title: sourceMeta.title || getFallbackSourceTitle(sourceMeta) || null,
+    text: sourceMeta.text || sourceMeta.sourceText || null,
     originalName: sourceMeta.originalName || null,
     mediaPageUrl:
       sourceMeta.mediaPageUrl || sourceMeta.sourceMediaPageUrl || null,
