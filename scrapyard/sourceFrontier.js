@@ -21,6 +21,14 @@ function getStatePath(modelLogDir) {
   return path.join(modelLogDir, 'source-frontier-state.json')
 }
 
+function normalizePostIds(postIds = []) {
+  return [
+    ...new Set(
+      postIds.map((postId) => String(postId || '').trim()).filter(Boolean)
+    ),
+  ]
+}
+
 function loadState(modelLogDir) {
   const statePath = getStatePath(modelLogDir)
   if (!fs.existsSync(statePath)) return { version: 1, sources: {} }
@@ -134,7 +142,7 @@ function getPostIdFromRecord(source, record = {}) {
 
 function loadConfirmedSourceFrontier(modelLogDir, source, options = {}) {
   const index = readSeenIndex(modelLogDir)
-  const knownPostIds = new Set()
+  const confirmedPostIds = new Set()
   let confirmedRecords = 0
 
   for (const record of uniqueRecords(index || {})) {
@@ -142,23 +150,36 @@ function loadConfirmedSourceFrontier(modelLogDir, source, options = {}) {
     if (!recordExists(record, options.datasetPaths)) continue
     const postId = getPostIdFromRecord(source, record)
     if (!postId) continue
-    knownPostIds.add(postId)
+    confirmedPostIds.add(postId)
     confirmedRecords += 1
   }
   const state = loadState(modelLogDir)
-  const savedCompletedPostIds = new Set(
-    state.sources?.[getSourceKey(source)]?.completedPostIds || []
-  )
-  const completedPostIds = new Set(
-    [...savedCompletedPostIds].filter((postId) => knownPostIds.has(postId))
-  )
+  const sourceState = state.sources?.[getSourceKey(source)] || {}
+  const savedSeenPostIds = new Set(sourceState.seenPostIds || [])
+  const savedCompletedPostIds = new Set(sourceState.completedPostIds || [])
+  const knownPostIds = new Set([
+    ...confirmedPostIds,
+    ...savedSeenPostIds,
+    ...savedCompletedPostIds,
+  ])
+  const completedPostIds = new Set([...savedCompletedPostIds])
+  const skippablePostIds = new Set([
+    ...savedSeenPostIds,
+    ...savedCompletedPostIds,
+  ])
 
   return {
     active: knownPostIds.size > 0,
     knownPostIds,
     knownPostCount: knownPostIds.size,
+    confirmedPostIds,
+    confirmedPostCount: confirmedPostIds.size,
+    seenPostIds: savedSeenPostIds,
+    seenPostCount: savedSeenPostIds.size,
     completedPostIds,
     completedPostCount: completedPostIds.size,
+    skippablePostIds,
+    skippablePostCount: skippablePostIds.size,
     confirmedRecords,
     sourceSite: source.site,
     sourceService: source.service || null,
@@ -199,7 +220,10 @@ function createBoundaryPageFilter(frontier, options = {}) {
         const id = String(getId(item) || '').trim()
         if (id && frontier.knownPostIds.has(id)) {
           knownCount += 1
-          if (frontier.completedPostIds?.has(id)) {
+          if (
+            frontier.completedPostIds?.has(id) ||
+            frontier.skippablePostIds?.has(id)
+          ) {
             completedCount += 1
             continue
           }
@@ -245,11 +269,7 @@ function createBoundaryPageFilter(frontier, options = {}) {
 }
 
 function recordCompletedSourcePosts(modelLogDir, source, postIds = []) {
-  const completedPostIds = [
-    ...new Set(
-      postIds.map((postId) => String(postId || '').trim()).filter(Boolean)
-    ),
-  ]
+  const completedPostIds = normalizePostIds(postIds)
   if (completedPostIds.length === 0) return { completedPostCount: 0 }
 
   const state = loadState(modelLogDir)
@@ -272,6 +292,139 @@ function recordCompletedSourcePosts(modelLogDir, source, postIds = []) {
     sourceKey,
     completedPostCount: merged.length,
     addedPostCount: completedPostIds.length,
+  }
+}
+
+function recordSeenSourcePosts(modelLogDir, source, postIds = []) {
+  const seenPostIds = normalizePostIds(postIds)
+  if (seenPostIds.length === 0) return { seenPostCount: 0, addedPostCount: 0 }
+
+  const state = loadState(modelLogDir)
+  const sourceKey = getSourceKey(source)
+  const existing = state.sources[sourceKey] || {}
+  const existingSeen = existing.seenPostIds || []
+  const merged = [...new Set([...existingSeen, ...seenPostIds])]
+  const addedPostCount = merged.length - existingSeen.length
+  if (addedPostCount <= 0) {
+    return {
+      sourceKey,
+      seenPostCount: merged.length,
+      addedPostCount: 0,
+    }
+  }
+
+  state.sources[sourceKey] = {
+    ...existing,
+    site: source.site,
+    service: source.service || null,
+    userId: source.userId || null,
+    username: source.username || source.rawName || null,
+    seenPostIds: merged,
+    updatedAt: new Date().toISOString(),
+  }
+  saveState(modelLogDir, state)
+  return {
+    sourceKey,
+    seenPostCount: merged.length,
+    addedPostCount,
+  }
+}
+
+function sourceEventMatches(source, event = {}) {
+  const eventSite = normalizeKey(event.sourceSite || event.site)
+  if (eventSite && eventSite !== normalizeKey(source.site)) return false
+
+  const eventService = normalizeKey(event.sourceService || event.service)
+  const sourceService = normalizeKey(source.service)
+  if (eventService && sourceService && eventService !== sourceService) {
+    return false
+  }
+
+  const eventUserId = normalizeKey(event.sourceUserId || event.userId)
+  const sourceUserId = normalizeKey(source.userId)
+  return !eventUserId || !sourceUserId || eventUserId === sourceUserId
+}
+
+function getPostIdFromPageUrl(source, value) {
+  let parsed
+  try {
+    parsed = new URL(String(value || '').trim())
+  } catch {
+    return ''
+  }
+  const service = normalizeKey(source.service)
+  const userId = normalizeKey(source.userId)
+  const parts = parsed.pathname.split('/').filter(Boolean).map(normalizeKey)
+  const serviceIndex = parts.indexOf(service)
+  if (serviceIndex < 0) return ''
+  if (parts[serviceIndex + 1] !== 'user') return ''
+  if (userId && parts[serviceIndex + 2] !== userId) return ''
+  if (parts[serviceIndex + 3] !== 'post') return ''
+  return parts[serviceIndex + 4] || ''
+}
+
+function collectEventUrls(value, urls = []) {
+  if (!value) return urls
+  if (typeof value === 'string') {
+    if (/^https?:\/\//i.test(value)) urls.push(value)
+    return urls
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectEventUrls(item, urls)
+    return urls
+  }
+  if (typeof value === 'object') {
+    for (const item of Object.values(value)) collectEventUrls(item, urls)
+  }
+  return urls
+}
+
+function extractSourcePostIdsFromRunEvent(source, event = {}) {
+  const postIds = new Set()
+  if (sourceEventMatches(source, event)) {
+    const direct = String(event.postId || event.sourcePostId || '').trim()
+    if (direct) postIds.add(direct)
+  }
+
+  for (const url of collectEventUrls(event)) {
+    const postId = getPostIdFromPageUrl(source, url)
+    if (postId) postIds.add(postId)
+  }
+
+  return [...postIds]
+}
+
+function backfillSeenSourcePostsFromRunEvents(modelLogDir, source) {
+  if (!modelLogDir || !fs.existsSync(modelLogDir)) {
+    return { seenPostCount: 0, addedPostCount: 0, scannedRunCount: 0 }
+  }
+
+  const postIds = new Set()
+  let scannedRunCount = 0
+  for (const entry of fs.readdirSync(modelLogDir)) {
+    if (!/^hoghaul-run-.*\.jsonl$/i.test(entry)) continue
+    scannedRunCount += 1
+    const runPath = path.join(modelLogDir, entry)
+    const lines = fs.readFileSync(runPath, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let event
+      try {
+        event = JSON.parse(line)
+      } catch {
+        continue
+      }
+      for (const postId of extractSourcePostIdsFromRunEvent(source, event)) {
+        postIds.add(postId)
+      }
+    }
+  }
+
+  const result = recordSeenSourcePosts(modelLogDir, source, [...postIds])
+  return {
+    ...result,
+    scannedRunCount,
+    extractedPostCount: postIds.size,
   }
 }
 
@@ -304,9 +457,11 @@ function recordSourceCheckpoint(modelLogDir, source, checkpoint) {
 }
 
 module.exports = {
+  backfillSeenSourcePostsFromRunEvents,
   createBoundaryPageFilter,
   getSourceCheckpoint,
   loadConfirmedSourceFrontier,
   recordCompletedSourcePosts,
+  recordSeenSourcePosts,
   recordSourceCheckpoint,
 }

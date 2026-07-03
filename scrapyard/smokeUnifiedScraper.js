@@ -21,10 +21,12 @@ const {
 } = require('./scraperRunner')
 const { parseSourceUrl } = require('./sourceRouter')
 const {
+  backfillSeenSourcePostsFromRunEvents,
   createBoundaryPageFilter,
   getSourceCheckpoint,
   loadConfirmedSourceFrontier,
   recordCompletedSourcePosts,
+  recordSeenSourcePosts,
   recordSourceCheckpoint,
 } = require('./sourceFrontier')
 const {
@@ -862,6 +864,18 @@ async function main() {
     pawchiveMediaEntries[0].mediaPageUrl,
     'https://pawchive.st/patreon/user/24586027/post/full-test'
   )
+  assert(
+    pawchiveMediaEntries[0].mediaPageUrls.includes(
+      'https://kemono.cr/patreon/user/24586027/post/full-test'
+    ),
+    'expected Pawchive entries to include legacy Kemono page aliases'
+  )
+  assert(
+    pawchiveMediaEntries[0].mediaUrls.includes(
+      'https://kemono.cr/data/a/b/one.jpg'
+    ),
+    'expected Pawchive entries to include legacy Kemono media aliases'
+  )
   assert.strictEqual(pawchiveMediaEntries[0].filename, 'one.jpg')
   assert.strictEqual(pawchiveMediaEntries[0].mediaQuality, 'full')
   assert.strictEqual(pawchiveMediaEntries[0].needsFullResolution, false)
@@ -1359,6 +1373,61 @@ async function main() {
     pageFilter.filterPage([{ id: 'older' }]).stopAfterPage,
     true
   )
+
+  const pawchiveSeenSource = {
+    origin: 'https://pawchive.st',
+    site: 'kemono',
+    service: 'patreon',
+    userId: '11678891',
+    rawName: '11678891',
+  }
+  recordSeenSourcePosts(frontierLogDir, pawchiveSeenSource, ['26720458'])
+  const pawchiveSeenFrontier = loadConfirmedSourceFrontier(
+    frontierLogDir,
+    pawchiveSeenSource,
+    {
+      datasetPaths: {
+        toDatasetAbsolutePath: (relativePath) =>
+          path.join(frontierDataset, relativePath),
+        existsLocallyOrOnNas: fs.existsSync,
+      },
+    }
+  )
+  assert.strictEqual(pawchiveSeenFrontier.knownPostCount, 1)
+  assert.strictEqual(pawchiveSeenFrontier.skippablePostCount, 1)
+  assert.deepStrictEqual(
+    createBoundaryPageFilter(pawchiveSeenFrontier).filterPage([
+      { id: '26720458' },
+    ]).items,
+    []
+  )
+
+  const pawchiveBackfillLogDir = path.join(frontierModelDir, 'pawchive-log')
+  fs.mkdirSync(pawchiveBackfillLogDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(pawchiveBackfillLogDir, 'hoghaul-run-2026-07-03.jsonl'),
+    `${JSON.stringify({
+      type: 'media_seen',
+      sourceSite: 'kemono',
+      sourceService: 'patreon',
+      sourceUserId: '11678891',
+      postId: '23020731',
+      mediaPageUrl: 'https://kemono.cr/patreon/user/11678891/post/23020731',
+    })}\n${JSON.stringify({
+      type: 'dom_media_extracted',
+      mediaPageUrl: 'https://pawchive.st/patreon/user/11678891/post/22976025',
+    })}\n`
+  )
+  const pawchiveBackfill = backfillSeenSourcePostsFromRunEvents(
+    pawchiveBackfillLogDir,
+    pawchiveSeenSource
+  )
+  assert.strictEqual(pawchiveBackfill.addedPostCount, 2)
+  const pawchiveBackfillFrontier = loadConfirmedSourceFrontier(
+    pawchiveBackfillLogDir,
+    pawchiveSeenSource
+  )
+  assert.strictEqual(pawchiveBackfillFrontier.skippablePostCount, 2)
 
   const redditStateDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'reddit-state-smoke-')

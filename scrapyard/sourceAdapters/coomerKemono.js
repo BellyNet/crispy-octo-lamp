@@ -84,6 +84,16 @@ function getPostPageUrl(source, post) {
   return `${source.origin}/${source.service}/user/${source.userId}/post/${post.id}`
 }
 
+function getLegacyKemonoPostPageUrls(source, post) {
+  if (source.origin !== PAWCHIVE_ORIGIN || !post?.id) return []
+  const pathPart = `/${source.service}/user/${source.userId}/post/${post.id}`
+  return [
+    `https://kemono.cr${pathPart}`,
+    `https://kemono.su${pathPart}`,
+    `https://kemono.party${pathPart}`,
+  ]
+}
+
 function getPostApiUrl(source, post) {
   return `${source.origin}/api/v1/${source.service}/user/${encodeURIComponent(
     source.userId
@@ -104,6 +114,17 @@ function getMediaUrl(source, media, post = {}) {
       : getPawchivePreviewUrl(mediaPath)
   }
   return `${source.origin}/data${mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`}`
+}
+
+function getLegacyKemonoMediaUrls(source, media) {
+  const mediaPath = String(media?.path || '').trim()
+  if (source.origin !== PAWCHIVE_ORIGIN || !mediaPath) return []
+  const dataPath = `/data${mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`}`
+  return [
+    `https://kemono.cr${dataPath}`,
+    `https://kemono.su${dataPath}`,
+    `https://kemono.party${dataPath}`,
+  ]
 }
 
 function getPawchiveQualityMetadata(source, media, post = {}) {
@@ -207,6 +228,10 @@ function getExternalMediaEntriesFromPost(source, post, options = {}) {
 
   const postPublishedAt = parseResolvedDate(post.published)
   const mediaPageUrl = getPostPageUrl(source, post)
+  const mediaPageUrls = [
+    mediaPageUrl,
+    ...getLegacyKemonoPostPageUrls(source, post),
+  ]
   const title = getPostTitleOrCaption(post)
   const normalizeUrl =
     typeof options.normalizeUrl === 'function'
@@ -230,7 +255,7 @@ function getExternalMediaEntriesFromPost(source, post, options = {}) {
         postId: String(post.id || ''),
         title,
         mediaPageUrl,
-        mediaPageUrls: [mediaPageUrl],
+        mediaPageUrls,
         mediaUrl: candidate.downloadUrl,
         mediaUrls: [candidate.downloadUrl, candidate.originalUrl],
         sourceUrls: [candidate.originalUrl],
@@ -250,6 +275,10 @@ function getExternalMediaEntriesFromPost(source, post, options = {}) {
 function getMediaEntriesFromPost(source, post, options = {}) {
   const postPublishedAt = parseResolvedDate(post.published)
   const mediaPageUrl = getPostPageUrl(source, post)
+  const mediaPageUrls = [
+    mediaPageUrl,
+    ...getLegacyKemonoPostPageUrls(source, post),
+  ]
   const title = getPostTitleOrCaption(post)
   const rawEntries = []
   if (post.file?.path) rawEntries.push(post.file)
@@ -278,9 +307,9 @@ function getMediaEntriesFromPost(source, post, options = {}) {
         postId: String(post.id || ''),
         title,
         mediaPageUrl,
-        mediaPageUrls: [mediaPageUrl],
+        mediaPageUrls,
         mediaUrl,
-        mediaUrls: [mediaUrl],
+        mediaUrls: [mediaUrl, ...getLegacyKemonoMediaUrls(source, media)],
         filename,
         originalName: media.name || null,
         uploadedDate: postPublishedAt,

@@ -53,8 +53,10 @@ const {
   recordRedditSourceCheck,
 } = require('../scrapyard/redditSourceState')
 const {
+  backfillSeenSourcePostsFromRunEvents,
   loadConfirmedSourceFrontier,
   recordCompletedSourcePosts,
+  recordSeenSourcePosts,
 } = require('../scrapyard/sourceFrontier')
 const {
   createBrowserMediaDownloader: createSharedBrowserMediaDownloader,
@@ -951,6 +953,13 @@ function getMediaEntriesFromPost(source, post) {
   return []
 }
 
+function isPawchiveSource(source = {}) {
+  return (
+    source.site === 'kemono' &&
+    /^https?:\/\/(?:www\.)?pawchive\.st\b/i.test(source.origin || '')
+  )
+}
+
 async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
   if (!downloader?.extractPostMediaUrls || entries.length === 0) return entries
 
@@ -1017,9 +1026,11 @@ async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
       domMediaCount: domUrls.length,
       replacedCount,
     })
-    console.log(
-      `DOM media links: ${replacedCount}/${postEntries.length} updated for ${postPageUrl}`
-    )
+    if (replacedCount > 0) {
+      console.log(
+        `DOM media links: ${replacedCount}/${postEntries.length} updated for ${postPageUrl}`
+      )
+    }
   }
 
   return enriched
@@ -1745,12 +1756,21 @@ async function run(argvInput = process.argv.slice(2)) {
       )
     }
   } else if (modelName) {
+    const seenBackfill = isPawchiveSource(source)
+      ? backfillSeenSourcePostsFromRunEvents(folders.logDir, source)
+      : null
+    if (seenBackfill?.addedPostCount > 0) {
+      appendRunEvent('source_seen_posts_backfilled', seenBackfill)
+      console.log(
+        `Pawchive seen-post backfill: ${seenBackfill.addedPostCount} new, ${seenBackfill.seenPostCount} total`
+      )
+    }
     sourceFrontier = loadConfirmedSourceFrontier(folders.logDir, source, {
       datasetPaths,
     })
     if (sourceFrontier.active && !runOptions.fullSourceRefresh) {
       console.log(
-        `${source.site} incremental state: ${sourceFrontier.knownPostCount} confirmed post(s)`
+        `${source.site} incremental state: ${sourceFrontier.knownPostCount} known post(s), ${sourceFrontier.skippablePostCount || 0} skippable`
       )
     }
   }
@@ -1878,7 +1898,7 @@ async function run(argvInput = process.argv.slice(2)) {
     }
     if (source.site !== 'reddit' && sourceFrontier?.active) {
       console.log(
-        `No new ${source.site} posts for ${source.rawName || source.userId}; ${sourceFrontier.knownPostCount} confirmed post(s)`
+        `No new ${source.site} posts for ${source.rawName || source.userId}; ${sourceFrontier.knownPostCount} known post(s)`
       )
       finalizeEmptyRun({
         status: 'no_new_posts',
@@ -1901,6 +1921,20 @@ async function run(argvInput = process.argv.slice(2)) {
     throw new Error(
       `No posts found after all ${source.site} discovery methods for ${inputUrl}`
     )
+  }
+
+  if (!dryRun && isPawchiveSource(source)) {
+    const seenSummary = recordSeenSourcePosts(
+      folders.logDir,
+      source,
+      selectedPosts.map((post) => post.id)
+    )
+    appendRunEvent('source_seen_posts_updated', seenSummary)
+    if (seenSummary.addedPostCount > 0) {
+      logScrollingMessage(
+        `Pawchive seen posts: ${seenSummary.seenPostCount} tracked`
+      )
+    }
   }
 
   if (dryRun) {
