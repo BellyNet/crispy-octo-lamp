@@ -1167,7 +1167,10 @@ async function main() {
     }
   )
   assert.strictEqual(redditGalleryPosts.length, 1)
+  assert.strictEqual(redditGalleryPosts[0].title, 'title')
+  assert.strictEqual(redditGalleryPosts[0].text, 'title')
   assert.strictEqual(redditGalleryPosts[0].mediaEntries.length, 1)
+  assert.strictEqual(redditGalleryPosts[0].mediaEntries[0].text, 'title')
   assert(
     redditGalleryEvents.some(
       (event) =>

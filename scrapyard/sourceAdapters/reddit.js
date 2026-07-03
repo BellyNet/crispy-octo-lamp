@@ -113,7 +113,7 @@ function getRedditPostTitle(post = {}) {
 }
 
 function getRedditPostText(post = {}) {
-  return cleanRedditText(post.selftext || post.selftext_html)
+  return getRedditPostTitle(post)
 }
 
 function filenameFromMediaUrl(mediaUrl) {
