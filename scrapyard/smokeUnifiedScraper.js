@@ -77,6 +77,9 @@ const runLifecycle = require('./runLifecycle')
 const {
   collectPawchivePreviewUpgrades,
 } = require('./reportPawchivePreviewUpgrades')
+const {
+  normalizeSeenUrl: normalizeHoghaulSeenUrl,
+} = require('../hoghaul/hoghaul')
 
 async function withConsoleSilenced(callback) {
   const originalLog = console.log
@@ -354,6 +357,7 @@ async function main() {
   assert.strictEqual(syncedMetadata.title, 'Full caption and details')
   assert.strictEqual(syncedMetadata.text, 'Full body text for dashboard')
   assert.strictEqual(syncedRedditMetadata.title, 'full reddit title here')
+  assert.strictEqual(syncedRedditMetadata.text, 'full reddit title here')
   assert.strictEqual(syncedMetadata.needsFullResolution, false)
   assert.strictEqual(
     syncedMetadata.fullResolutionStatus,
@@ -477,6 +481,53 @@ async function main() {
     seenIndex.loadMediaSeenIndex(metadataLogDir).mediaUrls[seenDetails.mediaUrl]
       .title,
     'Full caption and details'
+  )
+  const sourceSeenIndex = createMediaSeenIndex({
+    datasetDir: metadataLocalRoot,
+    existsLocallyOrOnNas: () => true,
+    normalizeUrl: normalizeHoghaulSeenUrl,
+  })
+  const pawchiveSeenDetails = {
+    relativePath: 'sample_model/images/pawchive.jpg',
+    mediaUrl:
+      'https://img.pawchive.st/data/a/b/one.jpg?f=one.jpg&token=discard',
+    mediaPageUrl: 'https://pawchive.st/patreon/user/24586027/post/full-test',
+    sourceSite: 'kemono',
+    sourceService: 'patreon',
+    sourceUserId: '24586027',
+  }
+  sourceSeenIndex.recordSuccessfulSeenMedia(
+    metadataLogDir,
+    pawchiveSeenDetails
+  )
+  const pawchiveSeenMatch = sourceSeenIndex.getSuccessfulSeenMediaMatch(
+    metadataLogDir,
+    null,
+    'https://img.pawchive.st/data/a/b/one.jpg?different=1'
+  )
+  assert.strictEqual(
+    pawchiveSeenMatch?.relativePath,
+    pawchiveSeenDetails.relativePath
+  )
+  const kemonoSeenIndex = createMediaSeenIndex({
+    datasetDir: metadataLocalRoot,
+    existsLocallyOrOnNas: () => true,
+    normalizeUrl: normalizeHoghaulSeenUrl,
+  })
+  const kemonoSeenDetails = {
+    relativePath: 'sample_model/images/kemono.jpg',
+    mediaUrl: 'https://kemono.su/data/a/b/two.jpg?f=two.jpg&token=old',
+    sourceSite: 'kemono',
+  }
+  kemonoSeenIndex.recordSuccessfulSeenMedia(metadataLogDir, kemonoSeenDetails)
+  const kemonoSeenMatch = kemonoSeenIndex.getSuccessfulSeenMediaMatch(
+    metadataLogDir,
+    null,
+    'https://kemono.cr/data/a/b/two.jpg?f=two.jpg&token=new'
+  )
+  assert.strictEqual(
+    kemonoSeenMatch?.relativePath,
+    kemonoSeenDetails.relativePath
   )
   fs.rmSync(metadataSyncRoot, { recursive: true, force: true })
 
@@ -1196,6 +1247,63 @@ async function main() {
   assert(
     redditGalleryStatuses.some((line) =>
       String(line).includes('Resolving Reddit gallery 1/1')
+    )
+  )
+
+  const redditTitleHydrationEvents = []
+  const redditHydratedTitlePosts = await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'missing_title_user',
+      username: 'missing_title_user',
+    },
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (/\/comments\/missing_title\//i.test(url)) {
+          return {
+            html: '<a class="title may-blank">Recovered Reddit title</a>',
+            byteLength: 55,
+            statusCode: 200,
+            url,
+          }
+        }
+        return {
+          html: [
+            '<div class="thing" data-fullname="t3_missing_title"',
+            ' data-permalink="/r/test/comments/missing_title/_/"',
+            ' data-url="https://i.redd.it/missing-title.jpg"',
+            ' data-timestamp="1710000000000"',
+            ' data-subreddit="test"></div>',
+          ].join(''),
+          byteLength: 230,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: {
+        parseRedgifsId: () => null,
+      },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        redditTitleHydrationEvents.push({ type, ...payload }),
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(redditHydratedTitlePosts.length, 1)
+  assert.strictEqual(redditHydratedTitlePosts[0].title, 'Recovered Reddit title')
+  assert.strictEqual(redditHydratedTitlePosts[0].text, 'Recovered Reddit title')
+  assert.strictEqual(
+    redditHydratedTitlePosts[0].mediaEntries[0].title,
+    'Recovered Reddit title'
+  )
+  assert(
+    redditTitleHydrationEvents.some(
+      (event) =>
+        event.type === 'reddit_title_hydration_finished' && event.foundTitle
     )
   )
 

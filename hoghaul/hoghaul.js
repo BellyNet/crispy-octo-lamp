@@ -114,6 +114,10 @@ const registryPath =
 const API_PAGE_SIZE = 50
 const REDDIT_PAGE_SIZE = 100
 const API_ACCEPT_HEADER = 'text/css'
+const PAWCHIVE_RATE_LIMIT_RETRIES =
+  Number.parseInt(process.env.HOGHAUL_PAWCHIVE_429_RETRIES || '', 10) || 3
+const PAWCHIVE_RATE_LIMIT_DELAY_MS =
+  Number.parseInt(process.env.HOGHAUL_PAWCHIVE_429_DELAY_MS || '', 10) || 30000
 const REQUEST_TIMEOUT_MS =
   Number.parseInt(process.env.HOGHAUL_REQUEST_TIMEOUT_MS || '', 10) || 30000
 const DOWNLOAD_PROGRESS_SNAPSHOT_INTERVAL_MS = 1000
@@ -711,6 +715,20 @@ function normalizeSeenUrl(url) {
       return `${parsed.protocol}//${host}${pathname}`
     }
 
+    if (
+      host === 'img.pawchive.st' &&
+      /^\/(?:thumbnail\/)?data\//i.test(pathname)
+    ) {
+      return `${parsed.protocol}//${host}${pathname}`
+    }
+
+    if (
+      /^kemono\.(?:cr|su|party)$/i.test(host) &&
+      /^\/data\//i.test(pathname)
+    ) {
+      return `kemono-data:${pathname.replace(/^\/data\/?/i, '').toLowerCase()}`
+    }
+
     if (host === 'media.redgifs.com') {
       const basename = path.basename(pathname).replace(/\.[^.]+$/, '')
       const stableId = basename.replace(/-mobile$/i, '')
@@ -731,6 +749,48 @@ function normalizeSeenUrl(url) {
   }
 
   return raw
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isPawchiveUrl(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'pawchive.st' || host.endsWith('.pawchive.st')
+  } catch {
+    return false
+  }
+}
+
+function isHttpRateLimitError(error) {
+  return /^HTTP 429\b/i.test(String(error?.message || ''))
+}
+
+async function fetchPawchiveJsonWithRetry(url, requestOptions = {}) {
+  let lastError = null
+  for (let attempt = 0; attempt <= PAWCHIVE_RATE_LIMIT_RETRIES; attempt += 1) {
+    try {
+      return await httpClient.fetchJson(url, requestOptions)
+    } catch (err) {
+      lastError = err
+      if (!isHttpRateLimitError(err) || attempt >= PAWCHIVE_RATE_LIMIT_RETRIES) {
+        throw err
+      }
+
+      const waitMs = PAWCHIVE_RATE_LIMIT_DELAY_MS * (attempt + 1)
+      appendRunEvent('pawchive_rate_limit_retry', {
+        url,
+        attempt: attempt + 1,
+        nextAttempt: attempt + 2,
+        waitMs,
+        error: err.message,
+      })
+      await sleep(waitMs)
+    }
+  }
+  throw lastError
 }
 
 function uniqueSeenUrls(values) {
@@ -831,13 +891,16 @@ async function fetchJson(url, requestOptions = {}) {
       }
     }
   }
-  return httpClient.fetchJson(url, {
+  const nextOptions = {
     ...requestOptions,
     headers: {
       Accept: isReddit ? 'application/json' : API_ACCEPT_HEADER,
       ...(requestOptions.headers || {}),
     },
-  })
+  }
+  return isPawchiveUrl(url)
+    ? fetchPawchiveJsonWithRetry(url, nextOptions)
+    : httpClient.fetchJson(url, nextOptions)
 }
 
 async function fetchHtml(url, requestOptions = {}) {
@@ -1158,7 +1221,9 @@ async function fetchPosts(source, options, deps = {}) {
     logger: pageLogger,
     normalizeUrl: normalizeSeenUrl,
     pageSize: API_PAGE_SIZE,
-    postConcurrency: options.postConcurrency,
+    postConcurrency: isPawchiveUrl(source.origin)
+      ? 1
+      : options.postConcurrency,
     sourceFrontier: deps.sourceFrontier,
     sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
   })
@@ -2252,6 +2317,7 @@ async function runHoghaulCli(argvInput = process.argv.slice(2)) {
 
 module.exports = {
   normalizeHoghaulRunOptions,
+  normalizeSeenUrl,
   parseHoghaulArgs,
   parseSourceUrl,
   runHoghaulScrape: run,

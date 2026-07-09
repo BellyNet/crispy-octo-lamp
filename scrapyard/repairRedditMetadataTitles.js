@@ -11,7 +11,7 @@ const {
 
 const argv = minimist(process.argv.slice(2), {
   boolean: ['apply', 'fetch-missing'],
-  string: ['dataset', 'delay-ms', 'model'],
+  string: ['dataset', 'delay-ms', 'fetch-timeout-ms', 'model'],
 })
 
 const datasetDir =
@@ -23,6 +23,10 @@ const FETCH_MISSING = Boolean(argv['fetch-missing'])
 const FETCH_DELAY_MS = Math.max(
   Number.parseInt(String(argv['delay-ms'] || ''), 10) || 650,
   0
+)
+const FETCH_TIMEOUT_MS = Math.max(
+  Number.parseInt(String(argv['fetch-timeout-ms'] || ''), 10) || 15000,
+  1000
 )
 const MODEL_FILTER = new Set(
   String(argv.model || argv.models || '')
@@ -86,11 +90,31 @@ function extractPostId(source) {
 }
 
 function getTitleFromHtml(html) {
-  const rawTitle = String(html || '').match(/<title>([\s\S]*?)<\/title>/i)?.[1]
+  const raw = String(html || '')
+  const attrTitle = raw.match(/\bdata-title=["']([^"']+)["']/i)?.[1]
+  if (attrTitle) return cleanText(attrTitle) || null
+
+  const linkTitle = raw.match(
+    /<a\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i
+  )?.[1]
+  if (linkTitle) return cleanText(linkTitle) || null
+
+  const ogTitle = raw.match(
+    /<meta\b[^>]*(?:property|name)=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i
+  )?.[1]
+  if (ogTitle) return cleanText(ogTitle) || null
+
+  const rawTitle = raw.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]
   if (!rawTitle) return null
   const cleaned = cleanText(rawTitle)
   if (!cleaned || /^blocked$/i.test(cleaned)) return null
-  return cleaned.replace(/\s+:\s+[^:]+$/, '').trim() || null
+  return (
+    cleaned
+      .replace(/\s*:\s*reddit(?:\.com)?\s*$/i, '')
+      .replace(/\s+:\s+[^:]+$/, '')
+      .replace(/^\s*u\/[^:]+:\s*/i, '')
+      .trim() || null
+  )
 }
 
 async function waitForFetchSlot() {
@@ -107,21 +131,31 @@ async function fetchRedditTitle(postId) {
   let title = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await waitForFetchSlot()
-    const response = await fetch(
-      `https://old.reddit.com/comments/${encodeURIComponent(postId)}/?over18=1`,
-      {
-        headers: {
-          Accept: 'text/html,application/xhtml+xml',
-          'Accept-Language': 'en-US,en;q=0.9',
-          Cookie: 'over18=1;',
-          Referer: 'https://old.reddit.com/',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
-        },
-        redirect: 'follow',
-      }
-    )
-    const html = await response.text()
+    let response
+    let html
+    try {
+      response = await fetch(
+        `https://old.reddit.com/comments/${encodeURIComponent(postId)}/?over18=1`,
+        {
+          headers: {
+            Accept: 'text/html,application/xhtml+xml',
+            'Accept-Language': 'en-US,en;q=0.9',
+            Cookie: 'over18=1;',
+            Referer: 'https://old.reddit.com/',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        }
+      )
+      html = await response.text()
+    } catch (err) {
+      if (attempt === 2) break
+      await sleep(30000 * (attempt + 1))
+      continue
+    }
+
     if (response.ok) {
       title =
         getTitleFromHtml(html) || getRedditTitleFromPermalink(response.url)
@@ -158,11 +192,12 @@ async function repairSidecar(modelName, sidecar) {
     if (!source || typeof source !== 'object') continue
     if (String(source.site || '').toLowerCase() !== 'reddit') continue
     scanned += 1
-    if (source.title) continue
-
-    let title = getTitleCandidates(source)
-      .map(getRedditTitleFromPermalink)
-      .find(Boolean)
+    let title = String(source.title || '').trim()
+    if (!title) {
+      title = getTitleCandidates(source)
+        .map(getRedditTitleFromPermalink)
+        .find(Boolean)
+    }
 
     if (!title && FETCH_MISSING) {
       const postId = extractPostId(source)
@@ -177,7 +212,17 @@ async function repairSidecar(modelName, sidecar) {
     }
     if (!title) continue
 
-    source.title = title
+    let changed = false
+    if (!source.title) {
+      source.title = title
+      changed = true
+    }
+    if (!source.text) {
+      source.text = title
+      changed = true
+    }
+    if (!changed) continue
+
     repaired += 1
     if (examples.length < 5) {
       examples.push({ modelName, relativePath, title })
@@ -221,7 +266,7 @@ async function run() {
   }
 
   console.log(
-    `${APPLY ? 'Repaired' : 'Would repair'} ${totals.repaired} missing Reddit title(s) across ${totals.models} model(s); scanned ${totals.scanned} Reddit metadata record(s).`
+    `${APPLY ? 'Repaired' : 'Would repair'} ${totals.repaired} missing Reddit title/text record(s) across ${totals.models} model(s); scanned ${totals.scanned} Reddit metadata record(s).`
   )
   if (FETCH_MISSING) {
     console.log(
