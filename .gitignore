@@ -62,3 +62,6 @@ slopvault-push.log
 slopvault-pull.log
 slopvault-diff.txt
 skipped_images.txt
+
+# scraper session cookies (curl netscape format) — do not commit
+cookies.txt

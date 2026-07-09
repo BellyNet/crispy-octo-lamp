@@ -539,6 +539,25 @@ function getSourceFromSidecar(userDir, folder, filename) {
   return src && typeof src === 'object' ? src : null
 }
 
+// Superset of getSourceFromSidecar — also returns the sibling `comments`
+// array and `commentCount`. Recent scrapes started persisting the top few
+// post comments alongside the title/URL under source, and the dashboard
+// needs them to render the info panel. Returns null when the record
+// doesn't exist at all; otherwise returns { source, comments, commentCount }
+// with sensible defaults when individual fields are missing.
+function getPostMetaFromSidecar(userDir, folder, filename) {
+  const entry = loadSidecar(userDir)
+  const record = entry.data[`${folder}/${filename}`]
+  if (!record || typeof record !== 'object') return null
+  const source =
+    record.source && typeof record.source === 'object' ? record.source : null
+  const comments = Array.isArray(record.comments) ? record.comments : []
+  const commentCount =
+    typeof record.commentCount === 'number' ? record.commentCount : null
+  if (!source && !comments.length && commentCount === null) return null
+  return { source, comments, commentCount }
+}
+
 function flushAllSidecars() {
   for (const [userDir] of _sidecars) flushSidecar(userDir)
 }
@@ -549,6 +568,7 @@ module.exports = {
   recordVideoDates,
   resolveDateFromSidecar,
   getSourceFromSidecar,
+  getPostMetaFromSidecar,
   resolveBestDateRecord,
   extractVideoDateFromFile,
   extractImageDateFromBuffer,

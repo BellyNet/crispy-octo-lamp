@@ -57,7 +57,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 10
+const RESPONSE_CACHE_VERSION = 13
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
@@ -638,25 +638,40 @@ async function processFileForResponse(username, userDir, item) {
     { cachedVideoDate: videoDate, cachedImageDate: imageDate, stat }
   )
 
-  // Pull the post-side metadata (title, source site, link back to the post)
-  // from the per-model .media-dates.json sidecar. Only included when at least
-  // a title or a URL is present, so the response stays compact for items
-  // without any source info.
+  // Pull the post-side metadata (title, source site, link back to the post,
+  // and the top few comments) from the per-model .media-dates.json sidecar.
+  // Only included when at least one of those fields carries actual content,
+  // so the response stays compact for items with no post metadata at all.
   let post = null
-  const sourceMeta = mediaDates.getSourceFromSidecar(
+  const postMeta = mediaDates.getPostMetaFromSidecar(
     userDir,
     item.folder,
     item.filename
   )
-  if (sourceMeta) {
-    const title =
-      typeof sourceMeta.title === 'string' ? sourceMeta.title.trim() : ''
-    const url = sourceMeta.mediaPageUrl || sourceMeta.mediaUrl || null
-    if (title || url) {
+  if (postMeta) {
+    const src = postMeta.source || {}
+    const title = typeof src.title === 'string' ? src.title.trim() : ''
+    const url = src.mediaPageUrl || src.mediaUrl || null
+    // Comments come in as { author, posted, text }. Drop empties, cap the
+    // list so a chatty thread doesn't add megabytes to the payload — the
+    // lightbox only ever shows a handful anyway. commentCount is preserved
+    // separately so the UI can say "showing 20 of 384".
+    const comments = postMeta.comments
+      .filter((c) => c && typeof c.text === 'string' && c.text.trim())
+      .slice(0, 20)
+    const commentCount =
+      typeof postMeta.commentCount === 'number'
+        ? postMeta.commentCount
+        : postMeta.comments.length || null
+    if (title || url || comments.length) {
       post = {}
       if (title) post.title = title
-      if (sourceMeta.site) post.site = sourceMeta.site
+      if (src.site) post.site = src.site
       if (url) post.url = url
+      if (comments.length) {
+        post.comments = comments
+        if (commentCount !== null) post.commentCount = commentCount
+      }
     }
   }
 
@@ -697,10 +712,19 @@ async function processFileForResponse(username, userDir, item) {
       // Images and gifs use the static /thumb/ JPEG. The ffmpeg-static
       // /thumb/ path stays available as a fallback in case a card's
       // animated preview is missing.
-      thumbUrl:
-        type === 'video'
-          ? `/thumbnail/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}`
-          : `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+      // For videos, this is the static-JPEG fallback (ffmpeg single-frame
+      // via /thumb/). The animated GIF preview is on previewUrl above;
+      // when that's missing or still generating, the client falls back to
+      // this. Images and gifs go straight to /thumb/.
+      thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+      // Mobile MP4 variant (~720p, ~1.5 Mbps). Populated for videos and
+      // gifs; the client detects iPhone/iPad UA at load time and swaps
+      // `url` → `mobileUrl` in the lightbox so a 42 MB source GIF turns
+      // into a ~4 MB H.264 clip. Desktop/laptop ignores this field.
+      mobileUrl:
+        type === 'video' || type === 'gif'
+          ? `/media-mobile/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`
+          : null,
       // True iff a same-stem .txt sidecar exists next to this file (LoRA
       // training caption). The full text is fetched on-demand from /api/caption
       // so the per-model response doesn't balloon for large datasets.
@@ -1143,7 +1167,12 @@ async function warmGridThumbs(username, items) {
     if (fs.existsSync(dst)) continue
     const src = safeSubPath(datasetDir, username, item.folder, item.filename)
     if (!src || !fs.existsSync(src)) continue
-    tasks.push(thumbLimit(() => generateThumb(src, dst).catch(() => {})))
+    // Use prewarmLimit (small) instead of thumbLimit so this background warm
+    // can't starve the on-demand /thumb/ requests the user is actively making
+    // in the grid they just opened. Without this, opening a freshly-scraped
+    // model queues N background jobs on the user-facing pool and every visible
+    // card waits behind the invisible ones.
+    tasks.push(prewarmLimit(() => generateThumb(src, dst).catch(() => {})))
   }
   if (!tasks.length) return
   console.log(
@@ -1206,6 +1235,196 @@ const THUMB_QUALITY = parseInt(process.env.THUMB_QUALITY, 10) || 80
 // separate, lower limit so it never starves on-demand requests.
 const thumbLimit = pLimit(parseInt(process.env.THUMB_CONCURRENCY, 10) || 8)
 const prewarmLimit = pLimit(parseInt(process.env.PREWARM_CONCURRENCY, 10) || 2)
+
+// ─── MOBILE VARIANTS ─────────────────────────────────────────────────────────
+// H.264/AAC MP4s at ~720p, ~1.5 Mbps, faststart. Generated for every video AND
+// every GIF (GIFs → MP4 shrinks 5–10×, plays in <video> tag on iOS). Served
+// to iPhone/iPad clients via /media-mobile/... so the desktop grid still gets
+// full-res originals. Cached under THUMB_DIR/<user>/mobile-<folder>-<stem>.mp4.
+const MOBILE_MAX_HEIGHT = parseInt(process.env.MOBILE_MAX_HEIGHT, 10) || 720
+const MOBILE_CRF = parseInt(process.env.MOBILE_CRF, 10) || 26
+const mobileEncodeLimit = pLimit(
+  parseInt(process.env.MOBILE_ENCODE_CONCURRENCY, 10) || 2
+)
+const _mobileInflight = new Map()
+
+function mobileVariantPath(username, folder, filename) {
+  const stem = path.basename(filename, path.extname(filename))
+  return path.join(THUMB_DIR, username, `mobile-${folder}-${stem}.mp4`)
+}
+
+async function generateMobileVariant(srcPath, dstPath, isGif) {
+  if (!ffmpegPath) return false
+  await fs.promises.mkdir(path.dirname(dstPath), { recursive: true })
+  const tmp = dstPath + '.tmp.mp4'
+  // scale=-2:'min(H,ih)' → cap height at H, keep width auto (divisible by 2),
+  // never upscale. -movflags +faststart puts moov atom up front so playback
+  // starts before the whole file is buffered. GIFs get -an (no audio track);
+  // videos get 96 kbps AAC.
+  const scaleFilter = `scale=-2:'min(${MOBILE_MAX_HEIGHT},ih)':flags=lanczos`
+  const args = [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-i',
+    srcPath,
+    '-vf',
+    scaleFilter,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    String(MOBILE_CRF),
+    '-pix_fmt',
+    'yuv420p',
+    '-movflags',
+    '+faststart',
+  ]
+  if (isGif) {
+    args.push('-an')
+  } else {
+    args.push('-c:a', 'aac', '-b:a', '96k')
+  }
+  args.push(tmp)
+  try {
+    await execFileAsync(ffmpegPath, args, { timeout: 5 * 60 * 1000 })
+    const stat = fs.statSync(tmp)
+    if (stat.size < 1000) throw new Error('output too small')
+    await fs.promises.rename(tmp, dstPath)
+    return true
+  } catch {
+    try {
+      await fs.promises.unlink(tmp)
+    } catch {}
+    return false
+  }
+}
+
+const MOBILE_UA_RE = /iPhone|iPad|iPod|Android/i
+function isMobileClient(req) {
+  return MOBILE_UA_RE.test(req.headers['user-agent'] || '')
+}
+
+// Explicit mobile-variant endpoint. Client references it via the `mobileUrl`
+// field on each response record. First hit for a not-yet-encoded file kicks
+// off background generation and 302s to the original for THIS request so the
+// user isn't stuck watching a spinner; the next hit gets the cached MP4.
+app.get('/media-mobile/:username/:folder/:filename', async (req, res) => {
+  const { username, folder, filename } = req.params
+  if (!MEDIA_FOLDERS.includes(folder)) return res.status(403).send('Forbidden')
+  const srcPath = safeSubPath(datasetDir, username, folder, filename)
+  if (!srcPath) return res.status(403).send('Forbidden')
+
+  const ext = path.extname(filename).toLowerCase()
+  const isVideo = VIDEO_EXTS_IN.has(ext)
+  const isGif = ext === '.gif'
+  if (!isVideo && !isGif) return res.status(400).send('Not encodable')
+
+  const dstPath = mobileVariantPath(username, folder, filename)
+  const dstBase = path.basename(dstPath)
+  const dstDir = path.dirname(dstPath)
+
+  if (fs.existsSync(dstPath)) {
+    res.setHeader('Cache-Control', IMMUTABLE_CACHE)
+    res.setHeader('Content-Type', 'video/mp4')
+    return res.sendFile(dstBase, { root: dstDir }, (err) => {
+      if (err && !res.headersSent) res.status(404).send('Not found')
+    })
+  }
+  if (!fs.existsSync(srcPath)) return res.status(404).send('Not found')
+
+  // Kick off background encode (deduped) so the next hit is instant.
+  const key = `${username}/${folder}/${filename}`
+  if (!_mobileInflight.has(key)) {
+    _mobileInflight.set(
+      key,
+      mobileEncodeLimit(() =>
+        generateMobileVariant(srcPath, dstPath, isGif).catch(() => false)
+      ).finally(() => _mobileInflight.delete(key))
+    )
+  }
+  // Not ready. Do NOT serve the source file at this URL: the client is
+  // playing this response in a <video> tag, and the source is a .gif or
+  // .webm — iOS Safari can't decode either as <video>. Worse, we used to
+  // cache the wrong-type response as immutable, so it stuck around
+  // forever even after the mp4 finished encoding. 404 + no-store lets the
+  // client fall back to the original url (rendered correctly for its
+  // type), and lets the browser re-check next time.
+  res.setHeader('X-Mobile-Variant', 'generating')
+  res.setHeader('Cache-Control', 'no-store')
+  return res.status(404).send('Encoding')
+})
+
+// Nightly / on-demand bulk prewarm — walks every video and every gif in
+// every model and generates any missing mobile variant. Uses the small
+// encode limit so it never starves the on-demand /media-mobile/ requests.
+async function prewarmMobileVariants() {
+  if (!ffmpegPath) {
+    console.log('  Mobile:    ffmpeg missing — skipping mobile variant prewarm')
+    return
+  }
+  let dirs
+  try {
+    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  const modelDirs = dirs.filter(
+    (e) => e.isDirectory() && !e.name.startsWith('.')
+  )
+  const tasks = []
+  for (const d of modelDirs) {
+    const username = d.name
+    for (const folder of MEDIA_FOLDERS) {
+      let files
+      try {
+        files = await fs.promises.readdir(
+          path.join(datasetDir, username, folder)
+        )
+      } catch {
+        continue
+      }
+      for (const file of files) {
+        const ext = path.extname(file).toLowerCase()
+        const isVideo = VIDEO_EXTS_IN.has(ext)
+        const isGif = ext === '.gif'
+        if (!isVideo && !isGif) continue
+        const dst = mobileVariantPath(username, folder, file)
+        if (fs.existsSync(dst)) continue
+        tasks.push({
+          src: path.join(datasetDir, username, folder, file),
+          dst,
+          isGif,
+        })
+      }
+    }
+  }
+  if (!tasks.length) {
+    console.log('  Mobile:    all mobile variants cached ✓')
+    return
+  }
+  console.log(
+    `  Mobile:    generating ${tasks.length} mobile variants (this can take a while)…`
+  )
+  const t0 = Date.now()
+  let done = 0
+  await Promise.all(
+    tasks.map((t) =>
+      mobileEncodeLimit(async () => {
+        await generateMobileVariant(t.src, t.dst, t.isGif).catch(() => {})
+        done++
+        if (done % 25 === 0 || done === tasks.length) {
+          process.stdout.write(`\r  Mobile:    ${done}/${tasks.length} done`)
+        }
+      })
+    )
+  )
+  console.log(
+    `\r  Mobile:    ${tasks.length} mobile variants generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `
+  )
+}
 const _thumbInflight = new Map() // dedupe concurrent requests for the same file
 
 function thumbDiskPath(username, folder, filename) {
@@ -1337,10 +1556,19 @@ app.get('/thumbnail/:username/:filename', async (req, res) => {
     )
   }
 
-  // Find the actual video file
-  const videoPath = safeSubPath(datasetDir, username, 'webm', filename)
-  if (!videoPath || !fs.existsSync(videoPath))
-    return res.status(404).send('Not found')
+  // Find the actual video file. Historically this hardcoded `webm/`,
+  // but videos can land in any media folder (the type is determined by
+  // extension, not folder name) — so search them all and use the first
+  // hit. Without this, any non-webm-located video preview returns 404.
+  let videoPath = null
+  for (const folder of MEDIA_FOLDERS) {
+    const candidate = safeSubPath(datasetDir, username, folder, filename)
+    if (candidate && fs.existsSync(candidate)) {
+      videoPath = candidate
+      break
+    }
+  }
+  if (!videoPath) return res.status(404).send('Not found')
 
   const ok = await generatePreviewGif(videoPath, gifPath)
   if (!ok) return res.status(404).send('Could not generate preview')
@@ -1474,9 +1702,95 @@ app.post('/api/run-maint', (_req, res) => {
   res.json({ ok: true, state: maintState })
 })
 
+// ─── FULL NIGHTLY PASS ───────────────────────────────────────────────────────
+// Same sequence the 04:00 nightly runs, exposed on demand. Runs one at a time.
+const nightlyState = {
+  inProgress: false,
+  trigger: null, // 'nightly' | 'manual' | 'startup'
+  step: null, // 'maint' | 'scan' | 'covers' | 'grid-thumbs' | 'gif-previews'
+  startedAt: null,
+  completedAt: null,
+}
+
+async function runNightlyPass({ trigger = 'manual' } = {}) {
+  if (nightlyState.inProgress) {
+    return { skipped: true, reason: 'already running' }
+  }
+  nightlyState.inProgress = true
+  nightlyState.trigger = trigger
+  nightlyState.startedAt = new Date().toISOString()
+  nightlyState.completedAt = null
+
+  // Run the heavy media passes FIRST so the subsequent scan picks up
+  // any new .mp4 files the webm transcoder produced and the moved
+  // .webm originals in .webm-backup/.
+  nightlyState.step = 'maint'
+  try {
+    await runMediaMaintenance({ trigger })
+  } catch (err) {
+    console.warn('  Nightly maintenance error:', err.message)
+  }
+  nightlyState.step = 'scan'
+  try {
+    await scanAll({ force: true, trigger })
+  } catch (err) {
+    console.warn('  Nightly scan error:', err.message)
+  }
+  nightlyState.step = 'covers'
+  try {
+    await prewarmCoverThumbs()
+  } catch (err) {
+    console.warn('  Cover thumb prewarm error:', err.message)
+  }
+  nightlyState.step = 'grid-thumbs'
+  try {
+    await prewarmAllGridThumbs()
+  } catch (err) {
+    console.warn('  Grid thumb prewarm error:', err.message)
+  }
+  nightlyState.step = 'gif-previews'
+  try {
+    await prewarmThumbnails()
+  } catch (err) {
+    console.warn('  Preview prewarm error:', err.message)
+  }
+  nightlyState.step = 'mobile-variants'
+  try {
+    await prewarmMobileVariants()
+  } catch (err) {
+    console.warn('  Mobile variant prewarm error:', err.message)
+  }
+
+  nightlyState.step = null
+  nightlyState.completedAt = new Date().toISOString()
+  nightlyState.inProgress = false
+  return { ok: true }
+}
+
+app.get('/api/nightly-status', (_req, res) => {
+  res.json({ ...nightlyState })
+})
+
+app.post('/api/run-nightly', (_req, res) => {
+  if (nightlyState.inProgress) {
+    return res
+      .status(202)
+      .json({ skipped: true, reason: 'already running', state: nightlyState })
+  }
+  // Kick off without awaiting — client polls /api/nightly-status for progress.
+  runNightlyPass({ trigger: 'manual' }).catch((err) =>
+    console.warn('  Manual nightly error:', err.message)
+  )
+  res.json({ ok: true, state: nightlyState })
+})
+
 // ─── SCAN ENDPOINTS ──────────────────────────────────────────────────────────
 app.get('/api/scan-status', (_req, res) => {
-  res.json({ ...scanState, responseCacheSize: mediaResponseCache.size })
+  res.json({
+    ...scanState,
+    responseCacheSize: mediaResponseCache.size,
+    nightly: { ...nightlyState },
+  })
 })
 
 app.post('/api/rescan', async (_req, res) => {
@@ -1803,6 +2117,13 @@ async function start() {
     // mobile visits to any model are served entirely from disk cache.
     .then(() => prewarmAllGridThumbs())
     .catch((err) => console.warn('  Grid thumb prewarm error:', err.message))
+    // Mobile variants last — encoding a ~720p H.264 per video + per gif is
+    // the heaviest pass by far. Chained after grid thumbs so we're not
+    // running two CPU-heavy loops in parallel.
+    .then(() => prewarmMobileVariants())
+    .catch((err) =>
+      console.warn('  Mobile variant prewarm error:', err.message)
+    )
 
   // GIF generation runs after the server is up — it's CPU-heavy and not needed
   // for page loads (the media endpoint works without previews being ready).
@@ -1827,37 +2148,12 @@ async function start() {
   // Nightly safety net at NIGHTLY_HOUR — force-rebuilds everything, also
   // refreshes the deterministic daily cover seed and regenerates any new GIF
   // previews. Catches anything the fingerprint tick missed (e.g. server was
-  // offline during a sync).
+  // offline during a sync). Same sequence as /api/run-nightly.
   const scheduleNightly = () => {
     setTimeout(async () => {
-      // Run the heavy media passes FIRST so the subsequent scan picks up
-      // any new .mp4 files the webm transcoder produced and the moved
-      // .webm originals in .webm-backup/.
-      try {
-        await runMediaMaintenance({ trigger: 'nightly' })
-      } catch (err) {
-        console.warn('  Nightly maintenance error:', err.message)
-      }
-      try {
-        await scanAll({ force: true, trigger: 'nightly' })
-      } catch (err) {
-        console.warn('  Nightly scan error:', err.message)
-      }
-      try {
-        await prewarmCoverThumbs()
-      } catch (err) {
-        console.warn('  Cover thumb prewarm (nightly) error:', err.message)
-      }
-      try {
-        await prewarmAllGridThumbs()
-      } catch (err) {
-        console.warn('  Grid thumb prewarm (nightly) error:', err.message)
-      }
-      try {
-        await prewarmThumbnails()
-      } catch (err) {
-        console.warn('  Preview prewarm (nightly) error:', err.message)
-      }
+      await runNightlyPass({ trigger: 'nightly' }).catch((err) =>
+        console.warn('  Nightly pass error:', err.message)
+      )
       scheduleNightly()
     }, msUntilNextHour(NIGHTLY_HOUR))
   }

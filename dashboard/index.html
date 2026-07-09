@@ -6,7 +6,7 @@
     <title>Dataset Dashboard</title>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css"
+      href="/vendor/photoswipe-5.4.4/photoswipe.css"
     />
     <style>
       *,
@@ -502,34 +502,42 @@
       }
 
       /* Post title pinned to the bottom of the thumb. Visible at every
-         card size — S/M get a single line truncated with ellipsis,
-         L can wrap to two. */
+         card size — S/M get four lines truncated with ellipsis, L gets
+         six. Font kept small so the average ~100-char title fits
+         meaningfully more of itself before the clamp kicks in.
+         `text-overflow: ellipsis` + both `-webkit-line-clamp` and the
+         standard `line-clamp` are explicitly set so the truncated line
+         actually shows "…" instead of a silent hard cut (iOS Safari
+         needs the -webkit-* pair; newer Chromium respects the standard
+         property).  */
       .card-post-title {
         position: absolute;
         left: 0;
         right: 0;
         bottom: 0;
-        padding: 14px 8px 6px;
-        font-size: 11px;
-        line-height: 1.3;
+        padding: 12px 5px 4px;
+        font-size: 10px;
+        line-height: 1.25;
         color: #f0f0f5;
         background: linear-gradient(
           to top,
-          rgba(0, 0, 0, 0.78) 0%,
-          rgba(0, 0, 0, 0.45) 60%,
+          rgba(0, 0, 0, 0.82) 0%,
+          rgba(0, 0, 0, 0.5) 60%,
           transparent 100%
         );
-        white-space: nowrap;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        line-clamp: 4;
         overflow: hidden;
         text-overflow: ellipsis;
+        word-break: break-word;
         z-index: 2;
         pointer-events: none;
       }
       body.card-size-large .card-post-title {
-        white-space: normal;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 6;
+        line-clamp: 6;
       }
 
       .card-thumb {
@@ -905,6 +913,15 @@
         color: var(--text);
         pointer-events: auto;
         z-index: 1050;
+        /* Cap the panel so a 400-char title + a wall of comments doesn't
+           extend past the top of the viewport and get silently clipped
+           by PhotoSwipe's root overflow. The panel scrolls internally
+           instead. Overscroll contained so the swipe-to-next-slide
+           gesture still lands on PhotoSwipe when the reader hits the
+           top/bottom of the scroll. */
+        max-height: 55vh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
       .pswp-info-row {
         display: flex;
@@ -923,8 +940,8 @@
       /* Post title is the headline of the info panel — large, white, on
          its own line, links underlined on hover. */
       .pswp-info-post-headline {
-        font-size: 16px;
-        line-height: 1.35;
+        font-size: 13px;
+        line-height: 1.4;
         font-weight: 600;
         color: #fff;
         word-break: break-word;
@@ -947,6 +964,36 @@
         word-break: break-word;
         max-height: 6.5em;
         overflow-y: auto;
+      }
+      /* Comments block — sits below the caption. Each row is a compact
+         author/text pair; the whole block scrolls independently when there
+         are more than a few. Kept dim compared to the headline so the eye
+         still lands on the post title first. */
+      .pswp-info-comments {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-height: 8em;
+        overflow-y: auto;
+        font-size: 12px;
+        line-height: 1.4;
+        color: rgba(220, 220, 230, 0.85);
+      }
+      .pswp-info-comment {
+        display: block;
+        word-break: break-word;
+      }
+      .pswp-info-comment-author {
+        color: var(--accent);
+        font-weight: 600;
+        margin-right: 6px;
+      }
+      .pswp-info-comment-count {
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 2px;
       }
       .pswp-info-post-meta {
         font-size: 11px;
@@ -1028,6 +1075,39 @@
         outline: none;
         border-radius: 4px;
       }
+      /* Dedicated unmute button — bottom-right of the video, matches the
+         Twitter/X / Reels pattern. Lives outside the native controls so
+         tapping it can't be confused with the lightbox close (top-right)
+         and survives even when the native controls auto-hide. */
+      .pswp-video-unmute {
+        position: absolute;
+        bottom: 16px;
+        right: 16px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.6);
+        border: none;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 5;
+        backdrop-filter: blur(6px);
+        transition: background 0.15s, transform 0.15s;
+      }
+      .pswp-video-unmute:hover {
+        background: rgba(0, 0, 0, 0.8);
+        transform: scale(1.05);
+      }
+      .pswp-video-unmute svg {
+        width: 22px;
+        height: 22px;
+      }
+      .pswp-video-unmute .icon-unmuted { display: none; }
+      .pswp-video-unmute.is-unmuted .icon-muted { display: none; }
+      .pswp-video-unmute.is-unmuted .icon-unmuted { display: block; }
       @media (max-width: 640px) {
         .pswp__pswp-info-panel {
           padding: 10px 12px;
@@ -1778,6 +1858,13 @@
       let activeSort = 'added-desc'
       let homeVisible = false
       let currentUsername = null
+      // iPhone/iPad path: swap `url` → `mobileUrl` in the lightbox so a
+      // huge source GIF/video comes down as a ~720p H.264 MP4. Server
+      // generates the variants nightly; missing ones fall back to the
+      // original for the very first hit and are cached after that.
+      // Desktop keeps the original url — this flag is only ever read
+      // inside openLightbox().
+      const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
       const userListEl = document.getElementById('user-list')
@@ -2912,10 +2999,16 @@
       // Use PhotoSwipe core directly (no lightbox wrapper) for programmatic use.
       // Cache the import promise so the first click opens instantly.
       let _pswpModule = null
+      // Session-level unmute preference. First video must always start
+      // muted to satisfy Chrome's autoplay policy; once the user clicks
+      // the dedicated unmute button on any video, every subsequent
+      // video in the same page session unmutes itself once playback
+      // begins (handled by a one-shot 'playing' listener per video).
+      let videoUnmutedPref = false
       function loadPswp() {
         if (!_pswpModule) {
           _pswpModule = import(
-            'https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.esm.js'
+            '/vendor/photoswipe-5.4.4/photoswipe.esm.js'
           ).then((m) => m.default)
         }
         return _pswpModule
@@ -2925,7 +3018,14 @@
       function openLightbox(startIndex) {
         loadPswp().then((PhotoSwipe) => {
           const dataSource = filtered.map((item) => {
-            if (item.type === 'video') {
+            // Render as <video> when it's a real video, OR when it's a
+            // gif on mobile (the server hands us a 720p H.264 MP4 in
+            // that case, which plays fine in <video> and is 5–10× smaller
+            // than the source GIF).
+            const asVideo =
+              item.type === 'video' ||
+              (IS_MOBILE && item.type === 'gif' && item.mobileUrl)
+            if (asVideo) {
               // Every video: muted + autoplay + loop + playsinline +
               // controls visible.
               //
@@ -2945,7 +3045,12 @@
               const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
-              const src = esc(item.url)
+              // Prefer the mobile MP4 when we're on a phone/tablet AND
+              // the server offered one. Falls back to the original url
+              // for desktop or when mobileUrl is missing for any reason.
+              const src = esc(
+                IS_MOBILE && item.mobileUrl ? item.mobileUrl : item.url
+              )
               // No `poster`, no `controls` initially. Tap on the video
               // toggles the native controls (wired up in contentAppend
               // below). The autoplay+muted+playsinline trio is what
@@ -3184,7 +3289,47 @@
                     })
                   }
 
-                  // 3. Meta row — kept deliberately sparse: media date,
+                  // 3. Post comments — the top few, pulled straight from
+                  //    the sidecar. Author is chipped in accent color;
+                  //    text runs inline after it. Block scrolls when
+                  //    long. Header shows "N of TOTAL comments" when
+                  //    the scraper truncated the list.
+                  const comments = Array.isArray(item.post?.comments)
+                    ? item.post.comments
+                    : []
+                  if (comments.length) {
+                    const total =
+                      typeof item.post.commentCount === 'number' &&
+                      item.post.commentCount > comments.length
+                        ? item.post.commentCount
+                        : null
+                    const header = document.createElement('div')
+                    header.className = 'pswp-info-comment-count'
+                    header.textContent = total
+                      ? `Top ${comments.length} of ${total} comments`
+                      : `${comments.length} comment${comments.length === 1 ? '' : 's'}`
+                    el.appendChild(header)
+
+                    const cbox = document.createElement('div')
+                    cbox.className = 'pswp-info-comments'
+                    for (const c of comments) {
+                      const row = document.createElement('div')
+                      row.className = 'pswp-info-comment'
+                      if (c.author) {
+                        const a = document.createElement('span')
+                        a.className = 'pswp-info-comment-author'
+                        a.textContent = c.author
+                        row.appendChild(a)
+                      }
+                      const t = document.createElement('span')
+                      t.textContent = c.text || ''
+                      row.appendChild(t)
+                      cbox.appendChild(row)
+                    }
+                    el.appendChild(cbox)
+                  }
+
+                  // 4. Meta row — kept deliberately sparse: media date,
                   //    added date, and the FLAGGED chip when set. The
                   //    file's type, dimensions, duration, size, source
                   //    site and filename all live on the card already.
@@ -3350,6 +3495,18 @@
                 if (!root) return
                 const hidden = root.classList.toggle('pswp--chrome-hidden')
                 el.title = hidden ? 'Show controls' : 'Hide controls'
+                // Also dismiss any active video controls so the info
+                // panel + date slider come back. Tapping the video
+                // itself can't safely toggle them off (clicks on the
+                // native mute/play buttons retarget to <video> and
+                // would hide controls mid-interaction), so this button
+                // is the one place to clear them.
+                if (hidden) {
+                  root.querySelectorAll('.pswp-video-wrap video').forEach((v) => {
+                    v.removeAttribute('controls')
+                  })
+                  root.classList.remove('pswp--video-controls')
+                }
               },
             })
           })
@@ -3473,21 +3630,86 @@
                 pollPlay(video)
               }
             })
+
+            // Fallback when the mobile MP4 variant isn't ready yet
+            // (server returns 404 with X-Mobile-Variant: generating).
+            // For gifs, swap the <video> for an <img> — mobile Safari
+            // can render the source .gif fine, just not inside <video>.
+            // For real videos, retry with the source url; if the source
+            // is a codec iOS can't play (e.g. .webm), there's nothing
+            // more we can do until the encode finishes.
+            const it = e.content?.data?._item
+            if (it && wrap.dataset.errorBound !== '1') {
+              wrap.dataset.errorBound = '1'
+              video.addEventListener(
+                'error',
+                () => {
+                  const usingMobile =
+                    it.mobileUrl && video.src.includes(it.mobileUrl)
+                  if (!usingMobile || !it.url) return
+                  if (it.type === 'gif') {
+                    const img = document.createElement('img')
+                    img.src = it.url
+                    img.alt = ''
+                    img.style.maxWidth = '100%'
+                    img.style.maxHeight = '100%'
+                    img.style.objectFit = 'contain'
+                    video.replaceWith(img)
+                  } else {
+                    video.src = it.url
+                    video.load()
+                  }
+                },
+                { once: true }
+              )
+            }
             if (wrap.dataset.tapBound) return
             wrap.dataset.tapBound = '1'
             wrap.addEventListener('click', (ev) => {
               if (ev.target !== wrap && ev.target !== video) return
-              const showing = video.hasAttribute('controls')
-              if (showing) {
-                video.removeAttribute('controls')
-                pswp.element?.classList.remove('pswp--video-controls')
-              } else {
-                video.setAttribute('controls', '')
-                // Push the bottom info panel and top date slider out
-                // of the way so the native controls aren't covered.
-                pswp.element?.classList.add('pswp--video-controls')
-              }
+              // Show-only. Clicks on the native controls (mute, play,
+              // scrub) live in the video's shadow DOM and retarget to
+              // <video>, so we can't tell a tap on the video frame
+              // from a tap on the mute button. Toggling off here used
+              // to hide the controls the instant the user tried to
+              // unmute. Use the chrome-toggle button to dismiss.
+              if (video.hasAttribute('controls')) return
+              video.setAttribute('controls', '')
+              // Push the bottom info panel and top date slider out
+              // of the way so the native controls aren't covered.
+              pswp.element?.classList.add('pswp--video-controls')
             })
+
+            // Dedicated unmute button (bottom-right). Primary affordance
+            // for audio — outside the native controls' shadow DOM so the
+            // click doesn't race with anything. Honors a session-level
+            // preference so once the user unmutes once, subsequent
+            // videos start unmuted automatically (Reels/Twitter pattern).
+            const btn = document.createElement('button')
+            btn.className = 'pswp-video-unmute'
+            btn.type = 'button'
+            btn.setAttribute('aria-label', 'Unmute')
+            btn.innerHTML =
+              '<svg class="icon-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>' +
+              '<svg class="icon-unmuted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>'
+            const syncBtn = () => {
+              btn.classList.toggle('is-unmuted', !video.muted)
+              btn.setAttribute('aria-label', video.muted ? 'Unmute' : 'Mute')
+            }
+            if (videoUnmutedPref) {
+              video.addEventListener('playing', () => {
+                video.muted = false
+                syncBtn()
+              }, { once: true })
+            }
+            btn.addEventListener('click', (ev) => {
+              ev.stopPropagation()
+              video.muted = !video.muted
+              videoUnmutedPref = !video.muted
+              syncBtn()
+            })
+            syncBtn()
+            wrap.appendChild(btn)
           })
           // Start the MutationObserver on afterInit — by then
           // pswp.element exists. PhotoSwipe defers appending the

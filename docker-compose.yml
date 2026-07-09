@@ -13,12 +13,15 @@ services:
       - /share/Vault69/dataset:/data/dataset
       # Live registry — updated by sync; picked up on next /api/users request, no rebuild needed
       - /share/Vault69/model_aliases.json:/app/model_aliases.json:ro
-      - dashboard-thumbs:/data/thumbs
+      # Derived assets (grid thumbs, gif previews, mobile-friendly mp4 variants,
+      # response/meta caches, featured & registry state) — bind-mounted onto the
+      # NAS so they survive container/volume prunes and don't have to be
+      # regenerated. Everything the server writes goes through THUMB_DIR;
+      # keeping it on the vault share means 7 TB of permanent room and a
+      # single backup target alongside the raw dataset.
+      - /share/Vault69/dashboard-cache:/data/thumbs
     environment:
       DATASET_DIR: /data/dataset
       THUMB_DIR: /data/thumbs
       DASHBOARD_PORT: 3420
       DASHBOARD_PASSWORD: gitgut
-
-volumes:
-  dashboard-thumbs:
