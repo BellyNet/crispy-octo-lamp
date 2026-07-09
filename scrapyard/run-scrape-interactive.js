@@ -21,6 +21,10 @@ const {
   runStufferDbBatch,
   runSync,
 } = require('./scraperRunner')
+const {
+  PLATFORMS: SOURCE_DISCOVERY_PLATFORMS,
+  probeUsername: probeSourceUsername,
+} = require('../hoghaul/backfill-sources-interactive')
 
 const registryPath = require('./scraperRunner').registryPath
 const datasetPaths = createDatasetPaths({
@@ -447,12 +451,12 @@ async function runModelAliasFlow(rl, sessionOptions) {
 }
 
 async function runSingleUrlFlow(rl, sessionOptions) {
-  const rawUrl = (await ask(rl, 'Paste source URL: ')).trim()
+  const rawUrl = (
+    await ask(rl, 'Paste source URL or enter a Reddit username: ')
+  ).trim()
   const parsed = parseSourceUrl(rawUrl)
   if (!parsed) {
-    console.log(
-      'Could not recognize that URL as StufferDB, Reddit, Coomer, CoomerFans, or Pawchive.'
-    )
+    await runUsernameSourceSearchFlow(rl, rawUrl, sessionOptions)
     return
   }
 
@@ -541,6 +545,244 @@ async function runSingleUrlFlow(rl, sessionOptions) {
   if (status !== 0) {
     console.log(`Scraper exited with status ${status}.`)
   }
+}
+
+function normalizeUsernameSearchInput(value) {
+  return sanitize(
+    String(value || '')
+      .trim()
+      .replace(/^@+/, '')
+      .replace(/^u\//i, '')
+      .replace(/^user\//i, '')
+  )
+}
+
+function getPlatformLabel(platform) {
+  if (platform === 'kemono') return 'Pawchive'
+  if (platform === 'coomer') return 'CoomerFans'
+  if (platform === 'stufferdb') return 'StufferDB'
+  return SOURCE_DISCOVERY_PLATFORMS?.[platform]?.label || platform
+}
+
+function getStufferDbSearchUrl(username) {
+  const query = `site:stufferdb.com/index "${username}" category`
+  return `https://duckduckgo.com/?q=${encodeURIComponent(query)}`
+}
+
+function formatSourceCandidate(hit) {
+  const service = hit.service ? `/${hit.service}` : ''
+  const username = hit.username || hit.name || hit.id || ''
+  const name = username ? ` (${username})` : ''
+  return `${getPlatformLabel(hit.platform)}${service}${name}: ${hit.url}`
+}
+
+async function resolveUsernameSearchModel(rl, registry, username) {
+  const suggestedModel = findCanonicalModelName(registry, username)
+  const defaultModel = suggestedModel || username
+  const prompt = suggestedModel
+    ? `Known model to save/run under [${suggestedModel}]: `
+    : `Known model to save/run under [${username}, creates if missing]: `
+
+  while (true) {
+    const answer = (await ask(rl, prompt)).trim()
+    const requested = sanitize(answer || defaultModel)
+    if (!requested) return null
+
+    const existingModel = findCanonicalModelName(registry, requested)
+    if (existingModel) return existingModel
+
+    if (!answer && !suggestedModel) return requested
+
+    const createAnswer = (
+      await ask(
+        rl,
+        `No existing model found for "${answer || requested}". Create it and save sources there? [Y/n]: `
+      )
+    )
+      .trim()
+      .toLowerCase()
+    if (!createAnswer || createAnswer === 'y' || createAnswer === 'yes') {
+      return requested
+    }
+
+    console.log('Choose an existing model or create this one.')
+  }
+}
+
+async function probeUsernamePlatform(platform, username) {
+  try {
+    const hits = await probeSourceUsername(platform, username)
+    return Array.isArray(hits)
+      ? hits
+          .filter((hit) => hit?.url)
+          .map((hit) => ({
+            ...hit,
+            platform,
+          }))
+      : []
+  } catch (err) {
+    console.log(`  ${getPlatformLabel(platform)} probe failed: ${err.message}`)
+    return []
+  }
+}
+
+async function collectUsernameSourceCandidates(username) {
+  const candidates = []
+  for (const platform of ['reddit', 'coomer', 'kemono']) {
+    process.stdout.write(`  Searching ${getPlatformLabel(platform)}...`)
+    const hits = await probeUsernamePlatform(platform, username)
+    process.stdout.write(` ${hits.length} hit(s)\n`)
+    for (const hit of hits) {
+      if (!candidates.some((candidate) => candidate.url === hit.url)) {
+        candidates.push(hit)
+      }
+    }
+  }
+  return candidates
+}
+
+async function chooseUsernameSourceCandidates(rl, candidates) {
+  const accepted = []
+  for (const candidate of candidates) {
+    console.log('')
+    console.log(formatSourceCandidate(candidate))
+    const answer = (
+      await ask(rl, 'Accept this source? [y/N]: ')
+    )
+      .trim()
+      .toLowerCase()
+    if (answer === 'y' || answer === 'yes') {
+      const parsed = parseSourceUrl(candidate.url)
+      if (parsed) accepted.push(parsed)
+      else console.log('  Accepted URL could not be parsed by the scraper.')
+    }
+  }
+  return accepted
+}
+
+async function askForManualStufferDbSource(rl, username) {
+  console.log('')
+  console.log(`StufferDB manual search: ${getStufferDbSearchUrl(username)}`)
+  const answer = (
+    await ask(
+      rl,
+      'Paste matching StufferDB category URL to add, or press Enter to skip: '
+    )
+  ).trim()
+  if (!answer) return null
+  const parsed = parseSourceUrl(answer)
+  if (parsed?.sourceType !== 'stufferdb') {
+    console.log('That does not look like a StufferDB category URL.')
+    return null
+  }
+  return parsed
+}
+
+async function runAcceptedUsernameSources(
+  acceptedSources,
+  canonicalModel,
+  sessionOptions,
+  options = {}
+) {
+  for (let index = 0; index < acceptedSources.length; index += 1) {
+    const parsed = acceptedSources[index]
+    const runOptions = {
+      model: canonicalModel,
+      'skip-nas-sync': options.skipNasSync,
+      'dry-run': options.dryRun,
+    }
+
+    if (parsed.scraper === 'hoghaul') {
+      Object.assign(
+        runOptions,
+        pruneBlankOptions(toHoghaulRunnerOptions(sessionOptions))
+      )
+    }
+
+    console.log('')
+    console.log(
+      `[${index + 1}/${acceptedSources.length}] ${canonicalModel} -> ${parsed.sourceType}`
+    )
+    console.log(parsed.url)
+    const status = await runScrape(parsed.url, runOptions)
+    if (status !== 0) {
+      console.log(`Scraper exited with status ${status}.`)
+      return status
+    }
+  }
+  return 0
+}
+
+async function runUsernameSourceSearchFlow(rl, rawInput, sessionOptions) {
+  const username = normalizeUsernameSearchInput(rawInput)
+  if (!username) {
+    console.log(
+      'Could not recognize that as a source URL or Reddit-style username.'
+    )
+    return
+  }
+
+  const registry = loadModelRegistry(registryPath)
+  const canonicalModel = await resolveUsernameSearchModel(
+    rl,
+    registry,
+    username
+  )
+  if (!canonicalModel) return
+
+  console.log('')
+  console.log(`Searching source matches for "${username}"...`)
+  const candidates = await collectUsernameSourceCandidates(username)
+  if (!candidates.length) {
+    console.log('No Reddit/Coomer/Pawchive matches found automatically.')
+  }
+
+  const acceptedSources = await chooseUsernameSourceCandidates(rl, candidates)
+  const stufferSource = await askForManualStufferDbSource(rl, username)
+  if (stufferSource) acceptedSources.push(stufferSource)
+
+  if (!acceptedSources.length) {
+    console.log('No sources accepted.')
+    return
+  }
+
+  const uniqueSources = acceptedSources.filter(
+    (source, index, sources) =>
+      sources.findIndex((candidate) => candidate.url === source.url) === index
+  )
+  for (const parsed of uniqueSources) {
+    const savedModel = registerParsedSourceForModel(parsed, canonicalModel)
+    if (savedModel !== canonicalModel) {
+      console.log(`Saved ${parsed.sourceType} source under ${savedModel}.`)
+    } else {
+      console.log(`Saved ${parsed.sourceType} source under ${canonicalModel}.`)
+    }
+  }
+
+  const runAnswer = (
+    await ask(rl, `Run ${uniqueSources.length} accepted source(s) now? [Y/n]: `)
+  )
+    .trim()
+    .toLowerCase()
+  if (runAnswer === 'n' || runAnswer === 'no') return
+
+  const dryRunAnswer = (await ask(rl, 'Dry run? [y/N]: ')).trim().toLowerCase()
+  const skipNasSyncAnswer = (
+    await ask(rl, 'Skip NAS sync for these source runs? [y/N]: ')
+  )
+    .trim()
+    .toLowerCase()
+
+  await runAcceptedUsernameSources(
+    uniqueSources,
+    canonicalModel,
+    sessionOptions,
+    {
+      dryRun: dryRunAnswer === 'y' || dryRunAnswer === 'yes',
+      skipNasSync:
+        skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
+    }
+  )
 }
 
 async function runRepairFlow(rl) {
@@ -692,7 +934,7 @@ async function main() {
       console.log('4. Update all Pawchive models')
       console.log('5. Set session Hoghaul options')
       console.log('6. Run a model/alias from registry')
-      console.log('7. Paste one source URL and run it')
+      console.log('7. Add/run one source URL or search by Reddit username')
       console.log('8. Repair models')
       console.log('9. Sync dataset/NAS')
       console.log('10. Download oversized Hoghaul videos')

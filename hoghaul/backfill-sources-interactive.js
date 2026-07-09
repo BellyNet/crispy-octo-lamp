@@ -1820,12 +1820,15 @@ async function run() {
 }
 
 module.exports = {
+  PLATFORMS,
   getRequestedSkipPlatforms,
   getRedditUnavailableReason,
   lookupReddit,
+  parseSourceUrl,
   parseSkipPlatforms,
   printAutoBackfillReport,
   probeReddit,
+  probeUsername,
 }
 
 if (require.main === module) {

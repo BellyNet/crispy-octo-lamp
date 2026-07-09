@@ -705,12 +705,100 @@ function getTitleFromPermalink(permalink) {
     .split('/')
     .filter(Boolean)
   const slug = parts[parts.length - 1] || ''
-  if (!slug) return null
+  if (!slug || slug === '_') return null
   let decodedSlug = slug
   try {
     decodedSlug = decodeURIComponent(slug)
   } catch {}
   return cleanRedditText(decodedSlug.replace(/_/g, ' ')) || null
+}
+
+function extractTitleFromOldRedditPostHtml(html) {
+  const raw = String(html || '')
+  const attrMatch = raw.match(/\bdata-title=["']([^"']+)["']/i)
+  if (attrMatch?.[1]) return cleanRedditText(htmlDecode(attrMatch[1]))
+
+  const titleLinkMatch = raw.match(
+    /<a\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i
+  )
+  if (titleLinkMatch?.[1]) return cleanRedditText(titleLinkMatch[1])
+
+  const ogTitleMatch = raw.match(
+    /<meta\b[^>]*(?:property|name)=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i
+  )
+  if (ogTitleMatch?.[1]) return cleanRedditText(htmlDecode(ogTitleMatch[1]))
+
+  const titleMatch = raw.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)
+  if (titleMatch?.[1]) {
+    return cleanRedditText(
+      htmlDecode(titleMatch[1])
+        .replace(/\s*:\s*reddit(?:\.com)?\s*$/i, '')
+        .replace(/^\s*u\/[^:]+:\s*/i, '')
+    )
+  }
+  return null
+}
+
+async function hydrateMissingRedditTitle(source, post, deps = {}) {
+  if (getRedditPostTitle(post)) return post
+  if (
+    typeof deps.fetchPostHtml !== 'function' &&
+    typeof deps.fetchHtml !== 'function'
+  ) {
+    return post
+  }
+
+  const permalink = post?.permalink || post?.url || ''
+  if (!permalink) return post
+
+  let postUrl
+  try {
+    postUrl = new URL(permalink, getOldRedditOrigin(source))
+    postUrl.hostname = 'old.reddit.com'
+    postUrl.searchParams.set('over18', '1')
+  } catch {
+    return post
+  }
+
+  deps.appendRunEvent?.('reddit_title_hydration_started', {
+    postId: String(post.id || ''),
+    url: postUrl.toString(),
+  })
+
+  try {
+    const response = await fetchOldRedditHtml(postUrl.toString(), {
+      ...deps,
+      redditHtmlRequestKind: 'title/post',
+    })
+    const title = extractTitleFromOldRedditPostHtml(response.html)
+    deps.appendRunEvent?.('reddit_title_hydration_finished', {
+      postId: String(post.id || ''),
+      foundTitle: Boolean(title),
+    })
+    return title ? { ...post, title } : post
+  } catch (err) {
+    deps.appendRunEvent?.('reddit_title_hydration_failed', {
+      postId: String(post.id || ''),
+      error: err.message,
+    })
+    deps.logger?.warn?.(
+      `Reddit title fetch failed for ${post.id}: ${err.message}`
+    )
+    return post
+  }
+}
+
+async function buildRedditPostWithMedia(source, post, deps = {}) {
+  const hydratedPost = await hydrateMissingRedditTitle(source, post, deps)
+  const mediaEntries = await getRedditMediaEntries(source, hydratedPost, deps)
+  return {
+    ...hydratedPost,
+    id: String(hydratedPost.id || ''),
+    title: getRedditPostTitle(hydratedPost),
+    text: getRedditPostText(hydratedPost),
+    published: getRedditPostDate(hydratedPost),
+    mediaEntries,
+  }
 }
 
 function parseOldRedditListingPosts(source, html) {
@@ -904,19 +992,7 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
             durationMs: Date.now() - galleryStartedAt,
           })
         }
-        const mediaEntries = await getRedditMediaEntries(
-          source,
-          enrichedPost,
-          deps
-        )
-        posts.push({
-          ...enrichedPost,
-          id: String(enrichedPost.id || ''),
-          title: getRedditPostTitle(enrichedPost),
-          text: getRedditPostText(enrichedPost),
-          published: getRedditPostDate(enrichedPost),
-          mediaEntries,
-        })
+        posts.push(await buildRedditPostWithMedia(source, enrichedPost, deps))
         emitDiscoveryProgress(deps, {
           mode: 'reddit html',
           pages: page + 1,
@@ -1380,15 +1456,7 @@ async function fetchRedditPosts(source, options = {}, deps = {}) {
       postsToProcess,
       postConcurrency,
       async (post) => {
-        const mediaEntries = await getRedditMediaEntries(source, post, deps)
-        return {
-          ...post,
-          id: String(post.id || ''),
-          title: getRedditPostTitle(post),
-          text: getRedditPostText(post),
-          published: getRedditPostDate(post),
-          mediaEntries,
-        }
+        return buildRedditPostWithMedia(source, post, deps)
       }
     )
 
@@ -1570,15 +1638,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
           }
         }
 
-        const mediaEntries = await getRedditMediaEntries(source, post, deps)
-        return {
-          ...post,
-          id: String(post.id || ''),
-          title: getRedditPostTitle(post),
-          text: getRedditPostText(post),
-          published: getRedditPostDate(post),
-          mediaEntries,
-        }
+        return buildRedditPostWithMedia(source, post, deps)
       }
     )
 

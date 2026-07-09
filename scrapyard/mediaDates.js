@@ -321,6 +321,14 @@ function getFallbackSourceTitle(sourceMeta) {
 function normalizeSourceMeta(sourceMeta) {
   if (!sourceMeta || typeof sourceMeta !== 'object') return null
 
+  const site = String(
+    sourceMeta.site || sourceMeta.sourceSite || ''
+  ).toLowerCase()
+  const title = sourceMeta.title || getFallbackSourceTitle(sourceMeta) || null
+  const text =
+    sourceMeta.text ||
+    sourceMeta.sourceText ||
+    (site === 'reddit' ? title : null)
   const normalized = {
     site: sourceMeta.site || sourceMeta.sourceSite || null,
     service: sourceMeta.service || sourceMeta.sourceService || null,
@@ -328,8 +336,8 @@ function normalizeSourceMeta(sourceMeta) {
     username: sourceMeta.username || sourceMeta.sourceUsername || null,
     subreddit: sourceMeta.subreddit || sourceMeta.sourceSubreddit || null,
     postId: sourceMeta.postId || sourceMeta.sourcePostId || null,
-    title: sourceMeta.title || getFallbackSourceTitle(sourceMeta) || null,
-    text: sourceMeta.text || sourceMeta.sourceText || null,
+    title,
+    text,
     originalName: sourceMeta.originalName || null,
     mediaPageUrl:
       sourceMeta.mediaPageUrl || sourceMeta.sourceMediaPageUrl || null,
