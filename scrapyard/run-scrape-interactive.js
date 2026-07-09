@@ -573,7 +573,8 @@ function formatSourceCandidate(hit) {
   const service = hit.service ? `/${hit.service}` : ''
   const username = hit.username || hit.name || hit.id || ''
   const name = username ? ` (${username})` : ''
-  return `${getPlatformLabel(hit.platform)}${service}${name}: ${hit.url}`
+  const note = hit.verified === false ? ' [unverified]' : ''
+  return `${getPlatformLabel(hit.platform)}${service}${name}${note}: ${hit.url}`
 }
 
 async function resolveUsernameSearchModel(rl, registry, username) {
@@ -628,7 +629,18 @@ async function probeUsernamePlatform(platform, username) {
 
 async function collectUsernameSourceCandidates(username) {
   const candidates = []
-  for (const platform of ['reddit', 'coomer', 'kemono']) {
+  const redditUrl = `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/`
+  candidates.push({
+    platform: 'reddit',
+    service: 'submitted',
+    username,
+    url: redditUrl,
+    name: username,
+    verified: false,
+  })
+  console.log(`  Reddit username candidate: ${redditUrl}`)
+
+  for (const platform of ['coomer', 'kemono']) {
     process.stdout.write(`  Searching ${getPlatformLabel(platform)}...`)
     const hits = await probeUsernamePlatform(platform, username)
     process.stdout.write(` ${hits.length} hit(s)\n`)
