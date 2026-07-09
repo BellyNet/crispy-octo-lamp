@@ -1018,6 +1018,12 @@
         color: var(--muted);
         flex-shrink: 0;
       }
+      .pswp-info-size {
+        font-size: 12px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+      }
       .pswp-info-src {
         font-size: 11px;
         color: var(--muted);
@@ -1108,6 +1114,38 @@
       .pswp-video-unmute .icon-unmuted { display: none; }
       .pswp-video-unmute.is-unmuted .icon-muted { display: none; }
       .pswp-video-unmute.is-unmuted .icon-unmuted { display: block; }
+
+      /* HD/SD chip in the PhotoSwipe top bar (mobile only). Uses text
+         instead of an icon so the current mode is legible at a glance
+         without decoding an icon. Accent-tinted when HD is active so a
+         glance tells you whether you're burning data or saving it. */
+      button.pswp__button--pswp-hd-chip {
+        width: auto;
+        min-width: 40px;
+        height: 40px;
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .pswp-hd-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: #fff;
+        padding: 3px 7px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        background: rgba(0, 0, 0, 0.3);
+        line-height: 1;
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+      }
+      .pswp-hd-label.pswp-hd-on {
+        color: #fff;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+
       @media (max-width: 640px) {
         .pswp__pswp-info-panel {
           padding: 10px 12px;
@@ -1912,9 +1950,36 @@
       // /media-mobile/ mp4s for gifs+videos. On: the lightbox uses the
       // originals, giving desktop-quality playback on a solid wifi at the
       // cost of much larger downloads. Persisted in localStorage; the
-      // button in the header reflects and flips this flag.
+      // header button AND the lightbox top-bar chip both reflect + flip
+      // this flag via setHdMode() so they stay in sync.
       const HD_MODE_KEY = 'dashboard-hd-mode'
       let hdMode = localStorage.getItem(HD_MODE_KEY) === '1'
+      const hdListeners = new Set()
+      function setHdMode(next) {
+        hdMode = !!next
+        localStorage.setItem(HD_MODE_KEY, hdMode ? '1' : '0')
+        for (const cb of hdListeners) {
+          try {
+            cb(hdMode)
+          } catch {}
+        }
+      }
+      function onHdChange(cb) {
+        hdListeners.add(cb)
+        return () => hdListeners.delete(cb)
+      }
+
+      // Bytes -> "12 KB" / "1.4 MB" / "2.1 GB". Kept terse for the
+      // sparse info-panel meta row. Falls back to a plain byte count for
+      // anything under 1 KB, so single-digit-KB thumbs still get a
+      // useful readout.
+      function formatBytes(n) {
+        if (typeof n !== 'number' || !isFinite(n) || n <= 0) return ''
+        if (n < 1024) return `${n} B`
+        if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+        if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+        return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
+      }
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
       const userListEl = document.getElementById('user-list')
@@ -3385,10 +3450,9 @@
                     el.appendChild(cbox)
                   }
 
-                  // 4. Meta row — kept deliberately sparse: media date,
-                  //    added date, and the FLAGGED chip when set. The
-                  //    file's type, dimensions, duration, size, source
-                  //    site and filename all live on the card already.
+                  // 4. Meta row — media date, added date, file size, and
+                  //    the FLAGGED chip when set. Sparse by design; the
+                  //    card already shows type / dims / duration / source.
                   const row = document.createElement('div')
                   row.className = 'pswp-info-row'
 
@@ -3411,6 +3475,14 @@
                     addedSpan.className = 'pswp-info-added'
                     addedSpan.textContent = `Added ${formatDate(new Date(item.addedMs).toISOString())}`
                     row.appendChild(addedSpan)
+                  }
+
+                  const sizeText = formatBytes(item.size)
+                  if (sizeText) {
+                    const sizeSpan = document.createElement('span')
+                    sizeSpan.className = 'pswp-info-size'
+                    sizeSpan.textContent = sizeText
+                    row.appendChild(sizeSpan)
                   }
 
                   el.appendChild(row)
@@ -3450,6 +3522,38 @@
                 delete linkBtnEl.dataset.url
               }
             }
+            // HD/SD indicator + toggle in the top bar (mobile only). Same
+            // state as the header button — tapping either flips the mode
+            // for future lightbox opens. Placed adjacent to the flag/link
+            // buttons so the current mode is always visible while viewing.
+            if (IS_MOBILE) {
+              let hdChipEl = null
+              const syncHdChip = () => {
+                if (!hdChipEl) return
+                hdChipEl.textContent = hdMode ? 'HD' : 'SD'
+                hdChipEl.classList.toggle('pswp-hd-on', hdMode)
+                hdChipEl.title = hdMode
+                  ? 'HD — full-res originals. Tap for data-saver.'
+                  : 'SD — compressed mp4s. Tap for full HD.'
+              }
+              pswp.ui.registerElement({
+                name: 'pswp-hd-chip',
+                order: 9,
+                isButton: true,
+                title: 'Toggle HD',
+                html: '<span class="pswp-hd-label">SD</span>',
+                onInit(el) {
+                  hdChipEl = el.querySelector('.pswp-hd-label') || el
+                  syncHdChip()
+                  const off = onHdChange(syncHdChip)
+                  pswp.on('destroy', off)
+                },
+                onClick() {
+                  setHdMode(!hdMode)
+                },
+              })
+            }
+
             pswp.ui.registerElement({
               name:     'pswp-link-button',
               order:    8,
@@ -3933,22 +4037,22 @@
 
       // ─── HD TOGGLE ────────────────────────────────────────────────────────
       // Only meaningful on mobile — desktop already loads full-res URLs.
+      // Sibling indicator lives in the PhotoSwipe top bar (see openLightbox).
+      // Both share state via setHdMode() so tapping either updates both.
       const hdBtn = document.getElementById('hd-toggle')
       function syncHdBtn() {
+        hdBtn.textContent = hdMode ? 'HD' : 'SD'
         hdBtn.classList.toggle('is-on', hdMode)
         hdBtn.setAttribute('aria-pressed', hdMode ? 'true' : 'false')
         hdBtn.title = hdMode
-          ? 'HD mode ON — loading originals (uses more data). Tap to switch to compressed.'
-          : 'HD mode OFF — loading compressed mp4s. Tap for full resolution.'
+          ? 'HD mode ON — loading originals (uses more data). Tap for data-saver.'
+          : 'Data-saver mode — loading compressed mp4s. Tap for full HD.'
       }
       if (IS_MOBILE) {
         hdBtn.style.display = 'flex'
         syncHdBtn()
-        hdBtn.addEventListener('click', () => {
-          hdMode = !hdMode
-          localStorage.setItem(HD_MODE_KEY, hdMode ? '1' : '0')
-          syncHdBtn()
-        })
+        onHdChange(syncHdBtn)
+        hdBtn.addEventListener('click', () => setHdMode(!hdMode))
       }
 
       // ─── RESCAN + SCAN STATUS ─────────────────────────────────────────────

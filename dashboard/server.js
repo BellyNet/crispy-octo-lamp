@@ -57,7 +57,15 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 13
+const RESPONSE_CACHE_VERSION = 14
+
+// Bumped whenever the encoding recipe for /media-mobile/ variants changes in
+// a way that changes the bytes of an already-cached file (e.g. gifs going
+// from no-audio to silent-AAC to fix iOS autoplay). The number is baked
+// into the mobileUrl as a `?v=N` query param — same underlying endpoint,
+// but Safari's HTTP cache treats it as a new URL and re-fetches instead
+// of replaying a stale `immutable, max-age=1yr` response.
+const MOBILE_VARIANT_VERSION = 2
 
 // ─── DELETION FLAGS ────────────────────────────────────────────────────────
 // Per-model sidecar lists files the user has flagged for deletion via the
@@ -723,7 +731,7 @@ async function processFileForResponse(username, userDir, item) {
       // into a ~4 MB H.264 clip. Desktop/laptop ignores this field.
       mobileUrl:
         type === 'video' || type === 'gif'
-          ? `/media-mobile/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`
+          ? `/media-mobile/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}?v=${MOBILE_VARIANT_VERSION}`
           : null,
       // True iff a same-stem .txt sidecar exists next to this file (LoRA
       // training caption). The full text is fetched on-demand from /api/caption
