@@ -1543,6 +1543,40 @@
         animation: spin 1.2s linear infinite;
       }
 
+      /* HD toggle — mobile-only. Off = compressed 720p mp4s (default).
+         On = original url. Persisted in localStorage. Accent-tinted when
+         active so it's obvious at a glance whether the user is burning
+         data or saving it. */
+      #hd-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 5px 8px;
+        border-radius: 6px;
+        flex-shrink: 0;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        transition:
+          background 0.15s,
+          color 0.15s,
+          border-color 0.15s;
+      }
+      #hd-toggle:hover {
+        background: var(--card-bg);
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      #hd-toggle.is-on {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: rgba(124, 108, 252, 0.12);
+      }
+
       /* ─── SCAN BANNER ────────────────────────────────────────── */
       #scan-banner {
         padding: 6px 20px;
@@ -1749,6 +1783,15 @@
           <option value="video">Videos</option>
           <option value="flagged">Flagged</option>
         </select>
+        <button
+          id="hd-toggle"
+          title="HD mode — full resolution (uses more data)"
+          aria-label="Toggle HD mode"
+          aria-pressed="false"
+          style="display: none"
+        >
+          <span>HD</span>
+        </button>
         <button id="rescan-btn" title="Rescan all models" aria-label="Rescan">
           <svg
             width="16"
@@ -1865,6 +1908,13 @@
       // Desktop keeps the original url — this flag is only ever read
       // inside openLightbox().
       const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      // HD toggle — mobile only. Off (default): the lightbox swaps to
+      // /media-mobile/ mp4s for gifs+videos. On: the lightbox uses the
+      // originals, giving desktop-quality playback on a solid wifi at the
+      // cost of much larger downloads. Persisted in localStorage; the
+      // button in the header reflects and flips this flag.
+      const HD_MODE_KEY = 'dashboard-hd-mode'
+      let hdMode = localStorage.getItem(HD_MODE_KEY) === '1'
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
       const userListEl = document.getElementById('user-list')
@@ -3017,14 +3067,20 @@
 
       function openLightbox(startIndex) {
         loadPswp().then((PhotoSwipe) => {
+          // Snapshot the HD flag once per open — mid-lightbox toggles
+          // don't rebuild the already-mounted slides, they take effect
+          // on the next open. This matches how card-size / filter
+          // changes propagate too.
+          const useMobileVariant = IS_MOBILE && !hdMode
           const dataSource = filtered.map((item) => {
             // Render as <video> when it's a real video, OR when it's a
-            // gif on mobile (the server hands us a 720p H.264 MP4 in
-            // that case, which plays fine in <video> and is 5–10× smaller
-            // than the source GIF).
+            // gif on mobile in SD mode (server hands us a 720p H.264 MP4
+            // that's 5–10× smaller than the source GIF and plays fine in
+            // <video>). HD mode on mobile falls through to the same path
+            // desktop uses — gif as animated <img>, no promotion.
             const asVideo =
               item.type === 'video' ||
-              (IS_MOBILE && item.type === 'gif' && item.mobileUrl)
+              (useMobileVariant && item.type === 'gif' && item.mobileUrl)
             if (asVideo) {
               // Every video: muted + autoplay + loop + playsinline +
               // controls visible.
@@ -3045,11 +3101,11 @@
               const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
               )
-              // Prefer the mobile MP4 when we're on a phone/tablet AND
-              // the server offered one. Falls back to the original url
-              // for desktop or when mobileUrl is missing for any reason.
+              // Prefer the mobile MP4 when SD mode is active on mobile
+              // AND the server offered one. HD mode, desktop, and any
+              // missing mobileUrl fall through to the original.
               const src = esc(
-                IS_MOBILE && item.mobileUrl ? item.mobileUrl : item.url
+                useMobileVariant && item.mobileUrl ? item.mobileUrl : item.url
               )
               // No `poster`, no `controls` initially. Tap on the video
               // toggles the native controls (wired up in contentAppend
@@ -3638,30 +3694,41 @@
             // For real videos, retry with the source url; if the source
             // is a codec iOS can't play (e.g. .webm), there's nothing
             // more we can do until the encode finishes.
+            //
+            // Race note: the browser starts loading the video the moment
+            // the html string is parsed, and contentAppend can fire
+            // AFTER a fast 404 has already dispatched the error event.
+            // `once: true` misses that early error, so we also check
+            // video.error / networkState synchronously and dispatch the
+            // fallback ourselves.
             const it = e.content?.data?._item
             if (it && wrap.dataset.errorBound !== '1') {
               wrap.dataset.errorBound = '1'
-              video.addEventListener(
-                'error',
-                () => {
-                  const usingMobile =
-                    it.mobileUrl && video.src.includes(it.mobileUrl)
-                  if (!usingMobile || !it.url) return
-                  if (it.type === 'gif') {
-                    const img = document.createElement('img')
-                    img.src = it.url
-                    img.alt = ''
-                    img.style.maxWidth = '100%'
-                    img.style.maxHeight = '100%'
-                    img.style.objectFit = 'contain'
-                    video.replaceWith(img)
-                  } else {
-                    video.src = it.url
-                    video.load()
-                  }
-                },
-                { once: true }
-              )
+              let fallbackFired = false
+              const applyFallback = () => {
+                if (fallbackFired) return
+                fallbackFired = true
+                const usingMobile =
+                  it.mobileUrl && video.src.includes(it.mobileUrl)
+                if (!usingMobile || !it.url) return
+                if (it.type === 'gif') {
+                  const img = document.createElement('img')
+                  img.src = it.url
+                  img.alt = ''
+                  img.style.maxWidth = '100%'
+                  img.style.maxHeight = '100%'
+                  img.style.objectFit = 'contain'
+                  video.replaceWith(img)
+                } else {
+                  video.src = it.url
+                  video.load()
+                }
+              }
+              video.addEventListener('error', applyFallback, { once: true })
+              // NETWORK_NO_SOURCE = 3 — set when no valid src could be
+              // loaded (matches the 404 case). Guard both this and
+              // video.error in case the event already fired.
+              if (video.error || video.networkState === 3) applyFallback()
             }
             if (wrap.dataset.tapBound) return
             wrap.dataset.tapBound = '1'
@@ -3863,6 +3930,26 @@
         }
       })
       sidebarOverlay.addEventListener('click', closeSidebar)
+
+      // ─── HD TOGGLE ────────────────────────────────────────────────────────
+      // Only meaningful on mobile — desktop already loads full-res URLs.
+      const hdBtn = document.getElementById('hd-toggle')
+      function syncHdBtn() {
+        hdBtn.classList.toggle('is-on', hdMode)
+        hdBtn.setAttribute('aria-pressed', hdMode ? 'true' : 'false')
+        hdBtn.title = hdMode
+          ? 'HD mode ON — loading originals (uses more data). Tap to switch to compressed.'
+          : 'HD mode OFF — loading compressed mp4s. Tap for full resolution.'
+      }
+      if (IS_MOBILE) {
+        hdBtn.style.display = 'flex'
+        syncHdBtn()
+        hdBtn.addEventListener('click', () => {
+          hdMode = !hdMode
+          localStorage.setItem(HD_MODE_KEY, hdMode ? '1' : '0')
+          syncHdBtn()
+        })
+      }
 
       // ─── RESCAN + SCAN STATUS ─────────────────────────────────────────────
       const rescanBtn = document.getElementById('rescan-btn')

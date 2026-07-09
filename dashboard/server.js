@@ -1259,16 +1259,24 @@ async function generateMobileVariant(srcPath, dstPath, isGif) {
   const tmp = dstPath + '.tmp.mp4'
   // scale=-2:'min(H,ih)' → cap height at H, keep width auto (divisible by 2),
   // never upscale. -movflags +faststart puts moov atom up front so playback
-  // starts before the whole file is buffered. GIFs get -an (no audio track);
-  // videos get 96 kbps AAC.
+  // starts before the whole file is buffered.
+  //
+  // GIFs get a silent AAC audio track (not `-an`) — iOS Safari refuses to
+  // autoplay muted <video> elements that lack an audio track, so an
+  // audio-less clip just sits frozen on frame 0. `-f lavfi -i anullsrc`
+  // supplies infinite silence as a second input; `-shortest` ends output
+  // when the (finite) video does. Videos keep their real audio at 96k.
   const scaleFilter = `scale=-2:'min(${MOBILE_MAX_HEIGHT},ih)':flags=lanczos`
-  const args = [
-    '-y',
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-i',
-    srcPath,
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', srcPath]
+  if (isGif) {
+    args.push(
+      '-f',
+      'lavfi',
+      '-i',
+      'anullsrc=channel_layout=stereo:sample_rate=44100'
+    )
+  }
+  args.push(
     '-vf',
     scaleFilter,
     '-c:v',
@@ -1280,10 +1288,10 @@ async function generateMobileVariant(srcPath, dstPath, isGif) {
     '-pix_fmt',
     'yuv420p',
     '-movflags',
-    '+faststart',
-  ]
+    '+faststart'
+  )
   if (isGif) {
-    args.push('-an')
+    args.push('-c:a', 'aac', '-b:a', '32k', '-shortest')
   } else {
     args.push('-c:a', 'aac', '-b:a', '96k')
   }
