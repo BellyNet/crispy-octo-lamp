@@ -3,6 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const readline = require('readline')
+const { execFile } = require('child_process')
 
 const { createDatasetPaths } = require('./datasetPaths')
 const {
@@ -577,6 +578,35 @@ function formatSourceCandidate(hit) {
   return `${getPlatformLabel(hit.platform)}${service}${name}${note}: ${hit.url}`
 }
 
+function openUrlForVerification(url) {
+  const targetUrl = String(url || '').trim()
+  if (!targetUrl) return
+
+  const platform = process.platform
+  const command =
+    platform === 'win32'
+      ? 'rundll32.exe'
+      : platform === 'darwin'
+        ? 'open'
+        : 'xdg-open'
+  const args =
+    platform === 'win32'
+      ? ['url.dll,FileProtocolHandler', targetUrl]
+      : [targetUrl]
+
+  console.log(`Opening profile for verification: ${targetUrl}`)
+  execFile(command, args, (err) => {
+    if (err) {
+      console.log(`Could not open browser automatically: ${err.message}`)
+      console.log(`Open manually: ${targetUrl}`)
+    }
+  })
+}
+
+function shouldOpenCandidateForVerification(candidate = {}) {
+  return ['coomer', 'kemono'].includes(candidate.platform)
+}
+
 async function resolveUsernameSearchModel(rl, registry, username) {
   const suggestedModel = findCanonicalModelName(registry, username)
   const defaultModel = suggestedModel || username
@@ -658,8 +688,11 @@ async function chooseUsernameSourceCandidates(rl, candidates) {
   for (const candidate of candidates) {
     console.log('')
     console.log(formatSourceCandidate(candidate))
+    if (shouldOpenCandidateForVerification(candidate)) {
+      openUrlForVerification(candidate.url)
+    }
     const answer = (
-      await ask(rl, 'Accept this source? [y/N]: ')
+      await ask(rl, 'Accept this source after verifying the profile? [y/N]: ')
     )
       .trim()
       .toLowerCase()
@@ -687,6 +720,13 @@ async function askForManualStufferDbSource(rl, username) {
     console.log('That does not look like a StufferDB category URL.')
     return null
   }
+  openUrlForVerification(parsed.url)
+  const confirm = (
+    await ask(rl, 'Accept this StufferDB source after verifying it? [y/N]: ')
+  )
+    .trim()
+    .toLowerCase()
+  if (confirm !== 'y' && confirm !== 'yes') return null
   return parsed
 }
 
