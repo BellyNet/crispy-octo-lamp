@@ -220,27 +220,95 @@ written to the tail. Playback is impossible without re-fetching.
 
 ### A.2 Tail-decode failures (incomplete download signature)
 
-Full deep-pass on all 20,035 videos running as of 10:25 ET. Uses
-`ffmpeg -v error -nostdin -sseof -3 -i FILE -f null -`, filtering
-out benign non-monotonic-dts warnings. Sample of 200 files hit 1
-additional failure — rough extrapolation to ~100 across the full
-inventory. Definitive list will be on the NAS at
-`/tmp/videoscan-deep-failures.txt` when the pass finishes
-(estimated ~40 min from launch, so ~11:05 ET).
+Full deep-pass on all 20,035 videos completed 2026-07-10 15:52 ET.
+Command: `ffmpeg -v error -nostdin -sseof -3 -i FILE -f null -`
+with benign non-monotonic-dts warnings filtered out. Failures = the
+last 3 seconds fail to decode.
 
-The four header-pass files above are a subset of these — they all
-fail the deep pass too.
+**40 files**, all in `webm/` subdirs:
+
+```
+acdc34434_laura_fatty/webm/20211130190134-b8fb1165.mp4
+alissbonyt/webm/20210725113622-e3ed8dde.mp4
+alissbonyt/webm/20230613001321-a4f0d4c4.mp4
+alissbonyt/webm/20240717090533-39388514.mp4
+alissbonyt/webm/20240717090929-4d40b18e.mp4
+anybodylost6726/webm/2892ac-01960b49-1458-7a29-bdde-3ee1d600996c.mp4
+azismiss/webm/20211112124847-da7e64cb.mp4
+azismiss/webm/20211112124923-1a7754e3.mp4
+azismiss/webm/20211112125015-1cbce647.mp4
+azismiss/webm/20211112125211-fe895104.mp4
+azismiss/webm/20211112125259-c9be00cc.mp4
+bbw_breanna/webm/20201124105853-1e5ac909.mp4
+beccabae/webm/20190114162527-f0dcd698.mp4
+bella_abbondanza/webm/20210309181745-2b212428.mp4
+bella_abbondanza/webm/20220612224814-0a58b229.mp4
+bella_abbondanza/webm/20220612225606-91e96a34.mp4
+bodylovebritt/webm/20211012172051-077cca0e.mp4
+bodylovebritt/webm/20221211204030-d54dc28b.mp4
+candii_kayn/webm/20231206222336-33eba64f.mp4
+candii_kayn/webm/20240222214631-e304da1a.mp4
+candii_kayn/webm/20240222215924-efb5e708.mp4
+candii_kayn/webm/20251014200040-afd24d97.mp4
+candii_kayn/webm/20251022214808-e7d844a4.mp4
+candii_kayn/webm/20251226194125-39b622ae.mp4
+candii_kayn/webm/20260401165520-c7c398ac.mp4
+chloe_curvingchloe_bigcuties_/webm/20210531062559-d5dd9e45.mp4
+chloe_curvingchloe_bigcuties_/webm/20210929051836-0205138b.mp4
+chloe_curvingchloe_bigcuties_/webm/20211029203302-6375f777.mp4
+lilmamakay/webm/20221114113245-aaf826ed.mp4
+margot_bbw/.webm-backup/20210522205239-f6e3fe5e.webm       ← .webm-backup, not shown by dashboard
+margot_bbw/webm/20210504163612-4ab07935.mp4
+margot_bbw/webm/20210522205239-f6e3fe5e.webm
+mary_boberry/webm/20240627201727-21d58928.mp4
+muffinmaid/webm/20240711191651-7c7f330e.mp4
+prettyplsgemini/webm/2892ac-01970e25-3706-7e0c-8cf1-e18dc49e7359.mp4
+prettyplsgemini/webm/2892ac-019713b8-b1d8-7c06-8a0d-117eb40aefac.mp4
+prettyplsgemini/webm/2892ac-019714d3-c4f9-7940-8dc9-2e6e8d865e21.mp4
+pumpkincakezz/webm/20221107143937-e76d0c8d.mp4
+sabrina_ssbbw/webm/20170823023109-52c5caa9.mp4
+skylar_bc/webm/20251223092220-c4934bf3.mp4
+```
+
+Header-pass strict subset (all four): `chloe_curvingchloe_bigcuties_`
+(3 files) + `mary_boberry` (1). Those are the "moov atom not found"
+files — completely unplayable. The other 36 have parseable headers
+but fail to decode near the end — the "download started, connection
+dropped mid-stream, no verification before persisting" signature.
+
+One extra: `margot_bbw/.webm-backup/…webm` shows a `.webm-backup`
+folder — that's the pre-transcode archive the dashboard doesn't
+list (it only shows `webm/`, `gif/`, `images/`). Whatever's making
+these backups picked up a corrupt file too; worth checking the
+same file's twin at `margot_bbw/webm/…webm` (also on this list).
 
 ### A.3 By-user summary
 
-Partial (from header pass only):
-
 ```
-chloe_curvingchloe_bigcuties_    3 files
-mary_boberry                     1 file
-────────────────────────────
-total header-fail                4 files
+candii_kayn                       7 files
+azismiss                          5 files
+alissbonyt                        4 files
+chloe_curvingchloe_bigcuties_     3 files
+prettyplsgemini                   3 files
+margot_bbw                        3 files   (1 in .webm-backup)
+bella_abbondanza                  3 files
+bodylovebritt                     2 files
+skylar_bc                         1 file
+sabrina_ssbbw                     1 file
+pumpkincakezz                     1 file
+muffinmaid                        1 file
+mary_boberry                      1 file
+lilmamakay                        1 file
+beccabae                          1 file
+bbw_breanna                       1 file
+anybodylost6726                   1 file
+acdc34434_laura_fatty             1 file
+──────────────────────────────
+total decode-fail                40 files
 ```
 
-Full by-user summary from the deep pass will be appended below once
-the scan completes.
+candii_kayn especially concentrated (7 in one model out of ~40
+total failures), and their filenames span 2023-2026 — suggests
+this model gets scraped repeatedly and the same adapter path
+lands truncated files often. Prime candidate for reproducing the
+scraper bug in Thread 2.
