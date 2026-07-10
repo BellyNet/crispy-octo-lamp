@@ -21,6 +21,9 @@ const {
   runSourceBatch,
   runStufferDbBatch,
   runSync,
+  readFreshModelRunSummary,
+  summarizeSourceRunSummary,
+  formatModelSummaryLine,
 } = require('./scraperRunner')
 const {
   PLATFORMS: SOURCE_DISCOVERY_PLATFORMS,
@@ -383,6 +386,82 @@ function selectModelSources(targets, answer) {
   return targets.filter((target) => filters.has(target.label))
 }
 
+function getFreshInteractiveRunSummary(canonicalModel, parsed, startedAtMs) {
+  if (!canonicalModel || !parsed?.scraper) return null
+  return readFreshModelRunSummary(canonicalModel, parsed.scraper, {
+    inputUrl: parsed.inputUrl || parsed.url,
+    startedAfterMs,
+  })
+}
+
+function printInteractiveModelTotal(result) {
+  if (!result?.runs?.length || result.sources.length <= 1) return
+  console.log(formatModelSummaryLine(result))
+}
+
+async function runInteractiveSourceGroup({
+  canonicalModel,
+  targets,
+  sessionOptions,
+  sharedOptions = {},
+}) {
+  const result = {
+    model: canonicalModel,
+    startedAt: new Date().toISOString(),
+    sources: targets,
+    runs: [],
+    finishedAt: null,
+  }
+  const hoghaulOptions = pruneBlankOptions(
+    toHoghaulRunnerOptions(sessionOptions)
+  )
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index]
+    const parsed = target.parsed || parseSourceUrl(target.url)
+    const label = target.label || getSourceLabel(target.sourceKey, target.url)
+    const runOptions = {
+      ...sharedOptions,
+      ...(parsed?.scraper === 'hoghaul' ? hoghaulOptions : {}),
+    }
+
+    console.log('')
+    console.log(
+      `[${index + 1}/${targets.length}] ${canonicalModel} -> ${label}`
+    )
+    if (target.url) console.log(target.url)
+
+    const startedAtMs = Date.now()
+    const status = parsed ? await runScrape(target.url, runOptions) : 1
+    const summary = getFreshInteractiveRunSummary(
+      canonicalModel,
+      parsed,
+      startedAtMs
+    )
+    result.runs.push({
+      ok: status === 0,
+      code: status,
+      scraper: parsed?.scraper || null,
+      sourceType: parsed?.sourceType || null,
+      sourceKey: target.sourceKey || parsed?.sourceType || null,
+      label,
+      url: target.url,
+      summary: summarizeSourceRunSummary(summary),
+    })
+
+    if (status !== 0) {
+      console.log(`Scraper exited with status ${status}.`)
+      result.finishedAt = new Date().toISOString()
+      printInteractiveModelTotal(result)
+      return status
+    }
+  }
+
+  result.finishedAt = new Date().toISOString()
+  printInteractiveModelTotal(result)
+  return 0
+}
+
 async function runModelAliasFlow(rl, sessionOptions) {
   const rawModel = (await ask(rl, 'Model or alias: ')).trim()
   const registry = loadModelRegistry(registryPath)
@@ -427,28 +506,12 @@ async function runModelAliasFlow(rl, sessionOptions) {
     'dry-run': dryRunAnswer === 'y' || dryRunAnswer === 'yes',
     'skip-nas-sync': skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
   }
-  const hoghaulOptions = pruneBlankOptions(
-    toHoghaulRunnerOptions(sessionOptions)
-  )
-
-  for (let index = 0; index < selectedTargets.length; index += 1) {
-    const target = selectedTargets[index]
-    const parsed = parseSourceUrl(target.url)
-    const runOptions = {
-      ...sharedOptions,
-      ...(parsed?.scraper === 'hoghaul' ? hoghaulOptions : {}),
-    }
-
-    console.log('')
-    console.log(
-      `[${index + 1}/${selectedTargets.length}] ${canonicalModel} -> ${target.label}`
-    )
-    const status = await runScrape(target.url, runOptions)
-    if (status !== 0) {
-      console.log(`Scraper exited with status ${status}.`)
-      return
-    }
-  }
+  await runInteractiveSourceGroup({
+    canonicalModel,
+    targets: selectedTargets,
+    sessionOptions,
+    sharedOptions,
+  })
 }
 
 async function runSingleUrlFlow(rl, sessionOptions) {
@@ -736,33 +799,21 @@ async function runAcceptedUsernameSources(
   sessionOptions,
   options = {}
 ) {
-  for (let index = 0; index < acceptedSources.length; index += 1) {
-    const parsed = acceptedSources[index]
-    const runOptions = {
+  return runInteractiveSourceGroup({
+    canonicalModel,
+    sessionOptions,
+    sharedOptions: {
       model: canonicalModel,
       'skip-nas-sync': options.skipNasSync,
       'dry-run': options.dryRun,
-    }
-
-    if (parsed.scraper === 'hoghaul') {
-      Object.assign(
-        runOptions,
-        pruneBlankOptions(toHoghaulRunnerOptions(sessionOptions))
-      )
-    }
-
-    console.log('')
-    console.log(
-      `[${index + 1}/${acceptedSources.length}] ${canonicalModel} -> ${parsed.sourceType}`
-    )
-    console.log(parsed.url)
-    const status = await runScrape(parsed.url, runOptions)
-    if (status !== 0) {
-      console.log(`Scraper exited with status ${status}.`)
-      return status
-    }
-  }
-  return 0
+    },
+    targets: acceptedSources.map((parsed) => ({
+      parsed,
+      url: parsed.url,
+      sourceKey: parsed.sourceType,
+      label: getPlatformLabel(parsed.sourceType),
+    })),
+  })
 }
 
 async function runUsernameSourceSearchFlow(rl, rawInput, sessionOptions) {
