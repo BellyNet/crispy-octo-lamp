@@ -3522,34 +3522,132 @@
                 delete linkBtnEl.dataset.url
               }
             }
-            // HD/SD indicator + toggle in the top bar (mobile only). Same
-            // state as the header button — tapping either flips the mode
-            // for future lightbox opens. Placed adjacent to the flag/link
-            // buttons so the current mode is always visible while viewing.
-            if (IS_MOBILE) {
-              let hdChipEl = null
-              const syncHdChip = () => {
-                if (!hdChipEl) return
-                hdChipEl.textContent = hdMode ? 'HD' : 'SD'
-                hdChipEl.classList.toggle('pswp-hd-on', hdMode)
-                hdChipEl.title = hdMode
-                  ? 'HD — full-res originals. Tap for data-saver.'
-                  : 'SD — compressed mp4s. Tap for full HD.'
+            // HD/SD chip in the PhotoSwipe top bar (mobile only).
+            //
+            // Truth model: the chip does NOT parrot the hdMode preference
+            // — it inspects the currently-mounted media element and
+            // labels what the user is *actually* looking at. This
+            // matters because the two can disagree:
+            //   * SD preference + mobile mp4 404 → fallback swapped the
+            //     <video> for an <img src=item.url>, so the user is on
+            //     the original (HD) even though the toggle says SD.
+            //   * HD preference on a gif → we render <img> directly with
+            //     item.url, so HD is honest.
+            //   * Any image → always HD (no compressed variant exists).
+            //
+            // Tap toggles the preference AND swaps the current slide in
+            // place: video src flips, or gif-video↔img swap. Global
+            // preference persists via setHdMode for next lightbox open.
+            let hdChipEl = null
+            const detectCurrentMode = () => {
+              const slide = pswp.currSlide
+              const holder = slide?.holderElement
+              if (!holder) return null
+              const video = holder.querySelector('.pswp-video-wrap video')
+              if (video) {
+                const src = video.currentSrc || video.src || ''
+                return src.includes('/media-mobile/') ? 'SD' : 'HD'
               }
+              const img = holder.querySelector(
+                '.pswp-video-wrap img, .pswp__img'
+              )
+              if (img) return 'HD'
+              return null
+            }
+            const syncHdChip = () => {
+              if (!hdChipEl) return
+              const detected = detectCurrentMode()
+              const label = detected || (hdMode ? 'HD' : 'SD')
+              hdChipEl.textContent = label
+              hdChipEl.classList.toggle('pswp-hd-on', label === 'HD')
+              hdChipEl.title =
+                label === 'HD'
+                  ? 'Viewing original (full quality). Tap for compressed.'
+                  : 'Viewing compressed 720p mp4. Tap for full HD.'
+            }
+            // Expose to the video-fallback path so it can refresh the
+            // chip the moment it swaps a <video> for an <img>.
+            window.__refreshHdChip = syncHdChip
+
+            const swapCurrentTo = (targetMode) => {
+              const slide = pswp.currSlide
+              if (!slide) return
+              const item = filtered[slide.index]
+              if (!item || !item.mobileUrl) return
+              const holder = slide.holderElement
+              if (!holder) return
+              const wrap = holder.querySelector('.pswp-video-wrap')
+              if (item.type === 'gif') {
+                if (targetMode === 'SD' && wrap) {
+                  // gif in HD (img inside wrap) → SD (video with mp4)
+                  const oldImg = wrap.querySelector('img')
+                  if (!oldImg) return
+                  const v = document.createElement('video')
+                  v.src = item.mobileUrl
+                  v.loop = true
+                  v.muted = true
+                  v.autoplay = true
+                  v.playsInline = true
+                  v.preload = 'auto'
+                  oldImg.replaceWith(v)
+                  v.play().catch(() => {})
+                } else if (targetMode === 'HD' && wrap) {
+                  // gif in SD (video with mp4) → HD (img with source gif)
+                  const oldVid = wrap.querySelector('video')
+                  if (!oldVid) return
+                  const img = document.createElement('img')
+                  img.src = item.url
+                  img.style.maxWidth = '100%'
+                  img.style.maxHeight = '100%'
+                  img.style.objectFit = 'contain'
+                  oldVid.replaceWith(img)
+                }
+              } else if (item.type === 'video' && wrap) {
+                const video = wrap.querySelector('video')
+                if (!video) return
+                const currentSrc = video.currentSrc || video.src || ''
+                const currentlySD = currentSrc.includes('/media-mobile/')
+                if (
+                  (targetMode === 'SD' && currentlySD) ||
+                  (targetMode === 'HD' && !currentlySD)
+                )
+                  return
+                video.src = targetMode === 'SD' ? item.mobileUrl : item.url
+                video.load()
+                video.play().catch(() => {})
+              }
+            }
+
+            if (IS_MOBILE) {
               pswp.ui.registerElement({
                 name: 'pswp-hd-chip',
                 order: 9,
                 isButton: true,
-                title: 'Toggle HD',
+                title: 'HD/SD',
                 html: '<span class="pswp-hd-label">SD</span>',
                 onInit(el) {
-                  hdChipEl = el.querySelector('.pswp-hd-label') || el
+                  hdChipEl =
+                    el.querySelector('.pswp-hd-label') || el
                   syncHdChip()
                   const off = onHdChange(syncHdChip)
-                  pswp.on('destroy', off)
+                  pswp.on('change', syncHdChip)
+                  pswp.on('contentActivate', syncHdChip)
+                  pswp.on('contentAppend', () => {
+                    syncHdChip()
+                    setTimeout(syncHdChip, 60)
+                  })
+                  pswp.on('destroy', () => {
+                    off()
+                    if (window.__refreshHdChip === syncHdChip) {
+                      delete window.__refreshHdChip
+                    }
+                  })
                 },
                 onClick() {
-                  setHdMode(!hdMode)
+                  const nextMode = detectCurrentMode() === 'HD' ? 'SD' : 'HD'
+                  setHdMode(nextMode === 'HD')
+                  swapCurrentTo(nextMode)
+                  setTimeout(syncHdChip, 30)
                 },
               })
             }
@@ -3827,6 +3925,11 @@
                   video.src = it.url
                   video.load()
                 }
+                // The user is now actually looking at the original file,
+                // not the compressed mp4 — refresh the top-bar chip so
+                // it says HD instead of the SD it was showing while the
+                // <video> was still trying to load the mp4.
+                window.__refreshHdChip?.()
               }
               video.addEventListener('error', applyFallback, { once: true })
               // NETWORK_NO_SOURCE = 3 — set when no valid src could be
