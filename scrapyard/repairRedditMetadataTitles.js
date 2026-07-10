@@ -215,11 +215,11 @@ async function repairSidecar(modelName, sidecar) {
     if (!title) continue
 
     let changed = false
-    if (!source.title) {
+    if (!String(source.title || '').trim()) {
       source.title = title
       changed = true
     }
-    if (!source.text) {
+    if (!String(source.text || '').trim()) {
       source.text = title
       changed = true
     }

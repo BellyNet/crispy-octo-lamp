@@ -324,17 +324,15 @@ function normalizeSourceMeta(sourceMeta) {
   const site = String(
     sourceMeta.site || sourceMeta.sourceSite || ''
   ).toLowerCase()
+  const sourceTitle = cleanSourceTitle(sourceMeta.title)
+  const sourceText = cleanSourceTitle(sourceMeta.text || sourceMeta.sourceText)
   const title =
-    sourceMeta.title ||
-    (site === 'reddit'
-      ? sourceMeta.text || sourceMeta.sourceText || null
-      : null) ||
+    sourceTitle ||
+    (site === 'reddit' ? sourceText || null : null) ||
     getFallbackSourceTitle(sourceMeta) ||
     null
   const text =
-    sourceMeta.text ||
-    sourceMeta.sourceText ||
-    (site === 'reddit' ? title : null)
+    sourceText || (site === 'reddit' ? title : null)
   const normalized = {
     site: sourceMeta.site || sourceMeta.sourceSite || null,
     service: sourceMeta.service || sourceMeta.sourceService || null,
