@@ -696,21 +696,56 @@
         --pswp-icon-stroke-width: 1.5px;
         --pswp-error-text-color: #7070a0;
       }
+      /* Top bar: single flex row across the full viewport width, no
+         wrapping. Every child is fixed at 44px tall and centered on the
+         cross axis so the mixed set (svg-icon buttons, HD text chip,
+         flex-1 date slider, close) lines up on a single baseline no
+         matter how narrow the viewport gets. */
       .pswp__top-bar {
         background: linear-gradient(
           to bottom,
           rgba(10, 10, 15, 0.7) 0%,
           transparent 100%
         );
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        width: 100%;
+        height: 44px;
+        padding: 0 4px;
+        gap: 2px;
       }
-      /* Counter element */
+      .pswp__top-bar > * {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 44px;
+        flex: 0 0 auto;
+      }
+      /* Date slider is the ONE child that gets to stretch — everything
+         else is fixed-width so a narrow phone viewport doesn't shove
+         the flag/link/HD chip off the bar. */
+      .pswp__top-bar .pswp__pswp-date-slider {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .pswp__top-bar .pswp__button {
+        width: 40px;
+        min-width: 40px;
+        height: 44px;
+      }
+      /* HD chip has an auto width because the label text is what
+         defines it; keep its total block the same 44px tall as the
+         icon buttons so nothing pokes above or below the row. */
+      .pswp__top-bar button.pswp__button--pswp-hd-chip {
+        height: 44px;
+      }
+      /* Counter is disabled via `counter: false` in the PhotoSwipe
+         options; the residual CSS rule is kept as a belt-and-braces
+         hide in case a future library update reintroduces it. */
+      .pswp__counter,
       .pswp__pswp-counter {
-        color: var(--muted);
-        font-size: 13px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        line-height: 44px;
-        padding: 0 12px;
-        user-select: none;
+        display: none !important;
       }
       /* Date-position timeline — lives inline inside the PhotoSwipe top
          bar so the media stays full-bleed underneath. Track grows to
@@ -1157,11 +1192,12 @@
       button.pswp__button--pswp-hd-chip {
         width: auto;
         min-width: 40px;
-        height: 40px;
-        padding: 0 10px;
+        padding: 0 8px;
         display: flex;
         align-items: center;
         justify-content: center;
+        /* Height comes from the top-bar row rule (44px). Kept auto
+           here so no rule fights the container. */
       }
       /* Both HD and SD are legitimate states — neither is "off." Each
          gets its own distinct color so the user can tell at a glance
@@ -3291,6 +3327,9 @@
             dataSource,
             index: startIndex,
             bgOpacity: 0.97,
+            // Kill the built-in "3 / 142" counter — it eats bar space and
+            // the date slider already indicates position along the run.
+            counter: false,
             // Full-bleed: chrome floats over the media. Close button and
             // chrome-toggle sit absolutely at top-right, info panel sits
             // absolutely at the bottom and only paints when chrome is
