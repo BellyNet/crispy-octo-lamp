@@ -739,8 +739,25 @@ function extractTitleFromOldRedditPostHtml(html) {
   return null
 }
 
+// True when a title looks like it was scraped from an og:title meta
+// (Reddit truncates that at ~93 chars and appends `..` — or sometimes
+// a single ellipsis char). Real user-typed titles rarely end this way
+// AND are ≥60 chars, and even if one does, a refetch just returns
+// the same string. Cheap false-positive path, no harm.
+function looksLikeTruncatedRedditTitle(title) {
+  if (!title) return false
+  const t = String(title).trim()
+  return t.length >= 60 && /(\.\.|…)$/.test(t)
+}
+
 async function hydrateMissingRedditTitle(source, post, deps = {}) {
-  if (getRedditPostTitle(post)) return post
+  const currentTitle = getRedditPostTitle(post)
+  // Fetch when title is missing OR looks truncated by og:title. Same
+  // network path for both — the `data-title` attribute in old-reddit
+  // HTML carries the full title unmolested.
+  if (currentTitle && !looksLikeTruncatedRedditTitle(currentTitle)) {
+    return post
+  }
   if (
     typeof deps.fetchPostHtml !== 'function' &&
     typeof deps.fetchHtml !== 'function'
@@ -1687,10 +1704,15 @@ module.exports = {
   OLD_REDDIT_PAGE_SIZE,
   buildRedditFilename,
   fetchRedditPosts,
+  fetchOldRedditHtml,
+  extractTitleFromOldRedditPostHtml,
+  getOldRedditOrigin,
   getPostPageUrl,
   getRedditMediaEntries,
   getRedditPostDate,
   getRedditPostTitle,
   getRedditSubreddit,
+  hydrateMissingRedditTitle,
+  looksLikeTruncatedRedditTitle,
   preflightRedditSource,
 }

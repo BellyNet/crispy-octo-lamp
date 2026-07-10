@@ -1981,17 +1981,21 @@
         return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
       }
 
-      // Mobile-variant file sizes cached per URL. The dashboard response
-      // only carries the source file size (item.size); when we're viewing
-      // the SD compressed mp4 the actual on-wire size is different, so we
-      // HEAD-fetch it once and memoize. `null` = server said no size
-      // (e.g. 404 mid-encode) or fetch failed; treated as "unknown"
-      // and the caller falls back to the source size.
+      // Mobile-variant file sizes cached per URL. HEAD-fetch once per
+      // URL, memoize successful lookups. Failures (mp4 still encoding =>
+      // 404) are NOT cached so a subsequent view after the encode
+      // completes actually picks up the real size — the previous
+      // implementation cached null forever and left the size field
+      // stuck on the source bytes even after the mp4 was ready.
       const mobileSizeCache = new Map()
       async function fetchMobileSize(url) {
         if (!url) return null
-        if (mobileSizeCache.has(url)) return mobileSizeCache.get(url)
-        // Cache the pending promise so parallel callers don't fan out
+        const cached = mobileSizeCache.get(url)
+        if (cached !== undefined) {
+          // Might be a pending Promise (concurrent caller) or a resolved
+          // number. Await either way.
+          return cached
+        }
         const pending = (async () => {
           try {
             const r = await fetch(url, { method: 'HEAD' })
@@ -2004,7 +2008,10 @@
         })()
         mobileSizeCache.set(url, pending)
         const resolved = await pending
-        mobileSizeCache.set(url, resolved)
+        // Only persist successful lookups; keep failures out of the
+        // cache so retries after the mp4 lands actually happen.
+        if (resolved != null) mobileSizeCache.set(url, resolved)
+        else mobileSizeCache.delete(url)
         return resolved
       }
 
@@ -3607,7 +3614,15 @@
               if (!holder) return null
               const video = holder.querySelector('.pswp-video-wrap video')
               if (video) {
-                const src = video.currentSrc || video.src || ''
+                // Prefer .src (the attribute we just set) over
+                // .currentSrc (the URL currently loaded, which lags
+                // behind by an async loadstart). Right after a swap
+                // via swapCurrentTo, .src has the new URL but
+                // .currentSrc still points at what the browser was
+                // playing a moment ago — reading currentSrc first
+                // made the chip and size suffix show stale state for
+                // the first 100-200ms after every toggle.
+                const src = video.src || video.currentSrc || ''
                 return src.includes('/media-mobile/') ? 'SD' : 'HD'
               }
               const img = holder.querySelector(
