@@ -192,7 +192,9 @@ async function repairSidecar(modelName, sidecar) {
     if (!source || typeof source !== 'object') continue
     if (String(source.site || '').toLowerCase() !== 'reddit') continue
     scanned += 1
-    let title = String(source.title || '').trim()
+    let title = String(
+      source.title || source.text || source.sourceText || ''
+    ).trim()
     if (!title) {
       title = getTitleCandidates(source)
         .map(getRedditTitleFromPermalink)
