@@ -930,6 +930,16 @@
         gap: 10px;
         font-size: 12px;
         color: var(--muted);
+        /* Force every child onto the same vertical baseline. Mixing
+           padded chips (flagged, quality) with plain text spans was
+           making the row's baseline jump depending on which was
+           present. Fixed line-height + centered items solves it. */
+        line-height: 1.4;
+      }
+      .pswp-info-row > * {
+        display: inline-flex;
+        align-items: center;
+        line-height: 1.4;
       }
       .pswp-info-row .pswp-info-meta,
       .pswp-info-row .pswp-info-date,
@@ -1023,6 +1033,31 @@
         color: var(--muted);
         font-variant-numeric: tabular-nums;
         flex-shrink: 0;
+      }
+      /* Info-panel HD/SD chip — mirrors the top-bar chip so the same
+         mode indicator is visible whether the user's looking at the
+         top of the lightbox or the info panel. Same click behavior:
+         tap swaps in place. */
+      .pswp-info-quality {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        padding: 2px 6px;
+        border-radius: 3px;
+        line-height: 1;
+        cursor: pointer;
+        user-select: none;
+        border: 1px solid transparent;
+      }
+      .pswp-info-quality.pswp-hd-mode-hd {
+        color: #fff;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .pswp-info-quality.pswp-hd-mode-sd {
+        color: #ffe0a3;
+        background: rgba(196, 132, 40, 0.85);
+        border-color: rgba(255, 176, 60, 0.9);
       }
       .pswp-info-src {
         font-size: 11px;
@@ -1128,6 +1163,11 @@
         align-items: center;
         justify-content: center;
       }
+      /* Both HD and SD are legitimate states — neither is "off." Each
+         gets its own distinct color so the user can tell at a glance
+         which one is currently loaded. HD = accent purple (full
+         quality), SD = amber (data saver). Base label used only if
+         neither class is set (shouldn't happen in practice). */
       .pswp-hd-label {
         font-size: 11px;
         font-weight: 700;
@@ -1140,10 +1180,15 @@
         line-height: 1;
         transition: background 0.15s, border-color 0.15s, color 0.15s;
       }
-      .pswp-hd-label.pswp-hd-on {
+      .pswp-hd-label.pswp-hd-mode-hd {
         color: #fff;
         background: var(--accent);
         border-color: var(--accent);
+      }
+      .pswp-hd-label.pswp-hd-mode-sd {
+        color: #ffe0a3;
+        background: rgba(196, 132, 40, 0.85);
+        border-color: rgba(255, 176, 60, 0.9);
       }
 
       @media (max-width: 640px) {
@@ -1609,10 +1654,18 @@
         color: var(--text);
         border-color: var(--accent);
       }
+      /* HD ↔ SD in the header button: two distinct color states so
+         the current preference is obvious at a glance. Matches the
+         lightbox chip (HD=accent purple, SD=amber). */
       #hd-toggle.is-on {
         color: var(--accent);
         border-color: var(--accent);
         background: rgba(124, 108, 252, 0.12);
+      }
+      #hd-toggle.is-sd {
+        color: #ffb036;
+        border-color: rgba(255, 176, 60, 0.5);
+        background: rgba(196, 132, 40, 0.12);
       }
 
       /* ─── SCAN BANNER ────────────────────────────────────────── */
@@ -1946,14 +1999,21 @@
       // Desktop keeps the original url — this flag is only ever read
       // inside openLightbox().
       const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-      // HD toggle — mobile only. Off (default): the lightbox swaps to
-      // /media-mobile/ mp4s for gifs+videos. On: the lightbox uses the
-      // originals, giving desktop-quality playback on a solid wifi at the
-      // cost of much larger downloads. Persisted in localStorage; the
-      // header button AND the lightbox top-bar chip both reflect + flip
-      // this flag via setHdMode() so they stay in sync.
+      // HD toggle — available on every device now (was mobile-only).
+      // Default: HD on desktop (fast local network) / SD on mobile
+      // (data saver). Off → lightbox swaps in the /media-mobile/ mp4s
+      // for gifs+videos. On → lightbox uses originals. Persisted in
+      // localStorage; the header button, the lightbox top-bar chip
+      // AND the info-panel chip all reflect + flip this flag via
+      // setHdMode() so they stay in sync.
       const HD_MODE_KEY = 'dashboard-hd-mode'
-      let hdMode = localStorage.getItem(HD_MODE_KEY) === '1'
+      const storedHdMode = localStorage.getItem(HD_MODE_KEY)
+      let hdMode =
+        storedHdMode === '1'
+          ? true
+          : storedHdMode === '0'
+            ? false
+            : !IS_MOBILE
       const hdListeners = new Set()
       function setHdMode(next) {
         hdMode = !!next
@@ -3166,17 +3226,19 @@
 
       function openLightbox(startIndex) {
         loadPswp().then((PhotoSwipe) => {
-          // Snapshot the HD flag once per open — mid-lightbox toggles
-          // don't rebuild the already-mounted slides, they take effect
-          // on the next open. This matches how card-size / filter
-          // changes propagate too.
-          const useMobileVariant = IS_MOBILE && !hdMode
+          // Snapshot the HD flag once per open. Mid-lightbox toggles
+          // (via the chip or header) swap the CURRENT slide in place
+          // via swapCurrentTo; adjacent slides pick up the new mode
+          // when they mount. useMobileVariant is now device-independent
+          // — it just tracks the hdMode preference so the HD toggle
+          // works everywhere, not just on iPhone.
+          const useMobileVariant = !hdMode
           const dataSource = filtered.map((item) => {
             // Render as <video> when it's a real video, OR when it's a
-            // gif on mobile in SD mode (server hands us a 720p H.264 MP4
-            // that's 5–10× smaller than the source GIF and plays fine in
-            // <video>). HD mode on mobile falls through to the same path
-            // desktop uses — gif as animated <img>, no promotion.
+            // gif in SD mode (server hands us a 720p H.264 MP4 that's
+            // 5–10× smaller than the source GIF and plays fine in
+            // <video>). HD mode falls through to the same path desktop
+            // used to always take — gif as animated <img>, no promotion.
             const asVideo =
               item.type === 'video' ||
               (useMobileVariant && item.type === 'gif' && item.mobileUrl)
@@ -3511,46 +3573,71 @@
                     row.appendChild(addedSpan)
                   }
 
-                  // File size — reflects the version actually being
-                  // viewed, not just the source. In SD (compressed mp4
-                  // via /media-mobile/) we HEAD-fetch the mp4 to get the
-                  // real on-wire size; in HD we show item.size (source).
-                  // Tagged with " · SD" / " · HD" when a mobile variant
-                  // exists so it's clear which byte count you're seeing.
+                  // Size + quality chip. The chip mirrors the top-bar
+                  // HD/SD indicator so the same state is visible from
+                  // the info panel too, and it's tappable to swap the
+                  // current slide in place. Size updates whenever the
+                  // mode flips — HEAD-fetched mp4 bytes in SD, source
+                  // bytes in HD — so the difference is obvious.
                   if (item.size || item.mobileUrl) {
+                    // Quality chip only rendered when a mobile variant
+                    // exists to switch between — no point on plain
+                    // images that have no SD/HD distinction.
+                    let qualityChip = null
+                    if (item.mobileUrl) {
+                      qualityChip = document.createElement('span')
+                      qualityChip.className = 'pswp-info-quality'
+                      qualityChip.textContent = 'HD'
+                      qualityChip.title = 'Tap to toggle HD/SD'
+                      qualityChip.addEventListener('click', () => {
+                        const nextMode =
+                          detectCurrentMode() === 'HD' ? 'SD' : 'HD'
+                        swapCurrentTo(nextMode)
+                        setHdMode(nextMode === 'HD')
+                      })
+                      row.appendChild(qualityChip)
+                    }
+
                     const sizeSpan = document.createElement('span')
                     sizeSpan.className = 'pswp-info-size'
                     sizeSpan.textContent = formatBytes(item.size) || '…'
                     row.appendChild(sizeSpan)
 
-                    const refreshSize = async () => {
+                    const refreshQualityAndSize = async () => {
                       // Bail if the slide changed under us — no point
-                      // updating a size span that's about to be replaced
+                      // updating a chip/size that's about to be replaced.
                       if (filtered[pswp.currIndex] !== item) return
-                      const mode = detectCurrentMode()
+                      const mode = detectCurrentMode() || (hdMode ? 'HD' : 'SD')
+                      if (qualityChip) {
+                        qualityChip.textContent = mode
+                        qualityChip.classList.toggle(
+                          'pswp-hd-mode-hd',
+                          mode === 'HD'
+                        )
+                        qualityChip.classList.toggle(
+                          'pswp-hd-mode-sd',
+                          mode === 'SD'
+                        )
+                      }
                       if (mode === 'SD' && item.mobileUrl) {
                         const sz = await fetchMobileSize(item.mobileUrl)
                         if (filtered[pswp.currIndex] !== item) return
                         sizeSpan.textContent = sz
-                          ? `${formatBytes(sz)} · SD`
-                          : `${formatBytes(item.size)}${item.mobileUrl ? ' · SD' : ''}`
+                          ? formatBytes(sz)
+                          : formatBytes(item.size)
                       } else {
-                        sizeSpan.textContent = `${formatBytes(item.size)}${item.mobileUrl ? ' · HD' : ''}`
+                        sizeSpan.textContent = formatBytes(item.size)
                       }
                     }
-                    refreshSize()
-                    // Re-render when the mode flips — swapCurrentTo mutates
-                    // the DOM first, then setHdMode fires listeners here,
-                    // so detectCurrentMode() sees the new state.
+                    refreshQualityAndSize()
+                    // Re-render when the mode flips — swapCurrentTo
+                    // mutates the DOM first, then setHdMode fires
+                    // listeners here, so detectCurrentMode() sees the
+                    // new state. queueMicrotask defers until the sync
+                    // swap is settled.
                     const off = onHdChange(() =>
-                      // Give the DOM swap a tick to settle before we
-                      // re-inspect it via detectCurrentMode.
-                      queueMicrotask(refreshSize)
+                      queueMicrotask(refreshQualityAndSize)
                     )
-                    sizeSpan.dataset.hdListenerBound = '1'
-                    // Best-effort teardown when PhotoSwipe drops the
-                    // slide's holder element; the listener would otherwise
-                    // linger for the life of the lightbox.
                     pswp.on('destroy', off)
                   }
 
@@ -3636,6 +3723,13 @@
               const detected = detectCurrentMode()
               const label = detected || (hdMode ? 'HD' : 'SD')
               hdChipEl.textContent = label
+              // Two mutually-exclusive state classes so there's no
+              // ambiguity about which mode the chip is showing. HD
+              // gets accent purple, SD gets amber — both are
+              // visibly active states, distinct from each other.
+              hdChipEl.classList.toggle('pswp-hd-mode-hd', label === 'HD')
+              hdChipEl.classList.toggle('pswp-hd-mode-sd', label === 'SD')
+              // Legacy class name kept in case older CSS ships too.
               hdChipEl.classList.toggle('pswp-hd-on', label === 'HD')
               hdChipEl.title =
                 label === 'HD'
@@ -3689,50 +3783,72 @@
                   (targetMode === 'HD' && !currentlySD)
                 )
                   return
+                // Preserve playback position across the swap so the
+                // user can compare HD ↔ SD at the exact same frame.
+                // muted state and unmuted-preference are already
+                // captured on the element so they carry through.
+                const preservedTime = isFinite(video.currentTime)
+                  ? video.currentTime
+                  : 0
+                const wasPaused = video.paused
                 video.src = targetMode === 'SD' ? item.mobileUrl : item.url
                 video.load()
-                video.play().catch(() => {})
+                const onReady = () => {
+                  if (preservedTime > 0) {
+                    try {
+                      video.currentTime = preservedTime
+                    } catch {}
+                  }
+                  if (!wasPaused) video.play().catch(() => {})
+                }
+                // loadedmetadata fires as soon as the container is
+                // parsed; that's enough to seek. If it already fired
+                // (fast cache hit), video.readyState >= 1 covers it.
+                if (video.readyState >= 1) onReady()
+                else
+                  video.addEventListener('loadedmetadata', onReady, {
+                    once: true,
+                  })
               }
             }
 
-            if (IS_MOBILE) {
-              pswp.ui.registerElement({
-                name: 'pswp-hd-chip',
-                order: 9,
-                isButton: true,
-                title: 'HD/SD',
-                html: '<span class="pswp-hd-label">SD</span>',
-                onInit(el) {
-                  hdChipEl =
-                    el.querySelector('.pswp-hd-label') || el
+            // Chip now shows on every device (was mobile-only) so
+            // desktop users off their home network can pick data-saver.
+            pswp.ui.registerElement({
+              name: 'pswp-hd-chip',
+              order: 9,
+              isButton: true,
+              title: 'HD/SD',
+              html: '<span class="pswp-hd-label">SD</span>',
+              onInit(el) {
+                hdChipEl = el.querySelector('.pswp-hd-label') || el
+                syncHdChip()
+                const off = onHdChange(syncHdChip)
+                pswp.on('change', syncHdChip)
+                pswp.on('contentActivate', syncHdChip)
+                pswp.on('contentAppend', () => {
                   syncHdChip()
-                  const off = onHdChange(syncHdChip)
-                  pswp.on('change', syncHdChip)
-                  pswp.on('contentActivate', syncHdChip)
-                  pswp.on('contentAppend', () => {
-                    syncHdChip()
-                    setTimeout(syncHdChip, 60)
-                  })
-                  pswp.on('destroy', () => {
-                    off()
-                    if (window.__refreshHdChip === syncHdChip) {
-                      delete window.__refreshHdChip
-                    }
-                  })
-                },
-                onClick() {
-                  const nextMode = detectCurrentMode() === 'HD' ? 'SD' : 'HD'
-                  // Order matters: mutate the DOM first, THEN broadcast
-                  // via setHdMode. Listeners (the size span refresh, the
-                  // header button, syncHdChip) call detectCurrentMode()
-                  // and would see the stale pre-swap state if we flipped
-                  // the flag first.
-                  swapCurrentTo(nextMode)
-                  setHdMode(nextMode === 'HD')
-                  setTimeout(syncHdChip, 30)
-                },
-              })
-            }
+                  setTimeout(syncHdChip, 60)
+                })
+                pswp.on('destroy', () => {
+                  off()
+                  if (window.__refreshHdChip === syncHdChip) {
+                    delete window.__refreshHdChip
+                  }
+                })
+              },
+              onClick() {
+                const nextMode = detectCurrentMode() === 'HD' ? 'SD' : 'HD'
+                // Order matters: mutate the DOM first, THEN broadcast
+                // via setHdMode. Listeners (the size span refresh, the
+                // header button, syncHdChip) call detectCurrentMode()
+                // and would see the stale pre-swap state if we flipped
+                // the flag first.
+                swapCurrentTo(nextMode)
+                setHdMode(nextMode === 'HD')
+                setTimeout(syncHdChip, 30)
+              },
+            })
 
             pswp.ui.registerElement({
               name:     'pswp-link-button',
@@ -4273,18 +4389,20 @@
       const hdBtn = document.getElementById('hd-toggle')
       function syncHdBtn() {
         hdBtn.textContent = hdMode ? 'HD' : 'SD'
+        // Two distinct visual states so neither is ambiguous.
         hdBtn.classList.toggle('is-on', hdMode)
+        hdBtn.classList.toggle('is-sd', !hdMode)
         hdBtn.setAttribute('aria-pressed', hdMode ? 'true' : 'false')
         hdBtn.title = hdMode
-          ? 'HD mode ON — loading originals (uses more data). Tap for data-saver.'
+          ? 'HD mode — loading originals (uses more data). Tap for data-saver.'
           : 'Data-saver mode — loading compressed mp4s. Tap for full HD.'
       }
-      if (IS_MOBILE) {
-        hdBtn.style.display = 'flex'
-        syncHdBtn()
-        onHdChange(syncHdBtn)
-        hdBtn.addEventListener('click', () => setHdMode(!hdMode))
-      }
+      // Header HD button now shows on every device. Off-network laptop
+      // sessions want data-saver too; on-network desktop wants HD.
+      hdBtn.style.display = 'flex'
+      syncHdBtn()
+      onHdChange(syncHdBtn)
+      hdBtn.addEventListener('click', () => setHdMode(!hdMode))
 
       // ─── RESCAN + SCAN STATUS ─────────────────────────────────────────────
       const rescanBtn = document.getElementById('rescan-btn')
