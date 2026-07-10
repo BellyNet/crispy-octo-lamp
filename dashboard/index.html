@@ -3840,6 +3840,51 @@
             if (pswp.element) pswp.element.classList.add('pswp--chrome-hidden')
           })
 
+          // Video scrubber vs slide swipe. PhotoSwipe interprets any
+          // horizontal drag over the slide area as a "swipe to next
+          // slide". Dragging the native <video> scrubber (the bottom
+          // control bar) is horizontal and gets hijacked. Fix: hook
+          // PhotoSwipe's own pointerDown/Move/Up events and call
+          // preventDefault() on the wrapped PhotoSwipeEvent — that
+          // makes PhotoSwipe bail out of its gesture handler for THAT
+          // pointer sequence only. Native controls in the video's
+          // shadow DOM still receive their events normally because we
+          // never touch DOM propagation.
+          //
+          // Trigger condition is narrow: the pointer must start inside
+          // the scrubber zone (bottom ~60px of a <video> that currently
+          // has native controls visible). Anywhere else on the video —
+          // and anywhere else in the lightbox — PhotoSwipe's gestures
+          // work exactly as before.
+          const scrubberPointers = new Set()
+          const isScrubberTouch = (orig) => {
+            if (!orig) return false
+            const t = orig.target
+            const vid =
+              (t && t.tagName === 'VIDEO' && t) ||
+              t?.closest?.('.pswp-video-wrap video')
+            if (!vid || !vid.hasAttribute('controls')) return false
+            const rect = vid.getBoundingClientRect()
+            const relY = orig.clientY - rect.top
+            return relY >= rect.height - 60
+          }
+          pswp.on('pointerDown', (e) => {
+            const orig = e.originalEvent
+            if (!isScrubberTouch(orig)) return
+            scrubberPointers.add(orig.pointerId)
+            e.preventDefault()
+          })
+          pswp.on('pointerMove', (e) => {
+            const orig = e.originalEvent
+            if (orig && scrubberPointers.has(orig.pointerId)) {
+              e.preventDefault()
+            }
+          })
+          pswp.on('pointerUp', (e) => {
+            const orig = e.originalEvent
+            if (orig) scrubberPointers.delete(orig.pointerId)
+          })
+
           // Autoplay on first click was failing across every theory
           // tried (HTML attribute alone, openingAnimationEnd hook,
           // canplay listener) so we stop guessing at PhotoSwipe's
@@ -4021,24 +4066,6 @@
               pswp.element?.classList.add('pswp--video-controls')
             })
 
-            // Stop pointer/touch events from bubbling to PhotoSwipe while
-            // native video controls are on screen — otherwise dragging the
-            // scrubber is interpreted as a horizontal swipe and yanks the
-            // user to the next slide mid-seek. PhotoSwipe listens on the
-            // root element; killing propagation at the video keeps the
-            // native controls fully functional while suppressing the
-            // library's gesture detection for that pointer sequence.
-            // Click still fires (separate event pipeline) so tap-to-show
-            // controls above continues to work.
-            ;['pointerdown', 'touchstart'].forEach((evt) => {
-              wrap.addEventListener(
-                evt,
-                (ev) => {
-                  if (video.hasAttribute('controls')) ev.stopPropagation()
-                },
-                { passive: true, capture: true }
-              )
-            })
 
             // Dedicated unmute button (bottom-right). Primary affordance
             // for audio — outside the native controls' shadow DOM so the
