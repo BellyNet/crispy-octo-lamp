@@ -501,21 +501,23 @@
         opacity: 1;
       }
 
-      /* Post title pinned to the bottom of the thumb. Visible at every
-         card size — S/M get four lines truncated with ellipsis, L gets
-         six. Font kept small so the average ~100-char title fits
+      /* Post title pinned to the bottom of the thumb. S/M sizes get
+         four clamped lines with a "…" glyph on the last visible line;
+         L gets six. Kept small so an average ~100-char title fits
          meaningfully more of itself before the clamp kicks in.
-         `text-overflow: ellipsis` + both `-webkit-line-clamp` and the
-         standard `line-clamp` are explicitly set so the truncated line
-         actually shows "…" instead of a silent hard cut (iOS Safari
-         needs the -webkit-* pair; newer Chromium respects the standard
-         property).  */
+         The `-webkit-box` + `-webkit-line-clamp` + `overflow: hidden`
+         triple is the only combo that reliably produces an ellipsis
+         glyph on iOS Safari; the earlier version also set the standard
+         `line-clamp` shorthand and `word-break: break-word`, both of
+         which quietly interfered on Safari and left the last line
+         clipped without an ellipsis. `overflow-wrap: anywhere`
+         replaces `word-break` for long URL-ish tokens.  */
       .card-post-title {
         position: absolute;
         left: 0;
         right: 0;
         bottom: 0;
-        padding: 12px 5px 4px;
+        padding: 12px 6px 4px;
         font-size: 10px;
         line-height: 1.25;
         color: #f0f0f5;
@@ -528,16 +530,13 @@
         display: -webkit-box;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 4;
-        line-clamp: 4;
         overflow: hidden;
-        text-overflow: ellipsis;
-        word-break: break-word;
+        overflow-wrap: anywhere;
         z-index: 2;
         pointer-events: none;
       }
       body.card-size-large .card-post-title {
         -webkit-line-clamp: 6;
-        line-clamp: 6;
       }
 
       .card-thumb {
@@ -913,13 +912,14 @@
         color: var(--text);
         pointer-events: auto;
         z-index: 1050;
-        /* Cap the panel so a 400-char title + a wall of comments doesn't
-           extend past the top of the viewport and get silently clipped
-           by PhotoSwipe's root overflow. The panel scrolls internally
-           instead. Overscroll contained so the swipe-to-next-slide
-           gesture still lands on PhotoSwipe when the reader hits the
-           top/bottom of the scroll. */
-        max-height: 55vh;
+        /* Cap the panel below the full viewport so it doesn't cover the
+           active media when a long title + wall of comments lands, but
+           give it enough room (75vh) that a typical Reddit-length post
+           title is visible without having to scroll inside a tiny box.
+           Panel scrolls internally when content still exceeds the cap.
+           Overscroll contained so the swipe-to-next-slide gesture still
+           lands on PhotoSwipe when the reader hits top/bottom. */
+        max-height: 75vh;
         overflow-y: auto;
         overscroll-behavior: contain;
       }
@@ -1979,6 +1979,33 @@
         if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
         if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
         return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
+      }
+
+      // Mobile-variant file sizes cached per URL. The dashboard response
+      // only carries the source file size (item.size); when we're viewing
+      // the SD compressed mp4 the actual on-wire size is different, so we
+      // HEAD-fetch it once and memoize. `null` = server said no size
+      // (e.g. 404 mid-encode) or fetch failed; treated as "unknown"
+      // and the caller falls back to the source size.
+      const mobileSizeCache = new Map()
+      async function fetchMobileSize(url) {
+        if (!url) return null
+        if (mobileSizeCache.has(url)) return mobileSizeCache.get(url)
+        // Cache the pending promise so parallel callers don't fan out
+        const pending = (async () => {
+          try {
+            const r = await fetch(url, { method: 'HEAD' })
+            if (!r.ok) return null
+            const cl = r.headers.get('content-length')
+            return cl ? parseInt(cl, 10) : null
+          } catch {
+            return null
+          }
+        })()
+        mobileSizeCache.set(url, pending)
+        const resolved = await pending
+        mobileSizeCache.set(url, resolved)
+        return resolved
       }
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
@@ -3477,12 +3504,47 @@
                     row.appendChild(addedSpan)
                   }
 
-                  const sizeText = formatBytes(item.size)
-                  if (sizeText) {
+                  // File size — reflects the version actually being
+                  // viewed, not just the source. In SD (compressed mp4
+                  // via /media-mobile/) we HEAD-fetch the mp4 to get the
+                  // real on-wire size; in HD we show item.size (source).
+                  // Tagged with " · SD" / " · HD" when a mobile variant
+                  // exists so it's clear which byte count you're seeing.
+                  if (item.size || item.mobileUrl) {
                     const sizeSpan = document.createElement('span')
                     sizeSpan.className = 'pswp-info-size'
-                    sizeSpan.textContent = sizeText
+                    sizeSpan.textContent = formatBytes(item.size) || '…'
                     row.appendChild(sizeSpan)
+
+                    const refreshSize = async () => {
+                      // Bail if the slide changed under us — no point
+                      // updating a size span that's about to be replaced
+                      if (filtered[pswp.currIndex] !== item) return
+                      const mode = detectCurrentMode()
+                      if (mode === 'SD' && item.mobileUrl) {
+                        const sz = await fetchMobileSize(item.mobileUrl)
+                        if (filtered[pswp.currIndex] !== item) return
+                        sizeSpan.textContent = sz
+                          ? `${formatBytes(sz)} · SD`
+                          : `${formatBytes(item.size)}${item.mobileUrl ? ' · SD' : ''}`
+                      } else {
+                        sizeSpan.textContent = `${formatBytes(item.size)}${item.mobileUrl ? ' · HD' : ''}`
+                      }
+                    }
+                    refreshSize()
+                    // Re-render when the mode flips — swapCurrentTo mutates
+                    // the DOM first, then setHdMode fires listeners here,
+                    // so detectCurrentMode() sees the new state.
+                    const off = onHdChange(() =>
+                      // Give the DOM swap a tick to settle before we
+                      // re-inspect it via detectCurrentMode.
+                      queueMicrotask(refreshSize)
+                    )
+                    sizeSpan.dataset.hdListenerBound = '1'
+                    // Best-effort teardown when PhotoSwipe drops the
+                    // slide's holder element; the listener would otherwise
+                    // linger for the life of the lightbox.
+                    pswp.on('destroy', off)
                   }
 
                   el.appendChild(row)
@@ -3645,8 +3707,13 @@
                 },
                 onClick() {
                   const nextMode = detectCurrentMode() === 'HD' ? 'SD' : 'HD'
-                  setHdMode(nextMode === 'HD')
+                  // Order matters: mutate the DOM first, THEN broadcast
+                  // via setHdMode. Listeners (the size span refresh, the
+                  // header button, syncHdChip) call detectCurrentMode()
+                  // and would see the stale pre-swap state if we flipped
+                  // the flag first.
                   swapCurrentTo(nextMode)
+                  setHdMode(nextMode === 'HD')
                   setTimeout(syncHdChip, 30)
                 },
               })
@@ -3952,6 +4019,25 @@
               // Push the bottom info panel and top date slider out
               // of the way so the native controls aren't covered.
               pswp.element?.classList.add('pswp--video-controls')
+            })
+
+            // Stop pointer/touch events from bubbling to PhotoSwipe while
+            // native video controls are on screen — otherwise dragging the
+            // scrubber is interpreted as a horizontal swipe and yanks the
+            // user to the next slide mid-seek. PhotoSwipe listens on the
+            // root element; killing propagation at the video keeps the
+            // native controls fully functional while suppressing the
+            // library's gesture detection for that pointer sequence.
+            // Click still fires (separate event pipeline) so tap-to-show
+            // controls above continues to work.
+            ;['pointerdown', 'touchstart'].forEach((evt) => {
+              wrap.addEventListener(
+                evt,
+                (ev) => {
+                  if (video.hasAttribute('controls')) ev.stopPropagation()
+                },
+                { passive: true, capture: true }
+              )
             })
 
             // Dedicated unmute button (bottom-right). Primary affordance
