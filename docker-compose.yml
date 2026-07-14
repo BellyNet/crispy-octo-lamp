@@ -25,3 +25,14 @@ services:
       THUMB_DIR: /data/thumbs
       DASHBOARD_PORT: 3420
       DASHBOARD_PASSWORD: gitgut
+      # Bump the mobile-variant encoder from the default 2 parallel to
+      # 6. On a QNAP with the dataset on its own disk, 2 workers were
+      # taking 27-48 hours per full nightly pass — nowhere near
+      # keeping up with the scraper adding new videos each day. 6
+      # workers finishes a ~4k backlog in ~6-8 hours and can catch
+      # up between scrapes. If ffmpeg starts starving other services
+      # (Container Station "high CPU" warnings), drop back to 4.
+      MOBILE_ENCODE_CONCURRENCY: 6
+      # Also bump the grid-thumb prewarm queue so a fresh model shows
+      # up faster after a scrape.
+      PREWARM_CONCURRENCY: 4

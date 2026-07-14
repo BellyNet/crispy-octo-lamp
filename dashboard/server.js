@@ -938,6 +938,13 @@ async function fingerprintTick() {
   await Promise.all(
     changed.map((u) => modelLimit(() => scanModel(u).catch(() => {})))
   )
+  // Kick the mobile-variant prewarm right after — without this it
+  // sat idle until the 04:00 nightly, and 15+ hours of scraping
+  // could pile up before iPhone visits started seeing mp4s. The
+  // throttle keeps back-to-back ticks from double-launching (encodes
+  // take 5+ min at concurrency 6, we don't need a fresh launch every
+  // minute).
+  schedulePrewarmIfIdle('tick')
 }
 
 // ─── FEATURED MODEL ───────────────────────────────────────────────────────────
@@ -1372,6 +1379,28 @@ app.get('/media-mobile/:username/:folder/:filename', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store')
   return res.status(404).send('Encoding')
 })
+
+// Throttled hook for the fingerprint tick + any other "new files
+// might have landed" trigger. At most one active prewarm at a time
+// (guarded by _prewarmInProgress), and a min gap between launches
+// (so a rapid burst of scan-hits doesn't spam the encode queue when
+// each pass is already long-running).
+let _lastPrewarmAt = 0
+let _prewarmInProgress = false
+const AUTO_PREWARM_MIN_GAP_MS = 15 * 60 * 1000 // 15 min
+function schedulePrewarmIfIdle(trigger = 'auto') {
+  if (_prewarmInProgress) return
+  const now = Date.now()
+  if (now - _lastPrewarmAt < AUTO_PREWARM_MIN_GAP_MS) return
+  _lastPrewarmAt = now
+  _prewarmInProgress = true
+  console.log(`  Mobile:    ${trigger}-triggered prewarm pass starting…`)
+  prewarmMobileVariants()
+    .catch((err) => console.warn('  Auto prewarm error:', err.message))
+    .finally(() => {
+      _prewarmInProgress = false
+    })
+}
 
 // Nightly / on-demand bulk prewarm — walks every video and every gif in
 // every model and generates any missing mobile variant. Uses the small
