@@ -1639,6 +1639,21 @@
         border-color: rgba(255, 176, 60, 0.5);
         background: rgba(196, 132, 40, 0.12);
       }
+      /* Brief pulse when a user taps SD but the current slide's mp4
+         isn't cached yet — swap gets refused and we revert the
+         preference. Combined with the swapped title attribute, it
+         signals "I tried but the SD variant isn't ready for this file
+         yet." */
+      #hd-toggle.is-encoding {
+        color: #ff9060;
+        border-color: #ff9060;
+        background: rgba(255, 144, 96, 0.22);
+        animation: hdEncodingPulse 0.4s ease-out 3;
+      }
+      @keyframes hdEncodingPulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.45; }
+      }
 
       /* ─── SCAN BANNER ────────────────────────────────────────── */
       #scan-banner {
@@ -2013,21 +2028,26 @@
         return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
       }
 
-      // Mobile-variant file sizes cached per URL. HEAD-fetch once per
-      // URL, memoize successful lookups. Failures (mp4 still encoding =>
-      // 404) are NOT cached so a subsequent view after the encode
-      // completes actually picks up the real size — the previous
-      // implementation cached null forever and left the size field
-      // stuck on the source bytes even after the mp4 was ready.
+      // Mobile-variant file sizes + availability cached per URL. HEAD
+      // request tells us both (200 + Content-Length = ready + size, 404
+      // = still encoding). Successful sizes are memoized forever;
+      // 404-failures are memoized for 60s so we don't hammer the server
+      // if the mp4 isn't ready, but a later view after the encode
+      // completes still eventually picks it up.
+      //
+      // Cache values:
+      //   Promise         — in flight
+      //   number          — mp4 is ready, this is its byte size
+      //   false           — mp4 confirmed not ready (60s TTL)
+      //   undefined       — never checked / expired
       const mobileSizeCache = new Map()
       async function fetchMobileSize(url) {
         if (!url) return null
         const cached = mobileSizeCache.get(url)
-        if (cached !== undefined) {
-          // Might be a pending Promise (concurrent caller) or a resolved
-          // number. Await either way.
-          return cached
-        }
+        if (cached instanceof Promise) return cached
+        if (typeof cached === 'number') return cached
+        if (cached === false) return null
+        // undefined → do a fresh HEAD
         const pending = (async () => {
           try {
             const r = await fetch(url, { method: 'HEAD' })
@@ -2040,11 +2060,28 @@
         })()
         mobileSizeCache.set(url, pending)
         const resolved = await pending
-        // Only persist successful lookups; keep failures out of the
-        // cache so retries after the mp4 lands actually happen.
-        if (resolved != null) mobileSizeCache.set(url, resolved)
-        else mobileSizeCache.delete(url)
+        if (resolved != null) {
+          mobileSizeCache.set(url, resolved)
+        } else {
+          mobileSizeCache.set(url, false)
+          // Auto-expire the failure marker so retries eventually catch
+          // the mp4 once it's encoded.
+          setTimeout(() => {
+            if (mobileSizeCache.get(url) === false) {
+              mobileSizeCache.delete(url)
+            }
+          }, 60 * 1000)
+        }
         return resolved
+      }
+      // Sync accessor — 'ready' | 'pending' | 'unknown'. Used by the
+      // chip to decide whether to allow / disable the SD swap on tap.
+      function mobileVariantStatus(url) {
+        if (!url) return 'unknown'
+        const cached = mobileSizeCache.get(url)
+        if (typeof cached === 'number') return 'ready'
+        if (cached === false) return 'pending'
+        return 'unknown'
       }
 
       // ─── DOM REFS ─────────────────────────────────────────────────────────
@@ -3651,6 +3688,85 @@
               if (img) return 'HD'
               return null
             }
+
+            // Swap the currently-mounted video's src to match the new
+            // hdMode preference. Runs on every setHdMode call while the
+            // lightbox is open, so tapping the header HD button feels
+            // like a live toggle instead of a "next open only" flag.
+            //
+            // Guards:
+            //  - Only videos with a .pswp-video-wrap get swapped; gifs
+            //    rendered as image slides (HD default for gifs) and
+            //    plain images have no wrap and aren't touched.
+            //  - Preserves currentTime + paused state so the user can
+            //    A/B compare HD ↔ SD at the same frame.
+            //  - Before switching HD→SD, verify the mp4 variant exists
+            //    (HEAD returns 200 with content-length). If not, revert
+            //    the preference silently and flash a "still encoding"
+            //    tooltip on the header button — otherwise the src would
+            //    404, fallback would restore HD, and the user would see
+            //    nothing change at all.
+            const swapCurrentToPref = async () => {
+              const slide = pswp.currSlide
+              const holder = slide?.holderElement
+              const item = filtered[slide?.index]
+              if (!holder || !item) return
+              const wrap = holder.querySelector('.pswp-video-wrap')
+              if (!wrap) return
+              const video = wrap.querySelector('video')
+              if (!video || !item.mobileUrl) return
+              const wantSD = !hdMode
+              const currentSrc = video.src || video.currentSrc || ''
+              const currentlySD = currentSrc.includes('/media-mobile/')
+              if (wantSD === currentlySD) return
+
+              // Availability guard before we commit to SD
+              if (wantSD) {
+                const sz = await fetchMobileSize(item.mobileUrl)
+                if (filtered[pswp.currIndex] !== item) return
+                if (sz == null) {
+                  // Mp4 isn't on disk yet; flash the header button and
+                  // revert the preference so state stays honest.
+                  const oldTitle = hdBtn.title
+                  hdBtn.title = 'SD mp4 still encoding — try again later.'
+                  hdBtn.classList.add('is-encoding')
+                  setTimeout(() => {
+                    hdBtn.classList.remove('is-encoding')
+                    hdBtn.title = oldTitle
+                  }, 2500)
+                  // Suppress the loop: set hdMode back without firing
+                  // listeners (would recurse into this swap).
+                  hdMode = true
+                  localStorage.setItem(HD_MODE_KEY, '1')
+                  syncHdBtn()
+                  return
+                }
+              }
+
+              const preservedTime = isFinite(video.currentTime)
+                ? video.currentTime
+                : 0
+              const wasPaused = video.paused
+              video.src = wantSD ? item.mobileUrl : item.url
+              video.load()
+              const onReady = () => {
+                if (preservedTime > 0) {
+                  try {
+                    video.currentTime = preservedTime
+                  } catch {}
+                }
+                if (!wasPaused) video.play().catch(() => {})
+              }
+              if (video.readyState >= 1) onReady()
+              else
+                video.addEventListener('loadedmetadata', onReady, {
+                  once: true,
+                })
+            }
+            // Register once per lightbox instance and tear down on
+            // destroy so we don't leak listeners across opens.
+            const offSwap = onHdChange(swapCurrentToPref)
+            pswp.on('destroy', offSwap)
 
             pswp.ui.registerElement({
               name:     'pswp-link-button',

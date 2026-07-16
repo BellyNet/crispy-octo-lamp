@@ -1436,13 +1436,19 @@ async function prewarmMobileVariants() {
         const isVideo = VIDEO_EXTS_IN.has(ext)
         const isGif = ext === '.gif'
         if (!isVideo && !isGif) continue
+        const src = path.join(datasetDir, username, folder, file)
         const dst = mobileVariantPath(username, folder, file)
         if (fs.existsSync(dst)) continue
-        tasks.push({
-          src: path.join(datasetDir, username, folder, file),
-          dst,
-          isGif,
-        })
+        // Stat the source to get mtime. Cheap (~one syscall per file)
+        // and lets us encode newest-first below — recently scraped
+        // videos are the ones users are most likely to browse and were
+        // the ones stuck at the tail of the queue for days when we
+        // iterated in filesystem order.
+        let mtime = 0
+        try {
+          mtime = fs.statSync(src).mtimeMs
+        } catch {}
+        tasks.push({ src, dst, isGif, mtime })
       }
     }
   }
@@ -1450,8 +1456,11 @@ async function prewarmMobileVariants() {
     console.log('  Mobile:    all mobile variants cached ✓')
     return
   }
+  // Newest first — biggest UX impact for the user's actual browsing
+  // pattern (they open the most recent uploads first).
+  tasks.sort((a, b) => b.mtime - a.mtime)
   console.log(
-    `  Mobile:    generating ${tasks.length} mobile variants (this can take a while)…`
+    `  Mobile:    generating ${tasks.length} mobile variants, newest first (this can take a while)…`
   )
   const t0 = Date.now()
   let done = 0
