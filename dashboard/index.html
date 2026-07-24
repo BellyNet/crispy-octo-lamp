@@ -308,6 +308,34 @@
       #sort-select:hover {
         border-color: var(--accent);
       }
+      /* Source filter — same visual language as #sort-select so the
+         two dropdowns sit as a matched pair in the sort bar. Hidden
+         when the current model has media from only one origin site
+         (nothing to pick), and hidden entirely on the Home view. */
+      #source-select {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 4px 28px 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237070a0'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-color: var(--card-bg);
+      }
+      #source-select:hover {
+        border-color: var(--accent);
+      }
+      #source-select.is-filtering {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
       #date-range {
         flex: 1;
         font-size: 11px;
@@ -638,6 +666,85 @@
         background: #2a1a1a;
         color: #e88a6a;
       }
+      /* Origin-site badge — where the media was scraped from
+         (reddit / stufferdb / coomer / kemono). Small text label
+         with a site-tinted background. Replaces the ~useless
+         "upload" date-source chip on cards. */
+      .origin-badge {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        text-transform: lowercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        line-height: 1.3;
+      }
+      .origin-badge.reddit {
+        background: #3a1a10;
+        color: #ff8b5c;
+      }
+      .origin-badge.stufferdb {
+        background: #1a2a3a;
+        color: #7bb6ea;
+      }
+      .origin-badge.coomerfans {
+        background: #2a2013;
+        color: #e0c265;
+      }
+      .origin-badge.kemono {
+        background: #1a2a1e;
+        color: #7fd39c;
+      }
+      .origin-badge.unknown {
+        background: #2a2a2e;
+        color: #8a8a92;
+      }
+      /* Lightbox top-right origin badge — same colour scheme,
+         slightly larger to sit alongside the icon buttons. */
+      .pswp-origin-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 4px 8px;
+        border-radius: 4px;
+        text-transform: lowercase;
+        pointer-events: auto;
+        opacity: 0.92;
+      }
+      .pswp-origin-badge.reddit {
+        background: rgba(255, 87, 34, 0.18);
+        color: #ff9d70;
+      }
+      .pswp-origin-badge.stufferdb {
+        background: rgba(90, 150, 220, 0.18);
+        color: #9dc5ee;
+      }
+      .pswp-origin-badge.coomerfans {
+        background: rgba(220, 180, 60, 0.18);
+        color: #e7cc7c;
+      }
+      .pswp-origin-badge.kemono {
+        background: rgba(90, 200, 130, 0.18);
+        color: #9bdcae;
+      }
+      .pswp-origin-badge.unknown {
+        background: rgba(140, 140, 150, 0.18);
+        color: #b5b5bc;
+      }
+      /* Info panel origin badge — same look, muted opacity so
+         it sits under the headline without competing with it. */
+      .pswp-info-row .pswp-origin-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+        opacity: 0.85;
+      }
 
       .type-badge {
         font-size: 9px;
@@ -853,10 +960,60 @@
       .pswp.pswp--chrome-hidden .pswp__button--fs,
       .pswp.pswp--chrome-hidden .pswp__button--arrow--prev,
       .pswp.pswp--chrome-hidden .pswp__button--arrow--next,
-      .pswp.pswp--chrome-hidden .pswp__pswp-flag-button,
+      .pswp.pswp--chrome-hidden .pswp__button--pswp-flag-button,
+      .pswp.pswp--chrome-hidden .pswp__button--pswp-link-button,
+      .pswp.pswp--chrome-hidden .pswp__button--pswp-hd-toggle,
+      .pswp.pswp--chrome-hidden .pswp__pswp-origin-chip,
       .pswp.pswp--chrome-hidden .pswp__pswp-date-slider,
       .pswp.pswp--chrome-hidden .pswp__pswp-caption {
         display: none !important;
+      }
+      /* HD/SD toggle in the lightbox top bar — same visual language
+         as the header button (#hd-toggle) so the two feel like a
+         single control mirrored across surfaces. Both listen on the
+         same setHdMode/onHdChange bus. PhotoSwipe v5 puts custom
+         buttons on `pswp__button pswp__button--<name>`, so target
+         that class directly. */
+      .pswp .pswp__button--pswp-hd-toggle {
+        width: auto;
+        min-width: 44px;
+        height: 32px;
+        padding: 0 12px !important;
+        margin: 6px 4px 0;
+        border-radius: 16px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff !important;
+        border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        cursor: pointer;
+        align-self: center;
+        line-height: 30px;
+      }
+      .pswp .pswp__button--pswp-hd-toggle.is-on {
+        background: rgba(90, 180, 255, 0.22);
+        border-color: rgba(120, 195, 255, 0.55) !important;
+        color: #9fd0ff !important;
+      }
+      .pswp .pswp__button--pswp-hd-toggle.is-sd {
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.72) !important;
+      }
+      .pswp .pswp__button--pswp-hd-toggle.is-encoding {
+        background: rgba(255, 160, 60, 0.25) !important;
+        border-color: rgba(255, 180, 90, 0.55) !important;
+      }
+      /* Origin site chip that lives in the top bar alongside the icon
+         buttons. Non-interactive — just a coloured label. Reuses the
+         .pswp-origin-badge palette by piggybacking those classes. */
+      .pswp__pswp-origin-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        pointer-events: none;
+        margin: 0 4px;
+        align-self: center;
       }
       /* Info panel stays visible at the bottom in both states; the meta
          row inside it (dates, FLAGGED chip) is gated behind the chrome
@@ -1904,6 +2061,13 @@
           <option value="duration-desc">Duration: Longest first</option>
           <option value="duration-asc">Duration: Shortest first</option>
         </select>
+        <select
+          id="source-select"
+          aria-label="Filter by source"
+          style="display: none"
+        >
+          <option value="all">Source: All</option>
+        </select>
         <span id="date-range"></span>
         <div class="sort-bar-right">
           <span class="sort-label">Card</span>
@@ -1976,6 +2140,12 @@
       let allMedia = [] // full list for current user
       let filtered = [] // filtered + sorted list
       let activeType = 'all'
+      // Origin-site filter: 'all' or one of the site strings emitted by
+      // the scrapers (reddit / stufferdb / coomerfans / kemono / ...).
+      // The <select> in the sort bar is only populated with the sites
+      // that appear on the currently-loaded model so we don't offer
+      // dead options that would produce an empty grid.
+      let activeSource = 'all'
       let activeSort = 'added-desc'
       let homeVisible = false
       let currentUsername = null
@@ -2092,6 +2262,7 @@
       const mediaStatsEl = document.getElementById('media-stats')
       const filterSelect = document.getElementById('filter-select')
       const sortSelect = document.getElementById('sort-select')
+      const sourceSelect = document.getElementById('source-select')
       const sortBar = document.getElementById('sort-bar')
       const dateRangeEl = document.getElementById('date-range')
       const gridEl = document.getElementById('media-grid')
@@ -2826,8 +2997,63 @@
 
         loadingEl.style.display = 'none'
         sortBar.style.display = allMedia.length ? 'flex' : 'none'
+        rebuildSourceSelect()
         applyFilter()
         updateStats()
+      }
+
+      // Populate #source-select with the sites this model actually has.
+      // Hides the dropdown when only one origin is present (nothing to
+      // pick between) — the origin-badge on each card already tells the
+      // user where it came from. Resets activeSource to 'all' whenever
+      // the previous pick isn't available on the new model, so switching
+      // models never leaves a filter stuck on an empty state.
+      function rebuildSourceSelect() {
+        if (!sourceSelect) return
+        const counts = new Map()
+        for (const m of allMedia) {
+          const site = itemOrigin(m) || 'unknown'
+          counts.set(site, (counts.get(site) || 0) + 1)
+        }
+        // Sort: known sites in ORIGIN_LABELS order, then anything else, unknown last.
+        const known = Object.keys(ORIGIN_LABELS)
+        const entries = []
+        for (const k of known) {
+          if (counts.has(k)) entries.push([k, counts.get(k)])
+        }
+        for (const [k, v] of counts) {
+          if (!known.includes(k) && k !== 'unknown') entries.push([k, v])
+        }
+        if (counts.has('unknown')) entries.push(['unknown', counts.get('unknown')])
+
+        sourceSelect.innerHTML = ''
+        const optAll = document.createElement('option')
+        optAll.value = 'all'
+        optAll.textContent = `Source: All (${allMedia.length.toLocaleString()})`
+        sourceSelect.appendChild(optAll)
+        for (const [site, count] of entries) {
+          const opt = document.createElement('option')
+          opt.value = site
+          const label = ORIGIN_LABELS[site] || site
+          opt.textContent = `${label} (${count.toLocaleString()})`
+          sourceSelect.appendChild(opt)
+        }
+        // Only 1 real site — hide the dropdown, force 'all'.
+        const shouldShow = entries.length >= 2
+        sourceSelect.style.display = shouldShow ? 'block' : 'none'
+        if (!entries.some(([k]) => k === activeSource) && activeSource !== 'all') {
+          activeSource = 'all'
+        }
+        sourceSelect.value = activeSource
+        sourceSelect.classList.toggle('is-filtering', activeSource !== 'all')
+      }
+
+      if (sourceSelect) {
+        sourceSelect.addEventListener('change', () => {
+          activeSource = sourceSelect.value
+          sourceSelect.classList.toggle('is-filtering', activeSource !== 'all')
+          applyFilter()
+        })
       }
 
       // ─── FILTER + SORT ────────────────────────────────────────────────────
@@ -2836,6 +3062,16 @@
           activeType === 'all'      ? [...allMedia]
           : activeType === 'flagged' ? allMedia.filter((m) => m.flagged)
                                      : allMedia.filter((m) => m.type === activeType)
+
+        // Second pass: origin site (reddit / stufferdb / …). `unknown`
+        // matches every item whose sidecar didn't record a site so the
+        // user can still surface pre-source-tracking media.
+        if (activeSource !== 'all') {
+          filtered = filtered.filter((m) => {
+            const site = itemOrigin(m)
+            return activeSource === 'unknown' ? !site : site === activeSource
+          })
+        }
 
         // Sort by real media date, falling back to added-to-disk date as last resort
         const effectiveDate = (m) => m.mediaDateMs || m.addedMs
@@ -3010,6 +3246,39 @@
       }
       const DATE_FMT = { year: '2-digit', month: 'numeric', day: 'numeric' }
 
+      // Origin-site labels for the small badge that replaced the
+      // date-source chip on cards. Keys match the `site` field set by
+      // the scrapers (see scrapyard/sourceAdapters/*). Anything not in
+      // this map falls back to the raw string with the `unknown` chip
+      // style so a new adapter still shows up somewhere.
+      const ORIGIN_LABELS = {
+        reddit: 'reddit',
+        stufferdb: 'stufferdb',
+        coomerfans: 'coomer',
+        kemono: 'kemono',
+      }
+      const ORIGIN_TIPS = {
+        reddit: 'Scraped from reddit',
+        stufferdb: 'Scraped from stufferdb',
+        coomerfans: 'Scraped from coomerfans',
+        kemono: 'Scraped from kemono',
+      }
+      // Pull the origin site off an item — the scrapers write it into
+      // .media-dates.json under `source.site`, and the server puts it
+      // on item.post.site. Returns null when unknown.
+      function itemOrigin(item) {
+        const s = item?.post?.site
+        return typeof s === 'string' && s ? s : null
+      }
+      function makeOriginBadge(site, extraClass = '') {
+        const key = ORIGIN_LABELS[site] ? site : 'unknown'
+        const el = document.createElement('span')
+        el.className = `origin-badge ${key}${extraClass ? ' ' + extraClass : ''}`
+        el.textContent = ORIGIN_LABELS[site] || site || 'unknown'
+        el.title = ORIGIN_TIPS[site] || `Origin: ${site || 'unknown'}`
+        return el
+      }
+
       function createCard(item, i) {
         const card = document.createElement('div')
         card.className = 'media-card' + (item.flagged ? ' flagged' : '')
@@ -3107,12 +3376,9 @@
         badge.textContent = item.type === 'image' ? 'img' : item.type
         left.appendChild(badge)
 
-        if (item.source && item.source !== 'filename') {
-          const srcBadge = document.createElement('span')
-          srcBadge.className = `source-badge ${item.source}`
-          srcBadge.textContent = SOURCE_LABELS[item.source] || item.source
-          srcBadge.title = SOURCE_TIPS[item.source] || item.source
-          left.appendChild(srcBadge)
+        const originSite = itemOrigin(item)
+        if (originSite) {
+          left.appendChild(makeOriginBadge(originSite))
         }
 
         const dateEl = document.createElement('span')
@@ -3488,15 +3754,28 @@
                   if (!item) return
                   el.replaceChildren()
 
-                  // 1. Headline — post title only. Plain text (no link);
-                  //    the source URL has its own dedicated link button
-                  //    in the top bar. Only rendered when we have real
-                  //    text after stripping the "<modelname> /" prefix.
+                  // 1. Headline — post title. Rendered as a link when we
+                  //    have the source-post URL so the reader can jump
+                  //    out to the original page. Only rendered when
+                  //    there's real text after stripping the
+                  //    "<modelname> /" prefix. No line-clamp: the info
+                  //    panel scrolls internally when the title is long
+                  //    (max-height: 75vh on .pswp__pswp-info-panel).
                   const cleanTitle = cleanPostTitle(item)
                   if (cleanTitle) {
                     const headline = document.createElement('div')
                     headline.className = 'pswp-info-post-headline'
-                    headline.textContent = cleanTitle
+                    const postUrl = item?.post?.url || null
+                    if (postUrl) {
+                      const a = document.createElement('a')
+                      a.href = postUrl
+                      a.target = '_blank'
+                      a.rel = 'noopener noreferrer'
+                      a.textContent = cleanTitle
+                      headline.appendChild(a)
+                    } else {
+                      headline.textContent = cleanTitle
+                    }
                     el.appendChild(headline)
                   }
 
@@ -3848,6 +4127,75 @@
                 } finally {
                   el.disabled = false
                 }
+              },
+            })
+
+            // Origin-site chip in the top bar (right side). Same
+            // colour scheme as the card's .origin-badge. Updated on
+            // slide change so swiping between items from different
+            // sites keeps the chip honest.
+            let originChipEl = null
+            const refreshOriginChip = () => {
+              if (!originChipEl) return
+              const item = filtered[pswp.currIndex]
+              const site = itemOrigin(item)
+              originChipEl.replaceChildren()
+              if (!site) {
+                originChipEl.style.display = 'none'
+                return
+              }
+              originChipEl.style.display = 'inline-flex'
+              const badge = document.createElement('span')
+              const key = ORIGIN_LABELS[site] ? site : 'unknown'
+              badge.className = `pswp-origin-badge ${key}`
+              badge.textContent = ORIGIN_LABELS[site] || site
+              badge.title = ORIGIN_TIPS[site] || `Origin: ${site}`
+              originChipEl.appendChild(badge)
+            }
+            pswp.ui.registerElement({
+              name: 'pswp-origin-chip',
+              order: 6,
+              appendTo: 'bar',
+              onInit(el) {
+                originChipEl = el
+                refreshOriginChip()
+                pswp.on('change', refreshOriginChip)
+                pswp.on('afterInit', refreshOriginChip)
+              },
+            })
+
+            // HD/SD toggle in the lightbox top bar. Shares state with
+            // the header #hd-toggle via setHdMode/onHdChange, so
+            // flipping either one updates both AND swaps the current
+            // slide live (swapCurrentToPref, registered above).
+            let hdToggleEl = null
+            const syncLightboxHd = () => {
+              if (!hdToggleEl) return
+              hdToggleEl.textContent = hdMode ? 'HD' : 'SD'
+              hdToggleEl.classList.toggle('is-on', hdMode)
+              hdToggleEl.classList.toggle('is-sd', !hdMode)
+              hdToggleEl.setAttribute(
+                'aria-pressed',
+                hdMode ? 'true' : 'false'
+              )
+              hdToggleEl.title = hdMode
+                ? 'HD mode on — tap for SD (data saver)'
+                : 'SD mode on — tap for HD (full resolution)'
+            }
+            pswp.ui.registerElement({
+              name: 'pswp-hd-toggle',
+              order: 18,
+              isButton: true,
+              title: 'Toggle HD/SD',
+              html: 'HD',
+              onInit(el) {
+                hdToggleEl = el
+                syncLightboxHd()
+                const off = onHdChange(syncLightboxHd)
+                pswp.on('destroy', off)
+              },
+              onClick() {
+                setHdMode(!hdMode)
               },
             })
 

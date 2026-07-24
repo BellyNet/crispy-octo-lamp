@@ -103,6 +103,65 @@ unless the post is re-scraped.
   hydrate) — if strategy 3 hits and returns something ending in
   `..`, keep trying strategies 4 and beyond before persisting.
 
+### Update 2026-07-24 — slug-fallback path also needs hydration
+
+The `..` heuristic misses a second class of truncation: posts where
+the Reddit API returned an **empty** `post.title` and the scraper
+fell back to `getTitleFromPermalink(post.permalink)`. The permalink
+slug is capped by Reddit at ~50 chars, and it never ends in `..` or
+`…`, so `looksLikeTruncatedRedditTitle` returns `false` and
+`hydrateMissingRedditTitle` bails.
+
+**Concrete example** — `diablapr`, post `1qzagn4`
+(`r/chubby`), stored title: `"the best thing about fat girls is
+we jiggle when"` (48 chars). The permalink is
+`.../the_best_thing_about_fat_girls_is_we_jiggle_when/` — the slug
+is exactly the stored title. Real post title on Reddit is longer;
+API-side it was empty at scrape time so we cached the slug.
+
+**Root cause**
+`hydrateMissingRedditTitle`
+([scrapyard/sourceAdapters/reddit.js:753-760](scrapyard/sourceAdapters/reddit.js#L753-L760))
+runs its guard against `getRedditPostTitle(post)`, which already
+merges the slug fallback in, so it can't tell "real API title" from
+"slug-substitute". Any slug-derived title that also happens to be
+under 60 chars silently blocks re-fetch forever.
+
+**Recommended fix** — check the raw `post.title` (before the
+slug fallback), not the merged current title:
+
+```js
+async function hydrateMissingRedditTitle(source, post, deps = {}) {
+  const apiTitle = cleanRedditText(post.title)
+  // Hydrate when the API didn't give us a title (slug fallback is
+  // ~50-char capped, indistinguishable from a truncated real title),
+  // OR when the current title matches the `..` truncation pattern.
+  const merged = getRedditPostTitle(post)
+  if (apiTitle && !looksLikeTruncatedRedditTitle(merged)) {
+    return post
+  }
+  // …rest unchanged
+}
+```
+
+Two-line diff, no false positives (empty API title is a reliable
+signal), and re-fetch already goes through the `data-title` /
+`<a class="title">` extraction path which returns the full title.
+
+**Backfill** — extend the `scrapyard/backfillTruncatedTitles.js`
+detection rule (from Thread 1's ask) to also flag sidecars where
+`source.title` **equals the URL slug of `source.mediaPageUrl`**
+(with `_` → ` `). That's the definitive slug-fallback signature and
+catches every affected historical row without false positives from
+posts that happen to be short.
+
+**Dashboard side (already shipped)** — the lightbox headline links
+to the source post and shows the stored title fully (no CSS clamp
+in the info panel). Cards clamp long titles with ellipsis; the full
+stored value shows on hover / when the info panel opens. Once codex
+re-hydrates, cards + info panel pick up the fuller titles on the
+next scan without further UI work.
+
 ---
 
 ## Thread 2 — decode-failing videos (incomplete downloads)

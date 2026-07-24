@@ -671,7 +671,7 @@ async function processFileForResponse(username, userDir, item) {
       typeof postMeta.commentCount === 'number'
         ? postMeta.commentCount
         : postMeta.comments.length || null
-    if (title || url || comments.length) {
+    if (title || url || comments.length || src.site) {
       post = {}
       if (title) post.title = title
       if (src.site) post.site = src.site
