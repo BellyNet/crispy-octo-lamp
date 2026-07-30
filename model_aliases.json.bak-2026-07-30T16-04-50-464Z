@@ -498,6 +498,16 @@
   "bellasky_": {
     "aliases": ["bellasky_"],
     "sources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/BellaSky_/submitted/",
+          "service": "submitted",
+          "userId": "BellaSky_",
+          "username": "BellaSky_",
+          "discoveredAs": "bellasky",
+          "lastCheckedAt": "2026-07-15T01:30:34.259Z"
+        }
+      ],
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/23184",

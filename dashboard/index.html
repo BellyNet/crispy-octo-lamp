@@ -3283,10 +3283,7 @@
         const card = document.createElement('div')
         card.className = 'media-card' + (item.flagged ? ' flagged' : '')
         card.dataset.index = i
-        // Native tooltip with the post title — works at any card size, the
-        // only inline render path on S/M where there isn't room for text.
         const cleanedCardTitle = cleanPostTitle(item)
-        if (cleanedCardTitle) card.title = cleanedCardTitle
         if (item.flagged) {
           const ribbon = document.createElement('div')
           ribbon.className = 'card-flag-ribbon'
