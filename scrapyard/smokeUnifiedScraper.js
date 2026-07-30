@@ -44,7 +44,9 @@ const mediaDates = require('./mediaDates')
 const { createMediaSeenIndex } = require('./mediaSeenIndex')
 const { evictVerifiedLocalMp4s, syncModelMetadataToNas } = require('./nasSync')
 const {
+  buildStufferDbMediaEntry,
   getStufferDbFallbackUrls,
+  getStufferDbRedditSubredditFromMediaUrl,
   normalizeStufferDbCategoryUrl,
   normalizeStufferDbPictureUrl,
   withStufferDbNewestFirst,
@@ -176,6 +178,33 @@ async function main() {
     postId: '1tmaqav',
     mediaPageUrl: 'https://www.reddit.com/comments/1tmaqav/',
   })
+  assert.strictEqual(
+    getStufferDbRedditSubredditFromMediaUrl(
+      'https://cdn.stufferdb.com/_data/i/galleries/Reddit/BBW_sfw/sample.jpg'
+    ),
+    'BBW_sfw'
+  )
+  assert.strictEqual(
+    getStufferDbRedditSubredditFromMediaUrl(
+      'https://cdn.stufferdb.com/_data/i/upload/2024/10/29/sample.jpg'
+    ),
+    null
+  )
+  assert.strictEqual(
+    buildStufferDbMediaEntry(
+      {
+        url: 'https://stufferdb.com/index?/category/16772',
+        modelName: 'sample_model',
+      },
+      'https://stufferdb.com/picture?/660723/category/16772',
+      {
+        mediaUrl:
+          'https://cdn.stufferdb.com/_data/i/galleries/Reddit/BBW_sfw/sample.jpg',
+        filename: 'sample.jpg',
+      }
+    ).sourceSubreddit,
+    'bbw_sfw'
+  )
   const legacySeenByPath = buildSeenIndexByRelativePath(
     {
       mediaPageUrls: {

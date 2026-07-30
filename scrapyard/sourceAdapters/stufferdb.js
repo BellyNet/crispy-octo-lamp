@@ -97,6 +97,24 @@ function getStufferDbPictureId(inputUrl) {
   return String(inputUrl || '').match(/picture\?\/(\d+)/)?.[1] || null
 }
 
+function getStufferDbRedditSubredditFromMediaUrl(mediaUrl) {
+  if (!mediaUrl) return null
+  try {
+    const parsed = new URL(mediaUrl)
+    const segments = parsed.pathname
+      .split('/')
+      .map((segment) => decodeURIComponent(segment).trim())
+      .filter(Boolean)
+    const redditIndex = segments.findIndex(
+      (segment) => segment.toLowerCase() === 'reddit'
+    )
+    const subreddit = redditIndex >= 0 ? segments[redditIndex + 1] : null
+    return subreddit || null
+  } catch {
+    return null
+  }
+}
+
 async function getBreadcrumbInfo(page) {
   return await page.evaluate(() => {
     const h2 = document.querySelector('.titrePage h2')
@@ -422,6 +440,9 @@ function buildStufferDbMediaEntry(
       sourceUserId:
         source.categoryId || getStufferDbCategoryId(sourceUrl) || null,
       sourceUsername: source.modelName || source.username || null,
+      sourceSubreddit:
+        mediaDetails.sourceSubreddit ||
+        getStufferDbRedditSubredditFromMediaUrl(mediaDetails.mediaUrl),
       postId: getStufferDbPictureId(normalizedMediaPageUrl),
       mediaPageUrl: normalizedMediaPageUrl,
       mediaPageUrls: [normalizedMediaPageUrl],
@@ -439,6 +460,9 @@ function buildStufferDbMediaEntry(
       sourceUserId:
         source.categoryId || getStufferDbCategoryId(sourceUrl) || null,
       sourceUsername: source.modelName || source.username || null,
+      sourceSubreddit:
+        mediaDetails.sourceSubreddit ||
+        getStufferDbRedditSubredditFromMediaUrl(mediaDetails.mediaUrl),
     }
   )
 }
@@ -457,6 +481,7 @@ module.exports = {
   getStufferDbMirrorUrl,
   getStufferDbCategoryId,
   getStufferDbPictureId,
+  getStufferDbRedditSubredditFromMediaUrl,
   gotoStufferDbWithFallback,
   normalizeStufferDbHost,
   normalizeStufferDbCategoryUrl,
