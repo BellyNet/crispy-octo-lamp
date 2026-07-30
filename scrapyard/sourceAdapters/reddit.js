@@ -116,6 +116,12 @@ function getRedditPostText(post = {}) {
   return getRedditPostTitle(post)
 }
 
+function looksLikePermalinkFallbackTitle(post = {}) {
+  const title = cleanRedditText(post.title)
+  const fallback = getTitleFromPermalink(post.permalink)
+  return Boolean(title && fallback && title === fallback)
+}
+
 function filenameFromMediaUrl(mediaUrl) {
   try {
     const name = decodeURIComponent(path.basename(new URL(mediaUrl).pathname))
@@ -751,11 +757,14 @@ function looksLikeTruncatedRedditTitle(title) {
 }
 
 async function hydrateMissingRedditTitle(source, post, deps = {}) {
-  const currentTitle = getRedditPostTitle(post)
-  // Fetch when title is missing OR looks truncated by og:title. Same
-  // network path for both — the `data-title` attribute in old-reddit
-  // HTML carries the full title unmolested.
-  if (currentTitle && !looksLikeTruncatedRedditTitle(currentTitle)) {
+  const currentTitle = cleanRedditText(post.title)
+  // Fetch when title is missing, URL-slug-derived, or looks truncated by
+  // og:title. Old-reddit's `data-title` carries the full title unmolested.
+  if (
+    currentTitle &&
+    !looksLikeTruncatedRedditTitle(currentTitle) &&
+    !looksLikePermalinkFallbackTitle(post)
+  ) {
     return post
   }
   if (

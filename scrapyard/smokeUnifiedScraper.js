@@ -525,10 +525,7 @@ async function main() {
     sourceService: 'patreon',
     sourceUserId: '24586027',
   }
-  sourceSeenIndex.recordSuccessfulSeenMedia(
-    metadataLogDir,
-    pawchiveSeenDetails
-  )
+  sourceSeenIndex.recordSuccessfulSeenMedia(metadataLogDir, pawchiveSeenDetails)
   const pawchiveSeenMatch = sourceSeenIndex.getSuccessfulSeenMediaMatch(
     metadataLogDir,
     null,
@@ -1323,7 +1320,10 @@ async function main() {
     }
   )
   assert.strictEqual(redditHydratedTitlePosts.length, 1)
-  assert.strictEqual(redditHydratedTitlePosts[0].title, 'Recovered Reddit title')
+  assert.strictEqual(
+    redditHydratedTitlePosts[0].title,
+    'Recovered Reddit title'
+  )
   assert.strictEqual(redditHydratedTitlePosts[0].text, 'Recovered Reddit title')
   assert.strictEqual(
     redditHydratedTitlePosts[0].mediaEntries[0].title,
@@ -1331,6 +1331,68 @@ async function main() {
   )
   assert(
     redditTitleHydrationEvents.some(
+      (event) =>
+        event.type === 'reddit_title_hydration_finished' && event.foundTitle
+    )
+  )
+
+  const redditPermalinkTitleHydrationEvents = []
+  const redditPermalinkTitlePosts = await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'permalink_title_user',
+      username: 'permalink_title_user',
+    },
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (/\/comments\/slug_title\//i.test(url)) {
+          return {
+            html: [
+              '<div class="thing" data-fullname="t3_slug_title"',
+              ' data-title="This is the full Reddit post title, not just the URL slug"></div>',
+            ].join(''),
+            byteLength: 80,
+            statusCode: 200,
+            url,
+          }
+        }
+        return {
+          html: [
+            '<div class="thing" data-fullname="t3_slug_title"',
+            ' data-permalink="/r/test/comments/slug_title/this_is_the_url_slug/"',
+            ' data-url="https://i.redd.it/slug-title.jpg"',
+            ' data-timestamp="1710000000000"',
+            ' data-subreddit="test"></div>',
+          ].join(''),
+          byteLength: 230,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: {
+        parseRedgifsId: () => null,
+      },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        redditPermalinkTitleHydrationEvents.push({ type, ...payload }),
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(redditPermalinkTitlePosts.length, 1)
+  assert.strictEqual(
+    redditPermalinkTitlePosts[0].title,
+    'This is the full Reddit post title, not just the URL slug'
+  )
+  assert.strictEqual(
+    redditPermalinkTitlePosts[0].mediaEntries[0].title,
+    'This is the full Reddit post title, not just the URL slug'
+  )
+  assert(
+    redditPermalinkTitleHydrationEvents.some(
       (event) =>
         event.type === 'reddit_title_hydration_finished' && event.foundTitle
     )

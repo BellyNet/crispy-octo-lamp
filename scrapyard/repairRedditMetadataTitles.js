@@ -58,6 +58,12 @@ function getTitleCandidates(source) {
   ]
 }
 
+function getPermalinkFallbackTitle(source) {
+  return getTitleCandidates(source)
+    .map(getRedditTitleFromPermalink)
+    .find(Boolean)
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -115,6 +121,17 @@ function getTitleFromHtml(html) {
       .replace(/^\s*u\/[^:]+:\s*/i, '')
       .trim() || null
   )
+}
+
+function looksLikeTruncatedRedditTitle(title) {
+  if (!title) return false
+  const value = String(title).trim()
+  return value.length >= 60 && /(\.\.|…)$/.test(value)
+}
+
+function looksLikePermalinkFallbackTitle(source, title) {
+  const fallback = getPermalinkFallbackTitle(source)
+  return Boolean(title && fallback && cleanText(title) === fallback)
 }
 
 async function waitForFetchSlot() {
@@ -192,19 +209,22 @@ async function repairSidecar(modelName, sidecar) {
     if (!source || typeof source !== 'object') continue
     if (String(source.site || '').toLowerCase() !== 'reddit') continue
     scanned += 1
-    let title = [source.title, source.text, source.sourceText]
+    const existingTitle = [source.title, source.text, source.sourceText]
       .map((value) => String(value || '').trim())
       .find(Boolean)
-    if (!title) {
-      title = getTitleCandidates(source)
-        .map(getRedditTitleFromPermalink)
-        .find(Boolean)
-    }
+    let title = existingTitle || getPermalinkFallbackTitle(source)
+    let fetchedTitle = null
 
-    if (!title && FETCH_MISSING) {
+    if (
+      FETCH_MISSING &&
+      (!title ||
+        looksLikeTruncatedRedditTitle(title) ||
+        looksLikePermalinkFallbackTitle(source, title))
+    ) {
       const postId = extractPostId(source)
       const beforeSize = redditTitleCache.size
-      title = await fetchRedditTitle(postId)
+      fetchedTitle = await fetchRedditTitle(postId)
+      title = fetchedTitle || title
       if (redditTitleCache.size > beforeSize) fetched += 1
       if (fetched > 0 && fetched % 25 === 0) {
         console.log(
@@ -215,11 +235,21 @@ async function repairSidecar(modelName, sidecar) {
     if (!title) continue
 
     let changed = false
-    if (!String(source.title || '').trim()) {
+    const shouldReplaceTitle =
+      !String(source.title || '').trim() ||
+      (fetchedTitle &&
+        (looksLikeTruncatedRedditTitle(source.title) ||
+          looksLikePermalinkFallbackTitle(source, source.title)))
+    if (shouldReplaceTitle && cleanText(source.title) !== title) {
       source.title = title
       changed = true
     }
-    if (!String(source.text || '').trim()) {
+    const shouldReplaceText =
+      !String(source.text || '').trim() ||
+      (fetchedTitle &&
+        (looksLikeTruncatedRedditTitle(source.text) ||
+          looksLikePermalinkFallbackTitle(source, source.text)))
+    if (shouldReplaceText && cleanText(source.text) !== title) {
       source.text = title
       changed = true
     }
