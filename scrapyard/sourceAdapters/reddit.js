@@ -116,6 +116,12 @@ function getRedditPostText(post = {}) {
   return getRedditPostTitle(post)
 }
 
+function isGenericRedditPageTitle(title) {
+  return /^(?:welcome to reddit|reddit - dive into anything)$/i.test(
+    String(title || '').trim()
+  )
+}
+
 function looksLikePermalinkFallbackTitle(post = {}) {
   const title = cleanRedditText(post.title)
   const fallback = getTitleFromPermalink(post.permalink)
@@ -722,25 +728,29 @@ function getTitleFromPermalink(permalink) {
 function extractTitleFromOldRedditPostHtml(html) {
   const raw = String(html || '')
   const attrMatch = raw.match(/\bdata-title=["']([^"']+)["']/i)
-  if (attrMatch?.[1]) return cleanRedditText(htmlDecode(attrMatch[1]))
+  const attrTitle = cleanRedditText(htmlDecode(attrMatch?.[1]))
+  if (attrTitle && !isGenericRedditPageTitle(attrTitle)) return attrTitle
 
   const titleLinkMatch = raw.match(
     /<a\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i
   )
-  if (titleLinkMatch?.[1]) return cleanRedditText(titleLinkMatch[1])
+  const linkTitle = cleanRedditText(titleLinkMatch?.[1])
+  if (linkTitle && !isGenericRedditPageTitle(linkTitle)) return linkTitle
 
   const ogTitleMatch = raw.match(
     /<meta\b[^>]*(?:property|name)=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i
   )
-  if (ogTitleMatch?.[1]) return cleanRedditText(htmlDecode(ogTitleMatch[1]))
+  const ogTitle = cleanRedditText(htmlDecode(ogTitleMatch?.[1]))
+  if (ogTitle && !isGenericRedditPageTitle(ogTitle)) return ogTitle
 
   const titleMatch = raw.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)
   if (titleMatch?.[1]) {
-    return cleanRedditText(
+    const title = cleanRedditText(
       htmlDecode(titleMatch[1])
         .replace(/\s*:\s*reddit(?:\.com)?\s*$/i, '')
         .replace(/^\s*u\/[^:]+:\s*/i, '')
     )
+    return title && !isGenericRedditPageTitle(title) ? title : null
   }
   return null
 }
@@ -762,6 +772,7 @@ async function hydrateMissingRedditTitle(source, post, deps = {}) {
   // og:title. Old-reddit's `data-title` carries the full title unmolested.
   if (
     currentTitle &&
+    !isGenericRedditPageTitle(currentTitle) &&
     !looksLikeTruncatedRedditTitle(currentTitle) &&
     !looksLikePermalinkFallbackTitle(post)
   ) {

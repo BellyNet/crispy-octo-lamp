@@ -60,6 +60,7 @@ const {
   getMediaEntriesFromPost,
 } = require('./sourceAdapters/coomerKemono')
 const {
+  extractTitleFromOldRedditPostHtml,
   fetchRedditPosts,
   getRedditPostTitle,
 } = require('./sourceAdapters/reddit')
@@ -277,6 +278,10 @@ async function main() {
       permalink: '/r/test/comments/abc123/a%20title_%26_more/',
     }),
     'a title & more'
+  )
+  assert.strictEqual(
+    extractTitleFromOldRedditPostHtml('<title>Welcome to Reddit</title>'),
+    null
   )
 
   assert.deepStrictEqual(

@@ -86,6 +86,12 @@ function cleanText(value) {
     .trim()
 }
 
+function isGenericRedditPageTitle(title) {
+  return /^(?:welcome to reddit|reddit - dive into anything)$/i.test(
+    String(title || '').trim()
+  )
+}
+
 function extractPostId(source) {
   if (source?.postId) return String(source.postId)
   for (const candidate of getTitleCandidates(source)) {
@@ -98,29 +104,38 @@ function extractPostId(source) {
 function getTitleFromHtml(html) {
   const raw = String(html || '')
   const attrTitle = raw.match(/\bdata-title=["']([^"']+)["']/i)?.[1]
-  if (attrTitle) return cleanText(attrTitle) || null
+  const cleanAttrTitle = cleanText(attrTitle)
+  if (cleanAttrTitle && !isGenericRedditPageTitle(cleanAttrTitle)) {
+    return cleanAttrTitle
+  }
 
   const linkTitle = raw.match(
     /<a\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i
   )?.[1]
-  if (linkTitle) return cleanText(linkTitle) || null
+  const cleanLinkTitle = cleanText(linkTitle)
+  if (cleanLinkTitle && !isGenericRedditPageTitle(cleanLinkTitle)) {
+    return cleanLinkTitle
+  }
 
   const ogTitle = raw.match(
     /<meta\b[^>]*(?:property|name)=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i
   )?.[1]
-  if (ogTitle) return cleanText(ogTitle) || null
+  const cleanOgTitle = cleanText(ogTitle)
+  if (cleanOgTitle && !isGenericRedditPageTitle(cleanOgTitle)) {
+    return cleanOgTitle
+  }
 
   const rawTitle = raw.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]
   if (!rawTitle) return null
   const cleaned = cleanText(rawTitle)
   if (!cleaned || /^blocked$/i.test(cleaned)) return null
-  return (
+  const title = cleanText(
     cleaned
       .replace(/\s*:\s*reddit(?:\.com)?\s*$/i, '')
       .replace(/\s+:\s+[^:]+$/, '')
       .replace(/^\s*u\/[^:]+:\s*/i, '')
-      .trim() || null
   )
+  return title && !isGenericRedditPageTitle(title) ? title : null
 }
 
 function looksLikeTruncatedRedditTitle(title) {
@@ -218,6 +233,7 @@ async function repairSidecar(modelName, sidecar) {
     if (
       FETCH_MISSING &&
       (!title ||
+        isGenericRedditPageTitle(title) ||
         looksLikeTruncatedRedditTitle(title) ||
         looksLikePermalinkFallbackTitle(source, title))
     ) {
@@ -238,7 +254,8 @@ async function repairSidecar(modelName, sidecar) {
     const shouldReplaceTitle =
       !String(source.title || '').trim() ||
       (fetchedTitle &&
-        (looksLikeTruncatedRedditTitle(source.title) ||
+        (isGenericRedditPageTitle(source.title) ||
+          looksLikeTruncatedRedditTitle(source.title) ||
           looksLikePermalinkFallbackTitle(source, source.title)))
     if (shouldReplaceTitle && cleanText(source.title) !== title) {
       source.title = title
@@ -247,7 +264,8 @@ async function repairSidecar(modelName, sidecar) {
     const shouldReplaceText =
       !String(source.text || '').trim() ||
       (fetchedTitle &&
-        (looksLikeTruncatedRedditTitle(source.text) ||
+        (isGenericRedditPageTitle(source.text) ||
+          looksLikeTruncatedRedditTitle(source.text) ||
           looksLikePermalinkFallbackTitle(source, source.text)))
     if (shouldReplaceText && cleanText(source.text) !== title) {
       source.text = title
