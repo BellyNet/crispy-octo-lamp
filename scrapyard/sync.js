@@ -72,11 +72,11 @@ const cleanupMirroredMp4s =
 let cmd = ''
 
 if (isPush) {
-  cmd = `robocopy "${baseLocal}" "${baseNAS}" /E /XC /XN /XO`
+  cmd = `robocopy "${baseLocal}" "${baseNAS}" /E`
 } else if (isPull) {
-  cmd = `robocopy "${baseNAS}" "${baseLocal}" /E /XC /XN /XO`
+  cmd = `robocopy "${baseNAS}" "${baseLocal}" /E`
 } else if (modelName) {
-  cmd = `robocopy "${baseLocal}\\${modelName}" "${baseNAS}\\${modelName}" /E /XC /XN /XO`
+  cmd = `robocopy "${baseLocal}\\${modelName}" "${baseNAS}\\${modelName}" /E`
 } else {
   console.error(
     'Missing flag.\nUsage:\n  npm run scrape -- sync --push\n  npm run scrape -- sync --pull\n  npm run scrape -- sync --model=<name>\nOptional:\n  npm run scrape -- sync --push --cleanup-mp4=true\n  npm run scrape -- sync --push --cleanup-gif-mp4=true'
@@ -117,7 +117,7 @@ exec(`powershell -Command "${cmd}"`, (err, stdout, stderr) => {
     ? 'removeMirroredMp4s.js'
     : 'removeGifDerivedMp4s.js'
   const cleanupLabel = cleanupMirroredMp4s
-    ? 'verified mirrored MP4 cleanup'
+    ? 'verified mirrored media cleanup'
     : 'verified GIF-derived MP4 cleanup'
   const cleanupArgs = [
     path.join(__dirname, cleanupScript),

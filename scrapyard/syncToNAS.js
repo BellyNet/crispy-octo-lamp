@@ -30,7 +30,7 @@ if (!fs.existsSync(localPath)) {
 
 console.log(`📤 Syncing ${model} from local → NAS...`)
 try {
-  const robocopyCmd = `robocopy "${localPath}" "${nasPath}" /E /XC /XN /XO /NFL /NDL /NJH /NJS /NP /R:2 /W:5`
+  const robocopyCmd = `robocopy "${localPath}" "${nasPath}" /E /NFL /NDL /NJH /NJS /NP /R:2 /W:5`
 
   exec(robocopyCmd, (err, stdout, stderr) => {
     const exitCode = err?.code ?? 0

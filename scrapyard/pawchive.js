@@ -1,16 +1,27 @@
 'use strict'
 
-const PAWCHIVE_ORIGIN = 'https://pawchive.st'
-const PAWCHIVE_HOST = 'pawchive.st'
-const PAWCHIVE_MEDIA_ORIGIN = 'https://img.pawchive.st'
+const PAWCHIVE_ORIGIN = 'https://pawchive.pw'
+const PAWCHIVE_HOST = 'pawchive.pw'
+const PAWCHIVE_MEDIA_ORIGIN = 'https://img.pawchive.pw'
+const PAWCHIVE_MEDIA_HOST = 'img.pawchive.pw'
+const LEGACY_PAWCHIVE_HOSTS = new Set(['pawchive.st', 'img.pawchive.st'])
+
+function isHostOrSubdomain(host, parentHost) {
+  return host === parentHost || host.endsWith(`.${parentHost}`)
+}
+
+function isPawchiveHost(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  return (
+    isHostOrSubdomain(host, PAWCHIVE_HOST) ||
+    isHostOrSubdomain(host, PAWCHIVE_MEDIA_HOST) ||
+    LEGACY_PAWCHIVE_HOSTS.has(host)
+  )
+}
 
 function isPawchiveOrKemonoHost(hostname) {
   const host = String(hostname || '').toLowerCase()
-  return (
-    host === PAWCHIVE_HOST ||
-    host.endsWith(`.${PAWCHIVE_HOST}`) ||
-    host.includes('kemono')
-  )
+  return isPawchiveHost(host) || host.includes('kemono')
 }
 
 function getPawchiveUserUrl(service, userId) {
@@ -37,11 +48,13 @@ function getPawchivePreviewUrl(mediaPath) {
 
 module.exports = {
   PAWCHIVE_HOST,
+  PAWCHIVE_MEDIA_HOST,
   PAWCHIVE_MEDIA_ORIGIN,
   PAWCHIVE_ORIGIN,
   getPawchiveMediaUrl,
   getPawchivePreviewUrl,
   getPawchiveProfileUrl,
   getPawchiveUserUrl,
+  isPawchiveHost,
   isPawchiveOrKemonoHost,
 }

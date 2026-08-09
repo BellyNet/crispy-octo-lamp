@@ -83,6 +83,10 @@ const {
 const {
   normalizeSeenUrl: normalizeHoghaulSeenUrl,
 } = require('../hoghaul/hoghaul')
+const {
+  PAWCHIVE_MEDIA_ORIGIN,
+  PAWCHIVE_ORIGIN,
+} = require('./pawchive')
 
 async function withConsoleSilenced(callback) {
   const originalLog = console.log
@@ -450,16 +454,21 @@ async function main() {
   fs.writeFileSync(path.join(mp4LocalVideoDir, 'missing.mp4'), 'missing')
   fs.writeFileSync(path.join(mp4LocalVideoDir, 'verified.webm'), 'webm')
   fs.writeFileSync(path.join(mp4NasVideoDir, 'verified.webm'), 'webm')
+  fs.writeFileSync(path.join(mp4LocalVideoDir, 'transcoded.webm'), 'webm')
+  fs.writeFileSync(path.join(mp4NasVideoDir, 'transcoded.mp4'), 'mp4')
+  fs.writeFileSync(path.join(mp4LocalVideoDir, 'animated.gif'), 'gif')
+  fs.writeFileSync(path.join(mp4NasVideoDir, 'animated.mp4'), 'mp4')
   const mp4Cleanup = evictVerifiedLocalMp4s({
     modelName: mp4ModelName,
     datasetDir: mp4LocalRoot,
     nasDatasetDir: mp4NasRoot,
   })
-  assert.strictEqual(mp4Cleanup.scannedFiles, 5)
-  assert.strictEqual(mp4Cleanup.verifiedFiles, 3)
-  assert.strictEqual(mp4Cleanup.deletedFiles, 2)
+  assert.strictEqual(mp4Cleanup.scannedFiles, 7)
+  assert.strictEqual(mp4Cleanup.verifiedFiles, 6)
+  assert.strictEqual(mp4Cleanup.deletedFiles, 6)
   assert.strictEqual(mp4Cleanup.missingOnNas, 1)
   assert.strictEqual(mp4Cleanup.sizeMismatches, 1)
+  assert.strictEqual(mp4Cleanup.sameStemMatches, 2)
   assert.strictEqual(
     fs.existsSync(path.join(mp4LocalVideoDir, 'verified.mp4')),
     false
@@ -470,7 +479,7 @@ async function main() {
   )
   assert.strictEqual(
     fs.existsSync(path.join(mp4LocalVideoDir, 'mismatch.mp4')),
-    true
+    false
   )
   assert.strictEqual(
     fs.existsSync(path.join(mp4LocalVideoDir, 'missing.mp4')),
@@ -478,13 +487,24 @@ async function main() {
   )
   assert.strictEqual(
     fs.existsSync(path.join(mp4LocalVideoDir, 'verified.webm')),
-    true
+    false
+  )
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4LocalVideoDir, 'transcoded.webm')),
+    false
+  )
+  assert.strictEqual(
+    fs.existsSync(path.join(mp4LocalVideoDir, 'animated.gif')),
+    false
   )
   const nasMp4Index = JSON.parse(
     fs.readFileSync(path.join(mp4LocalRoot, 'nas-mp4-index.v1.json'), 'utf8')
   )
   assert.deepStrictEqual(nasMp4Index.entries, [
+    'sample_model/webm/animated.gif',
+    'sample_model/webm/mismatch.mp4',
     'sample_model/webm/tolerated.mp4',
+    'sample_model/webm/transcoded.webm',
     'sample_model/webm/verified.mp4',
     'sample_model/webm/verified.webm',
   ])
@@ -523,9 +543,8 @@ async function main() {
   })
   const pawchiveSeenDetails = {
     relativePath: 'sample_model/images/pawchive.jpg',
-    mediaUrl:
-      'https://img.pawchive.st/data/a/b/one.jpg?f=one.jpg&token=discard',
-    mediaPageUrl: 'https://pawchive.st/patreon/user/24586027/post/full-test',
+    mediaUrl: `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg?f=one.jpg&token=discard`,
+    mediaPageUrl: `${PAWCHIVE_ORIGIN}/patreon/user/24586027/post/full-test`,
     sourceSite: 'kemono',
     sourceService: 'patreon',
     sourceUserId: '24586027',
@@ -534,7 +553,7 @@ async function main() {
   const pawchiveSeenMatch = sourceSeenIndex.getSuccessfulSeenMediaMatch(
     metadataLogDir,
     null,
-    'https://img.pawchive.st/data/a/b/one.jpg?different=1'
+    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg?different=1`
   )
   assert.strictEqual(
     pawchiveSeenMatch?.relativePath,
@@ -688,16 +707,23 @@ async function main() {
     scraper: 'hoghaul',
     sourceType: 'kemono',
     rawName: '12345',
-    origin: 'https://pawchive.st',
-    url: 'https://pawchive.st/patreon/user/12345',
+    origin: PAWCHIVE_ORIGIN,
+    url: `${PAWCHIVE_ORIGIN}/patreon/user/12345`,
   })
   assert.strictEqual(getTemporarilyDisabledSourceReason(pawchive), null)
+  await assertRouted(`${PAWCHIVE_ORIGIN}/patreon/user/24586027`, {
+    scraper: 'hoghaul',
+    sourceType: 'kemono',
+    rawName: '24586027',
+    origin: PAWCHIVE_ORIGIN,
+    url: `${PAWCHIVE_ORIGIN}/patreon/user/24586027`,
+  })
   await assertRouted('https://pawchive.st/patreon/user/24586027', {
     scraper: 'hoghaul',
     sourceType: 'kemono',
     rawName: '24586027',
-    origin: 'https://pawchive.st',
-    url: 'https://pawchive.st/patreon/user/24586027',
+    origin: PAWCHIVE_ORIGIN,
+    url: `${PAWCHIVE_ORIGIN}/patreon/user/24586027`,
   })
   const stufferdb = await assertRouted(
     'https://stufferdb.com/index?/category/2333',
@@ -770,7 +796,7 @@ async function main() {
       sources: {
         coomer: [{ url: 'https://coomerfans.com/u/onlyfans/123/alpha_model' }],
         reddit: [{ url: 'https://www.reddit.com/user/alpha_model/submitted/' }],
-        kemono: [{ url: 'https://pawchive.st/patreon/user/456' }],
+        kemono: [{ url: `${PAWCHIVE_ORIGIN}/patreon/user/456` }],
         stufferdb: [{ url: 'https://stufferdb.com/index?/category/1' }],
       },
     },
@@ -906,7 +932,7 @@ async function main() {
   assert.strictEqual(coomerMediaEntries[0].text, 'Full caption & details')
   const pawchivePreviewEntries = getMediaEntriesFromPost(
     {
-      origin: 'https://pawchive.st',
+      origin: PAWCHIVE_ORIGIN,
       site: 'kemono',
       service: 'patreon',
       userId: '24586027',
@@ -920,7 +946,7 @@ async function main() {
   )
   assert.strictEqual(
     pawchivePreviewEntries[0].mediaUrl,
-    'https://img.pawchive.st/thumbnail/data/a/b/one.jpg'
+    `${PAWCHIVE_MEDIA_ORIGIN}/thumbnail/data/a/b/one.jpg`
   )
   assert.strictEqual(
     pawchivePreviewEntries[0].filename,
@@ -931,11 +957,11 @@ async function main() {
   assert.strictEqual(pawchivePreviewEntries[0].fullResolutionStatus, 'pending')
   assert.strictEqual(
     pawchivePreviewEntries[0].fullResolutionUrl,
-    'https://img.pawchive.st/data/a/b/one.jpg'
+    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg`
   )
   const pawchiveMediaEntries = getMediaEntriesFromPost(
     {
-      origin: 'https://pawchive.st',
+      origin: PAWCHIVE_ORIGIN,
       site: 'kemono',
       service: 'patreon',
       userId: '24586027',
@@ -945,16 +971,31 @@ async function main() {
       title: 'Pawchive full asset',
       file: { path: '/a/b/one.jpg' },
       has_full: true,
+      pageMeta: {
+        comments: [
+          {
+            author: 'Patron',
+            posted: '2026-03-02T02:00:00',
+            text: 'Direct media comment',
+          },
+        ],
+        commentCount: 1,
+      },
     }
   )
   assert.strictEqual(
     pawchiveMediaEntries[0].mediaUrl,
-    'https://img.pawchive.st/data/a/b/one.jpg'
+    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg`
   )
   assert.strictEqual(
     pawchiveMediaEntries[0].mediaPageUrl,
-    'https://pawchive.st/patreon/user/24586027/post/full-test'
+    `${PAWCHIVE_ORIGIN}/patreon/user/24586027/post/full-test`
   )
+  assert.deepStrictEqual(pawchiveMediaEntries[0].pageMeta.comments[0], {
+    author: 'Patron',
+    posted: '2026-03-02T02:00:00',
+    text: 'Direct media comment',
+  })
   assert(
     pawchiveMediaEntries[0].mediaPageUrls.includes(
       'https://kemono.cr/patreon/user/24586027/post/full-test'
@@ -973,7 +1014,7 @@ async function main() {
 
   const pawchiveLinkedEntries = getMediaEntriesFromPost(
     {
-      origin: 'https://pawchive.st',
+      origin: PAWCHIVE_ORIGIN,
       site: 'kemono',
       service: 'patreon',
       userId: '24586027',
@@ -1031,7 +1072,7 @@ async function main() {
   const pawchiveMetadataStatuses = []
   const enrichedPawchivePosts = await fetchCoomerKemonoPosts(
     {
-      origin: 'https://pawchive.st',
+      origin: PAWCHIVE_ORIGIN,
       site: 'kemono',
       service: 'patreon',
       userId: '24586027',
@@ -1057,7 +1098,8 @@ async function main() {
               title: 'Full Pawchive title',
               content: '<p>Full Pawchive caption</p>',
               detail_fetched: true,
-              file: null,
+              file: { path: '/a/b/commented.jpg' },
+              has_full: true,
             },
           ],
         }
@@ -1070,7 +1112,7 @@ async function main() {
       pageSize: 50,
     }
   )
-  assert.strictEqual(enrichedPawchivePosts[0].mediaEntries.length, 0)
+  assert.strictEqual(enrichedPawchivePosts[0].mediaEntries.length, 1)
   assert.strictEqual(
     enrichedPawchivePosts[0].title,
     'Full Pawchive title - Full Pawchive caption'
@@ -1086,9 +1128,24 @@ async function main() {
     ],
     commentCount: 1,
   })
+  assert.deepStrictEqual(enrichedPawchivePosts[0].mediaEntries[0].pageMeta, {
+    comments: [
+      {
+        author: 'Pawchive Patron',
+        posted: '2026-03-02T02:00:00',
+        text: 'Complete comment & reaction',
+      },
+    ],
+    commentCount: 1,
+  })
   assert(
     pawchiveMetadataStatuses.some((line) =>
       String(line).includes('Fetching kemono metadata: 1/1 post(s)')
+    )
+  )
+  assert(
+    pawchiveMetadataStatuses.some((line) =>
+      String(line).includes('1 comments fetched')
     )
   )
 
@@ -1625,7 +1682,7 @@ async function main() {
   )
 
   const pawchiveSeenSource = {
-    origin: 'https://pawchive.st',
+    origin: PAWCHIVE_ORIGIN,
     site: 'kemono',
     service: 'patreon',
     userId: '11678891',
@@ -1665,7 +1722,7 @@ async function main() {
       mediaPageUrl: 'https://kemono.cr/patreon/user/11678891/post/23020731',
     })}\n${JSON.stringify({
       type: 'dom_media_extracted',
-      mediaPageUrl: 'https://pawchive.st/patreon/user/11678891/post/22976025',
+      mediaPageUrl: `${PAWCHIVE_ORIGIN}/patreon/user/11678891/post/22976025`,
     })}\n`
   )
   const pawchiveBackfill = backfillSeenSourcePostsFromRunEvents(

@@ -77,6 +77,10 @@ const {
   preflightCoomerFansSource,
 } = require('../scrapyard/sourceAdapters/coomerFans')
 const {
+  PAWCHIVE_ORIGIN,
+  isPawchiveHost,
+} = require('../scrapyard/pawchive')
+const {
   loadVisualHashCache,
   saveVisualHashCache,
   getVisualHashFromBuffer,
@@ -716,10 +720,12 @@ function normalizeSeenUrl(url) {
     }
 
     if (
-      host === 'img.pawchive.st' &&
+      isPawchiveHost(host) &&
       /^\/(?:thumbnail\/)?data\//i.test(pathname)
     ) {
-      return `${parsed.protocol}//${host}${pathname}`
+      return `pawchive-data:${pathname
+        .replace(/^\/(?:thumbnail\/)?data\/?/i, '')
+        .toLowerCase()}`
     }
 
     if (
@@ -758,7 +764,7 @@ function sleep(ms) {
 function isPawchiveUrl(url) {
   try {
     const host = new URL(url).hostname.toLowerCase()
-    return host === 'pawchive.st' || host.endsWith('.pawchive.st')
+    return isPawchiveHost(host)
   } catch {
     return false
   }
@@ -1017,10 +1023,7 @@ function getMediaEntriesFromPost(source, post) {
 }
 
 function isPawchiveSource(source = {}) {
-  return (
-    source.site === 'kemono' &&
-    /^https?:\/\/(?:www\.)?pawchive\.st\b/i.test(source.origin || '')
-  )
+  return source.site === 'kemono' && isPawchiveUrl(source.origin)
 }
 
 async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
@@ -1785,7 +1788,7 @@ async function run(argvInput = process.argv.slice(2)) {
     runOptions.postConcurrency || process.env.HOGHAUL_POST_CONCURRENCY,
     source.site === 'coomerfans'
       ? 8
-      : source.origin === 'https://pawchive.st'
+      : source.origin === PAWCHIVE_ORIGIN
         ? 4
         : 1
   )

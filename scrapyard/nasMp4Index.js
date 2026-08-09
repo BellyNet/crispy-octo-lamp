@@ -6,7 +6,13 @@ function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/')
 }
 
-const indexedVideoExtensions = new Set(['.mp4', '.m4v', '.mov', '.webm'])
+const indexedVideoExtensions = new Set([
+  '.mp4',
+  '.m4v',
+  '.mov',
+  '.webm',
+  '.gif',
+])
 
 function isIndexedVideoPath(filePath) {
   return indexedVideoExtensions.has(

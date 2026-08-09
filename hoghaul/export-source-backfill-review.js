@@ -3,6 +3,8 @@
 const fs = require('fs')
 const path = require('path')
 
+const { PAWCHIVE_ORIGIN } = require('../scrapyard/pawchive')
+
 const repoRoot = path.join(__dirname, '..')
 const registryPath = path.join(repoRoot, 'model_aliases.json')
 const permanentSkipPath = path.join(
@@ -48,7 +50,7 @@ function getSearchUrl(platform, model) {
     return `https://coomerfans.com/?q=${query}`
   }
   if (platform === 'kemono') {
-    return `https://pawchive.st/artists?q=${query}`
+    return `${PAWCHIVE_ORIGIN}/artists?q=${query}`
   }
   if (platform === 'reddit') {
     return `https://www.reddit.com/search/?q=${query}&type=users`

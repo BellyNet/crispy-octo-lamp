@@ -5,7 +5,7 @@
  *
  * Unified interactive backfill for all three source types:
  *   - coomerfans.com  (OnlyFans, Fansly, Patreon, …)
- *   - pawchive.st (Patreon, Fanbox, Gumroad, Discord, Fantia, ...)
+ *   - pawchive.pw (Patreon, Fanbox, Gumroad, Discord, Fantia, ...)
  *   - stufferdb  (manual URL paste only)
  *
  * For each model missing any source, auto-probes all known aliases against
@@ -102,7 +102,7 @@ const PLATFORMS = {
       'subscribestar',
     ],
     urlPattern:
-      /^https?:\/\/(?:www\.)?(?:pawchive\.st|kemono\.(?:cr|su|party))\/([^/]+)\/user\/([^/?#\s]+)/i,
+      /^https?:\/\/(?:www\.)?(?:pawchive\.(?:pw|st)|kemono\.(?:cr|su|party))\/([^/]+)\/user\/([^/?#\s]+)/i,
     searchUrl: (name) =>
       `${PAWCHIVE_ORIGIN}/artists?q=${encodeURIComponent(name)}`,
     profileUrl: getPawchiveProfileUrl,

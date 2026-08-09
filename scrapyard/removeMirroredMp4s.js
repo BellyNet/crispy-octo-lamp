@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const minimist = require('minimist')
+const { findNasBackedMediaMatch, isEvictableMediaPath } = require('./nasSync')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -43,19 +44,15 @@ main()
 
 function main() {
   if (!mirrorRoot) {
-    console.error('Missing required --mirror-root for mirrored MP4 cleanup.')
+    console.error('Missing required --mirror-root for mirrored media cleanup.')
     process.exit(1)
   }
 
   ensureDir(reportDir)
   const matches = collectMatches(datasetRoot)
-  const verifiedMatches = matches.filter((match) =>
-    fs.existsSync(path.join(mirrorRoot, match.relativePath))
-  )
+  const verifiedMatches = matches.filter((match) => match.nasMatch)
   const skippedMissingMirrorPaths = matches
-    .filter(
-      (match) => !fs.existsSync(path.join(mirrorRoot, match.relativePath))
-    )
+    .filter((match) => !match.nasMatch)
     .map((match) => match.relativePath)
   const deletedRelativePaths = verifiedMatches.map(
     (match) => match.relativePath
@@ -76,6 +73,7 @@ function main() {
     affectedModels,
     deletedRelativePaths,
     skippedMissingMirrorPaths,
+    matchSummary: summarizeMatches(verifiedMatches),
     hashCleanup: {
       bitwiseRefsRemoved: 0,
       visualRefsRemoved: 0,
@@ -94,13 +92,16 @@ function main() {
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
 
   console.log(`Dataset root: ${datasetRoot}`)
-  console.log(`Matched mirrored MP4 candidates: ${matches.length}`)
+  console.log(`Matched mirrored media candidates: ${matches.length}`)
   console.log(`Verified on mirror: ${verifiedMatches.length}`)
   console.log(`Missing on mirror: ${skippedMissingMirrorPaths.length}`)
+  console.log(
+    `Same-stem matches: ${report.matchSummary.sameStem}; same-path size mismatches: ${report.matchSummary.samePathSizeMismatch}`
+  )
   console.log(`Affected models: ${affectedModels.length}`)
   console.log(argv.apply ? 'Mode: apply' : 'Mode: dry-run')
   if (argv.apply) {
-    console.log('Hash refs preserved for NAS-backed MP4s.')
+    console.log('Hash refs preserved for NAS-backed media.')
   }
   console.log(`Report: ${reportPath}`)
 }
@@ -109,14 +110,16 @@ function printHelp() {
   console.log(`Usage: node scrapyard/removeMirroredMp4s.js [options]
 
 Options:
-  --apply                Delete local MP4 files that also exist under the mirror root.
+  --apply                Delete local media files that also exist under the mirror root.
   --dataset-root <path>  Override dataset root.
   --mirror-root <path>   Required mirror root used to verify safe deletion.
   --report-dir <path>    Override report directory.
   -h, --help             Show help.
 
 Match rule:
-  Deletes any local .mp4 only when the same relative path exists under the mirror root.
+  Deletes local .mp4/.m4v/.mov/.webm/.gif when the same relative path exists
+  under the mirror root, or when the same model/folder has the same filename
+  stem with another media extension.
 `)
 }
 
@@ -134,13 +137,19 @@ function collectMatches(root) {
 
   for (const model of models) {
     const modelDir = path.join(root, model)
-    const mp4Files = findMp4Files(modelDir)
+    const mediaFiles = findMediaFiles(modelDir)
 
-    for (const absolutePath of mp4Files) {
+    for (const absolutePath of mediaFiles) {
+      const relativePath = normalizePath(path.relative(root, absolutePath))
       matches.push({
         model,
         absolutePath,
-        relativePath: normalizePath(path.relative(root, absolutePath)),
+        relativePath,
+        nasMatch: findNasBackedMediaMatch({
+          localPath: absolutePath,
+          relativePath,
+          nasDatasetDir: mirrorRoot,
+        }),
       })
     }
   }
@@ -148,23 +157,47 @@ function collectMatches(root) {
   return matches
 }
 
-function findMp4Files(dirPath) {
+function findMediaFiles(dirPath) {
   const results = []
   const entries = fs.readdirSync(dirPath, { withFileTypes: true })
 
   for (const entry of entries) {
     const absolutePath = path.join(dirPath, entry.name)
     if (entry.isDirectory()) {
-      results.push(...findMp4Files(absolutePath))
+      results.push(...findMediaFiles(absolutePath))
       continue
     }
 
-    if (entry.isFile() && entry.name.toLowerCase().endsWith('.mp4')) {
+    if (entry.isFile() && isEvictableMediaPath(entry.name)) {
       results.push(absolutePath)
     }
   }
 
   return results
+}
+
+function summarizeMatches(matches) {
+  return matches.reduce(
+    (summary, match) => {
+      const nasMatch = match.nasMatch
+      if (nasMatch?.matchType === 'same-stem') summary.sameStem += 1
+      if (nasMatch?.matchType === 'same-path') summary.samePath += 1
+      if (
+        nasMatch?.matchType === 'same-path' &&
+        nasMatch.sizeMatches === false
+      ) {
+        summary.samePathSizeMismatch += 1
+      }
+      summary.bytes += fs.statSync(match.absolutePath).size
+      return summary
+    },
+    {
+      samePath: 0,
+      sameStem: 0,
+      samePathSizeMismatch: 0,
+      bytes: 0,
+    }
+  )
 }
 
 function normalizePath(value) {
