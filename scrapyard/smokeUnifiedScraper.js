@@ -82,6 +82,7 @@ const {
 } = require('./reportPawchivePreviewUpgrades')
 const {
   normalizeSeenUrl: normalizeHoghaulSeenUrl,
+  shouldUseBrowserMediaForSource,
 } = require('../hoghaul/hoghaul')
 const {
   PAWCHIVE_MEDIA_ORIGIN,
@@ -725,6 +726,22 @@ async function main() {
     origin: PAWCHIVE_ORIGIN,
     url: `${PAWCHIVE_ORIGIN}/patreon/user/24586027`,
   })
+  assert.strictEqual(shouldUseBrowserMediaForSource(pawchive, true), false)
+  assert.strictEqual(
+    shouldUseBrowserMediaForSource(
+      parseSourceUrl('https://coomer.su/onlyfans/user/name_here'),
+      true
+    ),
+    true
+  )
+  assert.strictEqual(
+    shouldUseBrowserMediaForSource(reddit, true, {}, {}),
+    false
+  )
+  assert.strictEqual(
+    shouldUseBrowserMediaForSource(reddit, true, { redditBrowserMedia: true }, {}),
+    true
+  )
   const stufferdb = await assertRouted(
     'https://stufferdb.com/index?/category/2333',
     {

@@ -1026,6 +1026,24 @@ function isPawchiveSource(source = {}) {
   return source.site === 'kemono' && isPawchiveUrl(source.origin)
 }
 
+function shouldUseBrowserMediaForSource(
+  source,
+  requestedBrowserMedia,
+  runOptions = {},
+  env = process.env
+) {
+  if (source.site === 'coomerfans') return false
+  if (isPawchiveSource(source)) return false
+  if (
+    source.site === 'reddit' &&
+    !runOptions.redditBrowserMedia &&
+    !env.HOGHAUL_REDDIT_BROWSER_MEDIA
+  ) {
+    return false
+  }
+  return Boolean(requestedBrowserMedia)
+}
+
 async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
   if (!downloader?.extractPostMediaUrls || entries.length === 0) return entries
 
@@ -1770,16 +1788,11 @@ async function run(argvInput = process.argv.slice(2)) {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
-  if (source.site === 'coomerfans') {
-    useBrowserMedia = false
-  }
-  if (
-    source.site === 'reddit' &&
-    !runOptions.redditBrowserMedia &&
-    !process.env.HOGHAUL_REDDIT_BROWSER_MEDIA
-  ) {
-    useBrowserMedia = false
-  }
+  useBrowserMedia = shouldUseBrowserMediaForSource(
+    source,
+    useBrowserMedia,
+    runOptions
+  )
   const imageConcurrency = parsePositiveInteger(
     runOptions.imageConcurrency || process.env.HOGHAUL_IMAGE_CONCURRENCY,
     source.site === 'coomerfans' ? 3 : 6
@@ -2325,6 +2338,7 @@ module.exports = {
   parseSourceUrl,
   runHoghaulScrape: run,
   runHoghaulCli,
+  shouldUseBrowserMediaForSource,
 }
 
 if (require.main === module) {
