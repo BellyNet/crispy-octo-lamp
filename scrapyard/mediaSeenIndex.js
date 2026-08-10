@@ -112,6 +112,10 @@ function createMediaSeenIndex(options = {}) {
   const pageMatchRequiresNoMediaUrl = Boolean(
     options.pageMatchRequiresNoMediaUrl
   )
+  const shouldUseDeadMediaMatch =
+    typeof options.shouldUseDeadMediaMatch === 'function'
+      ? options.shouldUseDeadMediaMatch
+      : null
 
   if (!datasetDir) {
     throw new Error('createMediaSeenIndex requires datasetDir')
@@ -135,6 +139,17 @@ function createMediaSeenIndex(options = {}) {
 
   function uniqueSeenMediaUrls(values) {
     return uniqueSeenUrls(values).filter((url) => isLikelyMediaUrl(url))
+  }
+
+  function compactRawValues(values) {
+    return Array.from(
+      new Set(
+        values
+          .flat(Infinity)
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      )
+    )
   }
 
   function getMediaSeenIndexPath(modelLogDir) {
@@ -291,21 +306,35 @@ function createMediaSeenIndex(options = {}) {
 
   function getDeadMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
     const index = loadMediaSeenIndex(modelLogDir)
-    const mediaPageUrls = uniqueSeenUrls(
+    const rawMediaPageUrls = compactRawValues(
       Array.isArray(mediaPageUrl) ? mediaPageUrl : [mediaPageUrl]
     )
-    const mediaUrls = uniqueSeenUrls(
+    const rawMediaUrls = compactRawValues(
       Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]
     )
+    const mediaPageUrls = uniqueSeenUrls(
+      rawMediaPageUrls
+    )
+    const mediaUrls = uniqueSeenUrls(rawMediaUrls)
+
+    const useMatch = (match) =>
+      !shouldUseDeadMediaMatch ||
+      shouldUseDeadMediaMatch({
+        match,
+        mediaPageUrl: rawMediaPageUrls[0] || null,
+        mediaPageUrls: rawMediaPageUrls,
+        mediaUrl: rawMediaUrls[0] || null,
+        mediaUrls: rawMediaUrls,
+      }) !== false
 
     for (const normalizedMediaUrl of mediaUrls) {
       const match = getDeadEntry(index, normalizedMediaUrl)
-      if (match) return match
+      if (match && useMatch(match)) return match
     }
     if (mediaUrls.length === 0) {
       for (const normalizedMediaPageUrl of mediaPageUrls) {
         const match = getDeadPageEntry(index, normalizedMediaPageUrl)
-        if (match) return match
+        if (match && useMatch(match)) return match
       }
     }
     return null
@@ -389,6 +418,11 @@ function createMediaSeenIndex(options = {}) {
 
   function recordDeadMedia(modelLogDir, details = {}) {
     const index = loadMediaSeenIndex(modelLogDir)
+    const rawMediaPageUrls = compactRawValues([
+      details.mediaPageUrl,
+      details.mediaPageUrls,
+    ])
+    const rawMediaUrls = compactRawValues([details.mediaUrl, details.mediaUrls])
     const mediaPageUrls = uniqueSeenUrls([
       details.mediaPageUrl,
       details.mediaPageUrls,
@@ -403,6 +437,10 @@ function createMediaSeenIndex(options = {}) {
       mediaUrls,
       mediaPageUrl: mediaPageUrls[0] || null,
       mediaPageUrls,
+      rawMediaUrl: rawMediaUrls[0] || null,
+      rawMediaUrls,
+      rawMediaPageUrl: rawMediaPageUrls[0] || null,
+      rawMediaPageUrls,
       status: 'dead',
       reason: details.reason || 'gone',
       error: details.error || null,

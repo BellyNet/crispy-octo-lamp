@@ -114,7 +114,7 @@ function getMediaUrl(source, media, post = {}) {
   if (/^https?:\/\//i.test(mediaPath)) return mediaPath
   if (source.origin === PAWCHIVE_ORIGIN) {
     return post.has_full === true
-      ? getPawchiveMediaUrl(mediaPath)
+      ? getPawchiveMediaUrl(mediaPath, media?.name)
       : getPawchivePreviewUrl(mediaPath)
   }
   return `${source.origin}/data${mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`}`
@@ -139,7 +139,7 @@ function getPawchiveQualityMetadata(source, media, post = {}) {
     mediaQuality: isFullResolution ? 'full' : 'pawchive_preview',
     needsFullResolution: !isFullResolution,
     fullResolutionStatus: isFullResolution ? 'source_full' : 'pending',
-    fullResolutionUrl: getPawchiveMediaUrl(media?.path),
+    fullResolutionUrl: getPawchiveMediaUrl(media?.path, media?.name),
   }
 }
 

@@ -163,10 +163,7 @@ function loadConfirmedSourceFrontier(modelLogDir, source, options = {}) {
     ...savedCompletedPostIds,
   ])
   const completedPostIds = new Set([...savedCompletedPostIds])
-  const skippablePostIds = new Set([
-    ...savedSeenPostIds,
-    ...savedCompletedPostIds,
-  ])
+  const skippablePostIds = new Set([...savedCompletedPostIds])
 
   return {
     active: knownPostIds.size > 0,

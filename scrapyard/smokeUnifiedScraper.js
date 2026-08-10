@@ -87,6 +87,8 @@ const {
 const {
   PAWCHIVE_MEDIA_ORIGIN,
   PAWCHIVE_ORIGIN,
+  PAWCHIVE_PREVIEW_ORIGIN,
+  shouldUsePawchiveDeadMediaMatch,
 } = require('./pawchive')
 
 async function withConsoleSilenced(callback) {
@@ -560,6 +562,58 @@ async function main() {
     pawchiveSeenMatch?.relativePath,
     pawchiveSeenDetails.relativePath
   )
+  const pawchiveDeadIndex = createMediaSeenIndex({
+    datasetDir: metadataLocalRoot,
+    existsLocallyOrOnNas: () => true,
+    normalizeUrl: normalizeHoghaulSeenUrl,
+    shouldUseDeadMediaMatch: shouldUsePawchiveDeadMediaMatch,
+  })
+  pawchiveDeadIndex.recordDeadMedia(metadataLogDir, {
+    mediaUrl: 'https://img.pawchive.pw/data/a/b/stale.jpg',
+    reason: 'not_found_404',
+    error: 'HTTP 404: https://img.pawchive.pw/data/a/b/stale.jpg',
+  })
+  assert.strictEqual(
+    pawchiveDeadIndex.getDeadMediaMatch(
+      metadataLogDir,
+      null,
+      `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/stale.jpg?f=stale.jpg`
+    ),
+    null
+  )
+  const pawchiveDeadData = pawchiveDeadIndex.loadMediaSeenIndex(metadataLogDir)
+  pawchiveDeadData.deadMediaUrls['pawchive-data:a/b/legacy.jpg'] = {
+    mediaUrl: 'pawchive-data:a/b/legacy.jpg',
+    mediaUrls: [
+      'pawchive-data:a/b/legacy.jpg',
+      'kemono-data:a/b/legacy.jpg',
+    ],
+    status: 'dead',
+    reason: 'not_found_404',
+    error: 'HTTP 404',
+  }
+  pawchiveDeadIndex.saveMediaSeenIndex(metadataLogDir, pawchiveDeadData)
+  assert.strictEqual(
+    pawchiveDeadIndex.getDeadMediaMatch(
+      metadataLogDir,
+      null,
+      `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/legacy.jpg?f=legacy.jpg`
+    ),
+    null
+  )
+  pawchiveDeadIndex.recordDeadMedia(metadataLogDir, {
+    mediaUrl: `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/gone.jpg?f=gone.jpg`,
+    reason: 'not_found_404',
+    error: `HTTP 404: ${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/gone.jpg?f=gone.jpg`,
+  })
+  assert.strictEqual(
+    pawchiveDeadIndex.getDeadMediaMatch(
+      metadataLogDir,
+      null,
+      `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/gone.jpg?f=gone.jpg`
+    )?.reason,
+    'not_found_404'
+  )
   const kemonoSeenIndex = createMediaSeenIndex({
     datasetDir: metadataLocalRoot,
     existsLocallyOrOnNas: () => true,
@@ -957,13 +1011,13 @@ async function main() {
     {
       id: 'preview-test',
       title: 'Pawchive preview',
-      file: { path: '/a/b/one.jpg' },
+      file: { path: '/a/b/one.jpg', name: 'one.jpg' },
       has_full: false,
     }
   )
   assert.strictEqual(
     pawchivePreviewEntries[0].mediaUrl,
-    `${PAWCHIVE_MEDIA_ORIGIN}/thumbnail/data/a/b/one.jpg`
+    `${PAWCHIVE_PREVIEW_ORIGIN}/thumbnail/data/a/b/one.jpg`
   )
   assert.strictEqual(
     pawchivePreviewEntries[0].filename,
@@ -974,7 +1028,7 @@ async function main() {
   assert.strictEqual(pawchivePreviewEntries[0].fullResolutionStatus, 'pending')
   assert.strictEqual(
     pawchivePreviewEntries[0].fullResolutionUrl,
-    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg`
+    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg?f=one.jpg`
   )
   const pawchiveMediaEntries = getMediaEntriesFromPost(
     {
@@ -986,7 +1040,7 @@ async function main() {
     {
       id: 'full-test',
       title: 'Pawchive full asset',
-      file: { path: '/a/b/one.jpg' },
+      file: { path: '/a/b/one.jpg', name: 'one.jpg' },
       has_full: true,
       pageMeta: {
         comments: [
@@ -1002,7 +1056,7 @@ async function main() {
   )
   assert.strictEqual(
     pawchiveMediaEntries[0].mediaUrl,
-    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg`
+    `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg?f=one.jpg`
   )
   assert.strictEqual(
     pawchiveMediaEntries[0].mediaPageUrl,
@@ -1115,7 +1169,7 @@ async function main() {
               title: 'Full Pawchive title',
               content: '<p>Full Pawchive caption</p>',
               detail_fetched: true,
-              file: { path: '/a/b/commented.jpg' },
+              file: { path: '/a/b/commented.jpg', name: 'commented.jpg' },
               has_full: true,
             },
           ],
@@ -1718,12 +1772,12 @@ async function main() {
     }
   )
   assert.strictEqual(pawchiveSeenFrontier.knownPostCount, 1)
-  assert.strictEqual(pawchiveSeenFrontier.skippablePostCount, 1)
+  assert.strictEqual(pawchiveSeenFrontier.skippablePostCount, 0)
   assert.deepStrictEqual(
     createBoundaryPageFilter(pawchiveSeenFrontier).filterPage([
       { id: '26720458' },
     ]).items,
-    []
+    [{ id: '26720458' }]
   )
 
   const pawchiveBackfillLogDir = path.join(frontierModelDir, 'pawchive-log')
@@ -1751,7 +1805,8 @@ async function main() {
     pawchiveBackfillLogDir,
     pawchiveSeenSource
   )
-  assert.strictEqual(pawchiveBackfillFrontier.skippablePostCount, 2)
+  assert.strictEqual(pawchiveBackfillFrontier.knownPostCount, 2)
+  assert.strictEqual(pawchiveBackfillFrontier.skippablePostCount, 0)
 
   const redditStateDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'reddit-state-smoke-')

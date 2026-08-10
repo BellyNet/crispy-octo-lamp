@@ -79,6 +79,7 @@ const {
 const {
   PAWCHIVE_ORIGIN,
   isPawchiveHost,
+  shouldUsePawchiveDeadMediaMatch,
 } = require('../scrapyard/pawchive')
 const {
   loadVisualHashCache,
@@ -152,6 +153,7 @@ const sharedMediaSeenIndex = createMediaSeenIndex({
   normalizeUrl: (url) => normalizeSeenUrl(htmlDecode(url)),
   matchOrder: ['media_url', 'media_page_url'],
   pageMatchRequiresNoMediaUrl: true,
+  shouldUseDeadMediaMatch: shouldUsePawchiveDeadMediaMatch,
 })
 const hoghaulMediaSaver = createMediaSaver({
   datasetDir,
@@ -809,6 +811,17 @@ function getEntryMediaUrls(entry) {
 
 function getEntryDirectMediaUrls(entry = {}) {
   return uniqueSeenUrls([entry.mediaUrl, entry.jsonMediaUrl, entry.mediaUrls])
+}
+
+function getEntryRawDirectMediaUrls(entry = {}) {
+  return Array.from(
+    new Set(
+      [entry.mediaUrl, entry.jsonMediaUrl, entry.mediaUrls]
+        .flat(Infinity)
+        .map((url) => String(url || '').trim())
+        .filter(Boolean)
+    )
+  )
 }
 
 function getEntryMediaPageUrls(entry) {
@@ -1524,7 +1537,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
   const deadMediaMatch = getDeadMediaMatch(
     folders.logDir,
     getEntryMediaPageUrls(entry),
-    getEntryDirectMediaUrls(entry)
+    getEntryRawDirectMediaUrls(entry)
   )
   if (deadMediaMatch) {
     recordDeadMediaSkip(
@@ -1600,7 +1613,7 @@ async function saveVideoMedia(modelName, folders, entry) {
   const deadMediaMatch = getDeadMediaMatch(
     folders.logDir,
     getEntryMediaPageUrls(entry),
-    getEntryDirectMediaUrls(entry)
+    getEntryRawDirectMediaUrls(entry)
   )
   if (deadMediaMatch) {
     recordDeadMediaSkip(
