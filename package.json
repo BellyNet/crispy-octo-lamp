@@ -43,6 +43,7 @@
     "audit:slopvault": "node audit/audit-slopvault.js",
     "repair": "node scrapyard/run-scrape.js repair",
     "repair:reddit-titles": "node scrapyard/repairRedditMetadataTitles.js",
+    "repair:coomerfans-titles": "node scrapyard/repairCoomerFansMetadataTitles.js",
     "prune:source-media": "node scrapyard/pruneSourceMedia.js",
     "repair:tail-decode": "node audit/run-session-repair.js",
     "salvage:tail-video": "node audit/salvage-tail-videos.js --input",
