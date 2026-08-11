@@ -343,6 +343,7 @@ module.exports = {
   parseCoomerFansCaption,
   parseCoomerFansMediaEntries,
   parseCoomerFansPostLinks,
+  parseCoomerFansTitle,
   preflightCoomerFansSource,
   resolveCoomerFansCreator,
 }

@@ -11,16 +11,17 @@
  * atomic rename so a Ctrl-C mid-run leaves the file valid.
  *
  * Coverage (as of writing):
- *   - coomerfans / kemono  → JSON API (implemented)
- *   - stufferdb            → needs Playwright  (TODO)
- *   - reddit               → needs Pushshift / old-Reddit HTML (TODO)
+ *   - kemono / pawchive    -> JSON API (implemented)
+ *   - coomerfans / coomer  -> no supported comments endpoint (titles only)
+ *   - stufferdb            -> needs Playwright (run under main scraper)
+ *   - reddit               -> needs Pushshift / old-Reddit HTML (TODO)
  *
  * Usage:
  *   node scrapyard/backfillComments.js                     # dry-run summary
  *   node scrapyard/backfillComments.js --apply             # actually fetch + write
  *   node scrapyard/backfillComments.js --user ramenslurper # scope to one model
  *   node scrapyard/backfillComments.js --limit 200 --apply # first 200 entries
- *   node scrapyard/backfillComments.js --site coomerfans --apply
+ *   node scrapyard/backfillComments.js --site kemono --apply
  */
 
 const fs = require('fs')
@@ -83,27 +84,13 @@ function normalizeApiComments(list) {
 function coomerKemonoCommentsUrl(entry) {
   const s = entry?.source
   if (!s) return null
-  if (
-    s.site !== 'coomerfans' &&
-    s.site !== 'coomer' &&
-    s.site !== 'kemono'
-  )
-    return null
+  if (s.site !== 'kemono') return null
   if (!s.service || !s.userId || !s.postId) return null
-  // Origin: the sidecar was populated when coomerfans.com hosted the API,
-  // but that domain now 404s. The API moved to coomer.st (behind Cloudflare
-  // — see `Accept: text/css` header trick below). Kemono still lives at
-  // kemono.cr. For entries with mediaPageUrl pointing at any coomer* host
-  // we pin coomer.st; kemono stays where it is.
   let origin
-  if (s.site === 'kemono') {
-    try {
-      origin = new URL(s.mediaPageUrl).origin
-    } catch {
-      origin = 'https://kemono.cr'
-    }
-  } else {
-    origin = 'https://coomer.st'
+  try {
+    origin = new URL(s.mediaPageUrl).origin
+  } catch {
+    origin = 'https://kemono.cr'
   }
   return `${origin}/api/v1/${s.service}/user/${encodeURIComponent(
     s.userId
@@ -111,8 +98,16 @@ function coomerKemonoCommentsUrl(entry) {
 }
 
 const HANDLERS = {
-  coomerfans: { name: 'coomerfans', url: coomerKemonoCommentsUrl },
-  coomer: { name: 'coomer', url: coomerKemonoCommentsUrl },
+  coomerfans: {
+    name: 'coomerfans',
+    url: () => null,
+    todo: 'no supported comments endpoint; use repair:coomerfans-titles for titles',
+  },
+  coomer: {
+    name: 'coomer',
+    url: () => null,
+    todo: 'no supported comments endpoint',
+  },
   kemono: { name: 'kemono', url: coomerKemonoCommentsUrl },
   stufferdb: {
     name: 'stufferdb',
@@ -230,17 +225,11 @@ async function main() {
   }
   if (!targets.length) return
 
-  // coomer.st puts everything behind a DDG (DuckDuckGo Browser Protection)
-  // wall that rejects anything smelling like a scraper. Requesting with
-  // `Accept: text/css` is the site's own documented bypass — the anti-bot
-  // hint page literally tells you to do this. Applies to all coomer/kemono
-  // hosts; a plain UA is fine for stufferdb / reddit later on.
   const http = createHttpClient({
     timeoutMs: 20000,
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
   })
-  const coomerHeaders = { Accept: 'text/css' }
   let done = 0
   let fetched = 0
   let empty = 0
@@ -255,9 +244,8 @@ async function main() {
       const t = queue.shift()
       if (!t) return
       try {
-        const isCoomer = /coomer|kemono/.test(t.site)
         const res = await http.fetchJson(t.url, {
-          headers: isCoomer ? coomerHeaders : {},
+          headers: {},
         })
         const comments = normalizeApiComments(res?.data?.data ?? res?.data)
         const commentCount = Array.isArray(res?.data?.data)
