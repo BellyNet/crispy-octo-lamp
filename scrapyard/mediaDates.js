@@ -240,16 +240,36 @@ function sidecarPath(userDir) {
 }
 
 function loadSidecar(userDir) {
-  if (_sidecars.has(userDir)) return _sidecars.get(userDir)
+  const p = sidecarPath(userDir)
+  const existing = _sidecars.get(userDir)
+  // Reload from disk when the file on disk is newer than what we've
+  // cached. Without this the dashboard server holds a snapshot from
+  // its first read forever, so post-scrape sidecar updates (new
+  // entries, freshly fetched comments, etc.) never surface. Skip the
+  // reload when the in-memory copy has pending writes — flushing
+  // would clobber them.
+  let currentMtime = 0
+  try {
+    currentMtime = fs.statSync(p).mtimeMs
+  } catch {}
+  if (existing) {
+    if (existing.dirty) return existing
+    if (currentMtime && existing.loadedMtime === currentMtime) return existing
+  }
   let data = { __version: SIDECAR_VERSION }
   try {
-    const raw = JSON.parse(fs.readFileSync(sidecarPath(userDir), 'utf8'))
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'))
     if (raw && typeof raw === 'object') {
       data = raw
       data.__version = SIDECAR_VERSION
     }
   } catch {}
-  const entry = { data, dirty: false, flushTimer: null }
+  const entry = {
+    data,
+    dirty: false,
+    flushTimer: null,
+    loadedMtime: currentMtime,
+  }
   _sidecars.set(userDir, entry)
   return entry
 }
@@ -362,8 +382,12 @@ function normalizeSourceMeta(sourceMeta) {
 function flushSidecar(userDir) {
   const entry = _sidecars.get(userDir)
   if (!entry || !entry.dirty) return
-  fs.writeFileSync(sidecarPath(userDir), JSON.stringify(entry.data), 'utf8')
+  const p = sidecarPath(userDir)
+  fs.writeFileSync(p, JSON.stringify(entry.data), 'utf8')
   entry.dirty = false
+  try {
+    entry.loadedMtime = fs.statSync(p).mtimeMs
+  } catch {}
 }
 
 function scheduleSidecarFlush(userDir) {

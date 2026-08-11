@@ -57,7 +57,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 14
+const RESPONSE_CACHE_VERSION = 15
 
 // Bumped whenever the encoding recipe for /media-mobile/ variants changes in
 // a way that changes the bytes of an already-cached file (e.g. gifs going
@@ -617,6 +617,13 @@ async function processFileForResponse(username, userDir, item) {
       ])
       width = m.width || 0
       height = m.height || 0
+      // sharp.metadata() reports raw pixel dims and ignores EXIF orientation,
+      // but browsers rotate on decode. Orientations 5–8 are 90°/270° rotated,
+      // so w/h swap. Without this, portraits shot on iPhones (very common)
+      // arrive at PhotoSwipe as landscape and get squished to fit.
+      if (m.orientation >= 5 && m.orientation <= 8) {
+        ;[width, height] = [height, width]
+      }
       imageDate = exifDate || null
     }
     metaCache.set(

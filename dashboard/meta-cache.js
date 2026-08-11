@@ -7,6 +7,11 @@
 const fs = require('fs')
 const path = require('path')
 
+// Bump when the meta shape changes in a way old cached values can't be trusted.
+// v2: width/height are now EXIF-orientation-corrected for images (rotated
+// portraits used to be cached as landscape and squished the lightbox).
+const META_CACHE_VERSION = 2
+
 class MetaCache {
   constructor(thumbDir) {
     this.metaDir = path.join(thumbDir, 'meta')
@@ -20,9 +25,10 @@ class MetaCache {
 
   _entry(username) {
     if (!this._users.has(username)) {
-      let data = {}
+      let data = { __version: META_CACHE_VERSION }
       try {
-        data = JSON.parse(fs.readFileSync(this._file(username), 'utf8'))
+        const raw = JSON.parse(fs.readFileSync(this._file(username), 'utf8'))
+        if (raw && raw.__version === META_CACHE_VERSION) data = raw
       } catch {}
       this._users.set(username, { data, dirty: false })
     }
@@ -32,7 +38,9 @@ class MetaCache {
   // Returns the cached metadata if the file hasn't changed, otherwise null.
   get(username, folder, filename, stat) {
     const { data } = this._entry(username)
-    const e = data[`${folder}/${filename}`]
+    const key = `${folder}/${filename}`
+    if (key === '__version') return null
+    const e = data[key]
     if (!e) return null
     if (e.size !== stat.size || e.mtimeMs !== stat.mtimeMs) return null
     return e
@@ -41,6 +49,7 @@ class MetaCache {
   // Stores metadata for a file. Call flush() to persist.
   set(username, folder, filename, stat, meta) {
     const entry = this._entry(username)
+    entry.data.__version = META_CACHE_VERSION
     entry.data[`${folder}/${filename}`] = {
       size: stat.size,
       mtimeMs: stat.mtimeMs,
