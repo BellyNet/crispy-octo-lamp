@@ -57,7 +57,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 15
+const RESPONSE_CACHE_VERSION = 14
 
 // Bumped whenever the encoding recipe for /media-mobile/ variants changes in
 // a way that changes the bytes of an already-cached file (e.g. gifs going
@@ -2146,12 +2146,14 @@ async function start() {
   console.log(`  Previews:  ${THUMB_DIR}`)
   console.log(`  Registry:  ${registryPath}\n`)
 
-  // Initial scan: short-circuits to disk cache when fingerprints match, so
-  // subsequent restarts open near-instantly. First run rebuilds everything.
-  await scanAll({ trigger: 'startup' }).catch((err) =>
-    console.warn('  Startup scan error:', err.message)
-  )
-
+  // Listen first, scan second. The initial scan short-circuits to the
+  // disk cache when fingerprints match, but on a first boot (or after a
+  // RESPONSE_CACHE_VERSION bump) it does a full walk of every model —
+  // which on a NAS bind mount takes long enough that blocking listen()
+  // makes the container look dead. Serve requests immediately; the
+  // per-user scanModel() called by /api/users/:u/media walks that user
+  // on demand, and the background scanAll below still primes stats +
+  // the LRU for the home grid.
   const server = app.listen(PORT, () => {
     console.log(`\n  Dataset Dashboard → http://localhost:${PORT}`)
     console.log(
@@ -2162,6 +2164,10 @@ async function start() {
     )
   })
 
+  const startupScan = scanAll({ trigger: 'startup' }).catch((err) =>
+    console.warn('  Startup scan error:', err.message)
+  )
+
   // Bump TCP keep-alive so iPhone Safari (which pauses for seconds between
   // user taps) keeps connections warm. Default is 5 s — a freshly opened
   // model on mobile then pays a fresh handshake on every other request.
@@ -2171,7 +2177,10 @@ async function start() {
   server.headersTimeout = 70 * 1000
 
   // Cover thumbs first — these block the home grid being fast. Cheap (sharp).
-  prewarmCoverThumbs()
+  // Chain off startupScan so the coverPool it populates is actually there
+  // when prewarm walks it. Server is already listening; this is background.
+  startupScan
+    .then(() => prewarmCoverThumbs())
     .catch((err) => console.warn('  Cover thumb prewarm error:', err.message))
     // Grid thumbs second — once covers are done, walk every image/gif in
     // every model and pre-generate the small JPEG. After this finishes,
