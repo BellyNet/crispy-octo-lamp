@@ -929,7 +929,7 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
   let listingUrl = getOldRedditListingUrl(source)
   let page = 0
   const incrementalFilter = createIncrementalPostFilter(deps, options)
-  if (incrementalFilter.active) {
+  if (incrementalFilter.active && !deps.suppressIncrementalLog) {
     deps.logger?.log?.(
       `Reddit incremental frontier: ${incrementalFilter.knownPostCount} known post(s), latest ${incrementalFilter.latestPostId || 'unknown'}`
     )
@@ -1541,9 +1541,10 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
   let lastDiscoveryProgressAt = 0
   let htmlFallbackFailureCount = 0
   let firstHtmlFallbackFailure = null
+  let finalDiscoveryProgressEmitted = false
   const postConcurrency = options.postConcurrency || 1
   const incrementalFilter = createIncrementalPostFilter(deps, options)
-  if (incrementalFilter.active) {
+  if (incrementalFilter.active && !deps.suppressIncrementalLog) {
     deps.logger?.log?.(
       `Reddit incremental frontier: ${incrementalFilter.knownPostCount} known post(s), latest ${incrementalFilter.latestPostId || 'unknown'}`
     )
@@ -1695,11 +1696,13 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
         posts.length >= options.maxPosts
       ) {
         maybeEmitProgress(true)
+        finalDiscoveryProgressEmitted = true
         emitHtmlFallbackSummary()
         return posts
       }
     }
     maybeEmitProgress(true)
+    finalDiscoveryProgressEmitted = true
 
     if (filteredPage.stopAfterPage) {
       deps.logger?.log?.(
@@ -1714,7 +1717,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
     page += 1
   }
 
-  maybeEmitProgress(true)
+  if (!finalDiscoveryProgressEmitted) maybeEmitProgress(true)
   emitHtmlFallbackSummary()
   return posts
 }

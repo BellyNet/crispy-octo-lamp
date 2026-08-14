@@ -740,7 +740,6 @@ async function runHoghaulScript(
 ) {
   const modelName = getRunnerModelName(parsedSource, argv)
   const code = await runNodeScriptInteractive(scriptPath, args, { log })
-  if (isTruthy(getOption(argv, 'dry-run'))) return code
   const summary = modelName
     ? readFreshModelRunSummary(modelName, 'hoghaul', {
         inputUrl: parsedSource.inputUrl,
@@ -751,6 +750,7 @@ async function runHoghaulScript(
     printRecoveredRunSummary(summary, { log })
     return code === 0 ? 1 : code
   }
+  if (summary?.status && isSuccessfulRunStatus(summary.status)) return 0
   return code
 }
 
@@ -1558,12 +1558,12 @@ function summarizeSourceRunSummary(summary) {
   const transfer = summary?.transfer || {}
   return {
     status: summary?.status || null,
-    saved: Number(stats?.saved || summary?.successCount || 0),
-    skipped: Number(stats?.skipped || 0),
-    duplicates: Number(stats?.duplicates || summary?.duplicateCount || 0),
-    errors: Number(stats?.failures || summary?.errorCount || 0),
-    processed: Number(stats?.processed || summary?.mediaCount || 0),
-    expectedMedia: Number(stats?.expectedMedia || summary?.mediaCount || 0),
+    saved: Number(stats?.saved ?? summary?.successCount ?? 0),
+    skipped: Number(stats?.skipped ?? 0),
+    duplicates: Number(stats?.duplicates ?? summary?.duplicateCount ?? 0),
+    errors: Number(stats?.failures ?? summary?.errorCount ?? 0),
+    processed: Number(stats?.processed ?? summary?.mediaCount ?? 0),
+    expectedMedia: Number(stats?.expectedMedia ?? summary?.mediaCount ?? 0),
     savedBytes: Number(stats?.savedBytes || 0),
     downloadBytes: Number(transfer.downloadBytes || 0),
     duplicateDownloadBytes: Number(transfer.duplicateDownloadBytes || 0),

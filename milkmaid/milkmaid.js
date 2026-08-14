@@ -1272,7 +1272,9 @@ function shouldDrawLazyProgress() {
 function getScrapeStatsLine() {
   const stats = runLifecycle.getRunProgressStats(currentRunLog, {
     processed: completedTotal,
-    expectedMedia: global.totalSearchTotal || 1,
+    expectedMedia: Number.isFinite(global.totalSearchTotal)
+      ? global.totalSearchTotal
+      : 1,
     saved: successCount,
     duplicates: duplicateCount,
     failures: errorCount,
@@ -1292,7 +1294,7 @@ function getScrapeStatsLine() {
 
 function setProgressTotal(total = null) {
   if (typeof total === 'number' && !Number.isNaN(total)) {
-    global.totalSearchTotal = Math.max(total, 1)
+    global.totalSearchTotal = Math.max(total, 0)
   }
   syncScrapeProgressCounters()
 }
@@ -1302,7 +1304,7 @@ function syncScrapeProgressCounters() {
   runLifecycle.setRunCounter(
     currentRunLog,
     'expectedMedia',
-    global.totalSearchTotal || 1
+    Number.isFinite(global.totalSearchTotal) ? global.totalSearchTotal : 1
   )
 }
 
@@ -1658,7 +1660,7 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
       )
 
       const mode = url.includes('&acs=') ? 'ACS' : 'PLAIN'
-      logAndProgress(
+      logScrollingMessage(
         `📸 ${modelName} - [${mode}] - ${dedupedUrls.length} media links (tracking ${global.totalSearchTotal})`
       )
       appendRunEvent('category_page_loaded', {
@@ -1674,7 +1676,7 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
         checkpointReached: checkpointIndex >= 0,
       })
       if (!fullSourceRefresh) {
-        logAndProgress(
+        logScrollingMessage(
           `StufferDB incremental page: ${confirmedSeenCount} confirmed seen, ${candidateUrls.length} new candidate(s)${checkpointIndex >= 0 ? ', checkpoint reached' : ''}`
         )
       }
@@ -1880,7 +1882,7 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
           categoryInspectedCount,
           unscannedCount,
         })
-        logAndProgress(
+        logScrollingMessage(
           `StufferDB checkpoint ${checkpointId} reached; stopping.`
         )
         break
@@ -1898,10 +1900,10 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
       }
     }
   } finally {
-    readline.clearLine(process.stdout, 0)
-    readline.cursorTo(process.stdout, 0)
-    logAndProgress(getCompletionLine())
-
+    if (process.stdout.isTTY) {
+      readline.clearLine(process.stdout, 0)
+      readline.cursorTo(process.stdout, 0)
+    }
     await page.close()
   }
   return {
@@ -1916,6 +1918,8 @@ async function scrapeGallery(browser, url, modelName, folders, options = {}) {
         : null,
     coverageComplete,
     unresolvedCount,
+    handledCount: totalCount,
+    inspectedCount: categoryInspectedCount,
     unscannedCount,
   }
 }
@@ -2001,9 +2005,11 @@ async function scrapeDirectPicture(browser, mediaPageUrl, modelName, folders) {
       entry: mediaEntry,
     })
   } finally {
-    readline.clearLine(process.stdout, 0)
-    readline.cursorTo(process.stdout, 0)
-    logAndProgress(getCompletionLine())
+    if (process.stdout.isTTY) {
+      readline.clearLine(process.stdout, 0)
+      readline.cursorTo(process.stdout, 0)
+    }
+    logScrollingMessage(getCompletionLine())
     await page.close()
   }
 }
@@ -2181,17 +2187,28 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
             categoryTotal,
           }
         )
+        const handledCount = Number(categoryResult.handledCount || 0)
+        const inspectedCount = Number(categoryResult.inspectedCount || 0)
+        const emptyCompletedCategoryAdjustment =
+          categoryResult.coverageComplete &&
+          handledCount === 0 &&
+          inspectedCount === 0
+            ? Number(categoryTotal || 0)
+            : 0
         effectiveCombinedTotal = Math.max(
-          effectiveCombinedTotal - Number(categoryResult.unscannedCount || 0),
+          effectiveCombinedTotal -
+            Number(categoryResult.unscannedCount || 0) -
+            Math.max(inspectedCount - handledCount, 0) -
+            emptyCompletedCategoryAdjustment,
           completedTotal,
-          1
+          handledCount
         )
         pendingCategoryCheckpoints.push(categoryResult)
         setProgressTotal(effectiveCombinedTotal)
       }
     }
 
-    logAndProgress('🧮 Scrape complete')
+    logScrollingMessage('🧮 Scrape complete')
 
     totalLazyBytes = 0
     lazyBytesDownloaded = 0
@@ -2795,7 +2812,9 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
 
     const finalStats = runLifecycle.getRunProgressStats(currentRunLog, {
       processed: completedTotal,
-      expectedMedia: global.totalSearchTotal || 1,
+      expectedMedia: Number.isFinite(global.totalSearchTotal)
+        ? global.totalSearchTotal
+        : 1,
       saved: successCount,
       duplicates: duplicateCount,
       failures: errorCount,

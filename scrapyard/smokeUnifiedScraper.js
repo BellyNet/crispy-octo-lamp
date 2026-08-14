@@ -18,6 +18,7 @@ const {
   runScrape,
   runAllSourceModelUpdate,
   runScraperCli,
+  summarizeSourceRunSummary,
 } = require('./scraperRunner')
 const { parseSourceUrl } = require('./sourceRouter')
 const {
@@ -77,6 +78,7 @@ const {
   getPermanentLazyVideoFailure,
 } = require('../milkmaid/milkmaid')
 const runLifecycle = require('./runLifecycle')
+const { createStatusLineLogger } = require('./statusLineLogger')
 const {
   collectPawchivePreviewUpgrades,
 } = require('./reportPawchivePreviewUpgrades')
@@ -1593,6 +1595,40 @@ async function main() {
     fs.readFileSync(lifecycleLog.summaryPath, 'utf8')
   )
   assert.strictEqual(lifecycleSummary.status, 'no_new_posts')
+
+  const allSourceSummary = summarizeSourceRunSummary({
+    status: 'finished',
+    counters: {
+      saved: 0,
+      skipped: 0,
+      duplicates: 0,
+      failures: 0,
+      processed: 0,
+      expectedMedia: 0,
+    },
+    successCount: 12,
+    duplicateCount: 3,
+    errorCount: 2,
+    mediaCount: 17,
+    transfer: {},
+  })
+  assert.strictEqual(allSourceSummary.saved, 0)
+  assert.strictEqual(allSourceSummary.duplicates, 0)
+  assert.strictEqual(allSourceSummary.errors, 0)
+  assert.strictEqual(allSourceSummary.expectedMedia, 0)
+
+  const capturedStatusLines = []
+  const statusLogger = createStatusLineLogger({
+    log: (line) => capturedStatusLines.push(line),
+  })
+  statusLogger.status('same progress')
+  statusLogger.status('same progress')
+  statusLogger.statusDone('same progress')
+  statusLogger.status('next progress')
+  assert.deepStrictEqual(capturedStatusLines, [
+    'same progress',
+    'next progress',
+  ])
 
   const redditOptions = buildScraperOptions(reddit, {
     model: 'abigailgray256',
