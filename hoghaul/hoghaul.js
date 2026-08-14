@@ -1233,7 +1233,6 @@ async function fetchPosts(source, options, deps = {}) {
     return fetchRedditAdapterPosts(source, options, {
       fetchHtml,
       fetchJson,
-      fetchHtml,
       fetchPostHtml: deps.fetchPostHtml,
       fallbackDelayMs: deps.fallbackDelayMs,
       redditFullRefresh: deps.redditFullRefresh,
@@ -1246,6 +1245,7 @@ async function fetchPosts(source, options, deps = {}) {
       normalizeUrl: normalizeSeenUrl,
       pageSize: REDDIT_PAGE_SIZE,
       redgifsClient,
+      suppressIncrementalLog: true,
     })
   }
 
@@ -1828,7 +1828,7 @@ async function run(argvInput = process.argv.slice(2)) {
   const folders = createModelFolders(modelName)
   let redditStateContext = null
   let sourceFrontier = null
-  if (!preflight && !dryRun) {
+  if (!preflight) {
     startRunLog(modelName, inputUrl, folders, keepHistory)
     appendRunEvent('source_discovery_started', {
       modelName,
@@ -2051,6 +2051,36 @@ async function run(argvInput = process.argv.slice(2)) {
     console.log(
       `Dry run only. Newest post: ${newest ? newest.toISOString() : 'unknown'}`
     )
+    const runStats = runLifecycle.getRunProgressStats(currentRunLog, {
+      processed: 0,
+      expectedMedia: selectedMedia.length,
+      saved: 0,
+      duplicates: 0,
+      failures: 0,
+    })
+    appendRunEvent('run_finished', {
+      successCount: 0,
+      duplicateCount: 0,
+      errorCount: 0,
+      queuedVideoCount: 0,
+      savedBytes: 0,
+      postCount: selectedPosts.length,
+      mediaCount: selectedMedia.length,
+      sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
+      counters: currentRunLog?.counters || {},
+      transfer: currentRunLog?.transfer || {},
+    })
+    finalizeRunLog({
+      successCount: 0,
+      duplicateCount: 0,
+      errorCount: 0,
+      queuedVideoCount: 0,
+      savedBytes: 0,
+      postCount: selectedPosts.length,
+      mediaCount: selectedMedia.length,
+      sourceDuplicateMediaCount: selectedMediaSourceDuplicateCount,
+    })
+    logScrollingMessage(runLifecycle.formatRunSummaryLine(runStats))
     return 0
   }
 
