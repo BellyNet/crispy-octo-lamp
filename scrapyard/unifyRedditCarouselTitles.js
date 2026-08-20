@@ -205,35 +205,96 @@ function pickBestTitle(group) {
   return pool[0].title
 }
 
+// When a carousel contains at least one bona-fide reddit entry, treat
+// reddit as the canonical post source and rewrite the non-reddit
+// siblings' identity fields to point at it. Non-reddit entries kept
+// their original download URL (source.mediaUrl) — that's still where
+// the bytes actually came from — but the dashboard's site badge and
+// "Source" link work off site/mediaPageUrl and are what the user
+// wants driven by reddit when reddit is one of the hosts.
+//
+// Returns the fields to copy, or null if no reddit anchor exists in
+// the group (e.g. the group was matched purely by a repeated filename
+// token with no reddit sibling present).
+function findRedditAnchor(group) {
+  for (const { entry } of group) {
+    const s = entry?.source
+    if (!s) continue
+    if (s.site !== 'reddit') continue
+    if (typeof s.mediaPageUrl !== 'string') continue
+    if (!/reddit\.com/.test(s.mediaPageUrl)) continue
+    return {
+      site: 'reddit',
+      postId: typeof s.postId === 'string' ? s.postId : null,
+      subreddit: typeof s.subreddit === 'string' ? s.subreddit : null,
+      mediaPageUrl: s.mediaPageUrl,
+    }
+  }
+  return null
+}
+
 function processUser(userDir) {
   const sc = loadSidecar(userDir)
   if (!sc) return null
   const groups = groupByRedditCarousel(sc.data)
-  const changed = [] // { postId, files, sites, oldTitles, newTitle }
+  const titleChanges = [] // { postId, files, sites, oldTitles, newTitle }
+  const promoted = [] // { postId, files, fromSites, toUrl }
   for (const [postId, group] of groups) {
     if (group.length < 2) continue
+
+    // Pass 1: title unification.
     const best = pickBestTitle(group)
-    if (!best) continue
-    const distinct = new Set(
-      group.map(({ entry }) => (entry.source.title || '').trim())
-    )
-    if (distinct.size <= 1 && distinct.has(best)) continue
-    const sites = [
-      ...new Set(group.map(({ entry }) => entry.source.site || '?')),
-    ]
-    changed.push({
-      postId,
-      files: group.length,
-      sites,
-      oldTitles: [...distinct],
-      newTitle: best,
-    })
-    for (const { entry } of group) {
-      entry.source.title = best
+    let titlePassRan = false
+    if (best) {
+      const distinct = new Set(
+        group.map(({ entry }) => (entry.source.title || '').trim())
+      )
+      if (!(distinct.size <= 1 && distinct.has(best))) {
+        const sites = [
+          ...new Set(group.map(({ entry }) => entry.source.site || '?')),
+        ]
+        titleChanges.push({
+          postId,
+          files: group.length,
+          sites,
+          oldTitles: [...distinct],
+          newTitle: best,
+        })
+        for (const { entry } of group) entry.source.title = best
+        titlePassRan = true
+      }
     }
+
+    // Pass 2: reddit source promotion. Only when the title pass agreed
+    // this group is a real carousel (best !== null) — that already
+    // enforces the "one distinct real title" guardrail, so the group
+    // isn't a token-collision false positive.
+    if (!best) continue
+    const anchor = findRedditAnchor(group)
+    if (!anchor) continue
+    const targets = group.filter(({ entry }) => entry.source.site !== 'reddit')
+    if (!targets.length) continue
+    const fromSites = [
+      ...new Set(targets.map(({ entry }) => entry.source.site || '?')),
+    ]
+    promoted.push({
+      postId,
+      files: targets.length,
+      fromSites,
+      toUrl: anchor.mediaPageUrl,
+    })
+    for (const { entry } of targets) {
+      entry.source.site = anchor.site
+      if (anchor.postId) entry.source.postId = anchor.postId
+      if (anchor.subreddit) entry.source.subreddit = anchor.subreddit
+      entry.source.mediaPageUrl = anchor.mediaPageUrl
+    }
+    void titlePassRan // silence lint if unused
   }
-  if (changed.length && APPLY) writeAtomic(sc.path, sc.data)
-  return { changed, sidecarPath: sc.path }
+  if ((titleChanges.length || promoted.length) && APPLY) {
+    writeAtomic(sc.path, sc.data)
+  }
+  return { titleChanges, promoted, sidecarPath: sc.path }
 }
 
 function main() {
@@ -245,27 +306,45 @@ function main() {
     .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
     .filter((d) => !SCOPE_USER || d.name === SCOPE_USER)
   let touchedUsers = 0
-  let totalGroups = 0
-  let totalFiles = 0
+  let totalTitleGroups = 0
+  let totalTitleFiles = 0
+  let totalPromoteGroups = 0
+  let totalPromoteFiles = 0
   for (const d of users) {
     const r = processUser(path.join(DATASET_DIR, d.name))
-    if (!r || !r.changed.length) continue
+    if (!r || (!r.titleChanges.length && !r.promoted.length)) continue
     touchedUsers++
-    totalGroups += r.changed.length
-    for (const c of r.changed) totalFiles += c.files
-    console.log(
-      `\n  ${d.name}  (${r.changed.length} carousel${r.changed.length === 1 ? '' : 's'})`
-    )
-    for (const c of r.changed.slice(0, 5)) {
+    totalTitleGroups += r.titleChanges.length
+    for (const c of r.titleChanges) totalTitleFiles += c.files
+    totalPromoteGroups += r.promoted.length
+    for (const p of r.promoted) totalPromoteFiles += p.files
+    const parts = []
+    if (r.titleChanges.length)
+      parts.push(`${r.titleChanges.length} title carousel(s)`)
+    if (r.promoted.length)
+      parts.push(`${r.promoted.length} reddit-promoted group(s)`)
+    console.log(`\n  ${d.name}  (${parts.join(', ')})`)
+    for (const c of r.titleChanges.slice(0, 3)) {
       const sites = c.sites.length > 1 ? ` [${c.sites.join('+')}]` : ''
       console.log(
-        `    ${c.postId}  ×${c.files}${sites}  → "${c.newTitle}"  (was: ${c.oldTitles.map((t) => JSON.stringify(t)).join(', ')})`
+        `    title  ${c.postId}  ×${c.files}${sites}  → "${c.newTitle}"`
       )
     }
-    if (r.changed.length > 5) console.log(`    …+${r.changed.length - 5} more`)
+    if (r.titleChanges.length > 3)
+      console.log(`    …+${r.titleChanges.length - 3} more title changes`)
+    for (const p of r.promoted.slice(0, 3)) {
+      console.log(
+        `    promote ${p.postId}  ×${p.files} [${p.fromSites.join('+')}→reddit]  ${p.toUrl}`
+      )
+    }
+    if (r.promoted.length > 3)
+      console.log(`    …+${r.promoted.length - 3} more promotions`)
   }
+  const verb = APPLY ? 'updated' : 'would update'
   console.log(
-    `\n${touchedUsers} user(s), ${totalGroups} carousel(s), ${totalFiles} file(s) ${APPLY ? 'updated' : 'would update'}`
+    `\n${touchedUsers} user(s):` +
+      `\n  titles:    ${totalTitleGroups} carousel(s), ${totalTitleFiles} file(s) ${verb}` +
+      `\n  promoted:  ${totalPromoteGroups} group(s), ${totalPromoteFiles} file(s) ${verb}`
   )
   if (!APPLY) console.log('(dry-run — re-run with --apply to write)')
 }
