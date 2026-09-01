@@ -1161,6 +1161,13 @@ app.get('/api/recent-media', (req, res) => {
   })
 })
 
+// All-runs overview for the admin page — lightweight per-run summaries
+// (no item lists) so it stays cheap to send even with 100+ runs indexed.
+app.get('/api/runs', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache')
+  res.json(runIndexStore.getRunSummaries())
+})
+
 app.post('/api/rebuild-run-index', async (_req, res) => {
   try {
     const result = await refreshRunIndex()

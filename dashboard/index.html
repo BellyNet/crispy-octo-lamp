@@ -1209,19 +1209,60 @@
         max-height: 6.5em;
         overflow-y: auto;
       }
-      /* Comments block — sits below the caption. Each row is a compact
-         author/text pair; the whole block scrolls independently when there
-         are more than a few. Kept dim compared to the headline so the eye
-         still lands on the post title first. */
+      .pswp-info-caption-block::-webkit-scrollbar {
+        width: 6px;
+      }
+      .pswp-info-caption-block::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .pswp-info-caption-block::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 3px;
+      }
+      /* Comments are hidden by default (this pill is what shows in the
+         info panel) — clicking it opens #pswp-comments-panel, a sidebar on
+         desktop / bottom sheet on mobile. Keeps the always-visible info
+         panel compact and stops a long comment thread from eating the
+         space the title/caption need. */
+      .pswp-info-comment-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        align-self: flex-start;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: rgba(220, 220, 230, 0.85);
+        border-radius: 12px;
+        padding: 3px 10px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .pswp-info-comment-toggle:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      /* Comments list — reused inside the panel below. Each row is a
+         compact author/text pair. */
       .pswp-info-comments {
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        max-height: 8em;
+        gap: 10px;
+        flex: 1;
         overflow-y: auto;
-        font-size: 12px;
-        line-height: 1.4;
+        font-size: 13px;
+        line-height: 1.45;
         color: rgba(220, 220, 230, 0.85);
+        padding: 14px 16px;
+      }
+      .pswp-info-comments::-webkit-scrollbar {
+        width: 6px;
+      }
+      .pswp-info-comments::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .pswp-info-comments::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 3px;
       }
       .pswp-info-comment {
         display: block;
@@ -1237,7 +1278,75 @@
         letter-spacing: 0.04em;
         text-transform: uppercase;
         color: var(--muted);
-        margin-bottom: 2px;
+      }
+
+      /* ─── Comments panel — sidebar (desktop) / bottom sheet (mobile) ─── */
+      #pswp-comments-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 100001;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      #pswp-comments-backdrop.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #pswp-comments-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        height: 100%;
+        width: min(380px, 100vw);
+        background: #15151c;
+        border-left: 1px solid var(--border);
+        z-index: 100002;
+        display: flex;
+        flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.25s ease;
+      }
+      #pswp-comments-panel.open {
+        transform: translateX(0);
+      }
+      #pswp-comments-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      #pswp-comments-panel-close {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 20px;
+        line-height: 1;
+        padding: 2px 6px;
+      }
+      #pswp-comments-panel-close:hover {
+        color: var(--text);
+      }
+      @media (max-width: 640px) {
+        #pswp-comments-panel {
+          top: auto;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 70vh;
+          width: 100%;
+          border-left: none;
+          border-top: 1px solid var(--border);
+          border-radius: 14px 14px 0 0;
+          transform: translateY(100%);
+        }
+        #pswp-comments-panel.open {
+          transform: translateY(0);
+        }
       }
       .pswp-info-post-meta {
         font-size: 11px;
@@ -3992,6 +4101,98 @@
 
           let infoPanelEl = null
 
+          // Comments panel — hidden by default (a small pill in the info
+          // panel opens it). Sidebar on desktop, bottom sheet on mobile
+          // (CSS media query on #pswp-comments-panel handles the layout
+          // swap). Lives as a direct child of <body>, outside .pswp
+          // entirely, so it isn't subject to PhotoSwipe's own event
+          // handling — it manages its own open/close state and is torn
+          // down on 'destroy' so opens don't accumulate orphaned panels.
+          const commentsBackdropEl = document.createElement('div')
+          commentsBackdropEl.id = 'pswp-comments-backdrop'
+          const commentsPanelEl = document.createElement('div')
+          commentsPanelEl.id = 'pswp-comments-panel'
+          const commentsPanelHeaderEl = document.createElement('div')
+          commentsPanelHeaderEl.id = 'pswp-comments-panel-header'
+          const commentsPanelTitleEl = document.createElement('span')
+          commentsPanelTitleEl.className = 'pswp-info-comment-count'
+          const commentsPanelCloseEl = document.createElement('button')
+          commentsPanelCloseEl.id = 'pswp-comments-panel-close'
+          commentsPanelCloseEl.type = 'button'
+          commentsPanelCloseEl.setAttribute('aria-label', 'Close comments')
+          commentsPanelCloseEl.textContent = '×'
+          commentsPanelHeaderEl.append(commentsPanelTitleEl, commentsPanelCloseEl)
+          const commentsListEl = document.createElement('div')
+          commentsListEl.className = 'pswp-info-comments'
+          commentsPanelEl.append(commentsPanelHeaderEl, commentsListEl)
+          document.body.append(commentsBackdropEl, commentsPanelEl)
+
+          // Wheel/click inside the panel must never reach PhotoSwipe's
+          // wheelToZoom handler or its background-click-closes behavior —
+          // same fix as infoPanelEl below, just applied here too since this
+          // panel lives outside .pswp and wouldn't otherwise inherit it.
+          commentsPanelEl.addEventListener('wheel', (e) => e.stopPropagation())
+          commentsPanelEl.addEventListener('click', (e) => e.stopPropagation())
+
+          let commentsOpen = false
+          function closeCommentsPanel() {
+            commentsOpen = false
+            commentsPanelEl.classList.remove('open')
+            commentsBackdropEl.classList.remove('open')
+          }
+          function renderCommentsPanel(item) {
+            const comments = Array.isArray(item?.post?.comments) ? item.post.comments : []
+            const total =
+              typeof item?.post?.commentCount === 'number' &&
+              item.post.commentCount > comments.length
+                ? item.post.commentCount
+                : null
+            commentsPanelTitleEl.textContent = !comments.length
+              ? 'Comments'
+              : total
+                ? `Top ${comments.length} of ${total} comments`
+                : `${comments.length} comment${comments.length === 1 ? '' : 's'}`
+            commentsListEl.innerHTML = ''
+            if (!comments.length) {
+              const empty = document.createElement('div')
+              empty.className = 'empty'
+              empty.textContent = 'No comments for this image.'
+              commentsListEl.appendChild(empty)
+              return
+            }
+            for (const c of comments) {
+              const row = document.createElement('div')
+              row.className = 'pswp-info-comment'
+              if (c.author) {
+                const a = document.createElement('span')
+                a.className = 'pswp-info-comment-author'
+                a.textContent = c.author
+                row.appendChild(a)
+              }
+              const t = document.createElement('span')
+              t.textContent = c.text || ''
+              row.appendChild(t)
+              commentsListEl.appendChild(row)
+            }
+          }
+          function openCommentsPanel() {
+            commentsOpen = true
+            renderCommentsPanel(filtered[pswp.currIndex])
+            commentsPanelEl.classList.add('open')
+            commentsBackdropEl.classList.add('open')
+          }
+          commentsBackdropEl.addEventListener('click', closeCommentsPanel)
+          commentsPanelCloseEl.addEventListener('click', closeCommentsPanel)
+          pswp.on('destroy', () => {
+            commentsBackdropEl.remove()
+            commentsPanelEl.remove()
+          })
+          // Swiping to a new slide while the panel is open keeps it open,
+          // refreshed to match — closing it here would be jarring mid-browse.
+          pswp.on('change', () => {
+            if (commentsOpen) renderCommentsPanel(filtered[pswp.currIndex])
+          })
+
           // Caption fetch cache for this lightbox instance — keyed by item URL.
           // Avoids re-fetching when the user swipes back and forth.
           const _captionCache = new Map()
@@ -4140,6 +4341,12 @@
               appendTo: 'root',
               onInit(el) {
                 infoPanelEl = el
+                // Without this, wheel events over the scrollable caption
+                // block (or anywhere else in the panel) bubble up to
+                // PhotoSwipe's wheelToZoom handler instead of scrolling —
+                // the panel sits inside .pswp, so it inherits that
+                // behavior unless explicitly stopped here.
+                el.addEventListener('wheel', (e) => e.stopPropagation())
                 const update = () => {
                   const item = filtered[pswp.currIndex]
                   if (!item) return
@@ -4230,45 +4437,27 @@
                     })
                   }
 
-                  // 3. Post comments — the top few, pulled straight from
-                  //    the sidecar. Author is chipped in accent color;
-                  //    text runs inline after it. Block scrolls when
-                  //    long. Header shows "N of TOTAL comments" when
-                  //    the scraper truncated the list.
+                  // 3. Comments toggle — hidden by default (see the
+                  //    #pswp-comments-panel setup above); this is just a
+                  //    small pill that opens it. Keeps the always-visible
+                  //    info panel compact regardless of thread length.
                   const comments = Array.isArray(item.post?.comments)
                     ? item.post.comments
                     : []
                   if (comments.length) {
-                    const total =
-                      typeof item.post.commentCount === 'number' &&
-                      item.post.commentCount > comments.length
-                        ? item.post.commentCount
-                        : null
-                    const header = document.createElement('div')
-                    header.className = 'pswp-info-comment-count'
-                    header.textContent = total
-                      ? `Top ${comments.length} of ${total} comments`
-                      : `${comments.length} comment${comments.length === 1 ? '' : 's'}`
-                    el.appendChild(header)
-
-                    const cbox = document.createElement('div')
-                    cbox.className = 'pswp-info-comments'
-                    for (const c of comments) {
-                      const row = document.createElement('div')
-                      row.className = 'pswp-info-comment'
-                      if (c.author) {
-                        const a = document.createElement('span')
-                        a.className = 'pswp-info-comment-author'
-                        a.textContent = c.author
-                        row.appendChild(a)
-                      }
-                      const t = document.createElement('span')
-                      t.textContent = c.text || ''
-                      row.appendChild(t)
-                      cbox.appendChild(row)
-                    }
-                    el.appendChild(cbox)
+                    const toggle = document.createElement('button')
+                    toggle.type = 'button'
+                    toggle.className = 'pswp-info-comment-toggle'
+                    toggle.textContent = `💬 ${comments.length} comment${comments.length === 1 ? '' : 's'}`
+                    toggle.addEventListener('click', (e) => {
+                      e.stopPropagation()
+                      openCommentsPanel()
+                    })
+                    el.appendChild(toggle)
                   }
+                  // (If the panel's open and this slide has no comments,
+                  // the pswp.on('change', ...) listener above already
+                  // refreshes it to the empty state — no extra call needed.)
 
                   // 4. Meta row — media date, added date, file size, and
                   //    the FLAGGED chip when set. Sparse by design; the

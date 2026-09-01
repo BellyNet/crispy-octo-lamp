@@ -194,6 +194,32 @@
         opacity: 0.35;
         cursor: default;
       }
+      #all-runs-toggle.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      #all-runs-panel {
+        max-height: 280px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 14px;
+      }
+      #all-runs-panel table {
+        margin: 0;
+      }
+      #all-runs-panel thead th {
+        position: sticky;
+        top: 0;
+        background: var(--bg);
+      }
+      #all-runs-body tr {
+        cursor: pointer;
+      }
+      #all-runs-body tr.current td {
+        background: rgba(124, 108, 252, 0.1);
+        color: var(--accent);
+      }
       .size-toggle {
         display: flex;
         gap: 4px;
@@ -299,6 +325,7 @@
             <span id="run-label">Run 1</span>
             <button id="run-older" type="button">Older &rarr;</button>
             <button id="run-rebuild" type="button" title="Rebuild the run index now instead of waiting for the next nightly pass">&#8635; Rebuild</button>
+            <button id="all-runs-toggle" type="button">All runs&hellip;</button>
           </div>
           <div class="size-toggle" id="size-toggle">
             <button data-size="s" type="button">S</button>
@@ -307,6 +334,20 @@
           </div>
         </div>
         <div class="status-line" id="run-range"></div>
+
+        <div id="all-runs-panel" style="display: none">
+          <table>
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="startedAt">Date <span class="arrow"></span></th>
+                <th class="sortable" data-sort="fileCount">Files <span class="arrow"></span></th>
+                <th class="sortable" data-sort="modelCount">Models <span class="arrow"></span></th>
+                <th class="sortable" data-sort="totalBytes">Size <span class="arrow"></span></th>
+              </tr>
+            </thead>
+            <tbody id="all-runs-body"></tbody>
+          </table>
+        </div>
 
         <div id="media-grid"></div>
       </details>
@@ -565,15 +606,91 @@
           runOlderBtn.disabled = d.runIndex >= (d.runsAvailable || 1) - 1
           runRangeEl.innerHTML = d.startedAt
             ? `<span>${fmtDateTime(Date.parse(d.startedAt))} – ${fmtDateTime(Date.parse(d.endedAt))} &middot; ${d.items.length} file${d.items.length === 1 ? '' : 's'}</span>`
-            : `<span class="empty">No runs in the last 45 days.</span>`
+            : `<span class="empty">No runs indexed yet.</span>`
 
           renderMediaGrid(d.items)
           renderModelsTable(d.items)
+          highlightCurrentRunRow()
         } catch {}
       }
 
       runNewerBtn.addEventListener('click', () => loadRun(Math.max(currentRunIndex - 1, 0)))
       runOlderBtn.addEventListener('click', () => loadRun(currentRunIndex + 1))
+
+      // ─── All-runs overview (sortable, click a row to load it) ───────────
+      const allRunsToggleBtn = document.getElementById('all-runs-toggle')
+      const allRunsPanelEl = document.getElementById('all-runs-panel')
+      let allRunsData = null // fetched lazily on first open
+      let allRunsSort = { field: 'startedAt', dir: 'desc' }
+
+      function highlightCurrentRunRow() {
+        document.querySelectorAll('#all-runs-body tr').forEach((tr) => {
+          tr.classList.toggle('current', Number(tr.dataset.runIndex) === currentRunIndex)
+        })
+      }
+
+      function renderAllRunsTable() {
+        const { field, dir } = allRunsSort
+        const rows = [...(allRunsData || [])].sort((a, b) => {
+          const av = field === 'startedAt' ? Date.parse(a.startedAt) : a[field]
+          const bv = field === 'startedAt' ? Date.parse(b.startedAt) : b[field]
+          const cmp = av - bv
+          return dir === 'asc' ? cmp : -cmp
+        })
+
+        document.querySelectorAll('#all-runs-panel th.sortable').forEach((th) => {
+          const arrow = th.querySelector('.arrow')
+          arrow.textContent = th.dataset.sort === field ? (dir === 'asc' ? '▲' : '▼') : ''
+        })
+
+        const body = document.getElementById('all-runs-body')
+        body.innerHTML = rows
+          .map(
+            (r) => `
+              <tr data-run-index="${r.runIndex}">
+                <td>${fmtDateTime(Date.parse(r.startedAt))}</td>
+                <td>${r.fileCount.toLocaleString()}</td>
+                <td>${r.modelCount.toLocaleString()}</td>
+                <td>${fmtFileSize(r.totalBytes)}</td>
+              </tr>
+            `
+          )
+          .join('')
+        body.querySelectorAll('tr').forEach((tr) => {
+          tr.addEventListener('click', () => loadRun(Number(tr.dataset.runIndex)))
+        })
+        highlightCurrentRunRow()
+      }
+
+      document.querySelectorAll('#all-runs-panel th.sortable').forEach((th) => {
+        th.addEventListener('click', () => {
+          const field = th.dataset.sort
+          if (allRunsSort.field === field) {
+            allRunsSort.dir = allRunsSort.dir === 'asc' ? 'desc' : 'asc'
+          } else {
+            allRunsSort = { field, dir: 'desc' }
+          }
+          renderAllRunsTable()
+        })
+      })
+
+      allRunsToggleBtn.addEventListener('click', async () => {
+        const opening = allRunsPanelEl.style.display === 'none'
+        allRunsPanelEl.style.display = opening ? 'block' : 'none'
+        allRunsToggleBtn.classList.toggle('active', opening)
+        if (opening && !allRunsData) {
+          allRunsToggleBtn.textContent = 'Loading…'
+          try {
+            const r = await fetch('/api/runs')
+            allRunsData = await r.json()
+          } catch {
+            allRunsData = []
+          }
+          allRunsToggleBtn.textContent = 'All runs…'
+          allRunsToggleBtn.classList.toggle('active', opening)
+        }
+        if (opening) renderAllRunsTable()
+      })
 
       const runRebuildBtn = document.getElementById('run-rebuild')
       runRebuildBtn.addEventListener('click', async () => {
@@ -582,6 +699,12 @@
         runRebuildBtn.textContent = 'Rebuilding…'
         try {
           await fetch('/api/rebuild-run-index', { method: 'POST' })
+          allRunsData = null // stale — refetch next time the panel opens
+          if (allRunsPanelEl.style.display !== 'none') {
+            const r = await fetch('/api/runs')
+            allRunsData = await r.json()
+            renderAllRunsTable()
+          }
           await loadRun(0)
         } finally {
           runRebuildBtn.disabled = false

@@ -107,6 +107,28 @@ class RunIndex {
   runsAvailable() {
     return this.runs.length
   }
+
+  // Lightweight per-run stats for the admin "all runs" overview table —
+  // deliberately excludes each run's full item list (that's what getRun()
+  // is for) so this stays cheap to send even with 100+ runs.
+  getRunSummaries() {
+    return this.runs.map((run, runIndex) => {
+      const models = new Set()
+      let totalBytes = 0
+      for (const item of run.items) {
+        models.add(item.username)
+        totalBytes += item.size || 0
+      }
+      return {
+        runIndex,
+        startedAt: run.startedAt,
+        endedAt: run.endedAt,
+        fileCount: run.items.length,
+        modelCount: models.size,
+        totalBytes,
+      }
+    })
+  }
 }
 
 function itemKey(item) {
