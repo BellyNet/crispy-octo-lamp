@@ -298,6 +298,7 @@
             <button id="run-newer" type="button">&larr; Newer</button>
             <span id="run-label">Run 1</span>
             <button id="run-older" type="button">Older &rarr;</button>
+            <button id="run-rebuild" type="button" title="Rebuild the run index now instead of waiting for the next nightly pass">&#8635; Rebuild</button>
           </div>
           <div class="size-toggle" id="size-toggle">
             <button data-size="s" type="button">S</button>
@@ -573,6 +574,20 @@
 
       runNewerBtn.addEventListener('click', () => loadRun(Math.max(currentRunIndex - 1, 0)))
       runOlderBtn.addEventListener('click', () => loadRun(currentRunIndex + 1))
+
+      const runRebuildBtn = document.getElementById('run-rebuild')
+      runRebuildBtn.addEventListener('click', async () => {
+        runRebuildBtn.disabled = true
+        const original = runRebuildBtn.textContent
+        runRebuildBtn.textContent = 'Rebuilding…'
+        try {
+          await fetch('/api/rebuild-run-index', { method: 'POST' })
+          await loadRun(0)
+        } finally {
+          runRebuildBtn.disabled = false
+          runRebuildBtn.textContent = original
+        }
+      })
 
       async function loadEmbeddings() {
         try {

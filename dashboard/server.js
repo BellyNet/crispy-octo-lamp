@@ -19,6 +19,7 @@ const MetaCache = require('./meta-cache.js')
 const VisitTracker = require('./visits.js')
 const { buildDiscoverPayload } = require('./discover.js')
 const NightlyHistory = require('./nightlyHistory.js')
+const RunIndex = require('./runIndex.js')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 
@@ -55,6 +56,7 @@ fs.mkdirSync(THUMB_DIR, { recursive: true })
 const metaCache = new MetaCache(THUMB_DIR)
 const visits = new VisitTracker(THUMB_DIR)
 const nightlyHistory = new NightlyHistory(THUMB_DIR)
+const runIndexStore = new RunIndex(THUMB_DIR)
 
 const RESPONSE_CACHE_DIR = path.join(THUMB_DIR, 'response-cache')
 fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
@@ -1105,80 +1107,64 @@ app.get('/api/discover', async (_req, res) => {
 })
 
 // Admin page — media added across every model, grouped into scrape "runs".
-// Reuses scanModel()'s existing cache (in-memory LRU → disk → walk), just
-// fanned out across every model and merged, so this is cheap after the
-// first hit. addedMs is disk birthtime/mtime (server.js processFileForResponse),
-// i.e. when the file actually landed locally — not any EXIF/post date.
+// Backed by runIndexStore (dashboard/runIndex.js), a persisted THUMB_DIR
+// index — this route is a pure read, no per-request scanning. The index
+// itself is refreshed by refreshRunIndex() (below), called at startup, at
+// the end of every nightly pass, and on demand via /api/rebuild-run-index.
 //
-// "Run" isn't tracked anywhere at scrape time — it's derived here from the
-// addedMs timestamps themselves. Real data check (500 items, 2026-09-01):
-// gaps of 10-80 min WITHIN a scrape session vs. 1,500-11,000+ min (1-8
-// days) BETWEEN sessions — a clean bimodal split, so a fixed gap threshold
-// reliably separates runs without needing any new instrumentation.
-const RECENT_MEDIA_WINDOW_MS = 45 * 24 * 60 * 60 * 1000 // 45 days
-const RUN_GAP_MS = 3 * 60 * 60 * 1000 // 3 hours
+// "Run" isn't tracked anywhere at scrape time — it's derived from addedMs
+// timestamps. Real data check (500 items, 2026-09-01): gaps of 10-80 min
+// WITHIN a scrape session vs. 1,500-11,000+ min (1-8 days) BETWEEN
+// sessions — a clean bimodal split, so a fixed gap threshold reliably
+// separates runs without needing any new instrumentation.
+async function refreshRunIndex() {
+  const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+  const usernames = entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .map((e) => e.name)
 
-app.get('/api/recent-media', async (req, res) => {
-  try {
-    const runIndex = Math.max(parseInt(req.query.run, 10) || 0, 0)
-    const entries = await fs.promises.readdir(datasetDir, {
-      withFileTypes: true,
-    })
-    const usernames = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => e.name)
-
-    const cutoff = Date.now() - RECENT_MEDIA_WINDOW_MS
-    const perModel = await Promise.all(
-      usernames.map((username) =>
-        modelLimit(async () => {
-          try {
-            const { response } = await scanModel(username)
-            return response
-              .filter((item) => (item.addedMs || 0) >= cutoff)
-              .map((item) => ({ ...item, username }))
-          } catch {
-            return []
-          }
-        })
-      )
+  const perModel = await Promise.all(
+    usernames.map((username) =>
+      modelLimit(async () => {
+        try {
+          const { response } = await scanModel(username)
+          return response.map((item) => ({
+            username,
+            folder: item.folder,
+            filename: item.filename,
+            type: item.type,
+            addedMs: item.addedMs,
+            size: item.size,
+            url: item.url,
+            thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+          }))
+        } catch {
+          return []
+        }
+      })
     )
+  )
 
-    const all = perModel.flat().sort((a, b) => (b.addedMs || 0) - (a.addedMs || 0))
+  return runIndexStore.addItems(perModel.flat())
+}
 
-    // Walk once, newest first, starting a new bucket whenever the gap since
-    // the previous item exceeds RUN_GAP_MS.
-    const runs = []
-    let current = null
-    for (const item of all) {
-      if (!current || current.startedAt - item.addedMs > RUN_GAP_MS) {
-        current = { startedAt: item.addedMs, endedAt: item.addedMs, items: [] }
-        runs.push(current)
-      }
-      current.startedAt = Math.min(current.startedAt, item.addedMs)
-      current.items.push(item)
-    }
+app.get('/api/recent-media', (req, res) => {
+  const runIdx = Math.max(parseInt(req.query.run, 10) || 0, 0)
+  const run = runIndexStore.getRun(runIdx)
+  res.setHeader('Cache-Control', 'no-cache')
+  res.json({
+    runIndex: runIdx,
+    startedAt: run?.startedAt || null,
+    endedAt: run?.endedAt || null,
+    runsAvailable: runIndexStore.runsAvailable(),
+    items: run?.items || [],
+  })
+})
 
-    const run = runs[runIndex] || null
-    const items = (run?.items || []).map((item) => ({
-      username: item.username,
-      folder: item.folder,
-      filename: item.filename,
-      type: item.type,
-      addedMs: item.addedMs,
-      size: item.size,
-      url: item.url,
-      thumbUrl: `/thumb/${encodeURIComponent(item.username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
-    }))
-
-    res.setHeader('Cache-Control', 'no-cache')
-    res.json({
-      runIndex,
-      startedAt: run ? new Date(run.startedAt).toISOString() : null,
-      endedAt: run ? new Date(run.endedAt).toISOString() : null,
-      runsAvailable: runs.length,
-      items,
-    })
+app.post('/api/rebuild-run-index', async (_req, res) => {
+  try {
+    const result = await refreshRunIndex()
+    res.json({ ok: true, ...result })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -1891,7 +1877,7 @@ app.post('/api/run-maint', (_req, res) => {
 const nightlyState = {
   inProgress: false,
   trigger: null, // 'nightly' | 'manual' | 'startup'
-  step: null, // 'maint' | 'scan' | 'covers' | 'grid-thumbs' | 'gif-previews'
+  step: null, // 'maint' | 'scan' | 'run-index' | 'covers' | 'grid-thumbs' | 'gif-previews'
   startedAt: null,
   completedAt: null,
 }
@@ -1926,6 +1912,15 @@ async function runNightlyPass({ trigger = 'manual' } = {}) {
   } catch (err) {
     console.warn('  Nightly scan error:', err.message)
     stepErrors.push({ step: 'scan', error: err.message })
+  }
+  // Right after scan so every model's scanModel() cache is freshest —
+  // cheap regardless (only new-since-last-index files do any real work).
+  nightlyState.step = 'run-index'
+  try {
+    await refreshRunIndex()
+  } catch (err) {
+    console.warn('  Run index refresh error:', err.message)
+    stepErrors.push({ step: 'run-index', error: err.message })
   }
   nightlyState.step = 'covers'
   try {
@@ -2400,6 +2395,13 @@ async function start() {
   // mid-request when the client takes a moment to send headers.
   server.keepAliveTimeout = 65 * 1000
   server.headersTimeout = 70 * 1000
+
+  // Run-index refresh — cheap (only new-since-last-index files do real
+  // work) and independent of the thumbnail chain below, so it runs
+  // alongside it rather than blocking on covers/grid-thumbs/mobile first.
+  startupScan
+    .then(() => refreshRunIndex())
+    .catch((err) => console.warn('  Run index refresh error:', err.message))
 
   // Cover thumbs first — these block the home grid being fast. Cheap (sharp).
   // Chain off startupScan so the coverPool it populates is actually there
