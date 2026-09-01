@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard Admin</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0d0d12;
+        --card-bg: #1a1a24;
+        --border: #2a2a3a;
+        --accent: #7c6cfc;
+        --text: #e0e0f0;
+        --muted: #7070a0;
+        --ok: #4caf82;
+        --err: #e05d5d;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        padding: 24px 32px 60px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 24px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      a.back {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 13px;
+      }
+      a.back:hover {
+        color: var(--accent);
+      }
+
+      section {
+        margin-bottom: 36px;
+      }
+      h2 {
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+
+      .status-line {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .status-line b {
+        color: var(--text);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      th.sortable {
+        cursor: pointer;
+        user-select: none;
+      }
+      th.sortable:hover {
+        color: var(--text);
+      }
+      th.sortable .arrow {
+        display: inline-block;
+        width: 10px;
+        opacity: 0.6;
+      }
+      tr:hover td {
+        background: var(--card-bg);
+      }
+      a.model-link {
+        color: var(--text);
+        text-decoration: none;
+      }
+      a.model-link:hover {
+        color: var(--accent);
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .badge.ok {
+        background: rgba(76, 175, 130, 0.15);
+        color: var(--ok);
+      }
+      .badge.err {
+        background: rgba(224, 93, 93, 0.15);
+        color: var(--err);
+      }
+      .step-error {
+        display: block;
+        font-size: 11px;
+        color: var(--err);
+      }
+
+      /* ─── Collapsible section ─── */
+      details.collapsible summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        list-style: none;
+      }
+      details.collapsible summary::-webkit-details-marker {
+        display: none;
+      }
+      details.collapsible summary .chevron {
+        display: inline-block;
+        transition: transform 0.15s;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      details.collapsible[open] summary .chevron {
+        transform: rotate(90deg);
+      }
+      details.collapsible summary h2 {
+        margin-bottom: 0;
+      }
+
+      /* ─── Run pager + size controls ─── */
+      .media-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 10px 0 14px;
+      }
+      .run-pager {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .run-pager button {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 3px 9px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .run-pager button:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .run-pager button:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .size-toggle {
+        display: flex;
+        gap: 4px;
+      }
+      .size-toggle button {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 6px;
+        padding: 3px 10px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .size-toggle button.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      #media-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 8px;
+      }
+      #media-grid.size-s {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+      }
+      #media-grid.size-m {
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      }
+      #media-grid.size-l {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      }
+      .media-card {
+        display: block;
+        text-decoration: none;
+        color: var(--text);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .media-card:hover {
+        border-color: var(--accent);
+      }
+      .media-card img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        display: block;
+        background: #0a0a10;
+      }
+      .media-card .meta {
+        padding: 5px 7px;
+        font-size: 11px;
+      }
+      .media-card .meta .name {
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .media-card .meta .time {
+        color: var(--muted);
+        opacity: 0.7;
+      }
+
+      .empty {
+        color: var(--muted);
+        font-size: 13px;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Dashboard Admin</h1>
+      <a class="back" href="/">&larr; Back to dashboard</a>
+    </header>
+
+    <section id="nightly-section">
+      <h2>Nightly pass</h2>
+      <div class="status-line" id="nightly-live"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Trigger</th>
+            <th>Duration</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody id="nightly-history-body"></tbody>
+      </table>
+    </section>
+
+    <section id="recent-media-section">
+      <details class="collapsible" id="media-details">
+        <summary><span class="chevron">&#9656;</span><h2>Recently added media</h2></summary>
+
+        <div class="media-toolbar">
+          <div class="run-pager">
+            <button id="run-newer" type="button">&larr; Newer</button>
+            <span id="run-label">Run 1</span>
+            <button id="run-older" type="button">Older &rarr;</button>
+          </div>
+          <div class="size-toggle" id="size-toggle">
+            <button data-size="s" type="button">S</button>
+            <button data-size="m" type="button">M</button>
+            <button data-size="l" class="active" type="button">L</button>
+          </div>
+        </div>
+        <div class="status-line" id="run-range"></div>
+
+        <div id="media-grid"></div>
+      </details>
+    </section>
+
+    <section id="recent-models-section">
+      <h2>Recently added by model (this run)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" data-sort="name">Model <span class="arrow"></span></th>
+            <th class="sortable" data-sort="addedCount">Added <span class="arrow"></span></th>
+            <th class="sortable" data-sort="addedBytes">Size <span class="arrow"></span></th>
+            <th class="sortable" data-sort="lastAddedMs">Last added <span class="arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody id="models-body"></tbody>
+      </table>
+    </section>
+
+    <section id="embeddings-section">
+      <h2>Embeddings ("You might like")</h2>
+      <div class="status-line" id="embeddings-updated"></div>
+    </section>
+
+    <script>
+      function fmtDateTime(ms) {
+        if (!ms) return '—'
+        return new Date(ms).toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        })
+      }
+
+      function fmtTime(ms) {
+        if (!ms) return '—'
+        return new Date(ms).toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        })
+      }
+
+      function fmtDuration(ms) {
+        if (!ms || ms < 0) return '—'
+        const s = Math.round(ms / 1000)
+        if (s < 60) return `${s}s`
+        const m = Math.floor(s / 60)
+        const rem = s % 60
+        return `${m}m ${rem}s`
+      }
+
+      function fmtFileSize(bytes) {
+        if (!bytes) return '0 B'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let v = bytes,
+          u = 0
+        while (v >= 1024 && u < units.length - 1) {
+          v /= 1024
+          u++
+        }
+        return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`
+      }
+
+      async function loadNightly() {
+        try {
+          const [statusRes, historyRes] = await Promise.all([
+            fetch('/api/nightly-status'),
+            fetch('/api/nightly-history'),
+          ])
+          const status = await statusRes.json()
+          const history = await historyRes.json()
+
+          const liveEl = document.getElementById('nightly-live')
+          liveEl.innerHTML = status.inProgress
+            ? `<span><b>Running</b> — step: ${status.step || '?'}</span>`
+            : `<span>Not running. Last trigger: <b>${status.trigger || '—'}</b></span>`
+
+          const body = document.getElementById('nightly-history-body')
+          if (!history.length) {
+            body.innerHTML = `<tr><td colspan="4" class="empty">No runs recorded yet.</td></tr>`
+            return
+          }
+          body.innerHTML = history
+            .map((run) => {
+              const badge = run.ok
+                ? '<span class="badge ok">OK</span>'
+                : '<span class="badge err">ERROR</span>'
+              const errors = (run.stepErrors || [])
+                .map((e) => `<span class="step-error">${e.step}: ${e.error}</span>`)
+                .join('')
+              return `
+                <tr>
+                  <td>${fmtDateTime(Date.parse(run.startedAt))}</td>
+                  <td>${run.trigger || '—'}</td>
+                  <td>${fmtDuration(run.durationMs)}</td>
+                  <td>${badge}${errors}</td>
+                </tr>
+              `
+            })
+            .join('')
+        } catch {}
+      }
+
+      // ─── Collapsible state ───────────────────────────────────────────────
+      const mediaDetailsEl = document.getElementById('media-details')
+      try {
+        mediaDetailsEl.open = localStorage.getItem('admin-media-open') !== 'false'
+      } catch {
+        mediaDetailsEl.open = true
+      }
+      mediaDetailsEl.addEventListener('toggle', () => {
+        try {
+          localStorage.setItem('admin-media-open', String(mediaDetailsEl.open))
+        } catch {}
+      })
+
+      // ─── Size toggle ─────────────────────────────────────────────────────
+      const mediaGridEl = document.getElementById('media-grid')
+      const sizeToggleEl = document.getElementById('size-toggle')
+      let mediaSize = 'l'
+      try {
+        mediaSize = localStorage.getItem('admin-media-size') || 'l'
+      } catch {}
+      function applyMediaSize() {
+        mediaGridEl.classList.remove('size-s', 'size-m', 'size-l')
+        mediaGridEl.classList.add(`size-${mediaSize}`)
+        sizeToggleEl.querySelectorAll('button').forEach((b) => {
+          b.classList.toggle('active', b.dataset.size === mediaSize)
+        })
+      }
+      sizeToggleEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-size]')
+        if (!btn) return
+        mediaSize = btn.dataset.size
+        try {
+          localStorage.setItem('admin-media-size', mediaSize)
+        } catch {}
+        applyMediaSize()
+      })
+      applyMediaSize()
+
+      // ─── Run pager + media grid + derived models table ──────────────────
+      let currentRunIndex = 0
+      let currentRun = null // last successful /api/recent-media response
+
+      function mediaCardHref(item) {
+        const openParam =
+          encodeURIComponent(item.folder) + '/' + encodeURIComponent(item.filename)
+        return `/#/u/${encodeURIComponent(item.username)}?open=${openParam}`
+      }
+
+      function renderMediaGrid(items) {
+        if (!items.length) {
+          mediaGridEl.innerHTML = '<div class="empty">No media in this run.</div>'
+          return
+        }
+        mediaGridEl.innerHTML = items
+          .map(
+            (item) => `
+              <a class="media-card" href="${mediaCardHref(item)}" title="${item.username} / ${item.filename}">
+                <img loading="lazy" src="${item.thumbUrl}" alt="${item.filename}" />
+                <div class="meta">
+                  <div class="name">${item.username}</div>
+                  <div class="time">${fmtTime(item.addedMs)}</div>
+                </div>
+              </a>
+            `
+          )
+          .join('')
+      }
+
+      // ─── Sortable models table (derived from the current run's items) ───
+      let modelSort = { field: 'addedCount', dir: 'desc' }
+
+      function deriveModelRows(items) {
+        const byModel = new Map()
+        for (const item of items) {
+          let row = byModel.get(item.username)
+          if (!row) {
+            row = { name: item.username, addedCount: 0, addedBytes: 0, lastAddedMs: 0 }
+            byModel.set(item.username, row)
+          }
+          row.addedCount++
+          row.addedBytes += item.size || 0
+          if (item.addedMs > row.lastAddedMs) row.lastAddedMs = item.addedMs
+        }
+        return [...byModel.values()]
+      }
+
+      function renderModelsTable(items) {
+        const rows = deriveModelRows(items)
+        const { field, dir } = modelSort
+        rows.sort((a, b) => {
+          const av = a[field],
+            bv = b[field]
+          const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv
+          return dir === 'asc' ? cmp : -cmp
+        })
+
+        document.querySelectorAll('#recent-models-section th.sortable').forEach((th) => {
+          const arrow = th.querySelector('.arrow')
+          arrow.textContent = th.dataset.sort === field ? (dir === 'asc' ? '▲' : '▼') : ''
+        })
+
+        const body = document.getElementById('models-body')
+        if (!rows.length) {
+          body.innerHTML = `<tr><td colspan="4" class="empty">No models in this run.</td></tr>`
+          return
+        }
+        const since = currentRun ? Date.parse(currentRun.startedAt) : 0
+        const until = currentRun ? Date.parse(currentRun.endedAt) : 0
+        body.innerHTML = rows
+          .map(
+            (r) => `
+              <tr>
+                <td><a class="model-link" href="/#/u/${encodeURIComponent(r.name)}?since=${since}&until=${until}">${r.name}</a></td>
+                <td>${r.addedCount.toLocaleString()}</td>
+                <td>${fmtFileSize(r.addedBytes)}</td>
+                <td>${fmtDateTime(r.lastAddedMs)}</td>
+              </tr>
+            `
+          )
+          .join('')
+      }
+
+      document.querySelectorAll('#recent-models-section th.sortable').forEach((th) => {
+        th.addEventListener('click', () => {
+          const field = th.dataset.sort
+          if (modelSort.field === field) {
+            modelSort.dir = modelSort.dir === 'asc' ? 'desc' : 'asc'
+          } else {
+            modelSort = { field, dir: field === 'name' ? 'asc' : 'desc' }
+          }
+          if (currentRun) renderModelsTable(currentRun.items)
+        })
+      })
+
+      const runNewerBtn = document.getElementById('run-newer')
+      const runOlderBtn = document.getElementById('run-older')
+      const runLabelEl = document.getElementById('run-label')
+      const runRangeEl = document.getElementById('run-range')
+
+      async function loadRun(runIndex) {
+        try {
+          const r = await fetch(`/api/recent-media?run=${runIndex}`)
+          const d = await r.json()
+          currentRunIndex = d.runIndex
+          currentRun = d
+
+          runLabelEl.textContent = `Run ${d.runIndex + 1} of ${d.runsAvailable || 1}`
+          runNewerBtn.disabled = d.runIndex <= 0
+          runOlderBtn.disabled = d.runIndex >= (d.runsAvailable || 1) - 1
+          runRangeEl.innerHTML = d.startedAt
+            ? `<span>${fmtDateTime(Date.parse(d.startedAt))} – ${fmtDateTime(Date.parse(d.endedAt))} &middot; ${d.items.length} file${d.items.length === 1 ? '' : 's'}</span>`
+            : `<span class="empty">No runs in the last 45 days.</span>`
+
+          renderMediaGrid(d.items)
+          renderModelsTable(d.items)
+        } catch {}
+      }
+
+      runNewerBtn.addEventListener('click', () => loadRun(Math.max(currentRunIndex - 1, 0)))
+      runOlderBtn.addEventListener('click', () => loadRun(currentRunIndex + 1))
+
+      async function loadEmbeddings() {
+        try {
+          const r = await fetch('/api/discover')
+          const d = await r.json()
+          const updatedEl = document.getElementById('embeddings-updated')
+          updatedEl.innerHTML = d.meta?.embeddingsUpdatedAt
+            ? `<span>Last updated: <b>${fmtDateTime(Date.parse(d.meta.embeddingsUpdatedAt))}</b></span>`
+            : `<span class="empty">No embeddings computed yet.</span>`
+        } catch {}
+      }
+
+      loadNightly()
+      loadRun(0)
+      loadEmbeddings()
+    </script>
+  </body>
+</html>

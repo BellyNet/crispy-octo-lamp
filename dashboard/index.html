@@ -1154,6 +1154,51 @@
         border-bottom-color: var(--accent);
         color: var(--accent);
       }
+      /* Sibling-image indicator for multi-file reddit posts (carousels,
+         before/after pairs) sharing a source postId. Jumps via pswp.goTo()
+         — doesn't touch PhotoSwipe's normal prev/next, which still walks
+         the full filtered grid same as always. */
+      .pswp-info-carousel {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .pswp-info-carousel-label {
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .pswp-info-carousel-dots {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .pswp-info-carousel-dot {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(240, 240, 245, 0.85);
+        font-size: 10px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+      }
+      .pswp-info-carousel-dot:hover {
+        border-color: var(--accent);
+      }
+      .pswp-info-carousel-dot.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
       /* LoRA caption inside the info panel, second in priority. Multi-line. */
       .pswp-info-caption-block {
         font-size: 13px;
@@ -1754,6 +1799,124 @@
       #rescan-btn.spinning svg {
         animation: spin 1.2s linear infinite;
       }
+      #admin-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 5px 8px;
+        border-radius: 6px;
+        flex-shrink: 0;
+        transition:
+          background 0.15s,
+          color 0.15s,
+          border-color 0.15s;
+      }
+      #admin-link:hover {
+        background: var(--card-bg);
+        color: var(--text);
+        border-color: var(--accent);
+      }
+
+      /* ─── DISCOVER PANEL ─────────────────────────────────────── */
+      #discover-panel {
+        margin-bottom: 18px;
+      }
+      #discover-stats {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .discover-stat-tile {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px 14px;
+        min-width: 100px;
+      }
+      .discover-stat-value {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .discover-stat-label {
+        font-size: 10px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      #discover-recs-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      #discover-updated {
+        font-size: 10px;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      #discover-recs-row {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        padding-bottom: 6px;
+      }
+      #discover-recs-row::-webkit-scrollbar {
+        height: 6px;
+      }
+      #discover-recs-row::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #discover-recs-row::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 3px;
+      }
+      .discover-card {
+        flex: 0 0 140px;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        cursor: pointer;
+        transition:
+          transform 0.15s,
+          border-color 0.15s;
+      }
+      .discover-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+      }
+      .discover-card img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        display: block;
+        background: #0a0a10;
+      }
+      .discover-card-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+        padding: 6px 8px 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .discover-card-reason {
+        font-size: 10px;
+        color: var(--muted);
+        padding: 0 8px 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
 
       /* HD toggle — mobile-only. Off = compressed 720p mp4s (default).
          On = original url. Persisted in localStorage. Accent-tinted when
@@ -1822,6 +1985,32 @@
         border-bottom: 1px solid var(--border);
         text-align: center;
         flex-shrink: 0;
+      }
+
+      /* ─── ADDED-RANGE BANNER ─────────────────────────────────── */
+      #added-range-banner {
+        padding: 6px 20px;
+        background: rgba(124, 108, 252, 0.12);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 500;
+        border-bottom: 1px solid var(--border);
+        text-align: center;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+      #added-range-clear {
+        color: var(--accent);
+        text-decoration: underline;
+        cursor: pointer;
+        background: none;
+        border: none;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0;
       }
 
       /* ─── HAMBURGER ──────────────────────────────────────────── */
@@ -2045,9 +2234,35 @@
             />
           </svg>
         </button>
+        <a
+          id="admin-link"
+          href="/admin"
+          title="Admin"
+          aria-label="Admin"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+        </a>
       </header>
       <div id="scan-banner" style="display: none">
         <span id="scan-banner-text"></span>
+      </div>
+      <div id="added-range-banner" style="display: none">
+        <span id="added-range-text"></span>
+        <button id="added-range-clear" type="button">Clear</button>
       </div>
 
       <div id="sort-bar" style="display: none">
@@ -2080,6 +2295,14 @@
       <div id="grid-container">
         <!-- HOME VIEW: model card grid -->
         <div id="home-view">
+          <div id="discover-panel">
+            <div id="discover-stats"></div>
+            <div id="discover-recs-header">
+              <span>You might like</span>
+              <span id="discover-updated"></span>
+            </div>
+            <div id="discover-recs-row"></div>
+          </div>
           <div id="home-sort-bar">
             <select id="home-sort-select" aria-label="Sort models">
               <option value="random" selected>Random ↻</option>
@@ -2147,6 +2370,10 @@
       // dead options that would produce an empty grid.
       let activeSource = 'all'
       let activeSort = 'added-desc'
+      // Set via #/u/<name>?since=<ms>&until=<ms> (admin page "recently
+      // added" click-through) — restricts the grid to files added in that
+      // window, on top of the type/source filters. null = no restriction.
+      let activeAddedRange = null
       let homeVisible = false
       let currentUsername = null
       // iPhone/iPad path: swap `url` → `mobileUrl` in the lightbox so a
@@ -2273,6 +2500,9 @@
       const homeSizeBtns = document.querySelectorAll('.home-size-btn')
       const homeSortSelect = document.getElementById('home-sort-select')
       let homeSort = 'random'
+      const discoverStatsEl = document.getElementById('discover-stats')
+      const discoverRecsRowEl = document.getElementById('discover-recs-row')
+      const discoverUpdatedEl = document.getElementById('discover-updated')
 
       // ─── HELPERS ──────────────────────────────────────────────────────────
       function formatDate(iso) {
@@ -2417,9 +2647,29 @@
       let _suppressHashChange = false
       function parseHashRoute() {
         const raw = (location.hash || '').replace(/^#/, '')
-        const m = raw.match(/^\/u\/(.+)$/)
-        if (m) return { view: 'user', username: decodeURIComponent(m[1]) }
-        return { view: 'home' }
+        const [path, query] = raw.split('?')
+        const m = path.match(/^\/u\/(.+)$/)
+        if (!m) return { view: 'home' }
+        const route = { view: 'user', username: decodeURIComponent(m[1]) }
+        if (query) {
+          const params = new URLSearchParams(query)
+          const open = params.get('open')
+          if (open) {
+            // "<folder>/<filename>", both individually encoded.
+            const slash = open.indexOf('/')
+            if (slash > 0) {
+              route.openFolder = decodeURIComponent(open.slice(0, slash))
+              route.openFilename = decodeURIComponent(open.slice(slash + 1))
+            }
+          }
+          const since = parseInt(params.get('since'), 10)
+          const until = parseInt(params.get('until'), 10)
+          if (Number.isFinite(since) && Number.isFinite(until)) {
+            route.since = since
+            route.until = until
+          }
+        }
+        return route
       }
       function setHashRoute(target) {
         const next =
@@ -2435,7 +2685,18 @@
         if (route.view === 'user') {
           const u = usersData.find((x) => x.name === route.username)
           if (u) {
-            selectUser(u, null, { skipHashUpdate: true })
+            activeAddedRange =
+              route.since != null ? { since: route.since, until: route.until } : null
+            selectUser(u, null, { skipHashUpdate: true }).then(() => {
+              if (route.openFolder && route.openFilename) {
+                const idx = filtered.findIndex(
+                  (m) =>
+                    m.folder === route.openFolder &&
+                    m.filename === route.openFilename
+                )
+                if (idx !== -1) openLightbox(idx)
+              }
+            })
             return
           }
           // Unknown model — bounce back to home rather than show a broken view.
@@ -2492,6 +2753,7 @@
             renderUserList(usersData)
             if (homeVisible) renderHomeGrid()
           }
+          if (homeVisible) loadDiscover()
         } catch {}
       }
 
@@ -2518,6 +2780,7 @@
         sourceLinksEl.innerHTML = ''
         if (!opts.skipHashUpdate) setHashRoute({ view: 'home' })
         renderHomeGrid()
+        loadDiscover()
       }
 
       function hideHomeView() {
@@ -2569,17 +2832,13 @@
         const seen = readLastSeen()
         if (homeSort === 'random' && !_homeRandomOrder) reshuffleHome()
 
-        // Sort order: featured → NEW models → everything else.
-        // Within each tier we honor the selected sort. NEW models are sorted
-        // by latestAddedMs desc so the freshest content is genuinely first.
+        // Sort order: featured pinned first, everything else purely by the
+        // selected sort. NEW models are called out with a badge (below) but
+        // no longer forced to the top — the "Recently added" sort option
+        // already surfaces them when that's what you want.
         const sorted = [...usersData].sort((a, b) => {
           if (a.featured && !b.featured) return -1
           if (b.featured && !a.featured) return 1
-          const aNew = isNewModel(a, seen) ? 1 : 0
-          const bNew = isNewModel(b, seen) ? 1 : 0
-          if (aNew !== bNew) return bNew - aNew // new first
-          if (aNew && bNew)
-            return (b.latestAddedMs || 0) - (a.latestAddedMs || 0)
           if (homeSort === 'oldest-media')
             return (a.earliestMs || Infinity) - (b.earliestMs || Infinity)
           if (homeSort === 'newest-media')
@@ -2744,6 +3003,107 @@
           card.appendChild(body)
           homeGridEl.appendChild(card)
         }
+      }
+
+      // ─── DISCOVER PANEL ───────────────────────────────────────────────────
+      // Generated stats + "you might like" cards — not a chat, just arithmetic
+      // over /api/discover (visit counts, model stats, local CLIP similarity).
+      function formatCount(n) {
+        return (n || 0).toLocaleString()
+      }
+
+      function renderDiscoverStats(stats) {
+        if (!stats) {
+          discoverStatsEl.innerHTML = ''
+          return
+        }
+        const tiles = [
+          ['Models', formatCount(stats.totalModels)],
+          ['Files', formatCount(stats.totalFiles)],
+          ['Total size', formatFileSize(stats.totalBytes || 0) || '0 B'],
+          ['Added this week', formatCount(stats.recentlyAddedCount)],
+        ]
+        discoverStatsEl.innerHTML = tiles
+          .map(
+            ([label, value]) => `
+          <div class="discover-stat-tile">
+            <div class="discover-stat-value">${value}</div>
+            <div class="discover-stat-label">${label}</div>
+          </div>
+        `
+          )
+          .join('')
+      }
+
+      // Minimal card — deliberately NOT reusing renderHomeGrid()'s per-card
+      // logic (activity graph, source dots, etc.) since that function isn't
+      // factored into a reusable helper and these cards need far less detail.
+      function renderDiscoverRecs(list) {
+        discoverRecsRowEl.innerHTML = ''
+        if (!list || !list.length) return
+        for (const rec of list) {
+          const card = document.createElement('div')
+          card.className = 'discover-card'
+          card.addEventListener('click', () => selectUser(rec.name))
+
+          const img = document.createElement('img')
+          img.loading = 'lazy'
+          img.alt = rec.name
+          const known = usersData.find((u) => u.name === rec.name)
+          if (known?.cover) {
+            img.src =
+              known.cover.thumbUrl || known.cover.previewUrl || known.cover.url
+          } else {
+            fetch(`/api/users/${encodeURIComponent(rec.name)}/cover`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((cover) => {
+                if (cover)
+                  img.src = cover.thumbUrl || cover.previewUrl || cover.url
+              })
+              .catch(() => {})
+          }
+          img.onerror = () => {
+            img.style.opacity = '0.3'
+          }
+
+          const name = document.createElement('div')
+          name.className = 'discover-card-name'
+          name.textContent = rec.name
+
+          const reason = document.createElement('div')
+          reason.className = 'discover-card-reason'
+          reason.textContent = rec.reason
+
+          card.appendChild(img)
+          card.appendChild(name)
+          card.appendChild(reason)
+          discoverRecsRowEl.appendChild(card)
+        }
+      }
+
+      function formatRelativeTime(iso) {
+        if (!iso) return ''
+        const ms = Date.now() - new Date(iso).getTime()
+        const mins = Math.round(ms / 60000)
+        if (mins < 1) return 'just now'
+        if (mins < 60) return `${mins}m ago`
+        const hours = Math.round(mins / 60)
+        if (hours < 24) return `${hours}h ago`
+        const days = Math.round(hours / 24)
+        return `${days}d ago`
+      }
+
+      async function loadDiscover() {
+        try {
+          const r = await fetch('/api/discover')
+          if (!r.ok) return
+          const d = await r.json()
+          renderDiscoverStats(d.stats)
+          renderDiscoverRecs(d.recommended)
+          discoverUpdatedEl.textContent = d.meta?.embeddingsUpdatedAt
+            ? `Updated ${formatRelativeTime(d.meta.embeddingsUpdatedAt)}`
+            : ''
+        } catch {}
       }
 
       function renderUserList(users) {
@@ -3073,6 +3433,18 @@
           })
         }
 
+        // Third pass: added-time window, set via the admin page's "recently
+        // added by model" click-through (#/u/<name>?since=&until=). Narrows
+        // to just the files added in that scrape run.
+        if (activeAddedRange) {
+          filtered = filtered.filter(
+            (m) =>
+              m.addedMs >= activeAddedRange.since &&
+              m.addedMs <= activeAddedRange.until
+          )
+        }
+        updateAddedRangeBanner()
+
         // Sort by real media date, falling back to added-to-disk date as last resort
         const effectiveDate = (m) => m.mediaDateMs || m.addedMs
         const byMediaDate = (dir) => (a, b) => {
@@ -3099,6 +3471,28 @@
         renderGrid()
         updateDateRange()
       }
+
+      const addedRangeBannerEl = document.getElementById('added-range-banner')
+      const addedRangeTextEl = document.getElementById('added-range-text')
+      const addedRangeClearEl = document.getElementById('added-range-clear')
+
+      function updateAddedRangeBanner() {
+        if (!activeAddedRange) {
+          addedRangeBannerEl.style.display = 'none'
+          return
+        }
+        addedRangeBannerEl.style.display = 'flex'
+        const since = formatDateShort(new Date(activeAddedRange.since).toISOString())
+        const until = formatDateShort(new Date(activeAddedRange.until).toISOString())
+        const range = since === until ? since : `${since} – ${until}`
+        addedRangeTextEl.textContent = `Showing ${filtered.length} file${filtered.length === 1 ? '' : 's'} added ${range}`
+      }
+
+      addedRangeClearEl.addEventListener('click', () => {
+        activeAddedRange = null
+        setHashRoute({ view: 'user', username: currentUsername })
+        applyFilter()
+      })
 
       // Keep pills + select in sync
       function setActiveType(type) {
@@ -3774,6 +4168,48 @@
                       headline.textContent = cleanTitle
                     }
                     el.appendChild(headline)
+                  }
+
+                  // 1.5 Sibling carousel — when this image is part of a
+                  //     multi-file reddit post (shared source.postId,
+                  //     e.g. a before/after pair or a gallery), show its
+                  //     position and let the reader jump straight to
+                  //     siblings. This does NOT change PhotoSwipe's normal
+                  //     prev/next — those still walk the full filtered
+                  //     grid exactly as before. Only pswp.goTo() jumps are
+                  //     added, same mechanism the date-slider already uses.
+                  const postId = item.post?.postId
+                  if (postId) {
+                    const siblingIdxs = []
+                    for (let i = 0; i < filtered.length; i++) {
+                      if (filtered[i]?.post?.postId === postId) siblingIdxs.push(i)
+                    }
+                    if (siblingIdxs.length > 1) {
+                      const posInGroup = siblingIdxs.indexOf(pswp.currIndex) + 1
+                      const carousel = document.createElement('div')
+                      carousel.className = 'pswp-info-carousel'
+
+                      const label = document.createElement('span')
+                      label.className = 'pswp-info-carousel-label'
+                      label.textContent = `${posInGroup} of ${siblingIdxs.length} in this post`
+                      carousel.appendChild(label)
+
+                      const dots = document.createElement('div')
+                      dots.className = 'pswp-info-carousel-dots'
+                      siblingIdxs.forEach((idx, n) => {
+                        const dot = document.createElement('button')
+                        dot.className =
+                          'pswp-info-carousel-dot' +
+                          (idx === pswp.currIndex ? ' active' : '')
+                        dot.textContent = String(n + 1)
+                        dot.title = `Go to image ${n + 1} of this post`
+                        dot.addEventListener('click', () => pswp.goTo(idx))
+                        dots.appendChild(dot)
+                      })
+                      carousel.appendChild(dots)
+
+                      el.appendChild(carousel)
+                    }
                   }
 
                   // 2. LoRA caption block. Strip the leading "<model>,"

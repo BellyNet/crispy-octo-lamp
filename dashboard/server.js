@@ -16,6 +16,9 @@ const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
 const { transcodeWebmInUserDir } = require('../scrapyard/transcodeWebm.js')
 const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
 const MetaCache = require('./meta-cache.js')
+const VisitTracker = require('./visits.js')
+const { buildDiscoverPayload } = require('./discover.js')
+const NightlyHistory = require('./nightlyHistory.js')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 
@@ -50,6 +53,8 @@ const MEDIA_EXTS = new Set([
 
 fs.mkdirSync(THUMB_DIR, { recursive: true })
 const metaCache = new MetaCache(THUMB_DIR)
+const visits = new VisitTracker(THUMB_DIR)
+const nightlyHistory = new NightlyHistory(THUMB_DIR)
 
 const RESPONSE_CACHE_DIR = path.join(THUMB_DIR, 'response-cache')
 fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
@@ -57,7 +62,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 14
+const RESPONSE_CACHE_VERSION = 15
 
 // Bumped whenever the encoding recipe for /media-mobile/ variants changes in
 // a way that changes the bytes of an already-cached file (e.g. gifs going
@@ -683,6 +688,12 @@ async function processFileForResponse(username, userDir, item) {
       if (title) post.title = title
       if (src.site) post.site = src.site
       if (url) post.url = url
+      // postId groups sibling files from the same reddit post (carousels,
+      // before/after pairs) — set for reddit entries directly and copied
+      // onto re-hosted siblings by scrapyard/unifyRedditCarouselTitles.js.
+      // Used client-side purely to jump between siblings in the lightbox;
+      // never changes what's shown in the grid.
+      if (typeof src.postId === 'string') post.postId = src.postId
       if (comments.length) {
         post.comments = comments
         if (commentCount !== null) post.commentCount = commentCount
@@ -1004,6 +1015,7 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 
 app.use(express.static(__dirname))
 app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
+app.get('/admin', (_req, res) => res.sendFile('admin.html', { root: __dirname }))
 
 // Users list — returns [{ name, sources, featured }, ...]
 // Sets Cache-Control: no-cache so the browser revalidates on every fetch; the
@@ -1067,6 +1079,111 @@ app.get('/api/users', async (_req, res) => {
   }
 })
 
+// Discover panel — generated stats + similarity-based "you might like"
+// recommendations. Pure computation over visits.json/embeddings.json/
+// modelStatsCache; see dashboard/discover.js for the actual logic.
+app.get('/api/discover', async (_req, res) => {
+  try {
+    const entries = await fs.promises.readdir(datasetDir, {
+      withFileTypes: true,
+    })
+    const modelNames = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+    res.setHeader('Cache-Control', 'no-cache')
+    res.json(
+      buildDiscoverPayload({
+        modelNames,
+        statsByName: modelStatsCache,
+        visitsData: visits.getVisits(),
+        thumbDir: THUMB_DIR,
+      })
+    )
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Admin page — media added across every model, grouped into scrape "runs".
+// Reuses scanModel()'s existing cache (in-memory LRU → disk → walk), just
+// fanned out across every model and merged, so this is cheap after the
+// first hit. addedMs is disk birthtime/mtime (server.js processFileForResponse),
+// i.e. when the file actually landed locally — not any EXIF/post date.
+//
+// "Run" isn't tracked anywhere at scrape time — it's derived here from the
+// addedMs timestamps themselves. Real data check (500 items, 2026-09-01):
+// gaps of 10-80 min WITHIN a scrape session vs. 1,500-11,000+ min (1-8
+// days) BETWEEN sessions — a clean bimodal split, so a fixed gap threshold
+// reliably separates runs without needing any new instrumentation.
+const RECENT_MEDIA_WINDOW_MS = 45 * 24 * 60 * 60 * 1000 // 45 days
+const RUN_GAP_MS = 3 * 60 * 60 * 1000 // 3 hours
+
+app.get('/api/recent-media', async (req, res) => {
+  try {
+    const runIndex = Math.max(parseInt(req.query.run, 10) || 0, 0)
+    const entries = await fs.promises.readdir(datasetDir, {
+      withFileTypes: true,
+    })
+    const usernames = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+
+    const cutoff = Date.now() - RECENT_MEDIA_WINDOW_MS
+    const perModel = await Promise.all(
+      usernames.map((username) =>
+        modelLimit(async () => {
+          try {
+            const { response } = await scanModel(username)
+            return response
+              .filter((item) => (item.addedMs || 0) >= cutoff)
+              .map((item) => ({ ...item, username }))
+          } catch {
+            return []
+          }
+        })
+      )
+    )
+
+    const all = perModel.flat().sort((a, b) => (b.addedMs || 0) - (a.addedMs || 0))
+
+    // Walk once, newest first, starting a new bucket whenever the gap since
+    // the previous item exceeds RUN_GAP_MS.
+    const runs = []
+    let current = null
+    for (const item of all) {
+      if (!current || current.startedAt - item.addedMs > RUN_GAP_MS) {
+        current = { startedAt: item.addedMs, endedAt: item.addedMs, items: [] }
+        runs.push(current)
+      }
+      current.startedAt = Math.min(current.startedAt, item.addedMs)
+      current.items.push(item)
+    }
+
+    const run = runs[runIndex] || null
+    const items = (run?.items || []).map((item) => ({
+      username: item.username,
+      folder: item.folder,
+      filename: item.filename,
+      type: item.type,
+      addedMs: item.addedMs,
+      size: item.size,
+      url: item.url,
+      thumbUrl: `/thumb/${encodeURIComponent(item.username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+    }))
+
+    res.setHeader('Cache-Control', 'no-cache')
+    res.json({
+      runIndex,
+      startedAt: run ? new Date(run.startedAt).toISOString() : null,
+      endedAt: run ? new Date(run.endedAt).toISOString() : null,
+      runsAvailable: runs.length,
+      items,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 async function getMediaFingerprint(userDir) {
   const fp = {}
   for (const folder of MEDIA_FOLDERS) {
@@ -1113,7 +1230,13 @@ app.get('/api/users/:username/media', async (req, res) => {
     // After responding, kick off background JPEG thumb generation for every
     // image/gif in this model. By the time the user scrolls past the first
     // ~200 cards, the rest are likely already cached on disk.
-    setImmediate(() => warmGridThumbs(username, response))
+    setImmediate(() => {
+      warmGridThumbs(username, response)
+      // This route only fires from a real client-side model open
+      // (selectUser() in index.html) — internal jobs call scanModel()
+      // directly — so it's a safe place to record a Discover-panel visit.
+      visits.recordVisit(username)
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -1782,6 +1905,11 @@ async function runNightlyPass({ trigger = 'manual' } = {}) {
   nightlyState.startedAt = new Date().toISOString()
   nightlyState.completedAt = null
 
+  // Structured record of what failed, on top of the existing console.warn
+  // calls — this is what makes it into nightly-history.json for the admin
+  // page rather than only ever being visible in server logs.
+  const stepErrors = []
+
   // Run the heavy media passes FIRST so the subsequent scan picks up
   // any new .mp4 files the webm transcoder produced and the moved
   // .webm originals in .webm-backup/.
@@ -1790,46 +1918,67 @@ async function runNightlyPass({ trigger = 'manual' } = {}) {
     await runMediaMaintenance({ trigger })
   } catch (err) {
     console.warn('  Nightly maintenance error:', err.message)
+    stepErrors.push({ step: 'maint', error: err.message })
   }
   nightlyState.step = 'scan'
   try {
     await scanAll({ force: true, trigger })
   } catch (err) {
     console.warn('  Nightly scan error:', err.message)
+    stepErrors.push({ step: 'scan', error: err.message })
   }
   nightlyState.step = 'covers'
   try {
     await prewarmCoverThumbs()
   } catch (err) {
     console.warn('  Cover thumb prewarm error:', err.message)
+    stepErrors.push({ step: 'covers', error: err.message })
   }
   nightlyState.step = 'grid-thumbs'
   try {
     await prewarmAllGridThumbs()
   } catch (err) {
     console.warn('  Grid thumb prewarm error:', err.message)
+    stepErrors.push({ step: 'grid-thumbs', error: err.message })
   }
   nightlyState.step = 'gif-previews'
   try {
     await prewarmThumbnails()
   } catch (err) {
     console.warn('  Preview prewarm error:', err.message)
+    stepErrors.push({ step: 'gif-previews', error: err.message })
   }
   nightlyState.step = 'mobile-variants'
   try {
     await prewarmMobileVariants()
   } catch (err) {
     console.warn('  Mobile variant prewarm error:', err.message)
+    stepErrors.push({ step: 'mobile-variants', error: err.message })
   }
 
   nightlyState.step = null
   nightlyState.completedAt = new Date().toISOString()
   nightlyState.inProgress = false
+
+  nightlyHistory.recordRun({
+    startedAt: nightlyState.startedAt,
+    completedAt: nightlyState.completedAt,
+    trigger,
+    durationMs:
+      Date.parse(nightlyState.completedAt) - Date.parse(nightlyState.startedAt),
+    ok: stepErrors.length === 0,
+    stepErrors,
+  })
+
   return { ok: true }
 }
 
 app.get('/api/nightly-status', (_req, res) => {
   res.json({ ...nightlyState })
+})
+
+app.get('/api/nightly-history', (_req, res) => {
+  res.json(nightlyHistory.getHistory())
 })
 
 app.post('/api/run-nightly', (_req, res) => {
@@ -1865,6 +2014,82 @@ app.post('/api/rescan', async (_req, res) => {
     console.warn('  Manual scan error:', err.message)
   )
   res.json({ ok: true, state: scanState })
+})
+
+// ─── CLIP EMBEDDINGS ─────────────────────────────────────────────────────────
+// Computes one L2-normalized CLIP centroid vector per model from sampled
+// thumbnails (dashboard/embed/compute_embeddings.py), written to
+// THUMB_DIR/embeddings.json. Powers Discover's "you might like" list.
+// Runs entirely locally via a Python subprocess — no image or embedding
+// data ever leaves the machine.
+const PYTHON_BIN = process.env.PYTHON_BIN || 'python'
+const EMBED_SCRIPT = path.join(__dirname, 'embed', 'compute_embeddings.py')
+
+const embedState = {
+  inProgress: false,
+  trigger: null, // 'manual'
+  step: null, // 'running' | null
+  startedAt: null,
+  completedAt: null,
+  lastExitCode: null,
+  lastError: null,
+  log: '', // tail of combined stdout+stderr, for debugging from the UI
+}
+
+async function runEmbedJob({ trigger = 'manual' } = {}) {
+  if (embedState.inProgress) {
+    return { skipped: true, reason: 'already running' }
+  }
+  embedState.inProgress = true
+  embedState.trigger = trigger
+  embedState.step = 'running'
+  embedState.startedAt = new Date().toISOString()
+  embedState.completedAt = null
+  embedState.lastExitCode = null
+  embedState.lastError = null
+  embedState.log = ''
+  console.log(`  Embed:     ${trigger} — computing CLIP embeddings…`)
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      PYTHON_BIN,
+      [EMBED_SCRIPT, '--dataset-dir', datasetDir, '--thumb-dir', THUMB_DIR],
+      { timeout: 10 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 }
+    )
+    embedState.lastExitCode = 0
+    embedState.log = `${stdout}\n${stderr}`.trim().slice(-8000)
+    console.log('  Embed:     done ✓')
+  } catch (err) {
+    // execFile rejects both on non-zero exit AND on spawn failure (ENOENT
+    // when python isn't on PATH) — either way, surface it into state instead
+    // of throwing into an unhandled rejection (this runs fire-and-forget).
+    // embeddings.json is only ever written by the script itself, so a
+    // failure here leaves the last good file in place for discover.js.
+    embedState.lastExitCode = typeof err.code === 'number' ? err.code : -1
+    embedState.lastError = err.message
+    embedState.log = `${err.stdout || ''}\n${err.stderr || ''}`.trim().slice(-8000)
+    console.warn(`  Embed:     failed — ${err.message}`)
+  }
+  embedState.step = null
+  embedState.completedAt = new Date().toISOString()
+  embedState.inProgress = false
+  return { ok: embedState.lastExitCode === 0 }
+}
+
+app.get('/api/embed-status', (_req, res) => {
+  res.json({ ...embedState })
+})
+
+app.post('/api/run-embed', (_req, res) => {
+  if (embedState.inProgress) {
+    return res
+      .status(202)
+      .json({ skipped: true, reason: 'already running', state: embedState })
+  }
+  // Kick off without awaiting — client polls /api/embed-status for progress.
+  runEmbedJob({ trigger: 'manual' }).catch((err) =>
+    console.warn('  Manual embed error:', err.message)
+  )
+  res.json({ ok: true, state: embedState })
 })
 
 // Serve media files

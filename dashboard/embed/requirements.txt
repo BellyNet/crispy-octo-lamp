@@ -1,0 +1,39 @@
+# CLIP embedding pipeline for the Discover panel's "you might like" feature.
+# Runs entirely locally — no dataset image or embedding is ever sent anywhere.
+#
+# On a machine with an existing GPU torch install (e.g. setting this up by
+# hand on a dev box), do NOT `pip install -r requirements.txt` directly —
+# open_clip_torch pulls in torch/torchvision as unpinned transitive deps,
+# and a second independent pip invocation will happily "upgrade" an
+# already-installed CUDA torch to a newer CPU-only build from the default
+# index, silently losing GPU acceleration. Install in this order instead:
+#
+#   1) pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#      (check https://pytorch.org/get-started/locally/ for whatever index
+#      has current Blackwell/sm_120 kernel support — torch and torchvision
+#      MUST come from the same install command so their ABIs match)
+#   2) pip install open_clip_torch pillow numpy --no-deps
+#      (--no-deps is required here so this step can't touch torch/torchvision)
+#
+# Verify GPU visibility with:
+#   python -c "import torch; print(torch.cuda.is_available())"
+# If step 2 or any later install silently reverts torch to a CPU build,
+# redo step 1 (torch+torchvision together) to fix it.
+#
+# On a fresh machine with no pre-existing torch (e.g. the Docker image built
+# by the repo's Dockerfile, which has no GPU to protect), a single combined
+# install IS safe and is what the Dockerfile does:
+#   pip install -r requirements.txt \
+#     --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+# because pip resolves the whole graph in one solve instead of two
+# independent installs stepping on each other.
+#
+# The first run of compute_embeddings.py downloads generic CLIP pretrained
+# weights (~350-600MB) from the OpenCLIP/HuggingFace hub — a one-time
+# model-weight fetch, not dataset content going out.
+
+torch
+torchvision
+open_clip_torch
+pillow
+numpy
