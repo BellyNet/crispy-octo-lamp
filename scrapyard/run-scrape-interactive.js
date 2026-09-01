@@ -390,7 +390,7 @@ function getFreshInteractiveRunSummary(canonicalModel, parsed, startedAtMs) {
   if (!canonicalModel || !parsed?.scraper) return null
   return readFreshModelRunSummary(canonicalModel, parsed.scraper, {
     inputUrl: parsed.inputUrl || parsed.url,
-    startedAfterMs,
+    startedAfterMs: startedAtMs,
   })
 }
 
@@ -404,7 +404,13 @@ async function runInteractiveSourceGroup({
   targets,
   sessionOptions,
   sharedOptions = {},
+  deps = {},
 }) {
+  const runScrapeImpl = deps.runScrape || runScrape
+  const getFreshRunSummary =
+    deps.getFreshInteractiveRunSummary || getFreshInteractiveRunSummary
+  const summarizeRunSummary =
+    deps.summarizeSourceRunSummary || summarizeSourceRunSummary
   const result = {
     model: canonicalModel,
     startedAt: new Date().toISOString(),
@@ -432,8 +438,8 @@ async function runInteractiveSourceGroup({
     if (target.url) console.log(target.url)
 
     const startedAtMs = Date.now()
-    const status = parsed ? await runScrape(target.url, runOptions) : 1
-    const summary = getFreshInteractiveRunSummary(
+    const status = parsed ? await runScrapeImpl(target.url, runOptions) : 1
+    const summary = getFreshRunSummary(
       canonicalModel,
       parsed,
       startedAtMs
@@ -446,20 +452,20 @@ async function runInteractiveSourceGroup({
       sourceKey: target.sourceKey || parsed?.sourceType || null,
       label,
       url: target.url,
-      summary: summarizeSourceRunSummary(summary),
+      summary: summarizeRunSummary(summary),
     })
 
     if (status !== 0) {
       console.log(`Scraper exited with status ${status}.`)
-      result.finishedAt = new Date().toISOString()
-      printInteractiveModelTotal(result)
-      return status
+      if (index < targets.length - 1) {
+        console.log('Continuing with remaining selected sources.')
+      }
     }
   }
 
   result.finishedAt = new Date().toISOString()
   printInteractiveModelTotal(result)
-  return 0
+  return result.runs.some((run) => !run.ok) ? 1 : 0
 }
 
 async function runModelAliasFlow(rl, sessionOptions) {
@@ -667,7 +673,7 @@ function openUrlForVerification(url) {
 }
 
 function shouldOpenCandidateForVerification(candidate = {}) {
-  return ['coomer', 'kemono'].includes(candidate.platform)
+  return ['coomer', 'kemono', 'reddit'].includes(candidate.platform)
 }
 
 async function resolveUsernameSearchModel(rl, registry, username) {
@@ -1136,6 +1142,7 @@ module.exports = {
   collectOversizedVideoTargets,
   main,
   registerParsedSourceForModel,
+  runInteractiveSourceGroup,
 }
 
 if (require.main === module) {

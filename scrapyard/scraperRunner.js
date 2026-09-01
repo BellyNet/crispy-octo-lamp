@@ -719,7 +719,7 @@ function printRecoveredRunSummary(summary, { log = console.log } = {}) {
 
   log('')
   log(
-    `Hoghaul ended before a normal run_finished event (${summary.status || 'unknown'}); recovered latest counters:`
+    `Hoghaul finished with status ${summary.status || 'unknown'}; latest counters:`
   )
   log(runLifecycle.formatRunSummaryLine(stats))
   if (summary.logPath) log(`Run log: ${summary.logPath}`)

@@ -1420,6 +1420,29 @@
       ]
     }
   },
+  "feedherandbreedher": {
+    "aliases": ["feederandbreedher", "feedherandbreedher"],
+    "sources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/FeederAndBreedHer/submitted/",
+          "service": "submitted",
+          "userId": "FeederAndBreedHer",
+          "username": "FeederAndBreedHer",
+          "discoveredAs": "feederandbreedher",
+          "lastCheckedAt": "2026-09-01T01:17:10.514Z"
+        }
+      ],
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/29322",
+          "categoryId": "29322",
+          "discoveredAs": "feedherandbreedher",
+          "lastCheckedAt": "2026-09-01T01:17:12.491Z"
+        }
+      ]
+    }
+  },
   "freya": {
     "aliases": ["freya"],
     "sources": {
@@ -2601,12 +2624,6 @@
           "categoryId": "1734",
           "discoveredAs": "sabrina_ssbbw",
           "lastCheckedAt": "2026-08-17T23:34:15.706Z"
-        },
-        {
-          "url": "https://stufferdb.com/index?/search/467339",
-          "categoryId": null,
-          "discoveredAs": "sabrina_ssbbw",
-          "lastCheckedAt": "2026-04-29T21:19:53.240Z"
         }
       ]
     }

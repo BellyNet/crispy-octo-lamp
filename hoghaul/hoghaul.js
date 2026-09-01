@@ -2012,9 +2012,19 @@ async function run(argvInput = process.argv.slice(2)) {
       userId: source.userId,
       reason: 'no_posts_after_fallbacks',
     })
-    throw new Error(
+    console.log(
       `No posts found after all ${source.site} discovery methods for ${inputUrl}`
     )
+    finalizeEmptyRun({
+      status: 'source_unavailable',
+      source,
+      modelName,
+      reason: 'noPostsAfterFallbacks',
+      details: {
+        inputUrl,
+      },
+    })
+    return 1
   }
 
   if (!dryRun && isPawchiveSource(source)) {

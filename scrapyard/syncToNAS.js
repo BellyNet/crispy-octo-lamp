@@ -30,18 +30,26 @@ if (!fs.existsSync(localPath)) {
 
 console.log(`📤 Syncing ${model} from local → NAS...`)
 try {
-  const robocopyCmd = `robocopy "${localPath}" "${nasPath}" /E /NFL /NDL /NJH /NJS /NP /R:2 /W:5`
+  const robocopyCmd = `robocopy "${localPath}" "${nasPath}" /E /XO /NFL /NDL /NJH /NJS /NP /R:2 /W:5 /XF .media-dates.json`
 
   exec(robocopyCmd, (err, stdout, stderr) => {
     const exitCode = err?.code ?? 0
     if (exitCode > 3) {
       console.error(`❌ Sync failed:`, stderr || stdout)
     } else {
-      syncModelMetadataToNas({
+      const metadata = syncModelMetadataToNas({
         modelName: model,
         datasetDir: localBase,
         nasDatasetDir: nasBase,
       })
+      if (metadata.failed > 0) {
+        console.error(
+          `❌ Metadata sync failed for ${metadata.failed} file(s): ${metadata.failures
+            .map((failure) => `${failure.targetPath}: ${failure.error}`)
+            .join('; ')}`
+        )
+        process.exit(1)
+      }
       pushRegistryToNas({ nasDatasetDir: nasBase })
       console.log(`✅ Sync completed with exit code ${exitCode}`)
     }

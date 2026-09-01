@@ -5,7 +5,11 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const { collectOversizedVideoTargets } = require('./run-scrape-interactive')
+const {
+  collectOversizedVideoTargets,
+  registerParsedSourceForModel,
+  runInteractiveSourceGroup,
+} = require('./run-scrape-interactive')
 const {
   applyScrapePositionalFallback,
   buildAllSourceQueue,
@@ -72,7 +76,6 @@ const {
   getModelProfileSource,
   sourceMetaFromSeenRecord,
 } = require('./legacySourceBackfill')
-const { registerParsedSourceForModel } = require('./run-scrape-interactive')
 const {
   getActiveStufferDbCheckpoint,
   getPermanentLazyVideoFailure,
@@ -382,7 +385,14 @@ async function main() {
       datasetDir: metadataLocalRoot,
       nasDatasetDir: metadataNasRoot,
     }),
-    { copied: 1, skipped: 0 }
+    {
+      copied: 1,
+      replaced: 0,
+      unchanged: 0,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+    }
   )
   const syncedRecord = JSON.parse(
     fs.readFileSync(
@@ -818,6 +828,10 @@ async function main() {
     stufferAi.url,
     'https://stufferdb.com/picture?/659098/category/8586'
   )
+  assert.strictEqual(
+    parseSourceUrl('https://stufferdb.com/index?/search/467339'),
+    null
+  )
   assert.deepStrictEqual(
     getStufferDbFallbackUrls('https://stufferai.com/index?/category/8586'),
     [
@@ -969,6 +983,43 @@ async function main() {
     coomerFansPosts[0].mediaEntries[0].text,
     'Full caption & details'
   )
+  let coomerFansRetryFetches = 0
+  const coomerFansRetryEvents = []
+  const coomerFansRetryPosts = await fetchCoomerFansPosts(
+    {
+      origin: 'https://coomerfans.com',
+      site: 'coomerfans',
+      service: 'onlyfans',
+      userId: '123',
+      rawName: 'name_here',
+    },
+    { maxPosts: 1 },
+    {
+      coomerFansMaxRetries: 1,
+      coomerFansRetryDelayMs: 0,
+      fetchHtml: async (url) => {
+        coomerFansRetryFetches += 1
+        if (coomerFansRetryFetches === 1) {
+          throw new Error('HTTP 503: Checking your browser')
+        }
+        if (url.includes('/p/1/123/onlyfans')) {
+          return {
+            html: 'Added 2026-05-01 00:00:00 +0000 UTC https://img1.coomerfans.com/storage/a/b/one.jpg',
+          }
+        }
+        return { html: '<a href="/p/1/123/onlyfans">one</a>' }
+      },
+      appendRunEvent: (type, payload) =>
+        coomerFansRetryEvents.push({ type, payload }),
+      logger: {
+        warn: () => {},
+        status: () => {},
+        statusDone: () => {},
+      },
+    }
+  )
+  assert.strictEqual(coomerFansRetryPosts.length, 1)
+  assert.strictEqual(coomerFansRetryEvents[0]?.type, 'coomerfans_html_retry')
   assert.strictEqual(
     parseCoomerFansCaption(
       [
@@ -1628,6 +1679,55 @@ async function main() {
   assert.deepStrictEqual(capturedStatusLines, [
     'same progress',
     'next progress',
+  ])
+
+  const interactiveRunUrls = []
+  const interactiveRedditUrl =
+    'https://www.reddit.com/user/sample_model/submitted/'
+  const interactiveStufferUrl = 'https://stufferdb.com/index?/category/2333'
+  const interactiveStatus = await withConsoleSilenced(() =>
+    runInteractiveSourceGroup({
+      canonicalModel: 'sample_model',
+      sessionOptions: {},
+      targets: [
+        {
+          parsed: parseSourceUrl(interactiveRedditUrl),
+          url: interactiveRedditUrl,
+          sourceKey: 'reddit',
+          label: 'Reddit',
+        },
+        {
+          parsed: parseSourceUrl(interactiveStufferUrl),
+          url: interactiveStufferUrl,
+          sourceKey: 'stufferdb',
+          label: 'StufferDB',
+        },
+      ],
+      deps: {
+        runScrape: async (url) => {
+          interactiveRunUrls.push(url)
+          return interactiveRunUrls.length === 1 ? 1 : 0
+        },
+        getFreshInteractiveRunSummary: () => null,
+        summarizeSourceRunSummary: () => ({
+          saved: 0,
+          skipped: 0,
+          duplicates: 0,
+          errors: 0,
+          processed: 0,
+          expectedMedia: 0,
+          savedBytes: 0,
+          downloadBytes: 0,
+          duplicateDownloadBytes: 0,
+          durationMs: 0,
+        }),
+      },
+    })
+  )
+  assert.strictEqual(interactiveStatus, 1)
+  assert.deepStrictEqual(interactiveRunUrls, [
+    interactiveRedditUrl,
+    interactiveStufferUrl,
   ])
 
   const redditOptions = buildScraperOptions(reddit, {

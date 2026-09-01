@@ -72,11 +72,11 @@ const cleanupMirroredMp4s =
 let cmd = ''
 
 if (isPush) {
-  cmd = `robocopy "${baseLocal}" "${baseNAS}" /E`
+  cmd = `robocopy "${baseLocal}" "${baseNAS}" /E /XO /R:2 /W:5 /XF .media-dates.json`
 } else if (isPull) {
-  cmd = `robocopy "${baseNAS}" "${baseLocal}" /E`
+  cmd = `robocopy "${baseNAS}" "${baseLocal}" /E /XO /R:2 /W:5 /XF .media-dates.json`
 } else if (modelName) {
-  cmd = `robocopy "${baseLocal}\\${modelName}" "${baseNAS}\\${modelName}" /E`
+  cmd = `robocopy "${baseLocal}\\${modelName}" "${baseNAS}\\${modelName}" /E /XO /R:2 /W:5 /XF .media-dates.json`
 } else {
   console.error(
     'Missing flag.\nUsage:\n  npm run scrape -- sync --push\n  npm run scrape -- sync --pull\n  npm run scrape -- sync --model=<name>\nOptional:\n  npm run scrape -- sync --push --cleanup-mp4=true\n  npm run scrape -- sync --push --cleanup-gif-mp4=true'
@@ -96,16 +96,32 @@ exec(`powershell -Command "${cmd}"`, (err, stdout, stderr) => {
   mergeNasMp4Entries(collectMp4RelativePaths(mergeRoot, baseLocal), baseLocal)
   syncNasMp4IndexToMirror(baseNAS, baseLocal)
   if (isPush) {
-    syncAllModelMetadataToNas({
+    const metadata = syncAllModelMetadataToNas({
       datasetDir: baseLocal,
       nasDatasetDir: baseNAS,
     })
+    if (metadata.failed > 0) {
+      console.error(
+        `Metadata sync failed for ${metadata.failed} file(s): ${metadata.failures
+          .map((failure) => `${failure.targetPath}: ${failure.error}`)
+          .join('; ')}`
+      )
+      process.exit(1)
+    }
   } else if (modelName) {
-    syncModelMetadataToNas({
+    const metadata = syncModelMetadataToNas({
       modelName,
       datasetDir: baseLocal,
       nasDatasetDir: baseNAS,
     })
+    if (metadata.failed > 0) {
+      console.error(
+        `Metadata sync failed for ${metadata.failed} file(s): ${metadata.failures
+          .map((failure) => `${failure.targetPath}: ${failure.error}`)
+          .join('; ')}`
+      )
+      process.exit(1)
+    }
   }
 
   if (!isPush || (!cleanupGifDerivedMp4s && !cleanupMirroredMp4s)) {

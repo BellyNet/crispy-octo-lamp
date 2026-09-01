@@ -107,10 +107,14 @@ function parseSourceUrl(inputUrl) {
 
     if (host.includes('stufferdb') || host.includes('stufferai')) {
       parsed.hostname = 'stufferdb.com'
+      const normalized = parsed.toString()
+      if (!/\/(?:category|picture)(?:[/?#]|$)/i.test(normalized)) {
+        return null
+      }
       return {
         scraper: 'milkmaid',
         sourceType: 'stufferdb',
-        url: parsed.toString(),
+        url: normalized,
         rawName: null,
       }
     }

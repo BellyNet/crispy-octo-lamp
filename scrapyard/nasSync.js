@@ -2,7 +2,8 @@
 
 const path = require('path')
 const fs = require('fs')
-const { exec } = require('child_process')
+const { exec, execFileSync } = require('child_process')
+const crypto = require('crypto')
 
 const {
   collectMp4RelativePaths,
@@ -36,6 +37,63 @@ function runRobocopy(command) {
       })
     })
   })
+}
+
+function filesHaveSameContent(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath) || !fs.existsSync(targetPath)) return false
+  const sourceHash = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(sourcePath))
+    .digest('hex')
+  const targetHash = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(targetPath))
+    .digest('hex')
+  return sourceHash === targetHash
+}
+
+function copyMutableMetadataFile(sourcePath, targetPath) {
+  if (fs.existsSync(targetPath) && filesHaveSameContent(sourcePath, targetPath)) {
+    return 'unchanged'
+  }
+
+  try {
+    fs.copyFileSync(sourcePath, targetPath)
+    return 'copied'
+  } catch (err) {
+    if (process.platform !== 'win32' || !fs.existsSync(targetPath)) {
+      throw err
+    }
+
+    const backupPath = `${targetPath}.codex-bak-${process.pid}-${Date.now()}`
+    fs.copyFileSync(targetPath, backupPath)
+    try {
+      removeWindowsHiddenFile(targetPath)
+      fs.copyFileSync(sourcePath, targetPath)
+      fs.rmSync(backupPath, { force: true })
+      return 'replaced'
+    } catch (replaceErr) {
+      if (!fs.existsSync(targetPath) && fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, targetPath)
+      }
+      if (fs.existsSync(backupPath)) {
+        fs.rmSync(backupPath, { force: true })
+      }
+      replaceErr.message = `${replaceErr.message}; original copy failed: ${err.message}`
+      throw replaceErr
+    }
+  }
+}
+
+function removeWindowsHiddenFile(filePath) {
+  try {
+    fs.rmSync(filePath, { force: true })
+  } catch (err) {
+    if (process.platform !== 'win32') throw err
+    execFileSync('cmd.exe', ['/c', 'del', '/f', '/a:h', filePath], {
+      stdio: 'ignore',
+    })
+  }
 }
 
 function getMediaStem(filePath) {
@@ -131,13 +189,24 @@ function syncModelMetadataToNas({
   nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
 } = {}) {
   if (!modelName || !datasetDir) {
-    return { copied: 0, skipped: MUTABLE_MODEL_METADATA_FILES.length }
+    return {
+      copied: 0,
+      replaced: 0,
+      unchanged: 0,
+      skipped: MUTABLE_MODEL_METADATA_FILES.length,
+      failed: 0,
+      failures: [],
+    }
   }
 
   const localModelDir = path.join(datasetDir, modelName)
   const nasModelDir = path.join(nasDatasetDir, modelName)
   let copied = 0
+  let replaced = 0
+  let unchanged = 0
   let skipped = 0
+  let failed = 0
+  const failures = []
 
   for (const fileName of MUTABLE_MODEL_METADATA_FILES) {
     const sourcePath = path.join(localModelDir, fileName)
@@ -147,11 +216,24 @@ function syncModelMetadataToNas({
     }
 
     fs.mkdirSync(nasModelDir, { recursive: true })
-    fs.copyFileSync(sourcePath, path.join(nasModelDir, fileName))
-    copied += 1
+    const targetPath = path.join(nasModelDir, fileName)
+    try {
+      const status = copyMutableMetadataFile(sourcePath, targetPath)
+      if (status === 'copied') copied += 1
+      else if (status === 'replaced') replaced += 1
+      else unchanged += 1
+    } catch (err) {
+      failed += 1
+      failures.push({
+        fileName,
+        sourcePath,
+        targetPath,
+        error: err.message,
+      })
+    }
   }
 
-  return { copied, skipped }
+  return { copied, replaced, unchanged, skipped, failed, failures }
 }
 
 function syncAllModelMetadataToNas({
@@ -159,12 +241,24 @@ function syncAllModelMetadataToNas({
   nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
 } = {}) {
   if (!datasetDir || !fs.existsSync(datasetDir)) {
-    return { models: 0, copied: 0, skipped: 0 }
+    return {
+      models: 0,
+      copied: 0,
+      replaced: 0,
+      unchanged: 0,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+    }
   }
 
   let models = 0
   let copied = 0
+  let replaced = 0
+  let unchanged = 0
   let skipped = 0
+  let failed = 0
+  const failures = []
   for (const entry of fs.readdirSync(datasetDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     const result = syncModelMetadataToNas({
@@ -172,11 +266,15 @@ function syncAllModelMetadataToNas({
       datasetDir,
       nasDatasetDir,
     })
-    if (result.copied > 0) models += 1
+    if (result.copied > 0 || result.replaced > 0) models += 1
     copied += result.copied
+    replaced += result.replaced
+    unchanged += result.unchanged
     skipped += result.skipped
+    failed += result.failed
+    failures.push(...result.failures)
   }
-  return { models, copied, skipped }
+  return { models, copied, replaced, unchanged, skipped, failed, failures }
 }
 
 function evictVerifiedLocalMp4s({
@@ -266,7 +364,8 @@ async function syncModelToNas({
   // that may never be viewed. They now run only via the nightly
   // maintenance script (nightly-maintenance.ps1) or by invoking the
   // CLIs directly (scrapyard/transcodeWebm.js, scrapyard/faststartMp4.js).
-  const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /R:2 /W:5`
+  const excludedMetadataFiles = MUTABLE_MODEL_METADATA_FILES.join(' ')
+  const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /XO /R:2 /W:5 /XF ${excludedMetadataFiles}`
   const result = await runRobocopy(command)
 
   if (!result.ok) {
@@ -276,7 +375,20 @@ async function syncModelToNas({
     return result
   }
 
-  syncModelMetadataToNas({ modelName, datasetDir, nasDatasetDir })
+  const metadata = syncModelMetadataToNas({ modelName, datasetDir, nasDatasetDir })
+  if (metadata.failed > 0) {
+    log.error(
+      `NAS metadata sync failed for ${modelName}: ${metadata.failures
+        .map((failure) => `${failure.fileName}: ${failure.error}`)
+        .join('; ')}`
+    )
+    return {
+      ...result,
+      ok: false,
+      code: result.code > 3 ? result.code : 12,
+      metadata,
+    }
+  }
   const cleanup = evictVerifiedLocalMp4s({
     modelName,
     datasetDir,
@@ -299,7 +411,7 @@ async function syncModelToNas({
     )
   }
   log.log(successMessage)
-  return { ...result, cleanup }
+  return { ...result, cleanup, metadata }
 }
 
 module.exports = {

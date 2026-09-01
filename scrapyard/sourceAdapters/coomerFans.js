@@ -6,8 +6,15 @@ const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
 const { createBoundaryPageFilter } = require('../sourceFrontier')
 
+const DEFAULT_COOMERFANS_RETRY_DELAY_MS = 5000
+const DEFAULT_COOMERFANS_MAX_RETRIES = 2
+
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function htmlDecode(value) {
@@ -50,6 +57,60 @@ function absoluteUrl(source, href) {
   return new URL(htmlDecode(href), source.origin).toString()
 }
 
+function getCoomerFansMaxRetries(deps = {}) {
+  const value = Number.parseInt(
+    String(deps.coomerFansMaxRetries ?? process.env.HOGHAUL_COOMERFANS_MAX_RETRIES ?? ''),
+    10
+  )
+  return Number.isFinite(value) && value >= 0
+    ? value
+    : DEFAULT_COOMERFANS_MAX_RETRIES
+}
+
+function getCoomerFansRetryDelayMs(deps = {}) {
+  const value = Number.parseInt(
+    String(
+      deps.coomerFansRetryDelayMs ??
+        process.env.HOGHAUL_COOMERFANS_RETRY_DELAY_MS ??
+        ''
+    ),
+    10
+  )
+  return Number.isFinite(value) && value >= 0
+    ? value
+    : DEFAULT_COOMERFANS_RETRY_DELAY_MS
+}
+
+function isCoomerFansTransientError(err) {
+  const message = String(err?.message || err || '')
+  return /\bHTTP\s+(?:429|502|503|504)\b/i.test(message)
+}
+
+async function fetchCoomerFansHtml(url, deps = {}) {
+  const maxRetries = getCoomerFansMaxRetries(deps)
+  let lastError = null
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await deps.fetchHtml(url)
+    } catch (err) {
+      lastError = err
+      if (!isCoomerFansTransientError(err) || attempt >= maxRetries) throw err
+      const delayMs = getCoomerFansRetryDelayMs(deps) * (attempt + 1)
+      deps.logger?.warn?.(
+        `CoomerFans transient HTML error; waiting ${Math.round(delayMs / 1000)}s before retry ${attempt + 1}: ${err.message}`
+      )
+      deps.appendRunEvent?.('coomerfans_html_retry', {
+        attempt: attempt + 1,
+        delayMs,
+        url,
+        error: err.message,
+      })
+      await sleep(delayMs)
+    }
+  }
+  throw lastError
+}
+
 function extractRegexValues(text, regex, group = 1) {
   return Array.from(String(text || '').matchAll(regex))
     .map((match) => match[group])
@@ -72,7 +133,7 @@ async function resolveCoomerFansCreator(source, deps = {}) {
   }
 
   const searchUrl = `${source.origin}/?q=${encodeURIComponent(source.rawName)}`
-  const { html } = await deps.fetchHtml(searchUrl)
+  const { html } = await fetchCoomerFansHtml(searchUrl, deps)
   const candidates = extractRegexValues(
     html,
     /href=["']\/u\/([^/]+)\/(\d+)\/([^"']+)["']/gi,
@@ -231,7 +292,7 @@ async function preflightCoomerFansSource(source, page = 0, deps = {}) {
   await resolveCoomerFansCreator(source, deps)
   const pageNumber = page + 1
   const pageUrl = getCoomerFansPageUrl(source, pageNumber)
-  const { html, byteLength } = await deps.fetchHtml(pageUrl)
+  const { html, byteLength } = await fetchCoomerFansHtml(pageUrl, deps)
   const postLinks = parseCoomerFansPostLinks(source, html)
 
   return {
@@ -270,7 +331,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     const pageNumber = page + 1
     const pageUrl = getCoomerFansPageUrl(source, pageNumber)
 
-    const { html } = await deps.fetchHtml(pageUrl)
+    const { html } = await fetchCoomerFansHtml(pageUrl, deps)
     const postLinks = parseCoomerFansPostLinks(source, html)
     if (postLinks.length === 0) break
 
@@ -290,7 +351,7 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
     const pagePosts = await Promise.all(
       selectedPostLinks.map((post) =>
         postLimit(async () => {
-          const { html: postHtml } = await deps.fetchHtml(post.url)
+          const { html: postHtml } = await fetchCoomerFansHtml(post.url, deps)
           const mediaEntries = parseCoomerFansMediaEntries(
             source,
             post,
