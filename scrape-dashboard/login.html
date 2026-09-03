@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrape Dashboard Login</title>
+    <style>
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background: #0d0d12;
+        color: #e4e4f4;
+        font:
+          14px -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+      }
+      form {
+        width: min(360px, calc(100vw - 32px));
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border: 1px solid #2a2a3a;
+        border-radius: 8px;
+        background: #1a1a24;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      input,
+      button {
+        border-radius: 6px;
+        border: 1px solid #2a2a3a;
+        padding: 10px;
+        font: inherit;
+      }
+      input {
+        background: #0f0f16;
+        color: #e4e4f4;
+      }
+      button {
+        background: #7c6cfc;
+        border-color: #7c6cfc;
+        color: white;
+        font-weight: 700;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <form method="post" action="/auth">
+      <h1>Scrape Dashboard</h1>
+      <input name="password" type="password" placeholder="Password" autofocus />
+      <button type="submit">Sign In</button>
+    </form>
+  </body>
+</html>
