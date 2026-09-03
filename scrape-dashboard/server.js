@@ -89,7 +89,7 @@ function getPlatformLabel(platform) {
 }
 
 function getStufferDbSearchUrl(username) {
-  const query = `site:stufferdb.com/index "${username}" category`
+  const query = `site:stufferdb.com ${username}`
   return `https://duckduckgo.com/?q=${encodeURIComponent(query)}`
 }
 
