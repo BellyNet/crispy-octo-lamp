@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrape Dashboard</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg: #0d0d12;
+        --sidebar-bg: #13131a;
+        --panel: #1a1a24;
+        --panel-2: #20202c;
+        --border: #2a2a3a;
+        --accent: #7c6cfc;
+        --good: #46c083;
+        --warn: #d9a441;
+        --bad: #d95f67;
+        --text: #e4e4f4;
+        --muted: #8a8aad;
+        --sidebar-w: 280px;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.45 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 8px 11px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: var(--accent);
+      }
+
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+        font-weight: 650;
+      }
+
+      button.danger {
+        color: #ffd9dc;
+        border-color: #6e2c34;
+        background: #351920;
+      }
+
+      input,
+      select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #0f0f16;
+        color: var(--text);
+        padding: 8px 10px;
+        outline: none;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+      }
+
+      #sidebar {
+        width: var(--sidebar-w);
+        min-width: var(--sidebar-w);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border);
+        background: var(--sidebar-bg);
+      }
+
+      .sidebar-header {
+        padding: 16px 14px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .app-title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .app-title strong {
+        font-size: 17px;
+      }
+
+      .app-title span,
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      #model-list {
+        list-style: none;
+        margin: 0;
+        padding: 7px 0;
+        overflow-y: auto;
+      }
+
+      .model-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        padding: 8px 13px;
+        border-left: 3px solid transparent;
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .model-item:hover,
+      .model-item.active {
+        background: var(--panel);
+        color: var(--text);
+      }
+
+      .model-item.active {
+        border-left-color: var(--accent);
+      }
+
+      .model-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .source-count {
+        font-size: 11px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      #main {
+        flex: 1;
+        min-width: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #main-header {
+        min-height: 70px;
+        padding: 14px 18px;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+      }
+
+      #current-model {
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      #main-content {
+        flex: 1;
+        overflow: auto;
+        padding: 18px;
+        display: grid;
+        grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1.35fr);
+        gap: 18px;
+      }
+
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        min-width: 0;
+      }
+
+      .panel-header {
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .panel-title {
+        font-size: 13px;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .panel-body {
+        padding: 14px;
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .row > input {
+        flex: 1;
+      }
+
+      .grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .candidate,
+      .source-row,
+      .job-row {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #15151e;
+        padding: 11px;
+      }
+
+      .candidate-top,
+      .source-row,
+      .job-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .candidate-title,
+      .source-title,
+      .job-title {
+        font-weight: 650;
+        overflow-wrap: anywhere;
+      }
+
+      .url {
+        color: var(--muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+        margin-top: 3px;
+      }
+
+      .chips {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+
+      .chip {
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #101018;
+        color: var(--muted);
+        padding: 2px 7px;
+        font-size: 11px;
+      }
+
+      .chip.good {
+        color: #c9ffe3;
+        border-color: #245f44;
+      }
+
+      .chip.warn {
+        color: #ffe9b6;
+        border-color: #76551c;
+      }
+
+      .chip.bad {
+        color: #ffd4d8;
+        border-color: #7a3038;
+      }
+
+      .actions {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .saved-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .source-row input[type='checkbox'] {
+        width: auto;
+      }
+
+      .options {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      label.check {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      label.check input {
+        width: auto;
+      }
+
+      #log {
+        min-height: 360px;
+        max-height: 520px;
+        overflow: auto;
+        margin: 0;
+        padding: 12px;
+        border-radius: 8px;
+        background: #09090e;
+        border: 1px solid var(--border);
+        color: #d7d7e8;
+        font:
+          12px/1.45 Consolas,
+          'SFMono-Regular',
+          monospace;
+        white-space: pre-wrap;
+      }
+
+      .status {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .status.completed {
+        color: var(--good);
+      }
+
+      .status.failed,
+      .status.canceled {
+        color: var(--bad);
+      }
+
+      .status.running {
+        color: var(--warn);
+      }
+
+      .empty {
+        color: var(--muted);
+        padding: 18px 0;
+      }
+
+      @media (max-width: 980px) {
+        body {
+          display: block;
+          overflow: auto;
+        }
+
+        #sidebar,
+        #main {
+          width: 100%;
+          min-width: 0;
+          height: auto;
+        }
+
+        #model-list {
+          max-height: 240px;
+        }
+
+        #main-content {
+          grid-template-columns: 1fr;
+          overflow: visible;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="app-title">
+          <strong>Scrape Dashboard</strong>
+          <span id="model-count">0</span>
+        </div>
+        <input id="model-filter" placeholder="Filter models" />
+      </div>
+      <ul id="model-list"></ul>
+    </aside>
+
+    <main id="main">
+      <header id="main-header">
+        <div>
+          <div id="current-model">Find sources or run all scrapes</div>
+          <div id="model-meta" class="muted"></div>
+        </div>
+        <div class="actions">
+          <button id="refresh-models">Refresh</button>
+          <button id="run-all" class="primary">Run All Scrape</button>
+        </div>
+      </header>
+
+      <section id="main-content">
+        <div class="grid">
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Source Search</div>
+            </div>
+            <div class="panel-body">
+              <div class="row">
+                <input id="source-query" placeholder="Username or source URL" />
+                <button id="search-sources" class="primary">Search</button>
+              </div>
+              <div style="margin-top: 10px">
+                <label>
+                  Save accepted sources under
+                  <input
+                    id="target-model"
+                    list="model-options"
+                    placeholder="Canonical model name"
+                  />
+                </label>
+                <datalist id="model-options"></datalist>
+              </div>
+              <div
+                id="search-status"
+                class="muted"
+                style="margin-top: 9px"
+              ></div>
+              <div id="candidates" class="grid" style="margin-top: 12px"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Model Inspector</div>
+              <div class="actions">
+                <button id="select-all-sources">Select All</button>
+                <button id="run-selected">Run Checked</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div id="saved-sources" class="saved-list"></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="grid">
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Run Options</div>
+            </div>
+            <div class="panel-body">
+              <div class="options">
+                <label class="check">
+                  <input id="opt-skip-nas" type="checkbox" checked />
+                  Skip NAS sync
+                </label>
+                <label class="check">
+                  <input id="opt-dry-run" type="checkbox" />
+                  Dry run
+                </label>
+                <label class="check">
+                  <input id="opt-keep-history" type="checkbox" checked />
+                  Keep history
+                </label>
+                <label class="check">
+                  <input id="opt-stop-on-error" type="checkbox" />
+                  Stop on error
+                </label>
+                <label>
+                  Pages
+                  <input id="opt-pages" placeholder="default" />
+                </label>
+                <label>
+                  Max posts
+                  <input id="opt-max-posts" placeholder="default" />
+                </label>
+                <label>
+                  Max files
+                  <input id="opt-max-files" placeholder="default" />
+                </label>
+                <label>
+                  Post concurrency
+                  <input id="opt-post-concurrency" placeholder="default" />
+                </label>
+                <label>
+                  Image concurrency
+                  <input id="opt-image-concurrency" placeholder="default" />
+                </label>
+                <label>
+                  Video concurrency
+                  <input id="opt-video-concurrency" placeholder="default" />
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Jobs</div>
+              <button id="cancel-job" class="danger">Cancel Active</button>
+            </div>
+            <div class="panel-body">
+              <div id="jobs" class="grid" style="margin-bottom: 12px"></div>
+              <pre id="log"></pre>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        models: [],
+        selectedModel: null,
+        selectedJobId: null,
+      }
+
+      const modelListEl = document.getElementById('model-list')
+      const modelCountEl = document.getElementById('model-count')
+      const modelFilterEl = document.getElementById('model-filter')
+      const currentModelEl = document.getElementById('current-model')
+      const modelMetaEl = document.getElementById('model-meta')
+      const savedSourcesEl = document.getElementById('saved-sources')
+      const candidatesEl = document.getElementById('candidates')
+      const sourceQueryEl = document.getElementById('source-query')
+      const targetModelEl = document.getElementById('target-model')
+      const modelOptionsEl = document.getElementById('model-options')
+      const searchStatusEl = document.getElementById('search-status')
+      const jobsEl = document.getElementById('jobs')
+      const logEl = document.getElementById('log')
+
+      function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, (char) => {
+          return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+          }[char]
+        })
+      }
+
+      async function api(path, options = {}) {
+        const res = await fetch(path, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        })
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`)
+        return payload
+      }
+
+      function sourceLabel(key) {
+        if (key === 'kemono') return 'Pawchive'
+        if (key === 'coomer') return 'CoomerFans'
+        if (key === 'reddit') return 'Reddit'
+        if (key === 'stufferdb') return 'StufferDB'
+        return key
+      }
+
+      function renderModels() {
+        const filter = modelFilterEl.value.trim().toLowerCase()
+        const models = state.models.filter((model) => {
+          if (!filter) return true
+          return [model.name, ...(model.aliases || [])]
+            .join(' ')
+            .toLowerCase()
+            .includes(filter)
+        })
+        modelCountEl.textContent = String(models.length)
+        modelOptionsEl.innerHTML = state.models
+          .map((model) => `<option value="${escapeHtml(model.name)}"></option>`)
+          .join('')
+        modelListEl.innerHTML = models
+          .map(
+            (model) => `
+              <li class="model-item ${state.selectedModel?.name === model.name ? 'active' : ''}" data-model="${escapeHtml(model.name)}">
+                <span class="model-name">${escapeHtml(model.name)}</span>
+                <span class="source-count">${model.sourceCount}</span>
+              </li>
+            `
+          )
+          .join('')
+      }
+
+      function renderSelectedModel() {
+        const model = state.selectedModel
+        currentModelEl.textContent = model
+          ? model.name
+          : 'Find sources or run all scrapes'
+        modelMetaEl.textContent = model
+          ? `${model.sourceCount} saved sources${model.hasLocalMedia ? ' | local media found' : ''}`
+          : 'No model is selected by default.'
+        renderSavedSources()
+        renderModels()
+      }
+
+      function getSavedSources(model) {
+        if (!model) return []
+        const rows = []
+        for (const [key, list] of Object.entries(model.sources || {})) {
+          for (const source of list || []) {
+            rows.push({
+              key,
+              label: sourceLabel(key),
+              url: source.url,
+              service: source.service || '',
+              userId: source.userId || source.categoryId || '',
+            })
+          }
+        }
+        return rows
+      }
+
+      function renderSavedSources() {
+        const rows = getSavedSources(state.selectedModel)
+        if (!rows.length) {
+          savedSourcesEl.innerHTML =
+            '<div class="empty">Pick a model from the sidebar to inspect its saved sources.</div>'
+          return
+        }
+        savedSourcesEl.innerHTML = rows
+          .map(
+            (source, index) => `
+              <label class="source-row">
+                <span>
+                  <input class="source-check" type="checkbox" checked data-url="${escapeHtml(source.url)}" />
+                  <span class="source-title">${escapeHtml(source.label)}</span>
+                  <span class="chip">${escapeHtml(source.service || source.userId || 'source')}</span>
+                  <div class="url">${escapeHtml(source.url)}</div>
+                </span>
+                <a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>
+              </label>
+            `
+          )
+          .join('')
+      }
+
+      function candidateMarkup(candidate) {
+        if (candidate.type === 'manual-search') {
+          return `
+            <article class="candidate">
+              <div class="candidate-top">
+                <div>
+                  <div class="candidate-title">StufferDB manual search</div>
+                  <div class="url">${escapeHtml(candidate.url)}</div>
+                  <div class="chips">
+                    <span class="chip warn">manual</span>
+                    <span class="chip">${escapeHtml(candidate.username)}</span>
+                  </div>
+                </div>
+                <div class="actions">
+                  <a href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>
+                </div>
+              </div>
+              <div class="row" style="margin-top: 10px">
+                <input class="manual-stuffer-url" placeholder="Paste StufferDB category URL" />
+                <button class="accept-manual-stuffer" type="button">Accept</button>
+              </div>
+            </article>
+          `
+        }
+
+        const chips = [
+          `<span class="chip">${escapeHtml(candidate.label)}</span>`,
+          candidate.service
+            ? `<span class="chip">${escapeHtml(candidate.service)}</span>`
+            : '',
+          candidate.existingModel
+            ? `<span class="chip good">saved: ${escapeHtml(candidate.existingModel)}</span>`
+            : '',
+          candidate.verified === false
+            ? '<span class="chip warn">verify</span>'
+            : '<span class="chip good">matched</span>',
+        ].join('')
+
+        return `
+          <article class="candidate" data-url="${escapeHtml(candidate.url)}">
+            <div class="candidate-top">
+              <div>
+                <div class="candidate-title">${escapeHtml(candidate.name || candidate.username || candidate.label)}</div>
+                <div class="url">${escapeHtml(candidate.url)}</div>
+                <div class="chips">${chips}</div>
+              </div>
+              <div class="actions">
+                <a href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>
+                <button class="accept-source" type="button" ${candidate.existingModel ? 'disabled' : ''}>Accept</button>
+              </div>
+            </div>
+          </article>
+        `
+      }
+
+      async function loadModels(keepSelection = true) {
+        const payload = await api('/api/models')
+        const previousName = keepSelection ? state.selectedModel?.name : null
+        state.models = payload.models || []
+        state.selectedModel =
+          state.models.find((model) => model.name === previousName) || null
+        renderSelectedModel()
+      }
+
+      async function searchSources() {
+        const query = sourceQueryEl.value.trim()
+        if (!query) return
+        searchStatusEl.textContent = 'Searching...'
+        candidatesEl.innerHTML = ''
+        try {
+          const payload = await api(
+            `/api/source-search?q=${encodeURIComponent(query)}`
+          )
+          const candidates = payload.candidates || []
+          searchStatusEl.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`
+          candidatesEl.innerHTML = candidates.length
+            ? candidates.map(candidateMarkup).join('')
+            : '<div class="empty">No candidates.</div>'
+        } catch (err) {
+          searchStatusEl.textContent = err.message
+        }
+      }
+
+      async function acceptSource(url) {
+        const targetModel = targetModelEl.value.trim()
+        if (!targetModel)
+          throw new Error('Enter a model to save this source under')
+        await api(`/api/models/${encodeURIComponent(targetModel)}/sources`, {
+          method: 'POST',
+          body: JSON.stringify({ url }),
+        })
+        await loadModels(true)
+        state.selectedModel =
+          state.models.find((model) => model.name === targetModel) ||
+          state.models.find(
+            (model) => model.name === targetModel.toLowerCase()
+          ) ||
+          state.selectedModel
+        renderSelectedModel()
+      }
+
+      function getRunOptions() {
+        const value = (id) => document.getElementById(id).value.trim()
+        return {
+          skipNasSync: document.getElementById('opt-skip-nas').checked,
+          dryRun: document.getElementById('opt-dry-run').checked,
+          keepHistory: document.getElementById('opt-keep-history').checked,
+          stopOnError: document.getElementById('opt-stop-on-error').checked,
+          pages: value('opt-pages'),
+          maxPosts: value('opt-max-posts'),
+          maxFiles: value('opt-max-files'),
+          postConcurrency: value('opt-post-concurrency'),
+          imageConcurrency: value('opt-image-concurrency'),
+          videoConcurrency: value('opt-video-concurrency'),
+        }
+      }
+
+      async function runSelectedSources() {
+        if (!state.selectedModel) return
+        const sources = [
+          ...document.querySelectorAll('.source-check:checked'),
+        ].map((input) => input.dataset.url)
+        if (!sources.length) return
+        const payload = await api('/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            model: state.selectedModel.name,
+            sources,
+            options: getRunOptions(),
+          }),
+        })
+        state.selectedJobId = payload.job.id
+        await refreshJobs()
+      }
+
+      async function runAllSources() {
+        const payload = await api('/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            mode: 'all',
+            options: getRunOptions(),
+          }),
+        })
+        state.selectedJobId = payload.job.id
+        await refreshJobs()
+      }
+
+      function renderJobs(jobs) {
+        if (!jobs.length) {
+          jobsEl.innerHTML = '<div class="empty">No jobs yet.</div>'
+          logEl.textContent = ''
+          return
+        }
+        if (!state.selectedJobId) state.selectedJobId = jobs[0].id
+        jobsEl.innerHTML = jobs
+          .slice(0, 5)
+          .map(
+            (job) => `
+              <div class="job-row" data-job-id="${job.id}">
+                  <div>
+                    <div class="job-title">#${job.id} ${escapeHtml(job.model)}</div>
+                  <div class="muted">${
+                    job.mode === 'all'
+                      ? 'all registered sources'
+                      : `${job.sources.length} source${job.sources.length === 1 ? '' : 's'}`
+                  }</div>
+                  </div>
+                <button class="status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</button>
+              </div>
+            `
+          )
+          .join('')
+        const selected =
+          jobs.find((job) => job.id === state.selectedJobId) || jobs[0]
+        logEl.textContent = (selected.log || [])
+          .map(
+            (line) => `[${new Date(line.at).toLocaleTimeString()}] ${line.text}`
+          )
+          .join('\n')
+        logEl.scrollTop = logEl.scrollHeight
+      }
+
+      async function refreshJobs() {
+        try {
+          const payload = await api('/api/jobs')
+          renderJobs(payload.jobs || [])
+        } catch (err) {
+          logEl.textContent = err.message
+        }
+      }
+
+      modelListEl.addEventListener('click', (event) => {
+        const item = event.target.closest('.model-item')
+        if (!item) return
+        state.selectedModel =
+          state.models.find((model) => model.name === item.dataset.model) ||
+          null
+        if (state.selectedModel) targetModelEl.value = state.selectedModel.name
+        renderSelectedModel()
+      })
+
+      candidatesEl.addEventListener('click', async (event) => {
+        const accept = event.target.closest('.accept-source')
+        const manual = event.target.closest('.accept-manual-stuffer')
+        try {
+          if (accept) {
+            const card = accept.closest('.candidate')
+            await acceptSource(card.dataset.url)
+            accept.textContent = 'Accepted'
+            accept.disabled = true
+          } else if (manual) {
+            const card = manual.closest('.candidate')
+            const input = card.querySelector('.manual-stuffer-url')
+            await acceptSource(input.value.trim())
+            manual.textContent = 'Accepted'
+            manual.disabled = true
+          }
+        } catch (err) {
+          searchStatusEl.textContent = err.message
+        }
+      })
+
+      jobsEl.addEventListener('click', (event) => {
+        const row = event.target.closest('.job-row')
+        if (!row) return
+        state.selectedJobId = Number(row.dataset.jobId)
+        refreshJobs()
+      })
+
+      document
+        .getElementById('search-sources')
+        .addEventListener('click', searchSources)
+      sourceQueryEl.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') searchSources()
+      })
+      modelFilterEl.addEventListener('input', renderModels)
+      document
+        .getElementById('refresh-models')
+        .addEventListener('click', () => loadModels(true))
+      document
+        .getElementById('run-selected')
+        .addEventListener('click', runSelectedSources)
+      document
+        .getElementById('run-all')
+        .addEventListener('click', runAllSources)
+      document
+        .getElementById('select-all-sources')
+        .addEventListener('click', () => {
+          const checks = [...document.querySelectorAll('.source-check')]
+          const allChecked = checks.every((input) => input.checked)
+          checks.forEach((input) => {
+            input.checked = !allChecked
+          })
+        })
+      document
+        .getElementById('cancel-job')
+        .addEventListener('click', async () => {
+          if (!state.selectedJobId) return
+          await api(`/api/jobs/${state.selectedJobId}/cancel`, {
+            method: 'POST',
+          })
+          await refreshJobs()
+        })
+
+      loadModels(false).catch((err) => {
+        currentModelEl.textContent = err.message
+      })
+      refreshJobs()
+      setInterval(refreshJobs, 1500)
+      setInterval(() => loadModels(true).catch(() => {}), 30000)
+    </script>
+  </body>
+</html>

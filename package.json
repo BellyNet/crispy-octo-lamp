@@ -75,6 +75,7 @@
     "backfill:sources-export": "node hoghaul/export-source-backfill-review.js",
     "sources:backfill-interactive": "node hoghaul/backfill-sources-interactive.js",
     "reddit:oauth-login": "node scrapyard/reddit-oauth-login.js",
+    "scrape:dashboard": "node scrape-dashboard/server.js",
     "ingest:kemonodownloader": "node hoghaul/ingest-kemonodownloader.js",
     "probe:sources": "node hoghaul/batch-probe-sources.js",
     "backfill:exif": "node milkmaid/backfill-exif-dates.js",
