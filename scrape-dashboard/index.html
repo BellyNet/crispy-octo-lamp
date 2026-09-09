@@ -412,7 +412,8 @@
       .status.running,
       .status.queued,
       .status.warn,
-      .status.progress {
+      .status.progress,
+      .status.interrupted {
         color: #ffe9b6;
         border: 1px solid #76551c;
         background: #2b2210;
@@ -464,6 +465,18 @@
 
       .log-title {
         font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .evidence-list {
+        display: grid;
+        gap: 4px;
+        margin-top: 7px;
+      }
+
+      .evidence-item {
+        color: var(--muted);
+        font-size: 12px;
         overflow-wrap: anywhere;
       }
 
@@ -612,7 +625,7 @@
             <div class="panel-body">
               <div class="options">
                 <label class="check">
-                  <input id="opt-skip-nas" type="checkbox" checked />
+                  <input id="opt-skip-nas" type="checkbox" />
                   Skip NAS sync
                 </label>
                 <label class="check">
@@ -1029,6 +1042,24 @@
         const failure = source.failure
           ? ` | ${source.failure.code || 'failure'}`
           : ''
+        const duplicateEvidence = (source.evidence?.duplicates || [])
+          .slice(0, 3)
+          .map((item) => {
+            const matched = item.savedPath ? ` -> ${item.savedPath}` : ''
+            const post = item.postId ? ` (${item.postId})` : ''
+            return `${item.type || 'duplicate'}: ${item.filename || item.title || item.url || 'media'}${post}${matched}`
+          })
+        const errorEvidence = (source.evidence?.errors || [])
+          .slice(0, 3)
+          .map((item) => {
+            const post = item.postId ? ` (${item.postId})` : ''
+            return `${item.type || 'error'}${post}: ${item.message || item.filename || item.url || 'see raw log'}`
+          })
+        const evidence = [...errorEvidence, ...duplicateEvidence]
+          .map(
+            (text) => `<span class="evidence-item">${escapeHtml(text)}</span>`
+          )
+          .join('')
         return `
           <article class="log-entry ${level}">
             <span class="log-dot"></span>
@@ -1038,6 +1069,9 @@
                 <span class="status ${level}">${escapeHtml(source.status || (source.ok ? 'ok' : 'failed'))}</span>
               </span>
               <span class="detail">${escapeHtml(counterText(source) + failure)}</span>
+              ${
+                evidence ? `<span class="evidence-list">${evidence}</span>` : ''
+              }
             </span>
           </article>
         `
@@ -1067,8 +1101,11 @@
         const current = summary.current
         if (!current) return ''
         const sourceText = current.sourceTotal
-          ? `source ${current.sourceIndex || 0}/${current.sourceTotal}`
+          ? `source ${current.sourceIndex || 0}/${current.sourceTotal}${current.sourceLabel ? ` | ${current.sourceLabel}` : ''}`
           : 'starting sources'
+        const urlText = current.url
+          ? `<span class="detail">${escapeHtml(current.url)}</span>`
+          : ''
         const modelText = current.modelTotal
           ? `user ${current.model} (${current.modelIndex}/${current.modelTotal})`
           : `user ${current.model}`
@@ -1081,6 +1118,7 @@
                 <span class="status progress">running</span>
               </span>
               <span class="detail">${escapeHtml(sourceText)}</span>
+              ${urlText}
             </span>
           </article>
         `
@@ -1100,16 +1138,21 @@
         const entries = [currentRunMarkup(summary)]
 
         if (summary.kind === 'all') {
-          if (summary.latestModel) {
+          const recentModels = summary.recentModels?.length
+            ? summary.recentModels
+            : summary.latestModel
+              ? [summary.latestModel]
+              : []
+          for (const model of recentModels) {
             entries.push(
               finalTotalMarkup({
-                analysis: `Latest user: ${summary.latestModel.model}.`,
-                totals: summary.latestModel.totals,
+                analysis: `User ${model.model}.`,
+                totals: model.totals,
               })
             )
             entries.push(
-              ...summary.latestModel.sources.map((source) =>
-                sourceSummaryMarkup(source, `${summary.latestModel.model}: `)
+              ...model.sources.map((source) =>
+                sourceSummaryMarkup(source, `${model.model}: `)
               )
             )
           }
@@ -1134,7 +1177,9 @@
         if (
           job.finishedAt ||
           job.status === 'completed' ||
-          job.status === 'failed'
+          job.status === 'failed' ||
+          job.status === 'canceled' ||
+          job.status === 'interrupted'
         ) {
           entries.push(finalTotalMarkup(summary))
         }
@@ -1260,7 +1305,7 @@
         registryMetaEl.textContent = err.message
       })
       refreshJobs()
-      setInterval(refreshJobs, 1500)
+      setInterval(refreshJobs, 800)
       setInterval(() => loadModels().catch(() => {}), 30000)
     </script>
   </body>

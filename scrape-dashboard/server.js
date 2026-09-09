@@ -54,6 +54,7 @@ const SOURCE_KEYS = ['reddit', 'kemono', 'coomer', 'stufferdb']
 const JOB_LOG_LIMIT = 2500
 const jobs = new Map()
 const queue = []
+const evidenceCache = new Map()
 let activeJob = null
 let nextJobId = 1
 
@@ -298,12 +299,56 @@ function stripAnsi(value) {
   return String(value || '').replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
 }
 
+function updateJobProgressFromLog(job, text) {
+  if (!job || job.mode !== 'all') return
+  const modelMatch = String(text).match(
+    /^MODEL\s+(\d+)\/(\d+):\s+(.+?)\s+\|\s+sources\s+(\d+)\s*$/i
+  )
+  if (modelMatch) {
+    job.liveProgress = {
+      model: modelMatch[3],
+      modelIndex: Number(modelMatch[1]),
+      modelTotal: Number(modelMatch[2]),
+      sourceIndex: 0,
+      sourceTotal: Number(modelMatch[4]),
+      sourceLabel: null,
+      url: null,
+      updatedAt: new Date().toISOString(),
+    }
+    return
+  }
+
+  const sourceMatch = String(text).match(
+    /^--\s+SOURCE\s+(\d+)\/(\d+):\s+(.+?)\s+->\s+(.+?)\s*$/i
+  )
+  if (sourceMatch) {
+    job.liveProgress = {
+      ...(job.liveProgress || {}),
+      model: sourceMatch[3],
+      sourceIndex: Number(sourceMatch[1]),
+      sourceTotal: Number(sourceMatch[2]),
+      sourceLabel: sourceMatch[4],
+      updatedAt: new Date().toISOString(),
+    }
+    return
+  }
+
+  if (job.liveProgress && /^\s+https?:\/\//i.test(String(text))) {
+    job.liveProgress = {
+      ...job.liveProgress,
+      url: String(text).trim(),
+      updatedAt: new Date().toISOString(),
+    }
+  }
+}
+
 function appendJobLog(job, text, stream = 'stdout') {
   const clean = stripAnsi(text)
   if (!clean) return
   const chunks = clean.split(/\r?\n/)
   for (const chunk of chunks) {
     if (!chunk) continue
+    updateJobProgressFromLog(job, chunk)
     job.log.push({
       at: new Date().toISOString(),
       stream,
@@ -320,6 +365,26 @@ function readJsonFileIfFresh(filePath, startedAt) {
     const stat = fs.statSync(filePath)
     if (startedAt && stat.mtimeMs + 1000 < Date.parse(startedAt)) return null
     return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function readLatestAllSourceReportForJob(job) {
+  try {
+    const stat = fs.statSync(allSourceReportPath)
+    if (job?.startedAt && stat.mtimeMs + 1000 < Date.parse(job.startedAt)) {
+      return null
+    }
+    if (job && job.allSourceReportMtimeMs === stat.mtimeMs) {
+      return job.allSourceReport || null
+    }
+    const report = JSON.parse(fs.readFileSync(allSourceReportPath, 'utf8'))
+    if (job) {
+      job.allSourceReport = report
+      job.allSourceReportMtimeMs = stat.mtimeMs
+    }
+    return report
   } catch {
     return null
   }
@@ -360,6 +425,66 @@ function addRunToTotals(totals, run) {
   totals.durationMs += Number(summary.durationMs || 0)
 }
 
+function compactEventUrl(event) {
+  return event?.mediaPageUrl || event?.url || event?.mediaUrl || ''
+}
+
+function readRunEvidence(logPath) {
+  if (!logPath) return { duplicates: [], errors: [] }
+  try {
+    const stat = fs.statSync(logPath)
+    const cached = evidenceCache.get(logPath)
+    if (cached?.mtimeMs === stat.mtimeMs) return cached.evidence
+
+    const evidence = { duplicates: [], errors: [] }
+    const lines = fs.readFileSync(logPath, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      if (!line) continue
+      let event
+      try {
+        event = JSON.parse(line)
+      } catch {
+        continue
+      }
+
+      if (
+        String(event.type || '').startsWith('duplicate') &&
+        evidence.duplicates.length < 5
+      ) {
+        evidence.duplicates.push({
+          type: event.type,
+          filename: event.filename || '',
+          savedPath: event.savedPath || event.relativePath || '',
+          postId: event.postId || '',
+          title: event.title || '',
+          url: compactEventUrl(event),
+        })
+      }
+
+      if (
+        /(error|failed|unavailable)/i.test(String(event.type || '')) &&
+        evidence.errors.length < 5
+      ) {
+        evidence.errors.push({
+          type: event.type || 'error',
+          message: event.error || event.message || event.reason || '',
+          filename: event.filename || '',
+          postId: event.postId || '',
+          url: compactEventUrl(event),
+        })
+      }
+    }
+
+    evidenceCache.set(logPath, { mtimeMs: stat.mtimeMs, evidence })
+    if (evidenceCache.size > 200) {
+      evidenceCache.delete(evidenceCache.keys().next().value)
+    }
+    return evidence
+  } catch {
+    return { duplicates: [], errors: [] }
+  }
+}
+
 function sourceRunView(run, index, total) {
   const summary = run?.summary || {}
   return {
@@ -376,6 +501,7 @@ function sourceRunView(run, index, total) {
     processed: Number(summary.processed || 0),
     expectedMedia: Number(summary.expectedMedia || 0),
     failure: summary.failure || null,
+    evidence: readRunEvidence(summary.logPath),
   }
 }
 
@@ -425,6 +551,7 @@ function allSourceRunView(run, index, total) {
     processed: Number(summary.processed || 0),
     expectedMedia: Number(summary.expectedMedia || 0),
     failure: summary.failure || null,
+    evidence: readRunEvidence(summary.logPath),
   }
 }
 
@@ -451,10 +578,7 @@ function allSourceModelView(result, index, totalModels) {
 }
 
 function summarizeAllSourceJob(job) {
-  const report =
-    job.allSourceReport ||
-    readJsonFileIfFresh(allSourceReportPath, job.startedAt)
-  if (report) job.allSourceReport = report
+  const report = readLatestAllSourceReportForJob(job)
   const results = Array.isArray(report?.results) ? report.results : []
   const models = results.map((result, index) =>
     allSourceModelView(
@@ -491,11 +615,26 @@ function summarizeAllSourceJob(job) {
   const latestModel = models[models.length - 1] || null
   const latestSource =
     latestModel?.sources[latestModel.sources.length - 1] || null
+  const liveProgress =
+    job.liveProgress && job.status === 'running'
+      ? {
+          model: job.liveProgress.model,
+          modelIndex: job.liveProgress.modelIndex || 0,
+          modelTotal:
+            job.liveProgress.modelTotal || Number(report?.selectedModels || 0),
+          sourceIndex: job.liveProgress.sourceIndex || 0,
+          sourceTotal: job.liveProgress.sourceTotal || 0,
+          sourceLabel: job.liveProgress.sourceLabel || null,
+          url: job.liveProgress.url || null,
+          updatedAt: job.liveProgress.updatedAt || null,
+        }
+      : null
   return {
     kind: 'all',
     reportPath: report ? allSourceReportPath : null,
     current:
-      job.status === 'running' && latestModel
+      liveProgress ||
+      (job.status === 'running' && latestModel
         ? {
             model: latestModel.model,
             modelIndex: latestModel.modelIndex,
@@ -503,9 +642,10 @@ function summarizeAllSourceJob(job) {
             sourceIndex: latestSource?.sourceIndex || 0,
             sourceTotal: latestModel.sourceCount,
           }
-        : null,
+        : null),
     totals,
     latestModel,
+    recentModels: models.slice(-8).reverse(),
     failedModels: models.filter((model) => !model.ok).slice(-20),
     analysis: analyzeTotals(job.status, totals),
   }
@@ -518,6 +658,9 @@ function analyzeTotals(status, totals) {
   }
   if (status === 'canceled') {
     return `Canceled after ${totals.sources} source run${totals.sources === 1 ? '' : 's'}.`
+  }
+  if (status === 'interrupted') {
+    return `Latest report is partial: ${totals.modelsAttempted} model${totals.modelsAttempted === 1 ? '' : 's'} and ${totals.sources} source run${totals.sources === 1 ? '' : 's'} recorded.`
   }
   if (totals.sourceFailures || totals.errors) {
     return `Finished with ${totals.sourceFailures} source failure${totals.sourceFailures === 1 ? '' : 's'} and ${totals.errors} media error${totals.errors === 1 ? '' : 's'}.`
@@ -553,6 +696,33 @@ function publicJob(job, options = {}) {
   }
   if (options.includeLog) payload.log = job.log
   return payload
+}
+
+function latestAllSourceReportJob() {
+  const report = readJsonFileIfFresh(allSourceReportPath)
+  if (!report) return null
+  const failed = Number(report.totals?.failures || 0) > 0
+  return {
+    id: 0,
+    mode: 'all',
+    status: report.finishedAt
+      ? failed
+        ? 'failed'
+        : 'completed'
+      : 'interrupted',
+    model: 'LATEST ALL-SOURCE REPORT',
+    sources: [],
+    options: {},
+    createdAt: report.startedAt || report.generatedAt || null,
+    startedAt: report.startedAt || report.generatedAt || null,
+    finishedAt: report.finishedAt || null,
+    activeSourceIndex: null,
+    exitCode: failed ? 1 : 0,
+    error: null,
+    runs: [],
+    log: [],
+    allSourceReport: report,
+  }
 }
 
 function killProcessTree(pid) {
@@ -672,10 +842,7 @@ async function runJob(job) {
           'stderr'
         )
       }
-      job.allSourceReport = readJsonFileIfFresh(
-        allSourceReportPath,
-        job.startedAt
-      )
+      job.allSourceReport = readLatestAllSourceReportForJob(job)
     } else {
       for (let index = 0; index < job.sources.length; index += 1) {
         if (job.status === 'canceling') break
@@ -797,13 +964,17 @@ app.post('/api/models/:model/sources', (req, res) => {
 })
 
 app.get('/api/jobs', (_req, res) => {
+  const visibleJobs = Array.from(jobs.values()).sort(
+    (left, right) => right.id - left.id
+  )
+  if (!visibleJobs.length) {
+    const latestJob = latestAllSourceReportJob()
+    if (latestJob) visibleJobs.push(latestJob)
+  }
   res.json({
     activeJobId: activeJob?.id || null,
     queuedJobIds: queue.map((job) => job.id),
-    jobs: Array.from(jobs.values())
-      .sort((left, right) => right.id - left.id)
-      .slice(0, 30)
-      .map(publicJob),
+    jobs: visibleJobs.slice(0, 30).map(publicJob),
   })
 })
 
@@ -846,6 +1017,7 @@ app.post('/api/jobs', (req, res) => {
     runs: [],
     log: [],
     child: null,
+    liveProgress: null,
   }
   jobs.set(job.id, job)
   queue.push(job)
