@@ -516,6 +516,14 @@ function getInactiveSourceMap(inactiveSources = getInactiveRedditSources()) {
   return map
 }
 
+function getSourceStateMap(states = []) {
+  const map = new Map()
+  for (const state of states) {
+    map.set(sourceStateKey(state.model, state.url), state)
+  }
+  return map
+}
+
 function getActiveRedditSourceStates() {
   const registry = loadModelRegistry(registryPath)
   const states = []
@@ -542,28 +550,37 @@ function getActiveRedditSourceStates() {
   )
 }
 
-function markRedditSourceSuspended(modelName, sourceUrl, reason = '') {
+function findActiveRedditSource(registry, canonical, sourceUrl) {
+  const sources = sourceListFor(registry[canonical], 'reddit')
+  const targetUrl = normalizeHistoryUrl(sourceUrl)
+  const sourceIndex = sources.findIndex(
+    (source) => normalizeHistoryUrl(source?.url) === targetUrl
+  )
+  return { sources, sourceIndex }
+}
+
+function markRedditSourceStatus(modelName, sourceUrl, status, reason = '') {
   const parsed = parseSourceUrl(sourceUrl)
   if (!parsed || parsed.sourceType !== 'reddit') {
-    throw new Error('Only Reddit sources can be marked suspended.')
+    throw new Error(`Only Reddit sources can be marked ${status}.`)
   }
 
   const registry = loadModelRegistry(registryPath)
   const canonical = findCanonicalModelName(registry, sanitize(modelName))
   if (!canonical) throw new Error('model not found')
   registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
-  const sources = sourceListFor(registry[canonical], 'reddit')
-  const targetUrl = normalizeHistoryUrl(parsed.url)
-  const sourceIndex = sources.findIndex(
-    (source) => normalizeHistoryUrl(source?.url) === targetUrl
+  const { sources, sourceIndex } = findActiveRedditSource(
+    registry,
+    canonical,
+    parsed.url
   )
   if (sourceIndex < 0) throw new Error('reddit source not found')
 
   sources[sourceIndex] = {
     ...sources[sourceIndex],
-    accountStatus: 'suspended',
+    accountStatus: status,
     accountStatusAt: new Date().toISOString(),
-    accountStatusReason: reason || 'marked_suspended',
+    accountStatusReason: reason || `marked_${status}`,
   }
   registry[canonical].sources.reddit = sources
   saveModelRegistry(registryPath, registry)
@@ -572,9 +589,18 @@ function markRedditSourceSuspended(modelName, sourceUrl, reason = '') {
     model: canonical,
     source: sources[sourceIndex],
     active: true,
-    accountStatus: 'suspended',
+    accountStatus: status,
     stale: false,
   }
+}
+
+function markRedditSourceSuspended(modelName, sourceUrl, reason = '') {
+  return markRedditSourceStatus(
+    modelName,
+    sourceUrl,
+    'suspended',
+    reason || 'marked_suspended'
+  )
 }
 
 function markRedditSourceActive(modelName, sourceUrl) {
@@ -587,10 +613,10 @@ function markRedditSourceActive(modelName, sourceUrl) {
   const canonical = findCanonicalModelName(registry, sanitize(modelName))
   if (!canonical) throw new Error('model not found')
   registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
-  const sources = sourceListFor(registry[canonical], 'reddit')
-  const targetUrl = normalizeHistoryUrl(parsed.url)
-  const sourceIndex = sources.findIndex(
-    (source) => normalizeHistoryUrl(source?.url) === targetUrl
+  const { sources, sourceIndex } = findActiveRedditSource(
+    registry,
+    canonical,
+    parsed.url
   )
   if (sourceIndex < 0) throw new Error('reddit source not found')
 
@@ -607,6 +633,77 @@ function markRedditSourceActive(modelName, sourceUrl) {
     source: nextSource,
     active: true,
     accountStatus: 'active',
+    stale: false,
+  }
+}
+
+function markRedditSourceValid(modelName, sourceUrl, reason = '') {
+  const parsed = parseSourceUrl(sourceUrl)
+  if (!parsed || parsed.sourceType !== 'reddit') {
+    throw new Error('Only Reddit sources can be marked valid.')
+  }
+
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+  registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
+
+  const active = findActiveRedditSource(registry, canonical, parsed.url)
+  if (active.sourceIndex >= 0) {
+    active.sources[active.sourceIndex] = {
+      ...active.sources[active.sourceIndex],
+      accountStatus: 'valid',
+      accountStatusAt: new Date().toISOString(),
+      accountStatusReason: reason || 'manually_verified_valid',
+    }
+    registry[canonical].sources.reddit = active.sources
+    saveModelRegistry(registryPath, registry)
+    auditCache = null
+    return {
+      model: canonical,
+      source: active.sources[active.sourceIndex],
+      active: true,
+      restored: false,
+      accountStatus: 'valid',
+      stale: false,
+    }
+  }
+
+  const inactiveSources = inactiveSourceListFor(registry[canonical], 'reddit')
+  const targetUrl = normalizeHistoryUrl(parsed.url)
+  const inactiveIndex = inactiveSources.findIndex(
+    (source) => normalizeHistoryUrl(source?.url) === targetUrl
+  )
+  if (inactiveIndex < 0) throw new Error('reddit source not found')
+
+  const inactiveSource = inactiveSources[inactiveIndex]
+  const restoredSource = {
+    url: parsed.url,
+    service: inactiveSource.service || parsed.service || 'submitted',
+    userId: inactiveSource.userId || parsed.userId || parsed.username,
+    username: inactiveSource.username || parsed.username || parsed.userId,
+    discoveredAs:
+      inactiveSource.discoveredAs || inactiveSource.username || parsed.username,
+    lastCheckedAt: new Date().toISOString(),
+    accountStatus: 'valid',
+    accountStatusAt: new Date().toISOString(),
+    accountStatusReason: reason || 'restored_manually_verified_valid',
+  }
+  if (!Array.isArray(registry[canonical].sources.reddit)) {
+    registry[canonical].sources.reddit = []
+  }
+  registry[canonical].sources.reddit.push(restoredSource)
+  registry[canonical].inactiveSources.reddit = inactiveSources.filter(
+    (_source, index) => index !== inactiveIndex
+  )
+  saveModelRegistry(registryPath, registry)
+  auditCache = null
+  return {
+    model: canonical,
+    source: restoredSource,
+    active: true,
+    restored: true,
+    accountStatus: 'valid',
     stale: false,
   }
 }
@@ -1430,7 +1527,11 @@ function syncLatestAllSourceReportToHistory() {
   return snapshot
 }
 
-function buildSourceAlerts(runs, inactiveSourceMap = new Map()) {
+function buildSourceAlerts(
+  runs,
+  inactiveSourceMap = new Map(),
+  activeSourceStateMap = new Map()
+) {
   const sortedRuns = [...runs].sort(
     (left, right) =>
       new Date(right.startedAt || right.createdAt || 0) -
@@ -1469,6 +1570,9 @@ function buildSourceAlerts(runs, inactiveSourceMap = new Map()) {
       ) {
         continue
       }
+      const activeState =
+        activeSourceStateMap.get(sourceStateKey(model.model, source.url)) ||
+        null
       const previous = priorWorked.get(normalizeHistoryUrl(source.url)) || null
       const savedEvidence = getSourceSavedEvidence(model.model, source)
       const alertType = previous
@@ -1476,8 +1580,17 @@ function buildSourceAlerts(runs, inactiveSourceMap = new Map()) {
         : savedEvidence.exactSavedMedia > 0
           ? 'saved_media_now_failing'
           : classifySourceProblem(source)
+      if (
+        activeState?.accountStatus === 'valid' &&
+        alertType === 'deleted_or_empty_reddit'
+      ) {
+        continue
+      }
       alerts.push({
         alertType,
+        accountStatus: activeState?.accountStatus || null,
+        accountStatusAt: activeState?.accountStatusAt || null,
+        accountStatusReason: activeState?.accountStatusReason || '',
         model: model.model,
         sourceKey: source.sourceKey,
         sourceType: source.sourceType,
@@ -1559,6 +1672,18 @@ function getLatestSourceStatusMap(latestRun) {
     }
   }
   return map
+}
+
+function attachLatestSourceStatuses(sources, latestSourceStatuses) {
+  return sources.map((source) => {
+    const latestStatus =
+      latestSourceStatuses.get(sourceStateKey(source.model, source.url)) || null
+    return {
+      ...source,
+      latestStatus,
+      recovered: Boolean(latestStatus?.ok),
+    }
+  })
 }
 
 function collectLatestMediaFailures(latestRun) {
@@ -1701,21 +1826,19 @@ function buildAuditQueues(history) {
   const mediaFailures = collectLatestMediaFailures(latestRun)
   const quarantine = readQuarantineSummary()
   const inactiveSourceMap = getInactiveSourceMap(inactiveRedditSources)
-  const suspendedRedditSources = activeRedditStates
-    .filter((source) => source.accountStatus === 'suspended')
-    .map((source) => {
-      const latestStatus =
-        latestSourceStatuses.get(sourceStateKey(source.model, source.url)) ||
-        null
-      return {
-        ...source,
-        latestStatus,
-        recovered: Boolean(latestStatus?.ok),
-      }
-    })
+  const activeSourceStateMap = getSourceStateMap(activeRedditStates)
+  const suspendedRedditSources = attachLatestSourceStatuses(
+    activeRedditStates.filter((source) => source.accountStatus === 'suspended'),
+    latestSourceStatuses
+  )
+  const validRedditSources = attachLatestSourceStatuses(
+    activeRedditStates.filter((source) => source.accountStatus === 'valid'),
+    latestSourceStatuses
+  )
   const queues = {
-    sources: buildSourceAlerts(runs, inactiveSourceMap),
+    sources: buildSourceAlerts(runs, inactiveSourceMap, activeSourceStateMap),
     suspendedRedditSources,
+    validRedditSources,
     inactiveRedditSources,
     staleModels: buildStaleModelQueue(inactiveRedditSources),
     oversizedVideos,
@@ -2261,9 +2384,15 @@ app.post('/api/models/:model/sources/reddit-state', (req, res) => {
         ...markRedditSourceActive(model, url),
       })
     }
+    if (state === 'valid') {
+      return res.json({
+        ok: true,
+        ...markRedditSourceValid(model, url, reason),
+      })
+    }
     res
       .status(400)
-      .json({ error: 'state must be suspended, deleted, or active' })
+      .json({ error: 'state must be suspended, deleted, active, or valid' })
   } catch (err) {
     res.status(400).json({ error: err.message })
   }

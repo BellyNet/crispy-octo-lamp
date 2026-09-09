@@ -865,6 +865,20 @@
           <details class="panel">
             <summary class="panel-header">
               <div>
+                <div class="panel-title">Verified Reddit Watch</div>
+                <div id="valid-source-meta" class="muted">
+                  Watching active Reddit sources marked valid.
+                </div>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <div id="valid-sources" class="source-state-list"></div>
+            </div>
+          </details>
+
+          <details class="panel">
+            <summary class="panel-header">
+              <div>
                 <div class="panel-title">Old Reddit Accounts</div>
                 <div id="inactive-source-meta" class="muted">
                   Deleted or deactivated accounts kept for traceability.
@@ -956,6 +970,8 @@
         'suspended-source-meta'
       )
       const suspendedSourcesEl = document.getElementById('suspended-sources')
+      const validSourceMetaEl = document.getElementById('valid-source-meta')
+      const validSourcesEl = document.getElementById('valid-sources')
       const inactiveSourceMetaEl = document.getElementById(
         'inactive-source-meta'
       )
@@ -1639,6 +1655,7 @@
         const quarantine = queues.quarantine || {}
         const staleModels = queues.staleModels || []
         const suspendedRedditSources = queues.suspendedRedditSources || []
+        const validRedditSources = queues.validRedditSources || []
         const inactiveRedditSources = queues.inactiveRedditSources || []
         const deleted = alerts.filter(
           (alert) => alert.alertType === 'deleted_or_empty_reddit'
@@ -1653,6 +1670,7 @@
           ['Repair First', formatNumber(savedBefore)],
           ['Empty/Deleted Reddit', formatNumber(deleted)],
           ['Suspended Watch', formatNumber(suspendedRedditSources.length)],
+          ['Verified Watch', formatNumber(validRedditSources.length)],
           ['Old Reddit Accounts', formatNumber(inactiveRedditSources.length)],
           ['Stale Models', formatNumber(staleModels.length)],
           ['Oversized', formatNumber(oversizedCount)],
@@ -1689,14 +1707,19 @@
         sourceAlertsEl.innerHTML = alerts
           .map((alert) => {
             const status =
-              alert.alertType === 'regression' || alert.savedBefore
-                ? 'warn'
-                : 'error'
-            const badge = alert.savedBefore
-              ? 'repair'
-              : alert.alertType === 'deleted_or_empty_reddit'
-                ? 'empty?'
-                : 'review'
+              alert.accountStatus === 'valid'
+                ? 'success'
+                : alert.alertType === 'regression' || alert.savedBefore
+                  ? 'warn'
+                  : 'error'
+            const badge =
+              alert.accountStatus === 'valid'
+                ? 'valid'
+                : alert.savedBefore
+                  ? 'repair'
+                  : alert.alertType === 'deleted_or_empty_reddit'
+                    ? 'empty?'
+                    : 'review'
             const previous = alert.previousWorkedAt
               ? ` | last worked ${formatDateTime(alert.previousWorkedAt)}`
               : ''
@@ -1729,7 +1752,8 @@
                     <button class="repair-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}" data-label="${escapeHtml(alert.label || alert.sourceType || 'source')}">Update Source</button>
                     ${
                       alert.sourceType === 'reddit'
-                        ? `<button class="suspend-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Suspended</button>
+                        ? `<button class="valid-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Valid</button>
+                           <button class="suspend-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Suspended</button>
                            <button class="delete-source danger" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Deleted</button>`
                         : ''
                     }
@@ -1826,6 +1850,11 @@
                     ${
                       options.clearable
                         ? `<button class="clear-suspended-source secondary" type="button" data-model="${escapeHtml(source.model)}" data-url="${escapeHtml(source.url)}">Clear Watch</button>`
+                        : ''
+                    }
+                    ${
+                      options.restoreable
+                        ? `<button class="restore-valid-source secondary" type="button" data-model="${escapeHtml(source.model)}" data-url="${escapeHtml(source.url)}">Restore Valid</button>`
                         : ''
                     }
                   </div>
@@ -2065,6 +2094,17 @@
           }
         )
         renderSourceStateList(
+          validSourcesEl,
+          validSourceMetaEl,
+          payload.auditQueues?.validRedditSources || [],
+          {
+            empty: 'No Reddit sources are marked manually valid.',
+            meta: 'active Reddit source marked valid',
+            status: 'valid',
+            clearable: true,
+          }
+        )
+        renderSourceStateList(
           inactiveSourcesEl,
           inactiveSourceMetaEl,
           payload.auditQueues?.inactiveRedditSources || [],
@@ -2072,6 +2112,7 @@
             empty: 'No old Reddit accounts are stored yet.',
             meta: 'old Reddit account',
             status: 'deleted',
+            restoreable: true,
           }
         )
         renderMediaQueues(payload.auditQueues || {})
@@ -2084,6 +2125,7 @@
         sourceAlertsEl.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`
         staleModelsEl.innerHTML = ''
         suspendedSourcesEl.innerHTML = ''
+        validSourcesEl.innerHTML = ''
         inactiveSourcesEl.innerHTML = ''
       }
 
@@ -2140,6 +2182,7 @@
         const repair = event.target.closest('.repair-source')
         const remove = event.target.closest('.remove-source')
         const ban = event.target.closest('.ban-source')
+        const valid = event.target.closest('.valid-source')
         const suspend = event.target.closest('.suspend-source')
         const deleteSource = event.target.closest('.delete-source')
         if (repair) {
@@ -2148,6 +2191,15 @@
             url: repair.dataset.url || '',
             label: repair.dataset.label || 'source',
           })
+        } else if (valid) {
+          const model = valid.dataset.model || ''
+          const url = valid.dataset.url || ''
+          markRedditSourceState(model, url, 'valid')
+            .then((payload) => {
+              searchStatusEl.textContent = `Marked ${payload.model || model} Reddit source as valid; it will stay active.`
+              return Promise.all([loadModels(), loadHistory()])
+            })
+            .catch(renderHistoryError)
         } else if (suspend) {
           const model = suspend.dataset.model || ''
           const url = suspend.dataset.url || ''
@@ -2185,15 +2237,13 @@
           const url = ban.dataset.url || ''
           if (
             !confirm(
-              `Mark this Reddit source as banned and purge it from ${model}?`
+              `Mark this Reddit source as suspended but keep scraping it for ${model}?`
             )
           )
             return
           markSourceBanned(model, url)
             .then((payload) => {
-              searchStatusEl.textContent = payload.stale
-                ? `${payload.model || model} now has no active sources.`
-                : `Marked banned and removed from ${payload.model || model}.`
+              searchStatusEl.textContent = `Marked suspended for ${payload.model || model}; it will stay active for future checks.`
               return Promise.all([loadModels(), loadHistory()])
             })
             .catch(renderHistoryError)
@@ -2223,14 +2273,30 @@
         jumpToSourceSearch(repair.dataset.model || '')
       }
 
-      suspendedSourcesEl.addEventListener('click', (event) => {
+      function handleClearWatch(event) {
         const clear = event.target.closest('.clear-suspended-source')
         if (!clear) return
         const model = clear.dataset.model || ''
         const url = clear.dataset.url || ''
         markRedditSourceState(model, url, 'active')
           .then((payload) => {
-            searchStatusEl.textContent = `Cleared suspended watch for ${payload.model || model}.`
+            searchStatusEl.textContent = `Cleared Reddit watch for ${payload.model || model}.`
+            return Promise.all([loadModels(), loadHistory()])
+          })
+          .catch(renderHistoryError)
+      }
+
+      suspendedSourcesEl.addEventListener('click', handleClearWatch)
+      validSourcesEl.addEventListener('click', handleClearWatch)
+
+      inactiveSourcesEl.addEventListener('click', (event) => {
+        const restore = event.target.closest('.restore-valid-source')
+        if (!restore) return
+        const model = restore.dataset.model || ''
+        const url = restore.dataset.url || ''
+        markRedditSourceState(model, url, 'valid')
+          .then((payload) => {
+            searchStatusEl.textContent = `Restored ${payload.model || model} Reddit source as valid and active.`
             return Promise.all([loadModels(), loadHistory()])
           })
           .catch(renderHistoryError)
@@ -2238,6 +2304,7 @@
 
       staleModelsEl.addEventListener('click', handleSourceSearchJump)
       suspendedSourcesEl.addEventListener('click', handleSourceSearchJump)
+      validSourcesEl.addEventListener('click', handleSourceSearchJump)
       inactiveSourcesEl.addEventListener('click', handleSourceSearchJump)
 
       repairContextEl.addEventListener('click', (event) => {
