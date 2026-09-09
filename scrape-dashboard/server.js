@@ -43,6 +43,12 @@ const APPDATA =
   path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
 const datasetDir =
   process.env.DATASET_DIR || path.join(APPDATA, '.slopvault', 'dataset')
+const allSourceReportPath = path.join(
+  rootDir,
+  'tmp',
+  'update-all-sources',
+  'update-all-sources-latest.json'
+)
 
 const SOURCE_KEYS = ['reddit', 'kemono', 'coomer', 'stufferdb']
 const JOB_LOG_LIMIT = 2500
@@ -309,8 +315,227 @@ function appendJobLog(job, text, stream = 'stdout') {
   }
 }
 
-function publicJob(job) {
+function readJsonFileIfFresh(filePath, startedAt) {
+  try {
+    const stat = fs.statSync(filePath)
+    if (startedAt && stat.mtimeMs + 1000 < Date.parse(startedAt)) return null
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function emptyTotals() {
   return {
+    modelsAttempted: 0,
+    cleanModels: 0,
+    sources: 0,
+    sourceFailures: 0,
+    saved: 0,
+    skipped: 0,
+    duplicates: 0,
+    errors: 0,
+    processed: 0,
+    expectedMedia: 0,
+    savedBytes: 0,
+    downloadBytes: 0,
+    duplicateDownloadBytes: 0,
+    durationMs: 0,
+  }
+}
+
+function addRunToTotals(totals, run) {
+  const summary = run?.summary || {}
+  totals.sources += 1
+  if (run?.ok === false) totals.sourceFailures += 1
+  totals.saved += Number(summary.saved || 0)
+  totals.skipped += Number(summary.skipped || 0)
+  totals.duplicates += Number(summary.duplicates || 0)
+  totals.errors += Number(summary.errors || 0)
+  totals.processed += Number(summary.processed || 0)
+  totals.expectedMedia += Number(summary.expectedMedia || 0)
+  totals.savedBytes += Number(summary.savedBytes || 0)
+  totals.downloadBytes += Number(summary.downloadBytes || 0)
+  totals.duplicateDownloadBytes += Number(summary.duplicateDownloadBytes || 0)
+  totals.durationMs += Number(summary.durationMs || 0)
+}
+
+function sourceRunView(run, index, total) {
+  const summary = run?.summary || {}
+  return {
+    sourceIndex: index + 1,
+    sourceTotal: total,
+    label: getPlatformLabel(run?.sourceType) || run?.label || 'Source',
+    url: run?.url || '',
+    ok: run?.ok !== false,
+    status: summary.status || (run?.ok === false ? 'failed' : 'pending'),
+    saved: Number(summary.saved || 0),
+    skipped: Number(summary.skipped || 0),
+    duplicates: Number(summary.duplicates || 0),
+    errors: Number(summary.errors || 0),
+    processed: Number(summary.processed || 0),
+    expectedMedia: Number(summary.expectedMedia || 0),
+    failure: summary.failure || null,
+  }
+}
+
+function summarizeSourceJob(job) {
+  const totals = emptyTotals()
+  totals.modelsAttempted = job.startedAt ? 1 : 0
+  const sources = (job.runs || []).map((run, index) => {
+    addRunToTotals(totals, run)
+    return sourceRunView(run, index, job.sources.length)
+  })
+  if (job.finishedAt && totals.sourceFailures === 0) totals.cleanModels = 1
+  const activeIndex =
+    job.status === 'running' || job.status === 'queued'
+      ? Math.min(Number(job.activeSourceIndex || 0), job.sources.length - 1)
+      : null
+  return {
+    kind: 'sources',
+    model: job.model,
+    current:
+      activeIndex !== null && job.sources[activeIndex]
+        ? {
+            model: job.model,
+            sourceIndex: activeIndex + 1,
+            sourceTotal: job.sources.length,
+            url: job.sources[activeIndex],
+          }
+        : null,
+    totals,
+    sources,
+    analysis: analyzeTotals(job.status, totals),
+  }
+}
+
+function allSourceRunView(run, index, total) {
+  const summary = run?.summary || {}
+  return {
+    sourceIndex: index + 1,
+    sourceTotal: total,
+    label: run?.label || getPlatformLabel(run?.sourceType),
+    url: run?.url || '',
+    ok: run?.ok !== false,
+    status: summary.status || (run?.ok === false ? 'failed' : 'finished'),
+    saved: Number(summary.saved || 0),
+    skipped: Number(summary.skipped || 0),
+    duplicates: Number(summary.duplicates || 0),
+    errors: Number(summary.errors || 0),
+    processed: Number(summary.processed || 0),
+    expectedMedia: Number(summary.expectedMedia || 0),
+    failure: summary.failure || null,
+  }
+}
+
+function allSourceModelView(result, index, totalModels) {
+  const totals = emptyTotals()
+  const sourceTotal = Number(
+    result?.sources?.length || result?.runs?.length || 0
+  )
+  const sources = (result?.runs || []).map((run, runIndex) => {
+    addRunToTotals(totals, run)
+    return allSourceRunView(run, runIndex, sourceTotal)
+  })
+  const failed =
+    sources.some((source) => !source.ok) || result?.nasSync?.ok === false
+  return {
+    modelIndex: index + 1,
+    modelTotal: totalModels,
+    model: result?.model || 'Unknown model',
+    ok: !failed,
+    sourceCount: sourceTotal,
+    sources,
+    totals,
+  }
+}
+
+function summarizeAllSourceJob(job) {
+  const report =
+    job.allSourceReport ||
+    readJsonFileIfFresh(allSourceReportPath, job.startedAt)
+  if (report) job.allSourceReport = report
+  const results = Array.isArray(report?.results) ? report.results : []
+  const models = results.map((result, index) =>
+    allSourceModelView(
+      result,
+      index,
+      Number(report?.selectedModels || results.length)
+    )
+  )
+  const reportTotals = report?.totals || {}
+  const totals = {
+    ...emptyTotals(),
+    modelsAttempted: Number(reportTotals.modelsAttempted || results.length),
+    cleanModels: Number(
+      reportTotals.cleanModels || models.filter((model) => model.ok).length
+    ),
+    sources: Number(
+      reportTotals.runs ||
+        models.reduce((sum, model) => sum + model.sources.length, 0)
+    ),
+    sourceFailures: Number(reportTotals.failures || 0),
+    saved: Number(reportTotals.saved || 0),
+    skipped: Number(reportTotals.skipped || 0),
+    duplicates: Number(reportTotals.duplicates || 0),
+    errors: Number(reportTotals.errors || 0),
+    processed: Number(reportTotals.processed || 0),
+    expectedMedia: Number(reportTotals.expectedMedia || 0),
+    savedBytes: Number(reportTotals.savedBytes || 0),
+    downloadBytes: Number(reportTotals.downloadBytes || 0),
+    duplicateDownloadBytes: Number(reportTotals.duplicateDownloadBytes || 0),
+    durationMs: Number(reportTotals.durationMs || 0),
+    totalModels: Number(report?.selectedModels || 0),
+    totalSources: Number(report?.selectedSources || 0),
+  }
+  const latestModel = models[models.length - 1] || null
+  const latestSource =
+    latestModel?.sources[latestModel.sources.length - 1] || null
+  return {
+    kind: 'all',
+    reportPath: report ? allSourceReportPath : null,
+    current:
+      job.status === 'running' && latestModel
+        ? {
+            model: latestModel.model,
+            modelIndex: latestModel.modelIndex,
+            modelTotal: latestModel.modelTotal,
+            sourceIndex: latestSource?.sourceIndex || 0,
+            sourceTotal: latestModel.sourceCount,
+          }
+        : null,
+    totals,
+    latestModel,
+    failedModels: models.filter((model) => !model.ok).slice(-20),
+    analysis: analyzeTotals(job.status, totals),
+  }
+}
+
+function analyzeTotals(status, totals) {
+  if (status === 'queued') return 'Queued and waiting for the active run.'
+  if (status === 'running') {
+    return `Running: saved ${totals.saved}, skipped ${totals.skipped}, duplicates ${totals.duplicates}.`
+  }
+  if (status === 'canceled') {
+    return `Canceled after ${totals.sources} source run${totals.sources === 1 ? '' : 's'}.`
+  }
+  if (totals.sourceFailures || totals.errors) {
+    return `Finished with ${totals.sourceFailures} source failure${totals.sourceFailures === 1 ? '' : 's'} and ${totals.errors} media error${totals.errors === 1 ? '' : 's'}.`
+  }
+  if (status === 'completed') {
+    return `Completed cleanly: saved ${totals.saved}, skipped ${totals.skipped}, duplicates ${totals.duplicates}.`
+  }
+  return `Status: ${status}.`
+}
+
+function summarizeJobForDashboard(job) {
+  return job.mode === 'all'
+    ? summarizeAllSourceJob(job)
+    : summarizeSourceJob(job)
+}
+
+function publicJob(job, options = {}) {
+  const payload = {
     id: job.id,
     mode: job.mode,
     status: job.status,
@@ -324,8 +549,10 @@ function publicJob(job) {
     exitCode: job.exitCode,
     error: job.error,
     runs: job.runs,
-    log: job.log,
+    summary: summarizeJobForDashboard(job),
   }
+  if (options.includeLog) payload.log = job.log
+  return payload
 }
 
 function killProcessTree(pid) {
@@ -445,6 +672,10 @@ async function runJob(job) {
           'stderr'
         )
       }
+      job.allSourceReport = readJsonFileIfFresh(
+        allSourceReportPath,
+        job.startedAt
+      )
     } else {
       for (let index = 0; index < job.sources.length; index += 1) {
         if (job.status === 'canceling') break
@@ -625,7 +856,7 @@ app.post('/api/jobs', (req, res) => {
 app.get('/api/jobs/:id', (req, res) => {
   const job = jobs.get(Number(req.params.id))
   if (!job) return res.status(404).json({ error: 'job not found' })
-  res.json({ job: publicJob(job) })
+  res.json({ job: publicJob(job, { includeLog: true }) })
 })
 
 app.post('/api/jobs/:id/cancel', (req, res) => {
