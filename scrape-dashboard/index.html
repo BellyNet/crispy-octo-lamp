@@ -13,24 +13,48 @@
 
       :root {
         --bg: #0d0d12;
-        --sidebar-bg: #13131a;
-        --panel: #1a1a24;
+        --panel: #191923;
         --panel-2: #20202c;
-        --border: #2a2a3a;
+        --panel-3: #111119;
+        --border: #2d2d3d;
+        --border-soft: #242433;
         --accent: #7c6cfc;
+        --accent-2: #42b7a8;
         --good: #46c083;
         --warn: #d9a441;
         --bad: #d95f67;
-        --text: #e4e4f4;
-        --muted: #8a8aad;
-        --sidebar-w: 280px;
+        --text: #e7e7f5;
+        --muted: #9292b4;
+        --muted-2: #686887;
+      }
+
+      html {
+        scrollbar-color: #555579 #15151f;
+        scrollbar-width: thin;
+      }
+
+      *::-webkit-scrollbar {
+        width: 11px;
+        height: 11px;
+      }
+
+      *::-webkit-scrollbar-track {
+        background: #15151f;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        background: #555579;
+        border: 3px solid #15151f;
+        border-radius: 999px;
+      }
+
+      *::-webkit-scrollbar-thumb:hover {
+        background: #6f6f9a;
       }
 
       body {
         margin: 0;
-        height: 100vh;
-        overflow: hidden;
-        display: flex;
+        min-height: 100vh;
         background: var(--bg);
         color: var(--text);
         font:
@@ -42,28 +66,44 @@
 
       button,
       input,
-      select {
+      select,
+      a.button {
         font: inherit;
       }
 
-      button {
+      button,
+      a.button {
         border: 1px solid var(--border);
         border-radius: 6px;
         background: var(--panel-2);
         color: var(--text);
         padding: 8px 11px;
         cursor: pointer;
+        text-decoration: none;
+        white-space: nowrap;
       }
 
-      button:hover {
+      button:hover,
+      a.button:hover {
         border-color: var(--accent);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
       }
 
       button.primary {
         background: var(--accent);
         border-color: var(--accent);
         color: white;
-        font-weight: 650;
+        font-weight: 700;
+      }
+
+      button.secondary {
+        border-color: #2d5f59;
+        background: #14312f;
+        color: #cffff8;
       }
 
       button.danger {
@@ -75,6 +115,7 @@
       input,
       select {
         width: 100%;
+        min-width: 0;
         border: 1px solid var(--border);
         border-radius: 6px;
         background: #0f0f16;
@@ -88,108 +129,50 @@
         border-color: var(--accent);
       }
 
-      #sidebar {
-        width: var(--sidebar-w);
-        min-width: var(--sidebar-w);
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-        border-right: 1px solid var(--border);
-        background: var(--sidebar-bg);
-      }
-
-      .sidebar-header {
-        padding: 16px 14px 12px;
-        border-bottom: 1px solid var(--border);
-      }
-
-      .app-title {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 10px;
-      }
-
-      .app-title strong {
-        font-size: 17px;
-      }
-
-      .app-title span,
-      .muted {
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      #model-list {
-        list-style: none;
-        margin: 0;
-        padding: 7px 0;
-        overflow-y: auto;
-      }
-
-      .model-item {
+      .app {
+        min-height: 100vh;
         display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 8px;
-        padding: 8px 13px;
-        border-left: 3px solid transparent;
-        color: var(--muted);
-        cursor: pointer;
+        grid-template-rows: auto 1fr;
       }
 
-      .model-item:hover,
-      .model-item.active {
-        background: var(--panel);
-        color: var(--text);
-      }
-
-      .model-item.active {
-        border-left-color: var(--accent);
-      }
-
-      .model-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .source-count {
-        font-size: 11px;
-        color: var(--muted);
-        font-variant-numeric: tabular-nums;
-      }
-
-      #main {
-        flex: 1;
-        min-width: 0;
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-      }
-
-      #main-header {
-        min-height: 70px;
-        padding: 14px 18px;
+      .topbar {
+        min-height: 72px;
+        padding: 14px 20px;
         display: flex;
         justify-content: space-between;
         gap: 16px;
         align-items: center;
         border-bottom: 1px solid var(--border);
+        background: #12121a;
       }
 
-      #current-model {
+      .title-stack {
+        min-width: 0;
+      }
+
+      .app-title {
         font-size: 20px;
-        font-weight: 700;
+        font-weight: 800;
       }
 
-      #main-content {
-        flex: 1;
-        overflow: auto;
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .content {
+        min-width: 0;
         padding: 18px;
         display: grid;
-        grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1.35fr);
+        grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
         gap: 18px;
+        align-items: start;
+      }
+
+      .stack {
+        display: grid;
+        gap: 18px;
+        min-width: 0;
       }
 
       .panel {
@@ -200,6 +183,7 @@
       }
 
       .panel-header {
+        min-height: 52px;
         padding: 13px 14px;
         border-bottom: 1px solid var(--border);
         display: flex;
@@ -210,7 +194,7 @@
 
       .panel-title {
         font-size: 13px;
-        font-weight: 750;
+        font-weight: 800;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--muted);
@@ -220,27 +204,92 @@
         padding: 14px;
       }
 
+      .workflow-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+      }
+
       .row {
         display: flex;
         gap: 8px;
         align-items: center;
+        min-width: 0;
       }
 
       .row > input {
         flex: 1;
       }
 
-      .grid {
+      .actions {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      label {
         display: grid;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      label.check {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      label.check input,
+      .source-row input[type='checkbox'] {
+        width: auto;
+      }
+
+      .options {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px;
+      }
+
+      .candidate-list,
+      .saved-list,
+      .job-list,
+      .activity-log {
+        display: grid;
+        gap: 8px;
+      }
+
+      .candidate,
+      .source-row,
+      .job-row,
+      .log-entry,
+      .metric,
+      .quick-card {
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        background: #15151e;
+      }
+
+      .quick-card {
+        padding: 14px;
+      }
+
+      .quick-title {
+        font-size: 18px;
+        font-weight: 750;
+      }
+
+      .quick-meta {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
       }
 
       .candidate,
       .source-row,
       .job-row {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #15151e;
         padding: 11px;
       }
 
@@ -256,14 +305,18 @@
       .candidate-title,
       .source-title,
       .job-title {
-        font-weight: 650;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .url,
+      .detail {
+        color: var(--muted);
+        font-size: 12px;
         overflow-wrap: anywhere;
       }
 
       .url {
-        color: var(--muted);
-        font-size: 12px;
-        overflow-wrap: anywhere;
         margin-top: 3px;
       }
 
@@ -298,79 +351,126 @@
         border-color: #7a3038;
       }
 
-      .actions {
-        display: flex;
-        gap: 7px;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-      }
-
-      .saved-list {
+      .metric-grid {
         display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 8px;
-        margin-top: 10px;
+        margin-bottom: 12px;
       }
 
-      .source-row input[type='checkbox'] {
-        width: auto;
+      .metric {
+        padding: 10px;
       }
 
-      .options {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 12px;
-      }
-
-      label {
-        display: grid;
-        gap: 5px;
+      .metric-label {
         color: var(--muted);
-        font-size: 12px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
       }
 
-      label.check {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-      }
-
-      label.check input {
-        width: auto;
-      }
-
-      #log {
-        min-height: 360px;
-        max-height: 520px;
-        overflow: auto;
-        margin: 0;
-        padding: 12px;
-        border-radius: 8px;
-        background: #09090e;
-        border: 1px solid var(--border);
-        color: #d7d7e8;
-        font:
-          12px/1.45 Consolas,
-          'SFMono-Regular',
-          monospace;
-        white-space: pre-wrap;
-      }
-
-      .status {
+      .metric-value {
+        margin-top: 4px;
+        font-size: 18px;
+        font-weight: 800;
         font-variant-numeric: tabular-nums;
       }
 
-      .status.completed {
-        color: var(--good);
+      .job-row {
+        cursor: pointer;
+      }
+
+      .job-row.active {
+        border-color: var(--accent);
+        background: #1d1d2a;
+      }
+
+      .status {
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 750;
+        text-transform: uppercase;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .status.completed,
+      .status.success {
+        color: #c9ffe3;
+        border: 1px solid #245f44;
+        background: #11241d;
       }
 
       .status.failed,
-      .status.canceled {
-        color: var(--bad);
+      .status.canceled,
+      .status.error {
+        color: #ffd4d8;
+        border: 1px solid #7a3038;
+        background: #2b151a;
       }
 
-      .status.running {
-        color: var(--warn);
+      .status.running,
+      .status.queued,
+      .status.warn,
+      .status.progress {
+        color: #ffe9b6;
+        border: 1px solid #76551c;
+        background: #2b2210;
+      }
+
+      .activity-log {
+        max-height: 560px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .log-entry {
+        padding: 10px 11px;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 9px;
+      }
+
+      .log-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        margin-top: 6px;
+        background: var(--muted-2);
+      }
+
+      .log-entry.progress .log-dot {
+        background: var(--accent-2);
+      }
+
+      .log-entry.success .log-dot {
+        background: var(--good);
+      }
+
+      .log-entry.warn .log-dot {
+        background: var(--warn);
+      }
+
+      .log-entry.error .log-dot {
+        background: var(--bad);
+      }
+
+      .log-head {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        justify-content: space-between;
+      }
+
+      .log-title {
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .log-time {
+        color: var(--muted-2);
+        font-size: 11px;
+        white-space: nowrap;
       }
 
       .empty {
@@ -379,90 +479,123 @@
       }
 
       @media (max-width: 980px) {
-        body {
-          display: block;
-          overflow: auto;
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
         }
 
-        #sidebar,
-        #main {
-          width: 100%;
-          min-width: 0;
-          height: auto;
-        }
-
-        #model-list {
-          max-height: 240px;
-        }
-
-        #main-content {
+        .content,
+        .options,
+        .metric-grid {
           grid-template-columns: 1fr;
-          overflow: visible;
+        }
+
+        .workflow-grid,
+        .candidate-top,
+        .source-row,
+        .job-row {
+          grid-template-columns: 1fr;
+        }
+
+        .actions {
+          justify-content: flex-start;
         }
       }
     </style>
   </head>
   <body>
-    <aside id="sidebar">
-      <div class="sidebar-header">
-        <div class="app-title">
-          <strong>Scrape Dashboard</strong>
-          <span id="model-count">0</span>
-        </div>
-        <input id="model-filter" placeholder="Filter models" />
-      </div>
-      <ul id="model-list"></ul>
-    </aside>
-
-    <main id="main">
-      <header id="main-header">
-        <div>
-          <div id="current-model">Find sources or run all scrapes</div>
-          <div id="model-meta" class="muted"></div>
+    <div class="app">
+      <header class="topbar">
+        <div class="title-stack">
+          <div class="app-title">Scrape Dashboard</div>
+          <div id="registry-meta" class="muted">Loading registry...</div>
         </div>
         <div class="actions">
           <button id="refresh-models">Refresh</button>
-          <button id="run-all" class="primary">Run All Scrape</button>
+          <button id="run-all" class="primary">Run Full Scrape</button>
         </div>
       </header>
 
-      <section id="main-content">
-        <div class="grid">
+      <main class="content">
+        <div class="stack">
           <section class="panel">
             <div class="panel-header">
-              <div class="panel-title">Source Search</div>
+              <div class="panel-title">Run Everything</div>
             </div>
             <div class="panel-body">
-              <div class="row">
-                <input id="source-query" placeholder="Username or source URL" />
-                <button id="search-sources" class="primary">Search</button>
+              <div class="quick-card">
+                <div class="workflow-grid">
+                  <div>
+                    <div class="quick-title">All registered sources</div>
+                    <div id="source-total" class="quick-meta">
+                      Counting saved sources...
+                    </div>
+                  </div>
+                  <button id="run-all-panel" class="primary" type="button">
+                    Run Full Scrape
+                  </button>
+                </div>
               </div>
-              <div style="margin-top: 10px">
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Add Or Update Model</div>
+                <div id="model-summary" class="muted">
+                  No model is selected by default.
+                </div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="workflow-grid">
                 <label>
-                  Save accepted sources under
+                  Model
                   <input
                     id="target-model"
                     list="model-options"
                     placeholder="Canonical model name"
                   />
                 </label>
-                <datalist id="model-options"></datalist>
+                <button id="load-target-model" type="button">
+                  Load Sources
+                </button>
+              </div>
+              <datalist id="model-options"></datalist>
+
+              <div class="row" style="margin-top: 12px">
+                <input
+                  id="source-query"
+                  placeholder="Username, profile URL, or source URL"
+                />
+                <button id="search-sources" class="primary" type="button">
+                  Search Sources
+                </button>
               </div>
               <div
                 id="search-status"
                 class="muted"
                 style="margin-top: 9px"
               ></div>
-              <div id="candidates" class="grid" style="margin-top: 12px"></div>
+              <div
+                id="candidates"
+                class="candidate-list"
+                style="margin-top: 12px"
+              ></div>
             </div>
           </section>
 
           <section class="panel">
             <div class="panel-header">
-              <div class="panel-title">Model Inspector</div>
+              <div class="panel-title">Saved Sources</div>
               <div class="actions">
-                <button id="select-all-sources">Select All</button>
-                <button id="run-selected">Run Checked</button>
+                <button id="select-all-sources" type="button">
+                  Select All
+                </button>
+                <button id="run-selected" class="secondary" type="button">
+                  Run Checked
+                </button>
               </div>
             </div>
             <div class="panel-body">
@@ -471,7 +604,7 @@
           </section>
         </div>
 
-        <div class="grid">
+        <div class="stack">
           <section class="panel">
             <div class="panel-header">
               <div class="panel-title">Run Options</div>
@@ -524,30 +657,44 @@
 
           <section class="panel">
             <div class="panel-header">
-              <div class="panel-title">Jobs</div>
-              <button id="cancel-job" class="danger">Cancel Active</button>
+              <div class="panel-title">Runs</div>
+              <button id="cancel-job" class="danger" type="button">
+                Cancel Active
+              </button>
             </div>
             <div class="panel-body">
-              <div id="jobs" class="grid" style="margin-bottom: 12px"></div>
-              <pre id="log"></pre>
+              <div id="jobs" class="job-list"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Activity</div>
+                <div id="selected-job-label" class="muted">
+                  Waiting for a run.
+                </div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div id="metrics" class="metric-grid"></div>
+              <div id="activity-log" class="activity-log"></div>
             </div>
           </section>
         </div>
-      </section>
-    </main>
+      </main>
+    </div>
 
     <script>
       const state = {
         models: [],
-        selectedModel: null,
         selectedJobId: null,
+        jobs: [],
       }
 
-      const modelListEl = document.getElementById('model-list')
-      const modelCountEl = document.getElementById('model-count')
-      const modelFilterEl = document.getElementById('model-filter')
-      const currentModelEl = document.getElementById('current-model')
-      const modelMetaEl = document.getElementById('model-meta')
+      const registryMetaEl = document.getElementById('registry-meta')
+      const sourceTotalEl = document.getElementById('source-total')
+      const modelSummaryEl = document.getElementById('model-summary')
       const savedSourcesEl = document.getElementById('saved-sources')
       const candidatesEl = document.getElementById('candidates')
       const sourceQueryEl = document.getElementById('source-query')
@@ -555,7 +702,9 @@
       const modelOptionsEl = document.getElementById('model-options')
       const searchStatusEl = document.getElementById('search-status')
       const jobsEl = document.getElementById('jobs')
-      const logEl = document.getElementById('log')
+      const selectedJobLabelEl = document.getElementById('selected-job-label')
+      const metricsEl = document.getElementById('metrics')
+      const activityLogEl = document.getElementById('activity-log')
 
       function escapeHtml(value) {
         return String(value || '').replace(/[&<>"']/g, (char) => {
@@ -587,41 +736,20 @@
         return key
       }
 
-      function renderModels() {
-        const filter = modelFilterEl.value.trim().toLowerCase()
-        const models = state.models.filter((model) => {
-          if (!filter) return true
-          return [model.name, ...(model.aliases || [])]
-            .join(' ')
-            .toLowerCase()
-            .includes(filter)
-        })
-        modelCountEl.textContent = String(models.length)
-        modelOptionsEl.innerHTML = state.models
-          .map((model) => `<option value="${escapeHtml(model.name)}"></option>`)
-          .join('')
-        modelListEl.innerHTML = models
-          .map(
-            (model) => `
-              <li class="model-item ${state.selectedModel?.name === model.name ? 'active' : ''}" data-model="${escapeHtml(model.name)}">
-                <span class="model-name">${escapeHtml(model.name)}</span>
-                <span class="source-count">${model.sourceCount}</span>
-              </li>
-            `
-          )
-          .join('')
+      function getTargetModelName() {
+        return targetModelEl.value.trim()
       }
 
-      function renderSelectedModel() {
-        const model = state.selectedModel
-        currentModelEl.textContent = model
-          ? model.name
-          : 'Find sources or run all scrapes'
-        modelMetaEl.textContent = model
-          ? `${model.sourceCount} saved sources${model.hasLocalMedia ? ' | local media found' : ''}`
-          : 'No model is selected by default.'
-        renderSavedSources()
-        renderModels()
+      function findTargetModel() {
+        const value = getTargetModelName().toLowerCase()
+        if (!value) return null
+        return (
+          state.models.find((model) => model.name.toLowerCase() === value) ||
+          state.models.find((model) =>
+            (model.aliases || []).some((alias) => alias.toLowerCase() === value)
+          ) ||
+          null
+        )
       }
 
       function getSavedSources(model) {
@@ -641,16 +769,48 @@
         return rows
       }
 
+      function renderRegistrySummary(payload = {}) {
+        const modelCount = state.models.length
+        const sourceCount = state.models.reduce(
+          (total, model) => total + model.sourceCount,
+          0
+        )
+        registryMetaEl.textContent = `${modelCount} models, ${sourceCount} saved sources`
+        sourceTotalEl.textContent = `${sourceCount} saved sources across ${modelCount} models`
+        if (payload.registryPath) registryMetaEl.title = payload.registryPath
+      }
+
+      function renderModelOptions() {
+        modelOptionsEl.innerHTML = state.models
+          .map((model) => `<option value="${escapeHtml(model.name)}"></option>`)
+          .join('')
+      }
+
       function renderSavedSources() {
-        const rows = getSavedSources(state.selectedModel)
-        if (!rows.length) {
+        const targetModel = findTargetModel()
+        const targetName = getTargetModelName()
+        const rows = getSavedSources(targetModel)
+        modelSummaryEl.textContent = targetModel
+          ? `${targetModel.name}: ${targetModel.sourceCount} saved sources${targetModel.hasLocalMedia ? ' | local media found' : ''}`
+          : targetName
+            ? `${targetName}: ready for new sources`
+            : 'No model is selected by default.'
+
+        if (!targetName) {
           savedSourcesEl.innerHTML =
-            '<div class="empty">Pick a model from the sidebar to inspect its saved sources.</div>'
+            '<div class="empty">Enter a model name to inspect or run its saved sources.</div>'
           return
         }
+
+        if (!rows.length) {
+          savedSourcesEl.innerHTML =
+            '<div class="empty">No saved sources for this model yet.</div>'
+          return
+        }
+
         savedSourcesEl.innerHTML = rows
           .map(
-            (source, index) => `
+            (source) => `
               <label class="source-row">
                 <span>
                   <input class="source-check" type="checkbox" checked data-url="${escapeHtml(source.url)}" />
@@ -658,7 +818,7 @@
                   <span class="chip">${escapeHtml(source.service || source.userId || 'source')}</span>
                   <div class="url">${escapeHtml(source.url)}</div>
                 </span>
-                <a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>
+                <a class="button" href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">Open</a>
               </label>
             `
           )
@@ -679,7 +839,7 @@
                   </div>
                 </div>
                 <div class="actions">
-                  <a href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>
+                  <a class="button" href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer">Open</a>
                 </div>
               </div>
               <div class="row" style="margin-top: 10px">
@@ -712,7 +872,7 @@
                 <div class="chips">${chips}</div>
               </div>
               <div class="actions">
-                <a href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>
+                <a class="button" href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer">Open</a>
                 <button class="accept-source" type="button" ${candidate.existingModel ? 'disabled' : ''}>Accept</button>
               </div>
             </div>
@@ -720,50 +880,48 @@
         `
       }
 
-      async function loadModels(keepSelection = true) {
+      async function loadModels() {
         const payload = await api('/api/models')
-        const previousName = keepSelection ? state.selectedModel?.name : null
         state.models = payload.models || []
-        state.selectedModel =
-          state.models.find((model) => model.name === previousName) || null
-        renderSelectedModel()
+        renderRegistrySummary(payload)
+        renderModelOptions()
+        renderSavedSources()
       }
 
       async function searchSources() {
         const query = sourceQueryEl.value.trim()
         if (!query) return
-        searchStatusEl.textContent = 'Searching...'
+        searchStatusEl.textContent = 'Searching source sites...'
         candidatesEl.innerHTML = ''
         try {
           const payload = await api(
             `/api/source-search?q=${encodeURIComponent(query)}`
           )
           const candidates = payload.candidates || []
-          searchStatusEl.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`
+          searchStatusEl.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} found`
           candidatesEl.innerHTML = candidates.length
             ? candidates.map(candidateMarkup).join('')
-            : '<div class="empty">No candidates.</div>'
+            : '<div class="empty">No candidates found.</div>'
         } catch (err) {
           searchStatusEl.textContent = err.message
         }
       }
 
       async function acceptSource(url) {
-        const targetModel = targetModelEl.value.trim()
-        if (!targetModel)
-          throw new Error('Enter a model to save this source under')
-        await api(`/api/models/${encodeURIComponent(targetModel)}/sources`, {
-          method: 'POST',
-          body: JSON.stringify({ url }),
-        })
-        await loadModels(true)
-        state.selectedModel =
-          state.models.find((model) => model.name === targetModel) ||
-          state.models.find(
-            (model) => model.name === targetModel.toLowerCase()
-          ) ||
-          state.selectedModel
-        renderSelectedModel()
+        const targetModel = getTargetModelName()
+        if (!targetModel) {
+          throw new Error('Enter a model before accepting a source.')
+        }
+        const payload = await api(
+          `/api/models/${encodeURIComponent(targetModel)}/sources`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ url }),
+          }
+        )
+        targetModelEl.value = payload.model || targetModel
+        await loadModels()
+        searchStatusEl.textContent = `Saved source under ${targetModelEl.value}`
       }
 
       function getRunOptions() {
@@ -783,7 +941,9 @@
       }
 
       async function runSelectedSources() {
-        if (!state.selectedModel) return
+        const model = findTargetModel()
+        const targetModel = model?.name || getTargetModelName()
+        if (!targetModel) return
         const sources = [
           ...document.querySelectorAll('.source-check:checked'),
         ].map((input) => input.dataset.url)
@@ -791,7 +951,7 @@
         const payload = await api('/api/jobs', {
           method: 'POST',
           body: JSON.stringify({
-            model: state.selectedModel.name,
+            model: targetModel,
             sources,
             options: getRunOptions(),
           }),
@@ -812,39 +972,208 @@
         await refreshJobs()
       }
 
-      function renderJobs(jobs) {
-        if (!jobs.length) {
-          jobsEl.innerHTML = '<div class="empty">No jobs yet.</div>'
-          logEl.textContent = ''
+      function formatDuration(start, finish) {
+        if (!start) return '-'
+        const end = finish ? new Date(finish).getTime() : Date.now()
+        const seconds = Math.max(0, Math.round((end - new Date(start)) / 1000))
+        if (seconds < 60) return `${seconds}s`
+        const minutes = Math.floor(seconds / 60)
+        return `${minutes}m ${seconds % 60}s`
+      }
+
+      function renderMetrics(job) {
+        if (!job) {
+          metricsEl.innerHTML = ''
           return
         }
-        if (!state.selectedJobId) state.selectedJobId = jobs[0].id
-        jobsEl.innerHTML = jobs
-          .slice(0, 5)
+        const totals = job.summary?.totals || {}
+        const items = [
+          ['Status', job.status],
+          ['Sources', String(totals.sources || 0)],
+          ['Saved', String(totals.saved || 0)],
+          ['Duration', formatDuration(job.startedAt, job.finishedAt)],
+        ]
+        metricsEl.innerHTML = items
           .map(
-            (job) => `
-              <div class="job-row" data-job-id="${job.id}">
-                  <div>
-                    <div class="job-title">#${job.id} ${escapeHtml(job.model)}</div>
-                  <div class="muted">${
-                    job.mode === 'all'
-                      ? 'all registered sources'
-                      : `${job.sources.length} source${job.sources.length === 1 ? '' : 's'}`
-                  }</div>
-                  </div>
-                <button class="status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</button>
+            ([label, value]) => `
+              <div class="metric">
+                <div class="metric-label">${escapeHtml(label)}</div>
+                <div class="metric-value">${escapeHtml(value)}</div>
               </div>
             `
           )
           .join('')
+      }
+
+      function counterText(item = {}) {
+        return [
+          `source ${item.sourceIndex || 0}/${item.sourceTotal || 0}`,
+          `saved ${item.saved || 0}`,
+          `skipped ${item.skipped || 0}`,
+          `duplicates ${item.duplicates || 0}`,
+          `errors ${item.errors || 0}`,
+        ].join(' | ')
+      }
+
+      function totalText(totals = {}) {
+        const sources = totals.totalSources || totals.sources || 0
+        const models = totals.totalModels
+          ? `models ${totals.modelsAttempted || 0}/${totals.totalModels} | `
+          : ''
+        return `${models}sources ${totals.sources || 0}/${sources} | saved ${totals.saved || 0} | skipped ${totals.skipped || 0} | duplicates ${totals.duplicates || 0} | errors ${totals.errors || 0}`
+      }
+
+      function sourceSummaryMarkup(source, titlePrefix = '') {
+        const level = source.errors || !source.ok ? 'error' : 'success'
+        const title = `${titlePrefix}${source.label || 'Source'}`
+        const failure = source.failure
+          ? ` | ${source.failure.code || 'failure'}`
+          : ''
+        return `
+          <article class="log-entry ${level}">
+            <span class="log-dot"></span>
+            <span>
+              <span class="log-head">
+                <span class="log-title">${escapeHtml(title)}</span>
+                <span class="status ${level}">${escapeHtml(source.status || (source.ok ? 'ok' : 'failed'))}</span>
+              </span>
+              <span class="detail">${escapeHtml(counterText(source) + failure)}</span>
+            </span>
+          </article>
+        `
+      }
+
+      function finalTotalMarkup(summary) {
+        const level =
+          summary.totals?.sourceFailures || summary.totals?.errors
+            ? 'warn'
+            : 'success'
+        return `
+          <article class="log-entry ${level}">
+            <span class="log-dot"></span>
+            <span>
+              <span class="log-head">
+                <span class="log-title">Run summary</span>
+                <span class="status ${level}">analyzed</span>
+              </span>
+              <span class="detail">${escapeHtml(summary.analysis || '')}</span>
+              <span class="detail">${escapeHtml(totalText(summary.totals || {}))}</span>
+            </span>
+          </article>
+        `
+      }
+
+      function currentRunMarkup(summary) {
+        const current = summary.current
+        if (!current) return ''
+        const sourceText = current.sourceTotal
+          ? `source ${current.sourceIndex || 0}/${current.sourceTotal}`
+          : 'starting sources'
+        const modelText = current.modelTotal
+          ? `user ${current.model} (${current.modelIndex}/${current.modelTotal})`
+          : `user ${current.model}`
+        return `
+          <article class="log-entry progress">
+            <span class="log-dot"></span>
+            <span>
+              <span class="log-head">
+                <span class="log-title">On ${escapeHtml(modelText)}</span>
+                <span class="status progress">running</span>
+              </span>
+              <span class="detail">${escapeHtml(sourceText)}</span>
+            </span>
+          </article>
+        `
+      }
+
+      function renderActivity(job) {
+        if (!job) {
+          selectedJobLabelEl.textContent = 'Waiting for a run.'
+          activityLogEl.innerHTML =
+            '<div class="empty">Start a full scrape or model source run to see activity here.</div>'
+          renderMetrics(null)
+          return
+        }
+        selectedJobLabelEl.textContent = `#${job.id} ${job.model}`
+        renderMetrics(job)
+        const summary = job.summary || {}
+        const entries = [currentRunMarkup(summary)]
+
+        if (summary.kind === 'all') {
+          if (summary.latestModel) {
+            entries.push(
+              finalTotalMarkup({
+                analysis: `Latest user: ${summary.latestModel.model}.`,
+                totals: summary.latestModel.totals,
+              })
+            )
+            entries.push(
+              ...summary.latestModel.sources.map((source) =>
+                sourceSummaryMarkup(source, `${summary.latestModel.model}: `)
+              )
+            )
+          }
+          if (summary.failedModels?.length) {
+            entries.push(
+              ...summary.failedModels.map((model) =>
+                finalTotalMarkup({
+                  analysis: `Needs review: ${model.model}.`,
+                  totals: model.totals,
+                })
+              )
+            )
+          }
+        } else {
+          entries.push(
+            ...(summary.sources || []).map((source) =>
+              sourceSummaryMarkup(source)
+            )
+          )
+        }
+
+        if (
+          job.finishedAt ||
+          job.status === 'completed' ||
+          job.status === 'failed'
+        ) {
+          entries.push(finalTotalMarkup(summary))
+        }
+
+        activityLogEl.innerHTML = entries.filter(Boolean).length
+          ? entries.filter(Boolean).join('')
+          : '<div class="empty">Run has started. Waiting for the first source summary.</div>'
+      }
+
+      function renderJobs(jobs) {
+        state.jobs = jobs
+        if (!jobs.length) {
+          jobsEl.innerHTML = '<div class="empty">No runs yet.</div>'
+          renderActivity(null)
+          return
+        }
+        if (!state.selectedJobId) state.selectedJobId = jobs[0].id
         const selected =
           jobs.find((job) => job.id === state.selectedJobId) || jobs[0]
-        logEl.textContent = (selected.log || [])
+        state.selectedJobId = selected.id
+        jobsEl.innerHTML = jobs
+          .slice(0, 8)
           .map(
-            (line) => `[${new Date(line.at).toLocaleTimeString()}] ${line.text}`
+            (job) => `
+              <div class="job-row ${job.id === selected.id ? 'active' : ''}" data-job-id="${job.id}">
+                <div>
+                  <div class="job-title">#${job.id} ${escapeHtml(job.model)}</div>
+                  <div class="muted">${
+                    job.mode === 'all'
+                      ? 'all registered sources'
+                      : `${job.sources.length} source${job.sources.length === 1 ? '' : 's'}`
+                  } | ${escapeHtml(formatDuration(job.startedAt, job.finishedAt))}</div>
+                </div>
+                <span class="status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
+              </div>
+            `
           )
-          .join('\n')
-        logEl.scrollTop = logEl.scrollHeight
+          .join('')
+        renderActivity(selected)
       }
 
       async function refreshJobs() {
@@ -852,19 +1181,9 @@
           const payload = await api('/api/jobs')
           renderJobs(payload.jobs || [])
         } catch (err) {
-          logEl.textContent = err.message
+          activityLogEl.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`
         }
       }
-
-      modelListEl.addEventListener('click', (event) => {
-        const item = event.target.closest('.model-item')
-        if (!item) return
-        state.selectedModel =
-          state.models.find((model) => model.name === item.dataset.model) ||
-          null
-        if (state.selectedModel) targetModelEl.value = state.selectedModel.name
-        renderSelectedModel()
-      })
 
       candidatesEl.addEventListener('click', async (event) => {
         const accept = event.target.closest('.accept-source')
@@ -891,7 +1210,7 @@
         const row = event.target.closest('.job-row')
         if (!row) return
         state.selectedJobId = Number(row.dataset.jobId)
-        refreshJobs()
+        renderJobs(state.jobs)
       })
 
       document
@@ -900,10 +1219,14 @@
       sourceQueryEl.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') searchSources()
       })
-      modelFilterEl.addEventListener('input', renderModels)
+      targetModelEl.addEventListener('input', renderSavedSources)
+      targetModelEl.addEventListener('change', renderSavedSources)
+      document
+        .getElementById('load-target-model')
+        .addEventListener('click', renderSavedSources)
       document
         .getElementById('refresh-models')
-        .addEventListener('click', () => loadModels(true))
+        .addEventListener('click', loadModels)
       document
         .getElementById('run-selected')
         .addEventListener('click', runSelectedSources)
@@ -911,10 +1234,14 @@
         .getElementById('run-all')
         .addEventListener('click', runAllSources)
       document
+        .getElementById('run-all-panel')
+        .addEventListener('click', runAllSources)
+      document
         .getElementById('select-all-sources')
         .addEventListener('click', () => {
           const checks = [...document.querySelectorAll('.source-check')]
-          const allChecked = checks.every((input) => input.checked)
+          const allChecked =
+            checks.length && checks.every((input) => input.checked)
           checks.forEach((input) => {
             input.checked = !allChecked
           })
@@ -929,12 +1256,12 @@
           await refreshJobs()
         })
 
-      loadModels(false).catch((err) => {
-        currentModelEl.textContent = err.message
+      loadModels().catch((err) => {
+        registryMetaEl.textContent = err.message
       })
       refreshJobs()
       setInterval(refreshJobs, 1500)
-      setInterval(() => loadModels(true).catch(() => {}), 30000)
+      setInterval(() => loadModels().catch(() => {}), 30000)
     </script>
   </body>
 </html>
