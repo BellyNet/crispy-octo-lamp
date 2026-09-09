@@ -726,6 +726,18 @@
       loadNightly()
       loadRun(0)
       loadEmbeddings()
+
+      // Auto-refresh every 5 minutes (same cadence as the main dashboard's
+      // refreshUsers) — without this, a tab left open for days looks frozen
+      // even though the backend index is current. Only re-loads run 0
+      // ("latest") and only while that's actually what's on screen — if
+      // you've paged back to look at an older run, a background refresh
+      // shouldn't yank you back to the newest one.
+      setInterval(() => {
+        loadNightly()
+        loadEmbeddings()
+        if (currentRunIndex === 0) loadRun(0)
+      }, 5 * 60 * 1000)
     </script>
   </body>
 </html>

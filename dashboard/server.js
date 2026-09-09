@@ -1145,7 +1145,13 @@ async function refreshRunIndex() {
     )
   )
 
-  return runIndexStore.addItems(perModel.flat())
+  const flatItems = perModel.flat()
+  const result = runIndexStore.addItems(flatItems)
+  console.log(
+    `  Run index: scanned ${usernames.length} models, ${flatItems.length} total items, ` +
+      `${result.added} new, ${result.newRuns} new run(s)`
+  )
+  return result
 }
 
 app.get('/api/recent-media', (req, res) => {
