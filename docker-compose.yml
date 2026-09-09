@@ -33,11 +33,14 @@ services:
       # up between scrapes. If ffmpeg starts starving other services
       # (Container Station "high CPU" warnings), drop back to 4.
       #
-      # TEMP 2026-09-09: bumped to 12 for one day to burn down the
-      # remaining backlog faster. The N5095 is only 4 cores, so this
-      # is already 3x oversubscribed — pushing much higher risks
-      # thrashing instead of helping. Revert to 6 once caught up.
-      MOBILE_ENCODE_CONCURRENCY: 12
+      # Tried 12 on 2026-09-09 to burn down backlog faster — measured
+      # WORSE throughput (~160-200 files/hr vs ~500-670/hr at 6) and
+      # load average nearly doubled (~23 -> ~40). The N5095 is only 4
+      # cores; going past 6 oversubscribes it enough to thrash instead
+      # of helping (scheduling overhead / possible thermal throttling
+      # under sustained full load). Don't raise this again without
+      # re-testing — 6 is the known-good ceiling for this hardware.
+      MOBILE_ENCODE_CONCURRENCY: 6
       # Also bump the grid-thumb prewarm queue so a fresh model shows
       # up faster after a scrape.
       PREWARM_CONCURRENCY: 4
