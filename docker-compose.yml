@@ -32,7 +32,12 @@ services:
       # workers finishes a ~4k backlog in ~6-8 hours and can catch
       # up between scrapes. If ffmpeg starts starving other services
       # (Container Station "high CPU" warnings), drop back to 4.
-      MOBILE_ENCODE_CONCURRENCY: 6
+      #
+      # TEMP 2026-09-09: bumped to 12 for one day to burn down the
+      # remaining backlog faster. The N5095 is only 4 cores, so this
+      # is already 3x oversubscribed — pushing much higher risks
+      # thrashing instead of helping. Revert to 6 once caught up.
+      MOBILE_ENCODE_CONCURRENCY: 12
       # Also bump the grid-thumb prewarm queue so a fresh model shows
       # up faster after a scrape.
       PREWARM_CONCURRENCY: 4
