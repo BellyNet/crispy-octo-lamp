@@ -1441,12 +1441,19 @@ async function generateMobileVariant(srcPath, dstPath, isGif) {
   }
   args.push(tmp)
   try {
-    await execFileAsync(ffmpegPath, args, { timeout: 5 * 60 * 1000 })
+    // 20 min, not 5 — at MOBILE_ENCODE_CONCURRENCY=6 on a 4-core NAS, a
+    // file that encodes in ~3-4 min alone can take well over 5 min under
+    // contention. A short timeout was silently killing legitimate (not
+    // stuck, not corrupt) encodes for anything but the shortest clips —
+    // discovered when a batch reported "1710 generated" but only 35 had
+    // actually landed on disk.
+    await execFileAsync(ffmpegPath, args, { timeout: 20 * 60 * 1000 })
     const stat = fs.statSync(tmp)
     if (stat.size < 1000) throw new Error('output too small')
     await fs.promises.rename(tmp, dstPath)
     return true
-  } catch {
+  } catch (err) {
+    console.warn(`  Mobile variant failed: ${srcPath}: ${err.message}`)
     try {
       await fs.promises.unlink(tmp)
     } catch {}
