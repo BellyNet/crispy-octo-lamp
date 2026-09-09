@@ -65,3 +65,6 @@ skipped_images.txt
 
 # scraper session cookies (curl netscape format) — do not commit
 cookies.txt
+
+# scrape dashboard runtime history
+scrape-dashboard/data/

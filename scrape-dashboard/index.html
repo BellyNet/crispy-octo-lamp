@@ -112,6 +112,11 @@
         background: #351920;
       }
 
+      button.nav-button.active {
+        border-color: var(--accent);
+        background: #26233f;
+      }
+
       input,
       select {
         width: 100%;
@@ -169,6 +174,14 @@
         align-items: start;
       }
 
+      .history-content {
+        grid-template-columns: 1fr;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
       .stack {
         display: grid;
         gap: 18px;
@@ -180,6 +193,15 @@
         border-radius: 8px;
         background: var(--panel);
         min-width: 0;
+      }
+
+      details.panel > summary.panel-header {
+        cursor: pointer;
+        list-style: none;
+      }
+
+      details.panel > summary.panel-header::-webkit-details-marker {
+        display: none;
       }
 
       .panel-header {
@@ -256,7 +278,13 @@
       .candidate-list,
       .saved-list,
       .job-list,
-      .activity-log {
+      .activity-log,
+      .history-list,
+      .alert-list,
+      .stale-model-list,
+      .source-state-list,
+      .model-run-list,
+      .media-queue-list {
         display: grid;
         gap: 8px;
       }
@@ -266,7 +294,13 @@
       .job-row,
       .log-entry,
       .metric,
-      .quick-card {
+      .quick-card,
+      .history-row,
+      .alert-row,
+      .stale-model-row,
+      .source-state-row,
+      .model-run,
+      .media-queue-row {
         border: 1px solid var(--border-soft);
         border-radius: 8px;
         background: #15151e;
@@ -274,6 +308,14 @@
 
       .quick-card {
         padding: 14px;
+      }
+
+      .repair-context {
+        border: 1px solid #76551c;
+        border-radius: 8px;
+        background: #211b10;
+        padding: 11px;
+        margin-top: 12px;
       }
 
       .quick-title {
@@ -289,13 +331,48 @@
 
       .candidate,
       .source-row,
-      .job-row {
+      .job-row,
+      .history-row,
+      .alert-row,
+      .model-run {
         padding: 11px;
+      }
+
+      details.alert-row,
+      details.stale-model-row,
+      details.source-state-row,
+      details.model-run,
+      details.media-queue-row {
+        padding: 0;
+      }
+
+      details.alert-row > summary,
+      details.stale-model-row > summary,
+      details.source-state-row > summary,
+      details.model-run > summary,
+      details.media-queue-row > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 11px;
+      }
+
+      details.alert-row > summary::-webkit-details-marker,
+      details.stale-model-row > summary::-webkit-details-marker,
+      details.source-state-row > summary::-webkit-details-marker,
+      details.model-run > summary::-webkit-details-marker,
+      details.media-queue-row > summary::-webkit-details-marker {
+        display: none;
       }
 
       .candidate-top,
       .source-row,
-      .job-row {
+      .job-row,
+      .history-row,
+      .alert-summary,
+      .stale-model-head,
+      .source-state-head,
+      .model-run-head,
+      .media-queue-head {
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 10px;
@@ -304,7 +381,13 @@
 
       .candidate-title,
       .source-title,
-      .job-title {
+      .job-title,
+      .history-title,
+      .alert-title,
+      .stale-model-title,
+      .source-state-title,
+      .model-run-title,
+      .media-queue-title {
         font-weight: 700;
         overflow-wrap: anywhere;
       }
@@ -317,6 +400,7 @@
       }
 
       .url {
+        display: block;
         margin-top: 3px;
       }
 
@@ -380,9 +464,23 @@
         cursor: pointer;
       }
 
-      .job-row.active {
+      .job-row.active,
+      .history-row.active {
         border-color: var(--accent);
         background: #1d1d2a;
+      }
+
+      .history-layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 0.8fr) minmax(440px, 1.2fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .source-breakdown {
+        display: grid;
+        gap: 7px;
+        padding: 0 11px 11px;
       }
 
       .status {
@@ -499,7 +597,8 @@
 
         .content,
         .options,
-        .metric-grid {
+        .metric-grid,
+        .history-layout {
           grid-template-columns: 1fr;
         }
 
@@ -524,12 +623,18 @@
           <div id="registry-meta" class="muted">Loading registry...</div>
         </div>
         <div class="actions">
+          <button id="show-live" class="nav-button active" type="button">
+            Live
+          </button>
+          <button id="show-history" class="nav-button" type="button">
+            Audit
+          </button>
           <button id="refresh-models">Refresh</button>
           <button id="run-all" class="primary">Run Full Scrape</button>
         </div>
       </header>
 
-      <main class="content">
+      <main id="live-view" class="content">
         <div class="stack">
           <section class="panel">
             <div class="panel-header">
@@ -591,6 +696,7 @@
                 class="muted"
                 style="margin-top: 9px"
               ></div>
+              <div id="repair-context" class="repair-context hidden"></div>
               <div
                 id="candidates"
                 class="candidate-list"
@@ -696,6 +802,120 @@
           </section>
         </div>
       </main>
+
+      <main id="history-view" class="content history-content hidden">
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Audit</div>
+                <div id="history-meta" class="muted">
+                  Loading saved run history and cleanup queues...
+                </div>
+              </div>
+              <button id="refresh-history" type="button">Refresh</button>
+            </div>
+            <div class="panel-body">
+              <div id="history-metrics" class="metric-grid"></div>
+            </div>
+          </section>
+
+          <details class="panel">
+            <summary class="panel-header">
+              <div>
+                <div class="panel-title">Source Repair Queue</div>
+                <div id="repair-meta" class="muted">
+                  Looking for deleted or newly failing sources.
+                </div>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <div id="source-alerts" class="alert-list"></div>
+            </div>
+          </details>
+
+          <details class="panel">
+            <summary class="panel-header">
+              <div>
+                <div class="panel-title">Stale / Disappeared Models</div>
+                <div id="stale-model-meta" class="muted">
+                  Looking for models with no active sources.
+                </div>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <div id="stale-models" class="stale-model-list"></div>
+            </div>
+          </details>
+
+          <details class="panel">
+            <summary class="panel-header">
+              <div>
+                <div class="panel-title">Suspended Reddit Watch</div>
+                <div id="suspended-source-meta" class="muted">
+                  Watching active Reddit sources marked as suspended.
+                </div>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <div id="suspended-sources" class="source-state-list"></div>
+            </div>
+          </details>
+
+          <details class="panel">
+            <summary class="panel-header">
+              <div>
+                <div class="panel-title">Old Reddit Accounts</div>
+                <div id="inactive-source-meta" class="muted">
+                  Deleted or deactivated accounts kept for traceability.
+                </div>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <div id="inactive-sources" class="source-state-list"></div>
+            </div>
+          </details>
+
+          <details class="panel">
+            <summary class="panel-header">
+              <div>
+                <div class="panel-title">Media Cleanup Queue</div>
+                <div id="media-queue-meta" class="muted">
+                  Looking for oversized, failed, and quarantined media.
+                </div>
+              </div>
+            </summary>
+            <div class="panel-body">
+              <div id="media-queues" class="media-queue-list"></div>
+            </div>
+          </details>
+
+          <div class="history-layout">
+            <details class="panel" open>
+              <summary class="panel-header">
+                <div class="panel-title">Run History</div>
+              </summary>
+              <div class="panel-body">
+                <div id="history-runs" class="history-list"></div>
+              </div>
+            </details>
+
+            <details class="panel" open>
+              <summary class="panel-header">
+                <div>
+                  <div class="panel-title">Run Detail</div>
+                  <div id="history-detail-label" class="muted">
+                    Select a run.
+                  </div>
+                </div>
+              </summary>
+              <div class="panel-body">
+                <div id="history-detail" class="model-run-list"></div>
+              </div>
+            </details>
+          </div>
+        </div>
+      </main>
     </div>
 
     <script>
@@ -703,8 +923,15 @@
         models: [],
         selectedJobId: null,
         jobs: [],
+        history: null,
+        selectedHistoryId: null,
+        repairContext: null,
       }
 
+      const liveViewEl = document.getElementById('live-view')
+      const historyViewEl = document.getElementById('history-view')
+      const showLiveEl = document.getElementById('show-live')
+      const showHistoryEl = document.getElementById('show-history')
       const registryMetaEl = document.getElementById('registry-meta')
       const sourceTotalEl = document.getElementById('source-total')
       const modelSummaryEl = document.getElementById('model-summary')
@@ -714,10 +941,32 @@
       const targetModelEl = document.getElementById('target-model')
       const modelOptionsEl = document.getElementById('model-options')
       const searchStatusEl = document.getElementById('search-status')
+      const repairContextEl = document.getElementById('repair-context')
       const jobsEl = document.getElementById('jobs')
       const selectedJobLabelEl = document.getElementById('selected-job-label')
       const metricsEl = document.getElementById('metrics')
       const activityLogEl = document.getElementById('activity-log')
+      const historyMetaEl = document.getElementById('history-meta')
+      const historyMetricsEl = document.getElementById('history-metrics')
+      const repairMetaEl = document.getElementById('repair-meta')
+      const sourceAlertsEl = document.getElementById('source-alerts')
+      const staleModelMetaEl = document.getElementById('stale-model-meta')
+      const staleModelsEl = document.getElementById('stale-models')
+      const suspendedSourceMetaEl = document.getElementById(
+        'suspended-source-meta'
+      )
+      const suspendedSourcesEl = document.getElementById('suspended-sources')
+      const inactiveSourceMetaEl = document.getElementById(
+        'inactive-source-meta'
+      )
+      const inactiveSourcesEl = document.getElementById('inactive-sources')
+      const mediaQueueMetaEl = document.getElementById('media-queue-meta')
+      const mediaQueuesEl = document.getElementById('media-queues')
+      const historyRunsEl = document.getElementById('history-runs')
+      const historyDetailLabelEl = document.getElementById(
+        'history-detail-label'
+      )
+      const historyDetailEl = document.getElementById('history-detail')
 
       function escapeHtml(value) {
         return String(value || '').replace(/[&<>"']/g, (char) => {
@@ -731,6 +980,11 @@
         })
       }
 
+      function linkMarkup(url, label = url) {
+        if (!url) return ''
+        return `<a class="url" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`
+      }
+
       async function api(path, options = {}) {
         const res = await fetch(path, {
           headers: { 'Content-Type': 'application/json' },
@@ -739,6 +993,15 @@
         const payload = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`)
         return payload
+      }
+
+      function setView(view) {
+        const showHistory = view === 'history'
+        liveViewEl.classList.toggle('hidden', showHistory)
+        historyViewEl.classList.toggle('hidden', !showHistory)
+        showLiveEl.classList.toggle('active', !showHistory)
+        showHistoryEl.classList.toggle('active', showHistory)
+        if (showHistory) loadHistory().catch(renderHistoryError)
       }
 
       function sourceLabel(key) {
@@ -829,7 +1092,7 @@
                   <input class="source-check" type="checkbox" checked data-url="${escapeHtml(source.url)}" />
                   <span class="source-title">${escapeHtml(source.label)}</span>
                   <span class="chip">${escapeHtml(source.service || source.userId || 'source')}</span>
-                  <div class="url">${escapeHtml(source.url)}</div>
+                  ${linkMarkup(source.url)}
                 </span>
                 <a class="button" href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">Open</a>
               </label>
@@ -844,10 +1107,11 @@
             <article class="candidate">
               <div class="candidate-top">
                 <div>
-                  <div class="candidate-title">StufferDB manual search</div>
-                  <div class="url">${escapeHtml(candidate.url)}</div>
+                  <div class="candidate-title">${escapeHtml(candidate.label)} manual search</div>
+                  ${linkMarkup(candidate.url)}
                   <div class="chips">
                     <span class="chip warn">manual</span>
+                    <span class="chip">${escapeHtml(candidate.label)}</span>
                     <span class="chip">${escapeHtml(candidate.username)}</span>
                   </div>
                 </div>
@@ -856,24 +1120,36 @@
                 </div>
               </div>
               <div class="row" style="margin-top: 10px">
-                <input class="manual-stuffer-url" placeholder="Paste StufferDB category URL" />
-                <button class="accept-manual-stuffer" type="button">Accept</button>
+                <input class="manual-source-url" placeholder="Paste ${escapeHtml(candidate.label)} profile or category URL" />
+                <button class="accept-manual-source" type="button">Accept</button>
               </div>
             </article>
           `
         }
 
+        const stufferdbResolved =
+          candidate.source === 'stufferdb-search-match' ||
+          candidate.source === 'stufferdb-first-result' ||
+          candidate.source === 'stufferdb-duckduckgo-result'
+        const matchChip = stufferdbResolved
+          ? candidate.source === 'stufferdb-search-match'
+            ? '<span class="chip good">name match</span>'
+            : '<span class="chip warn">first result</span>'
+          : candidate.verified === false
+            ? '<span class="chip warn">verify</span>'
+            : '<span class="chip good">matched</span>'
         const chips = [
           `<span class="chip">${escapeHtml(candidate.label)}</span>`,
           candidate.service
             ? `<span class="chip">${escapeHtml(candidate.service)}</span>`
             : '',
+          Number.isFinite(candidate.stufferdbMediaCount)
+            ? `<span class="chip">${candidate.stufferdbMediaCount} media</span>`
+            : '',
           candidate.existingModel
             ? `<span class="chip good">saved: ${escapeHtml(candidate.existingModel)}</span>`
             : '',
-          candidate.verified === false
-            ? '<span class="chip warn">verify</span>'
-            : '<span class="chip good">matched</span>',
+          matchChip,
         ].join('')
 
         return `
@@ -881,12 +1157,12 @@
             <div class="candidate-top">
               <div>
                 <div class="candidate-title">${escapeHtml(candidate.name || candidate.username || candidate.label)}</div>
-                <div class="url">${escapeHtml(candidate.url)}</div>
+                ${linkMarkup(candidate.url)}
                 <div class="chips">${chips}</div>
               </div>
               <div class="actions">
                 <a class="button" href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer">Open</a>
-                <button class="accept-source" type="button" ${candidate.existingModel ? 'disabled' : ''}>Accept</button>
+                <button class="accept-source" type="button">Add To Model</button>
               </div>
             </div>
           </article>
@@ -933,8 +1209,85 @@
           }
         )
         targetModelEl.value = payload.model || targetModel
+        if (state.repairContext?.oldUrl && state.repairContext.oldUrl !== url) {
+          await removeSource(
+            state.repairContext.model || targetModel,
+            state.repairContext.oldUrl
+          )
+          searchStatusEl.textContent = `Replaced source under ${targetModelEl.value}`
+          state.repairContext = null
+        } else {
+          searchStatusEl.textContent = `Saved source under ${targetModelEl.value}`
+        }
         await loadModels()
-        searchStatusEl.textContent = `Saved source under ${targetModelEl.value}`
+        await loadHistory().catch(() => {})
+        renderRepairContext()
+      }
+
+      async function removeSource(model, url) {
+        if (!model || !url) return null
+        return api(`/api/models/${encodeURIComponent(model)}/sources`, {
+          method: 'DELETE',
+          body: JSON.stringify({ url }),
+        })
+      }
+
+      async function markRedditSourceState(model, url, stateName) {
+        if (!model || !url) return null
+        return api(
+          `/api/models/${encodeURIComponent(model)}/sources/reddit-state`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              url,
+              state: stateName,
+              reason:
+                stateName === 'deleted'
+                  ? 'reddit_account_deleted'
+                  : 'reddit_account_suspended',
+            }),
+          }
+        )
+      }
+
+      async function markSourceBanned(model, url) {
+        if (!model || !url) return null
+        return api(`/api/models/${encodeURIComponent(model)}/sources/ban`, {
+          method: 'POST',
+          body: JSON.stringify({ url, reason: 'reddit_account_suspended' }),
+        })
+      }
+
+      function beginSourceRepair(alert) {
+        state.repairContext = {
+          model: alert.model,
+          label: alert.label || alert.sourceType || 'source',
+          oldUrl: alert.url,
+        }
+        targetModelEl.value = alert.model || ''
+        sourceQueryEl.value = alert.model || ''
+        renderSavedSources()
+        renderRepairContext()
+        setView('live')
+        sourceQueryEl.focus()
+      }
+
+      function renderRepairContext() {
+        const context = state.repairContext
+        if (!context) {
+          repairContextEl.classList.add('hidden')
+          repairContextEl.innerHTML = ''
+          return
+        }
+        repairContextEl.classList.remove('hidden')
+        repairContextEl.innerHTML = `
+          <div class="log-head">
+            <span class="log-title">Replacing ${escapeHtml(context.label)} for ${escapeHtml(context.model)}</span>
+            <button id="cancel-repair-context" type="button">Cancel</button>
+          </div>
+          <div class="detail">Accepting a new source will add it to this model and remove the old source below.</div>
+          ${linkMarkup(context.oldUrl)}
+        `
       }
 
       function getRunOptions() {
@@ -994,6 +1347,33 @@
         return `${minutes}m ${seconds % 60}s`
       }
 
+      function formatDateTime(value) {
+        if (!value) return '-'
+        return new Date(value).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      }
+
+      function formatNumber(value) {
+        return Number(value || 0).toLocaleString()
+      }
+
+      function formatBytes(bytes) {
+        const value = Number(bytes || 0)
+        if (!value) return '-'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let size = value
+        let unit = units.shift()
+        while (size >= 1024 && units.length) {
+          size /= 1024
+          unit = units.shift()
+        }
+        return `${size.toFixed(size >= 10 || unit === 'B' ? 0 : 1)} ${unit}`
+      }
+
       function renderMetrics(job) {
         if (!job) {
           metricsEl.innerHTML = ''
@@ -1039,6 +1419,11 @@
       function sourceSummaryMarkup(source, titlePrefix = '') {
         const level = source.errors || !source.ok ? 'error' : 'success'
         const title = `${titlePrefix}${source.label || 'Source'}`
+        const displayStatus = displaySourceStatus(source)
+        const rawStatus =
+          displayStatus !== source.status && source.status
+            ? ` | raw ${source.status}`
+            : ''
         const failure = source.failure
           ? ` | ${source.failure.code || 'failure'}`
           : ''
@@ -1066,9 +1451,9 @@
             <span>
               <span class="log-head">
                 <span class="log-title">${escapeHtml(title)}</span>
-                <span class="status ${level}">${escapeHtml(source.status || (source.ok ? 'ok' : 'failed'))}</span>
+                <span class="status ${level}">${escapeHtml(displayStatus)}</span>
               </span>
-              <span class="detail">${escapeHtml(counterText(source) + failure)}</span>
+              <span class="detail">${escapeHtml(counterText(source) + rawStatus + failure)}</span>
               ${
                 evidence ? `<span class="evidence-list">${evidence}</span>` : ''
               }
@@ -1221,6 +1606,492 @@
         renderActivity(selected)
       }
 
+      function alertTypeLabel(type) {
+        if (type === 'regression') return 'worked before'
+        if (type === 'saved_media_now_failing') return 'saved media before'
+        if (type === 'deleted_or_empty_reddit') return 'empty/deleted candidate'
+        if (type === 'reddit_error') return 'reddit error'
+        return 'source error'
+      }
+
+      function displaySourceStatus(source = {}) {
+        if (source.saved > 0) return source.status || 'saved media'
+        if (source.status === 'no_new_posts') return 'no new media'
+        if (
+          source.status === 'finished' &&
+          source.saved === 0 &&
+          source.errors === 0
+        ) {
+          return source.processed || source.duplicates || source.skipped
+            ? 'no new media'
+            : 'no media found'
+        }
+        return source.status || (source.ok ? 'ok' : 'failed')
+      }
+
+      function renderHistoryMetrics(payload) {
+        const latest = payload.latestRun
+        const totals = latest?.totals || {}
+        const alerts = payload.sourceAlerts || []
+        const queues = payload.auditQueues || {}
+        const oversized = queues.oversizedVideos || []
+        const mediaFailures = queues.mediaFailures || []
+        const quarantine = queues.quarantine || {}
+        const staleModels = queues.staleModels || []
+        const suspendedRedditSources = queues.suspendedRedditSources || []
+        const inactiveRedditSources = queues.inactiveRedditSources || []
+        const deleted = alerts.filter(
+          (alert) => alert.alertType === 'deleted_or_empty_reddit'
+        ).length
+        const savedBefore = alerts.filter((alert) => alert.savedBefore).length
+        const oversizedCount = oversized.reduce(
+          (sum, target) => sum + Number(target.count || 0),
+          0
+        )
+        const items = [
+          ['Latest Sources', formatNumber(totals.sources)],
+          ['Repair First', formatNumber(savedBefore)],
+          ['Empty/Deleted Reddit', formatNumber(deleted)],
+          ['Suspended Watch', formatNumber(suspendedRedditSources.length)],
+          ['Old Reddit Accounts', formatNumber(inactiveRedditSources.length)],
+          ['Stale Models', formatNumber(staleModels.length)],
+          ['Oversized', formatNumber(oversizedCount)],
+          ['Media Failures', formatNumber(mediaFailures.length)],
+          ['Quarantine', formatNumber(quarantine.needsReview || 0)],
+          ['Latest Saved', formatNumber(totals.saved)],
+          ['Saved Runs', formatNumber((payload.runs || []).length)],
+        ]
+        historyMetricsEl.innerHTML = items
+          .map(
+            ([label, value]) => `
+              <div class="metric">
+                <div class="metric-label">${escapeHtml(label)}</div>
+                <div class="metric-value">${escapeHtml(value)}</div>
+              </div>
+            `
+          )
+          .join('')
+      }
+
+      function renderSourceAlerts(alerts = []) {
+        const savedBefore = alerts.filter((alert) => alert.savedBefore).length
+        const neverSavedReddit = alerts.filter(
+          (alert) =>
+            alert.alertType === 'deleted_or_empty_reddit' && !alert.savedBefore
+        ).length
+        const otherFailures = alerts.length - savedBefore - neverSavedReddit
+        repairMetaEl.textContent = `${savedBefore} saved-before source${savedBefore === 1 ? '' : 's'} need repair; ${neverSavedReddit} never-saved Reddit source${neverSavedReddit === 1 ? '' : 's'} may be empty or deleted; ${otherFailures} other failure${otherFailures === 1 ? '' : 's'} need review.`
+        if (!alerts.length) {
+          sourceAlertsEl.innerHTML =
+            '<div class="empty">No failing or unavailable sources in the latest run.</div>'
+          return
+        }
+        sourceAlertsEl.innerHTML = alerts
+          .map((alert) => {
+            const status =
+              alert.alertType === 'regression' || alert.savedBefore
+                ? 'warn'
+                : 'error'
+            const badge = alert.savedBefore
+              ? 'repair'
+              : alert.alertType === 'deleted_or_empty_reddit'
+                ? 'empty?'
+                : 'review'
+            const previous = alert.previousWorkedAt
+              ? ` | last worked ${formatDateTime(alert.previousWorkedAt)}`
+              : ''
+            const savedEvidence = alert.savedBefore
+              ? ` | saved before ${formatNumber(alert.savedMediaCount)}`
+              : ' | never saved from this account'
+            const evidence = (alert.evidence?.errors || [])
+              .slice(0, 2)
+              .map(
+                (item) =>
+                  `<span class="evidence-item">${escapeHtml(item.type || 'error')}: ${escapeHtml(item.message || item.url || 'see raw log')}</span>`
+              )
+              .join('')
+            return `
+              <details class="alert-row" ${alert.savedBefore ? 'open' : ''}>
+                <summary class="alert-summary">
+                  <div>
+                    <div class="alert-title">${escapeHtml(alert.model)}: ${escapeHtml(alert.label || alert.sourceType || 'source')}</div>
+                    <div class="detail">${escapeHtml(displaySourceStatus(alert))} | ${escapeHtml(alertTypeLabel(alert.alertType))}${escapeHtml(savedEvidence)}${escapeHtml(previous)}</div>
+                  </div>
+                  <span class="status ${status}">${escapeHtml(badge)}</span>
+                </summary>
+                <div class="source-breakdown">
+                  <div class="alert-title">${escapeHtml(alert.model)}: ${escapeHtml(alert.label || alert.sourceType || 'source')}</div>
+                  <div class="detail">${escapeHtml(alert.status || 'failed')} | saved ${formatNumber(alert.saved || 0)} | errors ${formatNumber(alert.errors || 0)}</div>
+                  ${linkMarkup(alert.url)}
+                  ${evidence ? `<div class="evidence-list">${evidence}</div>` : ''}
+                  <div class="actions" style="margin-top: 8px; justify-content: flex-start">
+                    <a class="button" href="${escapeHtml(alert.url)}" target="_blank" rel="noreferrer">Open</a>
+                    <button class="repair-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}" data-label="${escapeHtml(alert.label || alert.sourceType || 'source')}">Update Source</button>
+                    ${
+                      alert.sourceType === 'reddit'
+                        ? `<button class="suspend-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Suspended</button>
+                           <button class="delete-source danger" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Deleted</button>`
+                        : ''
+                    }
+                  </div>
+                </div>
+              </details>
+            `
+          })
+          .join('')
+      }
+
+      function renderStaleModels(models = []) {
+        staleModelMetaEl.textContent = `${formatNumber(models.length)} model${models.length === 1 ? '' : 's'} with no active sources.`
+        if (!models.length) {
+          staleModelsEl.innerHTML =
+            '<div class="empty">No stale models without active sources.</div>'
+          return
+        }
+
+        staleModelsEl.innerHTML = models
+          .map((model) => {
+            const aliases = (model.aliases || []).slice(0, 8).join(', ')
+            const inactiveSources = model.inactiveSources || []
+            const inactiveMarkup = inactiveSources.length
+              ? inactiveSources
+                  .map(
+                    (source) => `
+                      <article class="log-entry warn">
+                        <span class="log-dot"></span>
+                        <span>
+                          <span class="log-head">
+                            <span class="log-title">${escapeHtml(source.username || source.userId || 'Reddit')}</span>
+                            <span class="status warn">${escapeHtml(source.inactiveReason || 'old')}</span>
+                          </span>
+                          <span class="detail">moved inactive ${escapeHtml(formatDateTime(source.inactiveAt))}</span>
+                          ${linkMarkup(source.url)}
+                        </span>
+                      </article>
+                    `
+                  )
+                  .join('')
+              : '<div class="empty">No inactive Reddit account recorded for this model.</div>'
+            return `
+              <details class="stale-model-row">
+                <summary class="stale-model-head">
+                  <div>
+                    <div class="stale-model-title">${escapeHtml(model.model)}</div>
+                    <div class="detail">${model.hasLocalMedia ? 'local media exists' : 'no local media found'}${aliases ? ` | aliases ${escapeHtml(aliases)}` : ''}</div>
+                  </div>
+                  <span class="status warn">no sources</span>
+                </summary>
+                <div class="source-breakdown">
+                  <div class="actions" style="justify-content: flex-start">
+                    <button class="repair-stale-model secondary" type="button" data-model="${escapeHtml(model.model)}">Add Source</button>
+                  </div>
+                  ${inactiveMarkup}
+                </div>
+              </details>
+            `
+          })
+          .join('')
+      }
+
+      function renderSourceStateList(targetEl, metaEl, sources = [], options) {
+        metaEl.textContent = `${formatNumber(sources.length)} ${options.meta}${sources.length === 1 ? '' : 's'}.`
+        if (!sources.length) {
+          targetEl.innerHTML = `<div class="empty">${escapeHtml(options.empty)}</div>`
+          return
+        }
+
+        targetEl.innerHTML = sources
+          .map((source) => {
+            const markedAt = source.accountStatusAt || source.inactiveAt
+            const reason =
+              source.accountStatusReason || source.inactiveReason || ''
+            const status = source.recovered ? 'recovered?' : options.status
+            const latest = source.latestStatus
+              ? ` | latest ${source.latestStatus.ok ? 'worked' : source.latestStatus.status || 'failed'}`
+              : ''
+            return `
+              <details class="source-state-row">
+                <summary class="source-state-head">
+                  <div>
+                    <div class="source-state-title">${escapeHtml(source.model)}: ${escapeHtml(source.username || source.userId || 'Reddit')}</div>
+                    <div class="detail">${escapeHtml(reason || options.status)}${markedAt ? ` | ${escapeHtml(formatDateTime(markedAt))}` : ''}${escapeHtml(latest)}</div>
+                  </div>
+                  <span class="status ${source.recovered ? 'success' : 'warn'}">${escapeHtml(status)}</span>
+                </summary>
+                <div class="source-breakdown">
+                  ${linkMarkup(source.url)}
+                  <div class="actions" style="justify-content: flex-start">
+                    <a class="button" href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">Open</a>
+                    <button class="repair-stale-model secondary" type="button" data-model="${escapeHtml(source.model)}">Search Sources</button>
+                    ${
+                      options.clearable
+                        ? `<button class="clear-suspended-source secondary" type="button" data-model="${escapeHtml(source.model)}" data-url="${escapeHtml(source.url)}">Clear Watch</button>`
+                        : ''
+                    }
+                  </div>
+                </div>
+              </details>
+            `
+          })
+          .join('')
+      }
+
+      function renderMediaQueues(queues = {}) {
+        const oversized = queues.oversizedVideos || []
+        const mediaFailures = queues.mediaFailures || []
+        const quarantine = queues.quarantine || {}
+        const oversizedCount = oversized.reduce(
+          (sum, target) => sum + Number(target.count || 0),
+          0
+        )
+        mediaQueueMetaEl.textContent = `${oversizedCount} oversized video${oversizedCount === 1 ? '' : 's'} across ${oversized.length} source${oversized.length === 1 ? '' : 's'}; ${mediaFailures.length} latest media failure${mediaFailures.length === 1 ? '' : 's'}; ${formatNumber(quarantine.needsReview || 0)} quarantine item${quarantine.needsReview === 1 ? '' : 's'} need review.`
+
+        const sections = []
+        sections.push(`
+          <details class="media-queue-row" ${oversized.length ? 'open' : ''}>
+            <summary class="media-queue-head">
+              <div>
+                <div class="media-queue-title">Oversized Video Retries</div>
+                <div class="detail">${formatNumber(oversizedCount)} video${oversizedCount === 1 ? '' : 's'} across ${formatNumber(oversized.length)} source${oversized.length === 1 ? '' : 's'}</div>
+              </div>
+              <span class="status ${oversized.length ? 'warn' : 'success'}">${oversized.length ? 'retry' : 'clean'}</span>
+            </summary>
+            <div class="source-breakdown">
+              ${
+                oversized.length
+                  ? oversized
+                      .map(
+                        (target) => `
+                          <article class="log-entry warn">
+                            <span class="log-dot"></span>
+                            <span>
+                              <span class="log-head">
+                                <span class="log-title">${escapeHtml(target.modelName || 'Unknown model')}</span>
+                                <span class="status warn">${formatNumber(target.count)} file${target.count === 1 ? '' : 's'}</span>
+                              </span>
+                              <span class="detail">largest ${escapeHtml(formatBytes(target.largestBytes))} | latest ${escapeHtml(formatDateTime(target.latestAt))}</span>
+                              ${
+                                target.url
+                                  ? linkMarkup(target.url)
+                                  : `<span class="url">${escapeHtml(target.error || '')}</span>`
+                              }
+                              ${
+                                target.sampleFiles?.length
+                                  ? `<span class="detail">samples ${escapeHtml(target.sampleFiles.join(', '))}</span>`
+                                  : ''
+                              }
+                            </span>
+                          </article>
+                        `
+                      )
+                      .join('')
+                  : '<div class="empty">No oversized video retry targets found.</div>'
+              }
+            </div>
+          </details>
+        `)
+
+        sections.push(`
+          <details class="media-queue-row" ${mediaFailures.length ? 'open' : ''}>
+            <summary class="media-queue-head">
+              <div>
+                <div class="media-queue-title">Latest Media Failures</div>
+                <div class="detail">${formatNumber(mediaFailures.length)} failed media event${mediaFailures.length === 1 ? '' : 's'} from the latest saved run</div>
+              </div>
+              <span class="status ${mediaFailures.length ? 'error' : 'success'}">${mediaFailures.length ? 'fix' : 'clean'}</span>
+            </summary>
+            <div class="source-breakdown">
+              ${
+                mediaFailures.length
+                  ? mediaFailures
+                      .map(
+                        (failure) => `
+                          <article class="log-entry error">
+                            <span class="log-dot"></span>
+                            <span>
+                              <span class="log-head">
+                                <span class="log-title">${escapeHtml(failure.model)}: ${escapeHtml(failure.type)}</span>
+                                <span class="status error">${escapeHtml(failure.label || failure.sourceType || 'source')}</span>
+                              </span>
+                              <span class="detail">${escapeHtml(failure.filename || failure.postId || failure.message || 'media failure')}</span>
+                              ${
+                                failure.url
+                                  ? linkMarkup(failure.url, failure.url)
+                                  : linkMarkup(
+                                      failure.sourceUrl,
+                                      failure.sourceUrl
+                                    )
+                              }
+                            </span>
+                          </article>
+                        `
+                      )
+                      .join('')
+                  : '<div class="empty">No media-error events found in the latest saved run.</div>'
+              }
+            </div>
+          </details>
+        `)
+
+        const quarantineStates = Object.entries(quarantine.countsByState || {})
+          .map(([state, count]) => `${state} ${formatNumber(count)}`)
+          .join(' | ')
+        sections.push(`
+          <details class="media-queue-row">
+            <summary class="media-queue-head">
+              <div>
+                <div class="media-queue-title">Quarantine Manifest</div>
+                <div class="detail">${formatNumber(quarantine.needsReview || 0)} need review | ${escapeHtml(quarantineStates || 'no manifest state')}</div>
+              </div>
+              <span class="status ${quarantine.needsReview || 0 ? 'warn' : 'success'}">${quarantine.needsReview || 0 ? 'review' : 'clean'}</span>
+            </summary>
+            <div class="source-breakdown">
+              ${
+                quarantine.error
+                  ? `<div class="empty">${escapeHtml(quarantine.error)}</div>`
+                  : (quarantine.items || [])
+                      .slice(0, 30)
+                      .map(
+                        (item) => `
+                          <article class="log-entry warn">
+                            <span class="log-dot"></span>
+                            <span>
+                              <span class="log-head">
+                                <span class="log-title">${escapeHtml(item.model || 'Unknown model')}</span>
+                                <span class="status warn">${escapeHtml(item.state || 'review')}</span>
+                              </span>
+                              <span class="detail">${escapeHtml((item.reasons || []).join(', ') || 'quarantine item')} | ${escapeHtml(formatBytes(item.sizeBytes))}</span>
+                              <span class="url">${escapeHtml(item.relativePath || '')}</span>
+                            </span>
+                          </article>
+                        `
+                      )
+                      .join('') ||
+                    '<div class="empty">No active quarantine review items.</div>'
+              }
+            </div>
+          </details>
+        `)
+
+        mediaQueuesEl.innerHTML = sections.join('')
+      }
+
+      function renderHistoryRuns(runs = []) {
+        if (!runs.length) {
+          historyRunsEl.innerHTML =
+            '<div class="empty">No run history has been saved yet.</div>'
+          historyDetailLabelEl.textContent = 'Select a run.'
+          historyDetailEl.innerHTML = ''
+          return
+        }
+        if (!state.selectedHistoryId) state.selectedHistoryId = runs[0].id
+        const selected =
+          runs.find((run) => run.id === state.selectedHistoryId) || runs[0]
+        state.selectedHistoryId = selected.id
+        historyRunsEl.innerHTML = runs
+          .map((run) => {
+            const totals = run.totals || {}
+            return `
+              <div class="history-row ${run.id === selected.id ? 'active' : ''}" data-history-id="${escapeHtml(run.id)}">
+                <div>
+                  <div class="history-title">${escapeHtml(run.model || 'Run')}</div>
+                  <div class="muted">${escapeHtml(formatDateTime(run.startedAt))} | ${escapeHtml(formatDuration(run.startedAt, run.finishedAt))}</div>
+                  <div class="detail">models ${formatNumber(totals.modelsAttempted)} | sources ${formatNumber(totals.sources)} | saved ${formatNumber(totals.saved)}</div>
+                </div>
+                <span class="status ${escapeHtml(run.status || 'completed')}">${escapeHtml(run.status || 'completed')}</span>
+              </div>
+            `
+          })
+          .join('')
+        renderHistoryDetail(selected)
+      }
+
+      function renderHistoryDetail(run) {
+        if (!run) {
+          historyDetailLabelEl.textContent = 'Select a run.'
+          historyDetailEl.innerHTML = ''
+          return
+        }
+        historyDetailLabelEl.textContent = `${formatDateTime(run.startedAt)} | ${totalText(run.totals || {})}`
+        const models = run.models || []
+        if (!models.length) {
+          historyDetailEl.innerHTML =
+            '<div class="empty">No model details were captured for this run.</div>'
+          return
+        }
+        historyDetailEl.innerHTML = models
+          .map((model) => {
+            const level =
+              model.totals?.sourceFailures || model.totals?.errors
+                ? 'warn'
+                : 'success'
+            const reviewCount = (model.sources || []).filter(
+              (source) => source.errors || !source.ok
+            ).length
+            const sources = (model.sources || [])
+              .map((source) => sourceSummaryMarkup(source, `${model.model}: `))
+              .join('')
+            return `
+              <details class="model-run">
+                <summary class="model-run-head">
+                  <div>
+                    <div class="model-run-title">${escapeHtml(model.model)}</div>
+                    <div class="detail">${escapeHtml(totalText(model.totals || {}))}${reviewCount ? ` | review ${formatNumber(reviewCount)}` : ''}</div>
+                  </div>
+                  <span class="status ${level}">${model.ok ? 'ok' : 'review'}</span>
+                </summary>
+                <div class="source-breakdown">${sources}</div>
+              </details>
+            `
+          })
+          .join('')
+      }
+
+      function renderHistory(payload) {
+        state.history = payload
+        historyMetaEl.textContent = `${payload.runs?.length || 0} saved run${payload.runs?.length === 1 ? '' : 's'} | ${payload.historyPath || ''}`
+        renderHistoryMetrics(payload)
+        renderSourceAlerts(payload.sourceAlerts || [])
+        renderStaleModels(payload.auditQueues?.staleModels || [])
+        renderSourceStateList(
+          suspendedSourcesEl,
+          suspendedSourceMetaEl,
+          payload.auditQueues?.suspendedRedditSources || [],
+          {
+            empty: 'No suspended Reddit sources are being watched.',
+            meta: 'active Reddit source marked suspended',
+            status: 'suspended',
+            clearable: true,
+          }
+        )
+        renderSourceStateList(
+          inactiveSourcesEl,
+          inactiveSourceMetaEl,
+          payload.auditQueues?.inactiveRedditSources || [],
+          {
+            empty: 'No old Reddit accounts are stored yet.',
+            meta: 'old Reddit account',
+            status: 'deleted',
+          }
+        )
+        renderMediaQueues(payload.auditQueues || {})
+        renderHistoryRuns(payload.runs || [])
+      }
+
+      function renderHistoryError(err) {
+        historyMetaEl.textContent = err.message
+        historyMetricsEl.innerHTML = ''
+        sourceAlertsEl.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`
+        staleModelsEl.innerHTML = ''
+        suspendedSourcesEl.innerHTML = ''
+        inactiveSourcesEl.innerHTML = ''
+      }
+
+      async function loadHistory() {
+        const payload = await api('/api/history')
+        renderHistory(payload)
+      }
+
       async function refreshJobs() {
         try {
           const payload = await api('/api/jobs')
@@ -1232,7 +2103,7 @@
 
       candidatesEl.addEventListener('click', async (event) => {
         const accept = event.target.closest('.accept-source')
-        const manual = event.target.closest('.accept-manual-stuffer')
+        const manual = event.target.closest('.accept-manual-source')
         try {
           if (accept) {
             const card = accept.closest('.candidate')
@@ -1241,7 +2112,7 @@
             accept.disabled = true
           } else if (manual) {
             const card = manual.closest('.candidate')
-            const input = card.querySelector('.manual-stuffer-url')
+            const input = card.querySelector('.manual-source-url')
             await acceptSource(input.value.trim())
             manual.textContent = 'Accepted'
             manual.disabled = true
@@ -1258,6 +2129,123 @@
         renderJobs(state.jobs)
       })
 
+      historyRunsEl.addEventListener('click', (event) => {
+        const row = event.target.closest('.history-row')
+        if (!row) return
+        state.selectedHistoryId = row.dataset.historyId
+        renderHistoryRuns(state.history?.runs || [])
+      })
+
+      sourceAlertsEl.addEventListener('click', (event) => {
+        const repair = event.target.closest('.repair-source')
+        const remove = event.target.closest('.remove-source')
+        const ban = event.target.closest('.ban-source')
+        const suspend = event.target.closest('.suspend-source')
+        const deleteSource = event.target.closest('.delete-source')
+        if (repair) {
+          beginSourceRepair({
+            model: repair.dataset.model || '',
+            url: repair.dataset.url || '',
+            label: repair.dataset.label || 'source',
+          })
+        } else if (suspend) {
+          const model = suspend.dataset.model || ''
+          const url = suspend.dataset.url || ''
+          if (
+            !confirm(
+              `Mark this Reddit source as suspended but keep scraping it for ${model}?`
+            )
+          )
+            return
+          markRedditSourceState(model, url, 'suspended')
+            .then((payload) => {
+              searchStatusEl.textContent = `Marked suspended for ${payload.model || model}; it will stay active for future checks.`
+              return Promise.all([loadModels(), loadHistory()])
+            })
+            .catch(renderHistoryError)
+        } else if (deleteSource) {
+          const model = deleteSource.dataset.model || ''
+          const url = deleteSource.dataset.url || ''
+          if (
+            !confirm(
+              `Mark this Reddit account as deleted and move it out of active sources for ${model}?`
+            )
+          )
+            return
+          markRedditSourceState(model, url, 'deleted')
+            .then((payload) => {
+              searchStatusEl.textContent = payload.stale
+                ? `${payload.model || model} now has no active sources.`
+                : `Moved deleted Reddit account to old sources for ${payload.model || model}.`
+              return Promise.all([loadModels(), loadHistory()])
+            })
+            .catch(renderHistoryError)
+        } else if (ban) {
+          const model = ban.dataset.model || ''
+          const url = ban.dataset.url || ''
+          if (
+            !confirm(
+              `Mark this Reddit source as banned and purge it from ${model}?`
+            )
+          )
+            return
+          markSourceBanned(model, url)
+            .then((payload) => {
+              searchStatusEl.textContent = payload.stale
+                ? `${payload.model || model} now has no active sources.`
+                : `Marked banned and removed from ${payload.model || model}.`
+              return Promise.all([loadModels(), loadHistory()])
+            })
+            .catch(renderHistoryError)
+        } else if (remove) {
+          const model = remove.dataset.model || ''
+          const url = remove.dataset.url || ''
+          if (!confirm(`Remove this source from ${model}?`)) return
+          removeSource(model, url)
+            .then(() => Promise.all([loadModels(), loadHistory()]))
+            .catch(renderHistoryError)
+        }
+      })
+
+      function jumpToSourceSearch(model) {
+        targetModelEl.value = model || ''
+        sourceQueryEl.value = model || ''
+        state.repairContext = null
+        renderSavedSources()
+        renderRepairContext()
+        setView('live')
+        sourceQueryEl.focus()
+      }
+
+      function handleSourceSearchJump(event) {
+        const repair = event.target.closest('.repair-stale-model')
+        if (!repair) return
+        jumpToSourceSearch(repair.dataset.model || '')
+      }
+
+      suspendedSourcesEl.addEventListener('click', (event) => {
+        const clear = event.target.closest('.clear-suspended-source')
+        if (!clear) return
+        const model = clear.dataset.model || ''
+        const url = clear.dataset.url || ''
+        markRedditSourceState(model, url, 'active')
+          .then((payload) => {
+            searchStatusEl.textContent = `Cleared suspended watch for ${payload.model || model}.`
+            return Promise.all([loadModels(), loadHistory()])
+          })
+          .catch(renderHistoryError)
+      })
+
+      staleModelsEl.addEventListener('click', handleSourceSearchJump)
+      suspendedSourcesEl.addEventListener('click', handleSourceSearchJump)
+      inactiveSourcesEl.addEventListener('click', handleSourceSearchJump)
+
+      repairContextEl.addEventListener('click', (event) => {
+        if (!event.target.closest('#cancel-repair-context')) return
+        state.repairContext = null
+        renderRepairContext()
+      })
+
       document
         .getElementById('search-sources')
         .addEventListener('click', searchSources)
@@ -1272,6 +2260,13 @@
       document
         .getElementById('refresh-models')
         .addEventListener('click', loadModels)
+      showLiveEl.addEventListener('click', () => setView('live'))
+      showHistoryEl.addEventListener('click', () => setView('history'))
+      document
+        .getElementById('refresh-history')
+        .addEventListener('click', () =>
+          loadHistory().catch(renderHistoryError)
+        )
       document
         .getElementById('run-selected')
         .addEventListener('click', runSelectedSources)
@@ -1305,7 +2300,9 @@
         registryMetaEl.textContent = err.message
       })
       refreshJobs()
+      loadHistory().catch(renderHistoryError)
       setInterval(refreshJobs, 800)
+      setInterval(() => loadHistory().catch(() => {}), 30000)
       setInterval(() => loadModels().catch(() => {}), 30000)
     </script>
   </body>

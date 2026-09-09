@@ -85,6 +85,19 @@ function sortSourcesObject(sources) {
   )
 }
 
+function sortInactiveSourcesObject(sources) {
+  const sorted = sortSourcesObject(sources)
+  return Object.fromEntries(
+    Object.entries(sorted).filter(([, list]) => list.length > 0)
+  )
+}
+
+function hasInactiveSources(entry) {
+  return Object.values(sortInactiveSourcesObject(entry?.inactiveSources)).some(
+    (sources) => sources.length > 0
+  )
+}
+
 function sortModelRegistry(registry) {
   return Object.fromEntries(
     Object.entries(registry || {})
@@ -94,6 +107,13 @@ function sortModelRegistry(registry) {
         {
           aliases: sortStringValues(entry?.aliases),
           sources: sortSourcesObject(entry?.sources),
+          ...(hasInactiveSources(entry)
+            ? {
+                inactiveSources: sortInactiveSourcesObject(
+                  entry.inactiveSources
+                ),
+              }
+            : {}),
         },
       ])
   )
@@ -107,10 +127,20 @@ function ensureModelEntryShape(entry, canonicalName) {
   if (canonicalName) aliasSet.add(canonicalName)
   const existingSources =
     entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
+  const inactiveSources =
+    entry?.inactiveSources && typeof entry.inactiveSources === 'object'
+      ? entry.inactiveSources
+      : {}
   return {
     aliases: Array.from(aliasSet),
     sources: Object.fromEntries(
       Object.entries(existingSources).map(([sourceName, sources]) => [
+        sourceName,
+        Array.isArray(sources) ? [...sources] : [],
+      ])
+    ),
+    inactiveSources: Object.fromEntries(
+      Object.entries(inactiveSources).map(([sourceName, sources]) => [
         sourceName,
         Array.isArray(sources) ? [...sources] : [],
       ])
