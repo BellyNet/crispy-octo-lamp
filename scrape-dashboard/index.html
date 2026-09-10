@@ -134,6 +134,12 @@
         border-color: var(--accent);
       }
 
+      mark {
+        border-radius: 3px;
+        background: rgba(126, 99, 255, 0.32);
+        color: var(--text);
+      }
+
       .app {
         min-height: 100vh;
         display: grid;
@@ -267,6 +273,61 @@
       label.check input,
       .source-row input[type='checkbox'] {
         width: auto;
+      }
+
+      .model-picker-wrap {
+        position: relative;
+      }
+
+      .model-picker {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        max-height: min(320px, 48vh);
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #101018;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);
+        padding: 6px;
+      }
+
+      .model-picker-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text);
+        text-align: left;
+        padding: 8px;
+        white-space: normal;
+      }
+
+      .model-picker-row:hover,
+      .model-picker-row.active {
+        border-color: var(--accent);
+        background: #1d1d2a;
+      }
+
+      .model-picker-row.match {
+        border-color: rgba(126, 99, 255, 0.38);
+      }
+
+      .model-picker-name {
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .model-picker-meta {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 11px;
+        overflow-wrap: anywhere;
       }
 
       .options {
@@ -677,12 +738,15 @@
               <div class="workflow-grid">
                 <label>
                   Model
-                  <input
-                    id="target-model"
-                    type="text"
-                    autocomplete="off"
-                    placeholder="Canonical model name"
-                  />
+                  <div class="model-picker-wrap">
+                    <input
+                      id="target-model"
+                      type="text"
+                      autocomplete="off"
+                      placeholder="Canonical model name"
+                    />
+                    <div id="model-picker" class="model-picker hidden"></div>
+                  </div>
                 </label>
                 <button id="load-target-model" type="button">
                   Load Sources
@@ -947,6 +1011,8 @@
         history: null,
         selectedHistoryId: null,
         repairContext: null,
+        modelPickerOpen: false,
+        modelPickerActiveIndex: 0,
       }
 
       const liveViewEl = document.getElementById('live-view')
@@ -960,6 +1026,7 @@
       const candidatesEl = document.getElementById('candidates')
       const sourceQueryEl = document.getElementById('source-query')
       const targetModelEl = document.getElementById('target-model')
+      const modelPickerEl = document.getElementById('model-picker')
       const searchStatusEl = document.getElementById('search-status')
       const repairContextEl = document.getElementById('repair-context')
       const jobsEl = document.getElementById('jobs')
@@ -1079,6 +1146,101 @@
         if (key === 'reddit') return 'Reddit'
         if (key === 'stufferdb') return 'StufferDB'
         return key
+      }
+
+      function normalizeSearchText(value) {
+        return String(value || '').toLowerCase()
+      }
+
+      function modelSearchScore(model, query) {
+        if (!query) return 50
+        const name = normalizeSearchText(model.name)
+        const aliases = (model.aliases || []).map(normalizeSearchText)
+        if (name === query) return 0
+        if (aliases.includes(query)) return 1
+        if (name.startsWith(query)) return 2
+        if (aliases.some((alias) => alias.startsWith(query))) return 3
+        if (name.includes(query)) return 4
+        if (aliases.some((alias) => alias.includes(query))) return 5
+        return 100
+      }
+
+      function sortedModelsForPicker() {
+        const query = normalizeSearchText(getTargetModelName())
+        return state.models
+          .map((model) => ({
+            model,
+            score: modelSearchScore(model, query),
+          }))
+          .sort((left, right) => {
+            if (left.score !== right.score) return left.score - right.score
+            return left.model.name.localeCompare(right.model.name)
+          })
+      }
+
+      function highlightText(value, query) {
+        const text = String(value || '')
+        const lower = normalizeSearchText(text)
+        const needle = normalizeSearchText(query)
+        const index = needle ? lower.indexOf(needle) : -1
+        if (index < 0) return escapeHtml(text)
+        return `${escapeHtml(text.slice(0, index))}<mark>${escapeHtml(text.slice(index, index + needle.length))}</mark>${escapeHtml(text.slice(index + needle.length))}`
+      }
+
+      function modelAliasPreview(model, query) {
+        const aliases = model.aliases || []
+        if (!aliases.length) return ''
+        const matching = aliases.find((alias) =>
+          normalizeSearchText(alias).includes(normalizeSearchText(query))
+        )
+        return matching || aliases[0]
+      }
+
+      function selectModelFromPicker(name) {
+        targetModelEl.value = name || ''
+        state.modelPickerOpen = false
+        state.modelPickerActiveIndex = 0
+        renderModelPicker()
+        renderSavedSources()
+        targetModelEl.focus()
+      }
+
+      function renderModelPicker() {
+        if (!state.modelPickerOpen) {
+          modelPickerEl.classList.add('hidden')
+          modelPickerEl.innerHTML = ''
+          return
+        }
+        const query = getTargetModelName()
+        const rows = sortedModelsForPicker()
+        state.modelPickerActiveIndex = Math.min(
+          Math.max(0, state.modelPickerActiveIndex),
+          Math.max(0, rows.length - 1)
+        )
+        modelPickerEl.classList.remove('hidden')
+        modelPickerEl.innerHTML =
+          rows
+            .map(({ model, score }, index) => {
+              const alias = modelAliasPreview(model, query)
+              return `
+                <button
+                  class="model-picker-row ${score < 100 ? 'match' : ''} ${index === state.modelPickerActiveIndex ? 'active' : ''}"
+                  type="button"
+                  data-model-name="${escapeHtml(model.name)}"
+                >
+                  <span>
+                    <span class="model-picker-name">${highlightText(model.name, query)}</span>
+                    ${
+                      alias
+                        ? `<span class="model-picker-meta">alias ${highlightText(alias, query)}</span>`
+                        : ''
+                    }
+                  </span>
+                  <span class="chip">${formatNumber(model.sourceCount || 0)} source${model.sourceCount === 1 ? '' : 's'}</span>
+                </button>
+              `
+            })
+            .join('') || '<div class="empty">No models loaded yet.</div>'
       }
 
       function getTargetModelName() {
@@ -2710,17 +2872,89 @@
         renderRepairContext()
       })
 
+      modelPickerEl.addEventListener('mousedown', (event) => {
+        const row = event.target.closest('.model-picker-row')
+        if (!row) return
+        event.preventDefault()
+        selectModelFromPicker(row.dataset.modelName || '')
+      })
+
+      document.addEventListener('mousedown', (event) => {
+        if (
+          event.target === targetModelEl ||
+          modelPickerEl.contains(event.target)
+        ) {
+          return
+        }
+        state.modelPickerOpen = false
+        renderModelPicker()
+      })
+
       document
         .getElementById('search-sources')
         .addEventListener('click', searchSources)
       sourceQueryEl.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') searchSources()
       })
-      targetModelEl.addEventListener('input', renderSavedSources)
-      targetModelEl.addEventListener('change', renderSavedSources)
+      targetModelEl.addEventListener('focus', () => {
+        state.modelPickerOpen = true
+        renderModelPicker()
+      })
+      targetModelEl.addEventListener('input', () => {
+        state.modelPickerOpen = true
+        state.modelPickerActiveIndex = 0
+        renderSavedSources()
+        renderModelPicker()
+      })
+      targetModelEl.addEventListener('keydown', (event) => {
+        if (
+          !state.modelPickerOpen &&
+          ['ArrowDown', 'ArrowUp'].includes(event.key)
+        ) {
+          state.modelPickerOpen = true
+          renderModelPicker()
+          event.preventDefault()
+          return
+        }
+        if (!state.modelPickerOpen) return
+        const rows = sortedModelsForPicker()
+        if (event.key === 'ArrowDown') {
+          state.modelPickerActiveIndex = Math.min(
+            rows.length - 1,
+            state.modelPickerActiveIndex + 1
+          )
+          renderModelPicker()
+          event.preventDefault()
+        } else if (event.key === 'ArrowUp') {
+          state.modelPickerActiveIndex = Math.max(
+            0,
+            state.modelPickerActiveIndex - 1
+          )
+          renderModelPicker()
+          event.preventDefault()
+        } else if (
+          event.key === 'Enter' &&
+          rows[state.modelPickerActiveIndex]
+        ) {
+          selectModelFromPicker(rows[state.modelPickerActiveIndex].model.name)
+          event.preventDefault()
+        } else if (event.key === 'Escape') {
+          state.modelPickerOpen = false
+          renderModelPicker()
+          event.preventDefault()
+        }
+      })
+      targetModelEl.addEventListener('change', () => {
+        renderSavedSources()
+        renderModelPicker()
+      })
       document
         .getElementById('load-target-model')
-        .addEventListener('click', renderSavedSources)
+        .addEventListener('click', () => {
+          state.modelPickerOpen = true
+          renderSavedSources()
+          renderModelPicker()
+        })
       document
         .getElementById('refresh-models')
         .addEventListener('click', loadModels)
