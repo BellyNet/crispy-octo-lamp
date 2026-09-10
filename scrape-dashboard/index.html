@@ -289,6 +289,13 @@
         gap: 8px;
       }
 
+      .media-queue-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-bottom: 10px;
+      }
+
       .candidate,
       .source-row,
       .job-row,
@@ -672,7 +679,8 @@
                   Model
                   <input
                     id="target-model"
-                    list="model-options"
+                    type="text"
+                    autocomplete="off"
                     placeholder="Canonical model name"
                   />
                 </label>
@@ -680,7 +688,6 @@
                   Load Sources
                 </button>
               </div>
-              <datalist id="model-options"></datalist>
 
               <div class="row" style="margin-top: 12px">
                 <input
@@ -953,7 +960,6 @@
       const candidatesEl = document.getElementById('candidates')
       const sourceQueryEl = document.getElementById('source-query')
       const targetModelEl = document.getElementById('target-model')
-      const modelOptionsEl = document.getElementById('model-options')
       const searchStatusEl = document.getElementById('search-status')
       const repairContextEl = document.getElementById('repair-context')
       const jobsEl = document.getElementById('jobs')
@@ -999,6 +1005,53 @@
       function linkMarkup(url, label = url) {
         if (!url) return ''
         return `<a class="url" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`
+      }
+
+      function mediaFailurePayload(failure) {
+        return {
+          model: failure.model || '',
+          filename: failure.filename || '',
+          savedPath: failure.savedPath || '',
+          postId: failure.postId || '',
+          message: failure.message || '',
+          url: failure.url || '',
+          mediaUrl: failure.mediaUrl || '',
+          mediaUrls: failure.mediaUrls || [],
+          mediaPageUrl: failure.mediaPageUrl || failure.url || '',
+          mediaPageUrls: failure.mediaPageUrls || [],
+          sourceSite: failure.sourceSite || null,
+          sourceService: failure.sourceService || null,
+          sourceUserId: failure.sourceUserId || null,
+          sourceUsername: failure.sourceUsername || null,
+          sourceSubreddit: failure.sourceSubreddit || null,
+          title: failure.title || '',
+          text: failure.text || '',
+          originalName: failure.originalName || '',
+          mediaQuality: failure.mediaQuality || '',
+          needsFullResolution: failure.needsFullResolution,
+          fullResolutionStatus: failure.fullResolutionStatus || '',
+          fullResolutionUrl: failure.fullResolutionUrl || '',
+        }
+      }
+
+      function encodedMediaFailure(failure) {
+        return escapeHtml(
+          encodeURIComponent(JSON.stringify(mediaFailurePayload(failure)))
+        )
+      }
+
+      function decodeMediaFailure(button) {
+        return JSON.parse(
+          decodeURIComponent(button.dataset.failure || '%7B%7D')
+        )
+      }
+
+      function recoveryKindLabel(kind) {
+        if (kind === 'already_present') return 'already present'
+        if (kind === 'large_download') return 'large'
+        if (kind === 'slow_download') return 'slow'
+        if (kind === 'likely_dead') return 'likely dead'
+        return 'review'
       }
 
       async function api(path, options = {}) {
@@ -1070,12 +1123,6 @@
         registryMetaEl.textContent = `${modelCount} models, ${sourceCount} saved sources`
         sourceTotalEl.textContent = `${sourceCount} saved sources across ${modelCount} models`
         if (payload.registryPath) registryMetaEl.title = payload.registryPath
-      }
-
-      function renderModelOptions() {
-        modelOptionsEl.innerHTML = state.models
-          .map((model) => `<option value="${escapeHtml(model.name)}"></option>`)
-          .join('')
       }
 
       function renderSavedSources() {
@@ -1189,7 +1236,6 @@
         const payload = await api('/api/models')
         state.models = payload.models || []
         renderRegistrySummary(payload)
-        renderModelOptions()
         renderSavedSources()
       }
 
@@ -1352,6 +1398,109 @@
         })
         state.selectedJobId = payload.job.id
         await refreshJobs()
+      }
+
+      async function runMediaSource(model, url, optionOverrides = {}) {
+        if (!model || !url) {
+          throw new Error('Missing model or source URL for cleanup retry.')
+        }
+        const payload = await api('/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            model,
+            sources: [url],
+            options: {
+              ...getRunOptions(),
+              keepHistory: true,
+              ...optionOverrides,
+            },
+          }),
+        })
+        state.selectedJobId = payload.job.id
+        await refreshJobs()
+        setView('live')
+        return payload
+      }
+
+      async function dismissMediaQueue(type, id, label) {
+        if (!type || !id) {
+          throw new Error('Missing cleanup queue item id.')
+        }
+        const payload = await api('/api/media-queues/dismiss', {
+          method: 'POST',
+          body: JSON.stringify({ type, id, label }),
+        })
+        await loadHistory()
+        return payload
+      }
+
+      async function repairSeenMediaFailure(id, failure) {
+        const payload = await api('/api/media-queues/repair-seen', {
+          method: 'POST',
+          body: JSON.stringify({ id, failure }),
+        })
+        await loadHistory()
+        return payload
+      }
+
+      async function markDeadMediaFailure(id, failure) {
+        const payload = await api('/api/media-queues/mark-dead', {
+          method: 'POST',
+          body: JSON.stringify({
+            id,
+            failure,
+            reason: 'dashboard_marked_dead',
+          }),
+        })
+        await loadHistory()
+        return payload
+      }
+
+      async function runQuarantineRepair(model = '', all = false) {
+        const payload = await api('/api/media-queues/quarantine-repair', {
+          method: 'POST',
+          body: JSON.stringify({ model, all }),
+        })
+        state.selectedJobId = payload.job.id
+        await refreshJobs()
+        setView('live')
+        return payload
+      }
+
+      async function runMediaQueueBulkAction(action) {
+        if (action === 'salvage-all') {
+          const payload = await runQuarantineRepair('', true)
+          searchStatusEl.textContent =
+            'Queued quarantine salvage for all candidates.'
+          return payload
+        }
+        const route =
+          action === 'repair-indexes'
+            ? '/api/media-queues/repair-seen-all'
+            : '/api/media-queues/retry-recovery'
+        const body =
+          action === 'repair-indexes'
+            ? {}
+            : {
+                type: action === 'retry-oversized' ? 'oversized' : 'slow',
+                options: getRunOptions(),
+              }
+        const payload = await api(route, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        })
+        if (payload.jobs?.length) {
+          state.selectedJobId = payload.jobs[0].id
+          setView('live')
+          await refreshJobs()
+        }
+        if (action === 'repair-indexes') {
+          searchStatusEl.textContent = `Repaired ${formatNumber(payload.repaired || 0)} seen-media index item${payload.repaired === 1 ? '' : 's'}.`
+        } else {
+          searchStatusEl.textContent = `Queued ${formatNumber(payload.jobs?.length || 0)} ${body.type} retry job${payload.jobs?.length === 1 ? '' : 's'}.`
+        }
+        await loadHistory()
+        return payload
       }
 
       function formatDuration(start, finish) {
@@ -1868,29 +2017,54 @@
       function renderMediaQueues(queues = {}) {
         const oversized = queues.oversizedVideos || []
         const mediaFailures = queues.mediaFailures || []
+        const slowFailures = queues.slowMediaFailures || []
+        const likelyDeadFailures = queues.likelyDeadMediaFailures || []
+        const tailDecode = queues.tailDecodeQuarantine || []
         const quarantine = queues.quarantine || {}
+        const quarantineVisible = (quarantine.items || []).length
+        const quarantineHidden = Math.max(
+          0,
+          Number(quarantine.needsReview || 0) - quarantineVisible
+        )
         const oversizedCount = oversized.reduce(
           (sum, target) => sum + Number(target.count || 0),
           0
         )
-        mediaQueueMetaEl.textContent = `${oversizedCount} oversized video${oversizedCount === 1 ? '' : 's'} across ${oversized.length} source${oversized.length === 1 ? '' : 's'}; ${mediaFailures.length} latest media failure${mediaFailures.length === 1 ? '' : 's'}; ${formatNumber(quarantine.needsReview || 0)} quarantine item${quarantine.needsReview === 1 ? '' : 's'} need review.`
+        const repairableCount = [...mediaFailures, ...slowFailures].filter(
+          (failure) => failure.canRepairSeen
+        ).length
+        const retryableSlowCount = slowFailures.filter(
+          (failure) => !failure.canRepairSeen && failure.sourceUrl
+        ).length
+        const recoveryCount =
+          oversized.length + slowFailures.length + tailDecode.length
+        mediaQueueMetaEl.textContent = `${formatNumber(recoveryCount)} recovery queue item${recoveryCount === 1 ? '' : 's'}; ${mediaFailures.length} latest media failure${mediaFailures.length === 1 ? '' : 's'}; ${likelyDeadFailures.length} likely dead; ${formatNumber(quarantine.needsReview || 0)} quarantine item${quarantine.needsReview === 1 ? '' : 's'} need review.`
 
         const sections = []
         sections.push(`
-          <details class="media-queue-row" ${oversized.length ? 'open' : ''}>
+          <div class="media-queue-actions">
+            <button class="media-queue-action secondary" type="button" data-action="repair-indexes" ${repairableCount ? '' : 'disabled'}>Repair All Indexes</button>
+            <button class="media-queue-action secondary" type="button" data-action="salvage-all" ${tailDecode.length || quarantine.needsReview ? '' : 'disabled'}>Run Salvage All</button>
+            <button class="media-queue-action" type="button" data-action="retry-slow" ${retryableSlowCount ? '' : 'disabled'}>Retry Slow</button>
+            <button class="media-queue-action" type="button" data-action="retry-oversized" ${oversizedCount ? '' : 'disabled'}>Retry Oversized</button>
+          </div>
+        `)
+        sections.push(`
+          <details class="media-queue-row" ${recoveryCount ? 'open' : ''}>
             <summary class="media-queue-head">
               <div>
-                <div class="media-queue-title">Oversized Video Retries</div>
-                <div class="detail">${formatNumber(oversizedCount)} video${oversizedCount === 1 ? '' : 's'} across ${formatNumber(oversized.length)} source${oversized.length === 1 ? '' : 's'}</div>
+                <div class="media-queue-title">Large / Slow Video Recovery</div>
+                <div class="detail">${formatNumber(oversizedCount)} oversized video${oversizedCount === 1 ? '' : 's'} | ${formatNumber(slowFailures.length)} slow/latest failure${slowFailures.length === 1 ? '' : 's'} | ${formatNumber(tailDecode.length)} tail-decode salvage candidate${tailDecode.length === 1 ? '' : 's'}</div>
               </div>
-              <span class="status ${oversized.length ? 'warn' : 'success'}">${oversized.length ? 'retry' : 'clean'}</span>
+              <span class="status ${recoveryCount ? 'warn' : 'success'}">${recoveryCount ? 'recover' : 'clean'}</span>
             </summary>
             <div class="source-breakdown">
               ${
-                oversized.length
-                  ? oversized
-                      .map(
-                        (target) => `
+                recoveryCount
+                  ? `
+                      ${oversized
+                        .map(
+                          (target) => `
                           <article class="log-entry warn">
                             <span class="log-dot"></span>
                             <span>
@@ -1909,12 +2083,68 @@
                                   ? `<span class="detail">samples ${escapeHtml(target.sampleFiles.join(', '))}</span>`
                                   : ''
                               }
+                              <span class="actions" style="margin-top: 8px; justify-content: flex-start">
+                                <button class="retry-oversized secondary" type="button" data-model="${escapeHtml(target.modelName || '')}" data-url="${escapeHtml(target.url || '')}">Retry Oversized</button>
+                                <button class="dismiss-media-queue" type="button" data-type="oversized" data-id="${escapeHtml(target.queueId || '')}" data-label="${escapeHtml(target.modelName || 'oversized video')}">Dismiss</button>
+                              </span>
                             </span>
                           </article>
                         `
-                      )
-                      .join('')
-                  : '<div class="empty">No oversized video retry targets found.</div>'
+                        )
+                        .join('')}
+                      ${slowFailures
+                        .map(
+                          (failure) => `
+                          <article class="log-entry warn">
+                            <span class="log-dot"></span>
+                            <span>
+                              <span class="log-head">
+                                <span class="log-title">${escapeHtml(failure.model || 'Unknown model')}: ${escapeHtml(failure.filename || failure.postId || 'media')}</span>
+                                <span class="status warn">${escapeHtml(recoveryKindLabel(failure.recoveryKind))}</span>
+                              </span>
+                              <span class="detail">attempts ${formatNumber(failure.history?.failureCount || 0)} | ${escapeHtml(failure.message || 'needs slow retry')}</span>
+                              ${
+                                failure.existingMedia
+                                  ? `<span class="detail">already on ${escapeHtml(failure.existingMedia.location)} | ${escapeHtml(formatBytes(failure.existingMedia.sizeBytes))}</span>`
+                                  : ''
+                              }
+                              ${linkMarkup(failure.mediaPageUrl || failure.url || failure.sourceUrl)}
+                              <span class="actions" style="margin-top: 8px; justify-content: flex-start">
+                                ${
+                                  failure.canRepairSeen
+                                    ? `<button class="repair-media-index secondary" type="button" data-id="${escapeHtml(failure.queueId || '')}" data-failure="${encodedMediaFailure(failure)}">Repair Index</button>`
+                                    : `<button class="retry-slow-media secondary" type="button" data-model="${escapeHtml(failure.model || '')}" data-url="${escapeHtml(failure.sourceUrl || '')}">Retry Slow</button>`
+                                }
+                                <button class="dismiss-media-queue" type="button" data-type="media-failure" data-id="${escapeHtml(failure.queueId || '')}" data-label="${escapeHtml(failure.filename || failure.postId || 'media failure')}">Dismiss</button>
+                              </span>
+                            </span>
+                          </article>
+                        `
+                        )
+                        .join('')}
+                      ${tailDecode
+                        .slice(0, 20)
+                        .map(
+                          (item) => `
+                          <article class="log-entry warn">
+                            <span class="log-dot"></span>
+                            <span>
+                              <span class="log-head">
+                                <span class="log-title">${escapeHtml(item.model || 'Unknown model')}</span>
+                                <span class="status warn">tail decode</span>
+                              </span>
+                              <span class="detail">${escapeHtml(item.relativePath || '')} | ${escapeHtml(formatBytes(item.sizeBytes))}</span>
+                              <span class="actions" style="margin-top: 8px; justify-content: flex-start">
+                                <button class="run-quarantine-repair secondary" type="button" data-model="${escapeHtml(item.model || '')}">Run Salvage</button>
+                                <button class="dismiss-media-queue" type="button" data-type="quarantine" data-id="${escapeHtml(item.queueId || '')}" data-label="${escapeHtml(item.relativePath || item.id || 'tail decode item')}">Dismiss</button>
+                              </span>
+                            </span>
+                          </article>
+                        `
+                        )
+                        .join('')}
+                    `
+                  : '<div class="empty">No large, slow, or tail-decode recovery targets found.</div>'
               }
             </div>
           </details>
@@ -1940,9 +2170,14 @@
                             <span>
                               <span class="log-head">
                                 <span class="log-title">${escapeHtml(failure.model)}: ${escapeHtml(failure.type)}</span>
-                                <span class="status error">${escapeHtml(failure.label || failure.sourceType || 'source')}</span>
+                                <span class="status ${failure.canMarkDead ? 'error' : failure.canRepairSeen ? 'success' : 'warn'}">${escapeHtml(recoveryKindLabel(failure.recoveryKind))}</span>
                               </span>
-                              <span class="detail">${escapeHtml(failure.filename || failure.postId || failure.message || 'media failure')}</span>
+                              <span class="detail">${escapeHtml(failure.filename || failure.postId || failure.message || 'media failure')} | attempts ${formatNumber(failure.history?.failureCount || 0)}${failure.history?.successCount ? ` | saved/seen ${formatNumber(failure.history.successCount)}` : ''}</span>
+                              ${
+                                failure.existingMedia
+                                  ? `<span class="detail">already on ${escapeHtml(failure.existingMedia.location)} | ${escapeHtml(formatBytes(failure.existingMedia.sizeBytes))}</span>`
+                                  : ''
+                              }
                               ${
                                 failure.url
                                   ? linkMarkup(failure.url, failure.url)
@@ -1951,6 +2186,19 @@
                                       failure.sourceUrl
                                     )
                               }
+                              <span class="actions" style="margin-top: 8px; justify-content: flex-start">
+                                ${
+                                  failure.canRepairSeen
+                                    ? `<button class="repair-media-index secondary" type="button" data-id="${escapeHtml(failure.queueId || '')}" data-failure="${encodedMediaFailure(failure)}">Repair Index</button>`
+                                    : `<button class="retry-media-source secondary" type="button" data-model="${escapeHtml(failure.model || '')}" data-url="${escapeHtml(failure.sourceUrl || '')}">Retry Source</button>`
+                                }
+                                ${
+                                  failure.canMarkDead
+                                    ? `<button class="mark-dead-media danger" type="button" data-id="${escapeHtml(failure.queueId || '')}" data-failure="${encodedMediaFailure(failure)}">Mark Dead</button>`
+                                    : ''
+                                }
+                                <button class="dismiss-media-queue" type="button" data-type="media-failure" data-id="${escapeHtml(failure.queueId || '')}" data-label="${escapeHtml(failure.filename || failure.postId || failure.type || 'media failure')}">Dismiss</button>
+                              </span>
                             </span>
                           </article>
                         `
@@ -1970,9 +2218,16 @@
             <summary class="media-queue-head">
               <div>
                 <div class="media-queue-title">Quarantine Manifest</div>
-                <div class="detail">${formatNumber(quarantine.needsReview || 0)} need review | ${escapeHtml(quarantineStates || 'no manifest state')}</div>
+                <div class="detail">${formatNumber(quarantine.needsReview || 0)} need review${quarantineHidden ? ` | showing ${formatNumber(quarantineVisible)}` : ''} | ${escapeHtml(quarantineStates || 'no manifest state')}</div>
               </div>
-              <span class="status ${quarantine.needsReview || 0 ? 'warn' : 'success'}">${quarantine.needsReview || 0 ? 'review' : 'clean'}</span>
+              <span class="actions" style="justify-content: flex-end">
+                ${
+                  quarantine.needsReview || 0
+                    ? '<button class="run-quarantine-repair secondary" type="button">Run Repair</button>'
+                    : ''
+                }
+                <span class="status ${quarantine.needsReview || 0 ? 'warn' : 'success'}">${quarantine.needsReview || 0 ? 'review' : 'clean'}</span>
+              </span>
             </summary>
             <div class="source-breakdown">
               ${
@@ -1991,6 +2246,10 @@
                               </span>
                               <span class="detail">${escapeHtml((item.reasons || []).join(', ') || 'quarantine item')} | ${escapeHtml(formatBytes(item.sizeBytes))}</span>
                               <span class="url">${escapeHtml(item.relativePath || '')}</span>
+                              <span class="actions" style="margin-top: 8px; justify-content: flex-start">
+                                <button class="run-quarantine-repair secondary" type="button" data-model="${escapeHtml(item.model || '')}">Repair Model</button>
+                                <button class="dismiss-media-queue" type="button" data-type="quarantine" data-id="${escapeHtml(item.queueId || '')}" data-label="${escapeHtml(item.relativePath || item.id || 'quarantine item')}">Dismiss</button>
+                              </span>
                             </span>
                           </article>
                         `
@@ -2306,6 +2565,144 @@
       suspendedSourcesEl.addEventListener('click', handleSourceSearchJump)
       validSourcesEl.addEventListener('click', handleSourceSearchJump)
       inactiveSourcesEl.addEventListener('click', handleSourceSearchJump)
+
+      mediaQueuesEl.addEventListener('click', (event) => {
+        const bulkAction = event.target.closest('.media-queue-action')
+        const oversized = event.target.closest('.retry-oversized')
+        const slowRetry = event.target.closest('.retry-slow-media')
+        const mediaRetry = event.target.closest('.retry-media-source')
+        const repairIndex = event.target.closest('.repair-media-index')
+        const markDead = event.target.closest('.mark-dead-media')
+        const quarantineRepair = event.target.closest('.run-quarantine-repair')
+        const dismiss = event.target.closest('.dismiss-media-queue')
+        if (
+          bulkAction ||
+          oversized ||
+          slowRetry ||
+          mediaRetry ||
+          repairIndex ||
+          markDead ||
+          quarantineRepair ||
+          dismiss
+        ) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        if (bulkAction) {
+          const action = bulkAction.dataset.action || ''
+          const labels = {
+            'repair-indexes': 'repair every already-present media index item',
+            'salvage-all': 'run quarantine salvage for all candidates',
+            'retry-slow': 'queue slow media retries at video concurrency 1',
+            'retry-oversized':
+              'queue oversized video retries at video concurrency 1',
+          }
+          if (!confirm(`Start ${labels[action] || 'this cleanup action'}?`)) {
+            return
+          }
+          runMediaQueueBulkAction(action).catch(renderHistoryError)
+        } else if (oversized) {
+          const model = oversized.dataset.model || ''
+          const url = oversized.dataset.url || ''
+          if (!url) {
+            searchStatusEl.textContent =
+              'This oversized queue item is missing a source URL.'
+            return
+          }
+          if (
+            !confirm(
+              `Retry ${model || 'this model'} with oversized video downloads enabled?`
+            )
+          ) {
+            return
+          }
+          runMediaSource(model, url, {
+            downloadOversized: true,
+            videoConcurrency: '1',
+          })
+            .then(() => {
+              searchStatusEl.textContent = `Queued oversized retry for ${model || url} with video concurrency 1.`
+            })
+            .catch(renderHistoryError)
+        } else if (slowRetry) {
+          const model = slowRetry.dataset.model || ''
+          const url = slowRetry.dataset.url || ''
+          if (!url) {
+            searchStatusEl.textContent =
+              'This slow media item is missing a source URL.'
+            return
+          }
+          runMediaSource(model, url, {
+            downloadOversized: true,
+            videoConcurrency: '1',
+          })
+            .then(() => {
+              searchStatusEl.textContent = `Queued slow retry for ${model || url} with video concurrency 1.`
+            })
+            .catch(renderHistoryError)
+        } else if (mediaRetry) {
+          const model = mediaRetry.dataset.model || ''
+          const url = mediaRetry.dataset.url || ''
+          if (!url) {
+            searchStatusEl.textContent =
+              'This media failure is missing a source URL.'
+            return
+          }
+          runMediaSource(model, url)
+            .then(() => {
+              searchStatusEl.textContent = `Queued media retry for ${model || url}.`
+            })
+            .catch(renderHistoryError)
+        } else if (repairIndex) {
+          const id = repairIndex.dataset.id || ''
+          const failure = decodeMediaFailure(repairIndex)
+          repairSeenMediaFailure(id, failure)
+            .then((payload) => {
+              const location = payload.existingMedia?.location || 'dataset'
+              searchStatusEl.textContent = `Repaired seen-media index from ${location}.`
+            })
+            .catch(renderHistoryError)
+        } else if (markDead) {
+          const id = markDead.dataset.id || ''
+          const failure = decodeMediaFailure(markDead)
+          if (
+            !confirm(
+              `Mark ${failure.filename || failure.postId || 'this media'} as dead so Hoghaul skips it in future runs?`
+            )
+          ) {
+            return
+          }
+          markDeadMediaFailure(id, failure)
+            .then(() => {
+              searchStatusEl.textContent = `Marked ${failure.filename || 'media'} as dead.`
+            })
+            .catch(renderHistoryError)
+        } else if (quarantineRepair) {
+          const model = quarantineRepair.dataset.model || ''
+          if (
+            !model &&
+            !confirm('Run quarantine repair for all visible cleanup items?')
+          ) {
+            return
+          }
+          runQuarantineRepair(model)
+            .then(() => {
+              searchStatusEl.textContent = model
+                ? `Queued quarantine repair for ${model}.`
+                : 'Queued quarantine repair.'
+            })
+            .catch(renderHistoryError)
+        } else if (dismiss) {
+          const type = dismiss.dataset.type || ''
+          const id = dismiss.dataset.id || ''
+          const label = dismiss.dataset.label || ''
+          dismissMediaQueue(type, id, label)
+            .then(() => {
+              searchStatusEl.textContent = `Dismissed ${label || 'cleanup item'}.`
+            })
+            .catch(renderHistoryError)
+        }
+      })
 
       repairContextEl.addEventListener('click', (event) => {
         if (!event.target.closest('#cancel-repair-context')) return

@@ -26,6 +26,9 @@ const {
 const {
   collectOversizedVideoTargets,
 } = require('../scrapyard/run-scrape-interactive')
+const { createMediaSeenIndex } = require('../scrapyard/mediaSeenIndex')
+const { normalizeSeenUrl } = require('../hoghaul/hoghaul')
+const { shouldUsePawchiveDeadMediaMatch } = require('../scrapyard/pawchive')
 const {
   PLATFORMS,
   probeUsername,
@@ -35,6 +38,7 @@ const rootDir = path.join(__dirname, '..')
 const registryPath =
   process.env.MODEL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
 const runScrapeScript = path.join(rootDir, 'scrapyard', 'run-scrape.js')
+const sessionRepairScript = path.join(rootDir, 'audit', 'run-session-repair.js')
 const app = express()
 
 const PORT = Number.parseInt(process.env.SCRAPE_DASHBOARD_PORT, 10) || 3430
@@ -50,6 +54,7 @@ const APPDATA =
   path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
 const datasetDir =
   process.env.DATASET_DIR || path.join(APPDATA, '.slopvault', 'dataset')
+const nasDatasetDir = path.resolve(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
 const allSourceReportPath = path.join(
   rootDir,
   'tmp',
@@ -72,9 +77,28 @@ const jobs = new Map()
 const queue = []
 const evidenceCache = new Map()
 const AUDIT_CACHE_MS = 60_000
+const EVIDENCE_ERROR_LIMIT = 50
+const MEDIA_HISTORY_CACHE_MS = 60_000
 let auditCache = null
+const mediaFailureHistoryCache = new Map()
 let activeJob = null
 let nextJobId = 1
+
+const dashboardMediaSeenIndex = createMediaSeenIndex({
+  datasetDir,
+  existsLocallyOrOnNas: (filePath) =>
+    fs.existsSync(filePath) ||
+    fs.existsSync(
+      path.join(
+        nasDatasetDir,
+        path.relative(datasetDir, filePath).replace(/\//g, path.sep)
+      )
+    ),
+  normalizeUrl: (url) => normalizeSeenUrl(String(url || '')),
+  matchOrder: ['media_url', 'media_page_url'],
+  pageMatchRequiresNoMediaUrl: true,
+  shouldUseDeadMediaMatch: shouldUsePawchiveDeadMediaMatch,
+})
 
 function parseCookies(req) {
   return Object.fromEntries(
@@ -881,7 +905,12 @@ async function searchSourceCandidates(rawQuery) {
 
   for (const term of terms) {
     for (const platform of ['coomer', 'kemono']) {
-      const hits = await probeUsername(platform, term)
+      let hits = []
+      try {
+        hits = await probeUsername(platform, term)
+      } catch {
+        hits = []
+      }
       for (const hit of hits) {
         if (!candidates.some((candidate) => candidate.url === hit.url)) {
           candidates.push(
@@ -953,7 +982,7 @@ function appendBoolean(args, flag, value) {
 }
 
 function appendScrapeOptions(args, options = {}) {
-  appendBoolean(args, '--skip-nas-sync', options.skipNasSync !== false)
+  appendBoolean(args, '--skip-nas-sync', Boolean(options.skipNasSync))
   appendBoolean(args, '--dry-run', Boolean(options.dryRun))
   appendBoolean(args, '--keep-history', Boolean(options.keepHistory))
   appendBoolean(args, '--stop-on-error', Boolean(options.stopOnError))
@@ -1138,6 +1167,16 @@ function compactEventUrl(event) {
   return event?.mediaPageUrl || event?.url || event?.mediaUrl || ''
 }
 
+function compactFailureMessage(value, limit = 220) {
+  const normalized = String(value || '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return normalized.length > limit
+    ? `${normalized.slice(0, limit - 1)}...`
+    : normalized
+}
+
 function readRunEvidence(logPath) {
   if (!logPath) return { duplicates: [], errors: [] }
   try {
@@ -1172,14 +1211,38 @@ function readRunEvidence(logPath) {
 
       if (
         /(error|failed|unavailable)/i.test(String(event.type || '')) &&
-        evidence.errors.length < 5
+        evidence.errors.length < EVIDENCE_ERROR_LIMIT
       ) {
         evidence.errors.push({
           type: event.type || 'error',
-          message: event.error || event.message || event.reason || '',
+          message: compactFailureMessage(
+            event.error || event.message || event.reason || ''
+          ),
           filename: event.filename || '',
+          savedPath: event.savedPath || event.relativePath || '',
           postId: event.postId || '',
           url: compactEventUrl(event),
+          mediaUrl: event.mediaUrl || '',
+          mediaUrls: Array.isArray(event.mediaUrls) ? event.mediaUrls : [],
+          mediaPageUrl: event.mediaPageUrl || '',
+          mediaPageUrls: Array.isArray(event.mediaPageUrls)
+            ? event.mediaPageUrls
+            : [],
+          sourceSite: event.sourceSite || null,
+          sourceService: event.sourceService || null,
+          sourceUserId: event.sourceUserId || null,
+          sourceUsername: event.sourceUsername || null,
+          sourceSubreddit: event.sourceSubreddit || null,
+          title: event.title || '',
+          text: event.text || '',
+          originalName: event.originalName || '',
+          mediaQuality: event.mediaQuality || '',
+          needsFullResolution:
+            typeof event.needsFullResolution === 'boolean'
+              ? event.needsFullResolution
+              : null,
+          fullResolutionStatus: event.fullResolutionStatus || '',
+          fullResolutionUrl: event.fullResolutionUrl || '',
         })
       }
     }
@@ -1477,12 +1540,18 @@ function readRunHistory() {
       version: HISTORY_VERSION,
       updatedAt: history.updatedAt || null,
       runs: Array.isArray(history.runs) ? history.runs : [],
+      mediaQueueDismissals: Array.isArray(history.mediaQueueDismissals)
+        ? history.mediaQueueDismissals
+            .map(normalizeMediaQueueDismissal)
+            .filter(Boolean)
+        : [],
     }
   } catch {
     return {
       version: HISTORY_VERSION,
       updatedAt: null,
       runs: [],
+      mediaQueueDismissals: [],
     }
   }
 }
@@ -1493,6 +1562,11 @@ function writeRunHistory(history) {
     version: HISTORY_VERSION,
     updatedAt: new Date().toISOString(),
     runs: Array.isArray(history.runs) ? history.runs : [],
+    mediaQueueDismissals: Array.isArray(history.mediaQueueDismissals)
+      ? history.mediaQueueDismissals
+          .map(normalizeMediaQueueDismissal)
+          .filter(Boolean)
+      : [],
   }
   const tempPath = `${runHistoryPath}.tmp`
   fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`)
@@ -1686,11 +1760,440 @@ function attachLatestSourceStatuses(sources, latestSourceStatuses) {
   })
 }
 
+function normalizeMediaQueueDismissal(record) {
+  const id = String(record?.id || '').trim()
+  const type = String(record?.type || '').trim()
+  if (!id || !type) return null
+  return {
+    id,
+    type,
+    label: record?.label || '',
+    dismissedAt: record?.dismissedAt || new Date().toISOString(),
+  }
+}
+
+function mediaQueueDismissalKey(type, id) {
+  return `${type}:${id}`
+}
+
+function getMediaQueueDismissalMap(history) {
+  const map = new Map()
+  for (const record of history?.mediaQueueDismissals || []) {
+    const normalized = normalizeMediaQueueDismissal(record)
+    if (!normalized) continue
+    map.set(mediaQueueDismissalKey(normalized.type, normalized.id), normalized)
+  }
+  return map
+}
+
+function isMediaQueueDismissed(dismissalMap, type, id) {
+  return dismissalMap.has(mediaQueueDismissalKey(type, id))
+}
+
+function dismissMediaQueueItem({ type, id, label }) {
+  const history = readRunHistory()
+  const dismissals = getMediaQueueDismissalMap(history)
+  const record = normalizeMediaQueueDismissal({
+    type,
+    id,
+    label,
+    dismissedAt: new Date().toISOString(),
+  })
+  if (!record) throw new Error('queue item type and id are required')
+  dismissals.set(mediaQueueDismissalKey(record.type, record.id), record)
+  history.mediaQueueDismissals = [...dismissals.values()].sort(
+    (left, right) => new Date(right.dismissedAt) - new Date(left.dismissedAt)
+  )
+  writeRunHistory(history)
+  auditCache = null
+  return record
+}
+
+function mediaList(value) {
+  return Array.from(
+    new Set(
+      [value]
+        .flat(Infinity)
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function getModelLogDir(modelName) {
+  const model = sanitize(modelName || '')
+  if (!model) throw new Error('model is required')
+  return path.join(datasetDir, model, 'log')
+}
+
+function writeSuccessfulSeenMediaFromFailure(failure) {
+  const model = sanitize(failure?.model || '')
+  if (!model) throw new Error('model is required')
+  const existingMedia = findExistingMediaForFailure({ ...failure, model })
+  if (!existingMedia) {
+    throw new Error('No local or NAS media exists for this failed item.')
+  }
+  const modelLogDir = getModelLogDir(model)
+  fs.mkdirSync(modelLogDir, { recursive: true })
+  dashboardMediaSeenIndex.recordSuccessfulSeenMedia(modelLogDir, {
+    relativePath: existingMedia.relativePath,
+    filename: failure.filename || path.basename(existingMedia.relativePath),
+    mediaUrl: failure.mediaUrl || null,
+    mediaUrls: mediaList([failure.mediaUrl, failure.mediaUrls]),
+    mediaPageUrl: failure.mediaPageUrl || failure.url || null,
+    mediaPageUrls: mediaList([
+      failure.mediaPageUrl,
+      failure.mediaPageUrls,
+      failure.url,
+    ]),
+    sourceSite: failure.sourceSite || null,
+    sourceService: failure.sourceService || null,
+    sourceUserId: failure.sourceUserId || null,
+    sourceUsername: failure.sourceUsername || null,
+    sourceSubreddit: failure.sourceSubreddit || null,
+    postId: failure.postId || null,
+    title: failure.title || null,
+    text: failure.text || null,
+    originalName: failure.originalName || null,
+    mediaQuality: failure.mediaQuality || null,
+    needsFullResolution:
+      typeof failure.needsFullResolution === 'boolean'
+        ? failure.needsFullResolution
+        : null,
+    fullResolutionStatus: failure.fullResolutionStatus || null,
+    fullResolutionUrl: failure.fullResolutionUrl || null,
+  })
+  mediaFailureHistoryCache.delete(modelLogDir)
+  auditCache = null
+  return existingMedia
+}
+
+function writeDeadMediaFromFailure(failure) {
+  const model = sanitize(failure?.model || '')
+  if (!model) throw new Error('model is required')
+  const modelLogDir = getModelLogDir(model)
+  fs.mkdirSync(modelLogDir, { recursive: true })
+  dashboardMediaSeenIndex.recordDeadMedia(modelLogDir, {
+    filename: failure.filename || null,
+    mediaUrl: failure.mediaUrl || null,
+    mediaUrls: mediaList([failure.mediaUrl, failure.mediaUrls]),
+    mediaPageUrl: failure.mediaPageUrl || failure.url || null,
+    mediaPageUrls: mediaList([
+      failure.mediaPageUrl,
+      failure.mediaPageUrls,
+      failure.url,
+    ]),
+    reason: failure.reason || 'dashboard_marked_dead',
+    error:
+      failure.message || failure.error || 'Marked dead from scrape dashboard',
+  })
+  mediaFailureHistoryCache.delete(modelLogDir)
+  auditCache = null
+  return {
+    model,
+    indexPath: dashboardMediaSeenIndex.getMediaSeenIndexPath(modelLogDir),
+  }
+}
+
+function makeOversizedQueueId(target) {
+  return makeHistoryId([
+    'oversized',
+    target?.modelName,
+    normalizeHistoryUrl(target?.url),
+    target?.latestAt,
+    ...(target?.sampleFiles || []),
+  ])
+}
+
+function makeMediaFailureQueueId(failure) {
+  return makeHistoryId([
+    'media-failure',
+    failure?.latestRunId,
+    failure?.model,
+    failure?.type,
+    failure?.filename,
+    failure?.postId,
+    failure?.url || failure?.sourceUrl,
+  ])
+}
+
+function makeQuarantineQueueId(item) {
+  return makeHistoryId([
+    'quarantine',
+    item?.id,
+    item?.relativePath,
+    item?.quarantinePath,
+    item?.state,
+  ])
+}
+
+function normalizeMediaIdentityParts(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+}
+
+function getMediaFailureKeys(failure) {
+  const preferred = [
+    failure?.filename,
+    failure?.mediaUrl,
+    ...(failure?.mediaUrls || []),
+    failure?.url,
+  ]
+    .map(normalizeMediaIdentityParts)
+    .filter(Boolean)
+  if (preferred.length) return [preferred[0]]
+
+  return [failure?.mediaPageUrl, ...(failure?.mediaPageUrls || [])]
+    .map(normalizeMediaIdentityParts)
+    .filter(Boolean)
+}
+
+function addMediaHistoryRecord(map, rawKey, updater) {
+  const key = normalizeMediaIdentityParts(rawKey)
+  if (!key) return
+  const record = map.get(key) || {
+    failureCount: 0,
+    successCount: 0,
+    deadSkipCount: 0,
+    firstFailedAt: '',
+    lastFailedAt: '',
+    lastSuccessAt: '',
+    messages: {},
+  }
+  updater(record)
+  map.set(key, record)
+}
+
+function mergeMediaHistoryRecord(target, source) {
+  if (!source) return target
+  target.failureCount += Number(source.failureCount || 0)
+  target.successCount += Number(source.successCount || 0)
+  target.deadSkipCount += Number(source.deadSkipCount || 0)
+  if (
+    source.firstFailedAt &&
+    (!target.firstFailedAt || source.firstFailedAt < target.firstFailedAt)
+  ) {
+    target.firstFailedAt = source.firstFailedAt
+  }
+  if (source.lastFailedAt && source.lastFailedAt > target.lastFailedAt) {
+    target.lastFailedAt = source.lastFailedAt
+  }
+  if (source.lastSuccessAt && source.lastSuccessAt > target.lastSuccessAt) {
+    target.lastSuccessAt = source.lastSuccessAt
+  }
+  for (const [message, count] of Object.entries(source.messages || {})) {
+    target.messages[message] = (target.messages[message] || 0) + Number(count)
+  }
+  return target
+}
+
+function readModelMediaFailureHistory(modelName) {
+  const model = sanitize(modelName || '')
+  if (!model) return new Map()
+  const modelLogDir = path.join(datasetDir, model, 'log')
+  const cached = mediaFailureHistoryCache.get(modelLogDir)
+  if (cached && Date.now() - cached.createdAtMs < MEDIA_HISTORY_CACHE_MS) {
+    return cached.map
+  }
+  const map = new Map()
+  let files = []
+  try {
+    files = fs
+      .readdirSync(modelLogDir, { withFileTypes: true })
+      .filter(
+        (entry) => entry.isFile() && /^hoghaul-run-.*\.jsonl$/i.test(entry.name)
+      )
+      .map((entry) => path.join(modelLogDir, entry.name))
+  } catch {
+    return map
+  }
+
+  for (const filePath of files) {
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      if (!line) continue
+      let event
+      try {
+        event = JSON.parse(line)
+      } catch {
+        continue
+      }
+      const type = String(event.type || '')
+      const keys = [
+        event.filename,
+        event.mediaUrl,
+        ...(Array.isArray(event.mediaUrls) ? event.mediaUrls : []),
+        event.mediaPageUrl,
+        ...(Array.isArray(event.mediaPageUrls) ? event.mediaPageUrls : []),
+        event.url,
+      ].filter(Boolean)
+      if (!keys.length) continue
+
+      const failed =
+        /^(?:lazy_video_error|media_error|gif_conversion_error)$/i.test(type)
+      const succeeded =
+        /^(?:saved_lazy_video|saved_image|saved_gif|skip_seen_media|skip_lazy_existing|duplicate_bitwise|duplicate_visual|duplicate_visual_fuzzy)$/i.test(
+          type
+        )
+      const deadSkipped = /^skip_dead_media$/i.test(type)
+      if (!failed && !succeeded && !deadSkipped) continue
+
+      for (const key of keys) {
+        addMediaHistoryRecord(map, key, (record) => {
+          const at = String(event.at || '')
+          if (failed) {
+            record.failureCount += 1
+            if (at && (!record.firstFailedAt || at < record.firstFailedAt)) {
+              record.firstFailedAt = at
+            }
+            if (at && at > record.lastFailedAt) record.lastFailedAt = at
+            const message = compactFailureMessage(
+              event.error || event.message || event.reason || ''
+            )
+            record.messages[message] = (record.messages[message] || 0) + 1
+          } else if (succeeded) {
+            record.successCount += 1
+            if (at && at > record.lastSuccessAt) record.lastSuccessAt = at
+          } else if (deadSkipped) {
+            record.deadSkipCount += 1
+          }
+        })
+      }
+    }
+  }
+
+  mediaFailureHistoryCache.set(modelLogDir, {
+    createdAtMs: Date.now(),
+    map,
+  })
+  if (mediaFailureHistoryCache.size > 100) {
+    mediaFailureHistoryCache.delete(
+      mediaFailureHistoryCache.keys().next().value
+    )
+  }
+  return map
+}
+
+function getMediaFailureHistory(failure) {
+  const modelHistory = readModelMediaFailureHistory(failure?.model)
+  const summary = {
+    failureCount: 0,
+    successCount: 0,
+    deadSkipCount: 0,
+    firstFailedAt: '',
+    lastFailedAt: '',
+    lastSuccessAt: '',
+    messages: {},
+  }
+  const seenRecords = new Set()
+  for (const key of getMediaFailureKeys(failure)) {
+    const record = modelHistory.get(key)
+    if (!record || seenRecords.has(record)) continue
+    seenRecords.add(record)
+    mergeMediaHistoryRecord(summary, record)
+  }
+  return summary
+}
+
+function getFailureRelativePath(failure) {
+  const savedPath = String(failure?.savedPath || '').replace(/\\/g, '/')
+  if (savedPath) return savedPath
+  const model = sanitize(failure?.model || '')
+  const filename = String(failure?.filename || '').trim()
+  if (!model || !filename) return ''
+  const extension = path.extname(filename).toLowerCase()
+  const bucket = ['.mp4', '.m4v', '.mov', '.webm'].includes(extension)
+    ? 'webm'
+    : ['.gif'].includes(extension)
+      ? 'gif'
+      : 'images'
+  return `${model}/${bucket}/${filename}`
+}
+
+function findExistingMediaForFailure(failure) {
+  const relativePath = getFailureRelativePath(failure)
+  if (!relativePath) return null
+  const relativeParts = relativePath.split('/').filter(Boolean)
+  const localPath = path.join(datasetDir, ...relativeParts)
+  if (fs.existsSync(localPath)) {
+    const stat = fs.statSync(localPath)
+    return {
+      location: 'local',
+      relativePath,
+      absolutePath: localPath,
+      sizeBytes: stat.size,
+    }
+  }
+  const nasPath = path.join(nasDatasetDir, ...relativeParts)
+  if (fs.existsSync(nasPath)) {
+    const stat = fs.statSync(nasPath)
+    return {
+      location: 'nas',
+      relativePath,
+      absolutePath: nasPath,
+      sizeBytes: stat.size,
+    }
+  }
+  return null
+}
+
+function mediaFailureLooksSlow(failure) {
+  const message = String(failure?.message || '')
+  return /timed out|timeout|ETIMEDOUT|ECONNRESET|EPIPE|socket hang up|Connection closed|ERR_CONNECTION_TIMED_OUT|No lazy download progress/i.test(
+    message
+  )
+}
+
+function mediaFailureLooksLarge(failure) {
+  const message = String(failure?.message || '')
+  return /length.*out of range|Received\s+\d+|too large|ERR_DOWNLOAD_TOO_LARGE/i.test(
+    message
+  )
+}
+
+function mediaFailureLooksPermanent(failure) {
+  const message = String(failure?.message || '')
+  return /\b(?:HTTP|Browser HTTP)\s*(?:404|410)\b|not found|gone/i.test(message)
+}
+
+function annotateMediaFailure(failure) {
+  const history = getMediaFailureHistory(failure)
+  const existingMedia = findExistingMediaForFailure(failure)
+  const slow = mediaFailureLooksSlow(failure)
+  const large = mediaFailureLooksLarge(failure)
+  const likelyDead =
+    !existingMedia &&
+    history.successCount === 0 &&
+    (mediaFailureLooksPermanent(failure) ||
+      (history.failureCount >= 3 && !slow && !large))
+  return {
+    ...failure,
+    history,
+    existingMedia,
+    recoveryKind: existingMedia
+      ? 'already_present'
+      : large
+        ? 'large_download'
+        : slow
+          ? 'slow_download'
+          : likelyDead
+            ? 'likely_dead'
+            : 'review',
+    canRepairSeen: Boolean(existingMedia),
+    canSlowRetry: !existingMedia && (slow || large),
+    canMarkDead: likelyDead,
+  }
+}
+
 function collectLatestMediaFailures(latestRun) {
   const failures = []
   for (const model of latestRun?.models || []) {
     for (const source of model.sources || []) {
-      const errors = source.evidence?.errors || []
+      const logEvidence = source.logPath
+        ? readRunEvidence(source.logPath)
+        : null
+      const errors = logEvidence?.errors || source.evidence?.errors || []
       for (const error of errors) {
         if (
           !/media_error|lazy_video_error|gif_conversion_error/i.test(
@@ -1700,6 +2203,7 @@ function collectLatestMediaFailures(latestRun) {
           continue
         }
         failures.push({
+          latestRunId: latestRun?.id || null,
           model: model.model,
           label: source.label,
           sourceType: source.sourceType,
@@ -1708,14 +2212,36 @@ function collectLatestMediaFailures(latestRun) {
           type: error.type,
           message: error.message || '',
           filename: error.filename || '',
+          savedPath: error.savedPath || '',
           postId: error.postId || '',
           url: error.url || '',
+          mediaUrl: error.mediaUrl || '',
+          mediaUrls: Array.isArray(error.mediaUrls) ? error.mediaUrls : [],
+          mediaPageUrl: error.mediaPageUrl || error.url || '',
+          mediaPageUrls: Array.isArray(error.mediaPageUrls)
+            ? error.mediaPageUrls
+            : [],
+          sourceSite: error.sourceSite || null,
+          sourceService: error.sourceService || null,
+          sourceUserId: error.sourceUserId || null,
+          sourceUsername: error.sourceUsername || null,
+          sourceSubreddit: error.sourceSubreddit || null,
+          title: error.title || '',
+          text: error.text || '',
+          originalName: error.originalName || '',
+          mediaQuality: error.mediaQuality || '',
+          needsFullResolution:
+            typeof error.needsFullResolution === 'boolean'
+              ? error.needsFullResolution
+              : null,
+          fullResolutionStatus: error.fullResolutionStatus || '',
+          fullResolutionUrl: error.fullResolutionUrl || '',
           logPath: source.logPath || null,
         })
       }
     }
   }
-  return failures
+  return failures.map(annotateMediaFailure)
 }
 
 function readQuarantineSummary() {
@@ -1740,7 +2266,7 @@ function readQuarantineSummary() {
         countsByReason[reason] = (countsByReason[reason] || 0) + 1
       }
       if (state !== 'repaired' && reviewItems.length < 100) {
-        reviewItems.push({
+        const reviewItem = {
           id: item.id,
           model: item.model,
           mediaType,
@@ -1752,7 +2278,9 @@ function readQuarantineSummary() {
           lastAttemptAt: item.repair?.lastAttemptAt || null,
           lastAttemptOutcome: item.repair?.lastAttemptOutcome || null,
           lastAttemptError: item.repair?.lastAttemptError || null,
-        })
+        }
+        reviewItem.queueId = makeQuarantineQueueId(reviewItem)
+        reviewItems.push(reviewItem)
       }
     }
 
@@ -1787,6 +2315,7 @@ function readQuarantineSummary() {
 
 function buildAuditQueues(history) {
   const runs = history?.runs || []
+  const dismissalMap = getMediaQueueDismissalMap(history)
   const inactiveRedditSources = getInactiveRedditSources()
   const activeRedditStates = getActiveRedditSourceStates()
   const newestStartedAt = [...runs]
@@ -1820,11 +2349,49 @@ function buildAuditQueues(history) {
   let oversizedVideos = []
   try {
     oversizedVideos = collectOversizedVideoTargets({ datasetDir })
+      .map((target) => ({
+        ...target,
+        queueId: makeOversizedQueueId(target),
+      }))
+      .filter(
+        (target) =>
+          !isMediaQueueDismissed(dismissalMap, 'oversized', target.queueId)
+      )
   } catch (err) {
     oversizedVideos = [{ error: err.message }]
   }
   const mediaFailures = collectLatestMediaFailures(latestRun)
+    .map((failure) => ({
+      ...failure,
+      queueId: makeMediaFailureQueueId(failure),
+    }))
+    .filter(
+      (failure) =>
+        !isMediaQueueDismissed(dismissalMap, 'media-failure', failure.queueId)
+    )
   const quarantine = readQuarantineSummary()
+  const quarantineReviewTotal = Number(quarantine.needsReview || 0)
+  const visibleQuarantineItems = quarantine.items || []
+  quarantine.items = (quarantine.items || []).filter(
+    (item) => !isMediaQueueDismissed(dismissalMap, 'quarantine', item.queueId)
+  )
+  quarantine.visibleNeedsReview = quarantine.items.length
+  quarantine.dismissedVisible =
+    visibleQuarantineItems.length - quarantine.items.length
+  quarantine.needsReview = Math.max(
+    quarantine.items.length,
+    quarantineReviewTotal - quarantine.dismissedVisible
+  )
+  const slowMediaFailures = mediaFailures.filter((failure) => {
+    return failure.canSlowRetry || failure.recoveryKind === 'already_present'
+  })
+  const likelyDeadMediaFailures = mediaFailures.filter(
+    (failure) => failure.canMarkDead
+  )
+  const tailDecodeQuarantine = quarantine.items.filter(
+    (item) =>
+      Array.isArray(item.reasons) && item.reasons.includes('tail_decode_error')
+  )
   const inactiveSourceMap = getInactiveSourceMap(inactiveRedditSources)
   const activeSourceStateMap = getSourceStateMap(activeRedditStates)
   const suspendedRedditSources = attachLatestSourceStatuses(
@@ -1843,6 +2410,9 @@ function buildAuditQueues(history) {
     staleModels: buildStaleModelQueue(inactiveRedditSources),
     oversizedVideos,
     mediaFailures,
+    slowMediaFailures,
+    likelyDeadMediaFailures,
+    tailDecodeQuarantine,
     quarantine,
   }
   auditCache = {
@@ -2042,6 +2612,34 @@ function analyzeTotals(status, totals) {
 }
 
 function summarizeJobForDashboard(job) {
+  if (job.mode === 'utility') {
+    return {
+      kind: 'utility',
+      current:
+        job.status === 'running'
+          ? {
+              model: job.model,
+              sourceIndex: 1,
+              sourceTotal: 1,
+              url: job.utility?.label || job.model,
+            }
+          : null,
+      totals: {
+        ...emptyTotals(),
+        sources: job.startedAt ? 1 : 0,
+        sourceFailures: job.status === 'failed' ? 1 : 0,
+      },
+      latestModel: null,
+      recentModels: [],
+      failedModels: [],
+      analysis:
+        job.status === 'completed'
+          ? 'Cleanup job completed.'
+          : job.status === 'failed'
+            ? 'Cleanup job failed; check activity for details.'
+            : `Cleanup job ${job.status}.`,
+    }
+  }
   return job.mode === 'all'
     ? summarizeAllSourceJob(job)
     : summarizeSourceJob(job)
@@ -2182,6 +2780,33 @@ function runChildForAllSources(job) {
   })
 }
 
+function runChildForUtility(job) {
+  return new Promise((resolve) => {
+    const args = job.utility?.args || []
+    appendJobLog(job, `Running ${job.utility?.label || 'cleanup utility'}`)
+    appendJobLog(
+      job,
+      `node ${args.map((arg) => JSON.stringify(arg)).join(' ')}`
+    )
+
+    const child = spawn(process.execPath, args, {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    job.child = child
+    child.stdout.on('data', (chunk) => appendJobLog(job, chunk, 'stdout'))
+    child.stderr.on('data', (chunk) => appendJobLog(job, chunk, 'stderr'))
+    child.on('error', (err) => {
+      appendJobLog(job, `Failed to start utility: ${err.message}`, 'stderr')
+      resolve({ code: 1, error: err.message })
+    })
+    child.on('exit', (code, signal) => {
+      resolve({ code: code ?? (signal ? 130 : 1), signal })
+    })
+  })
+}
+
 async function runJob(job) {
   activeJob = job
   job.status = 'running'
@@ -2189,11 +2814,26 @@ async function runJob(job) {
   job.activeSourceIndex = 0
   appendJobLog(
     job,
-    `Started ${job.mode === 'all' ? 'all-source' : 'scrape'} job for ${job.model}`
+    `Started ${job.mode === 'all' ? 'all-source' : job.mode === 'utility' ? 'cleanup' : 'scrape'} job for ${job.model}`
   )
 
   try {
-    if (job.mode === 'all') {
+    if (job.mode === 'utility') {
+      const result = await runChildForUtility(job)
+      job.child = null
+      job.runs.push({
+        ok: result.code === 0,
+        code: result.code,
+        signal: result.signal || null,
+        scraper: 'utility',
+        sourceType: job.utility?.type || 'cleanup',
+        url: job.utility?.label || '',
+        summary: null,
+      })
+      if (result.code !== 0) {
+        appendJobLog(job, `Cleanup utility exited with status ${result.code}`)
+      }
+    } else if (job.mode === 'all') {
       const result = await runChildForAllSources(job)
       job.child = null
       job.runs.push({
@@ -2263,7 +2903,8 @@ async function runJob(job) {
     job.finishedAt = new Date().toISOString()
     appendJobLog(job, `Job ${job.status}`)
     try {
-      upsertHistorySnapshot(snapshotFromJob(job))
+      if (job.mode !== 'utility') upsertHistorySnapshot(snapshotFromJob(job))
+      auditCache = null
     } catch (err) {
       appendJobLog(
         job,
@@ -2430,6 +3071,142 @@ app.get('/api/jobs', (_req, res) => {
   })
 })
 
+function enqueueJob(job) {
+  jobs.set(job.id, job)
+  queue.push(job)
+  runNextJob()
+  return job
+}
+
+function createQueuedSourceJob({ model, sources, options = {} }) {
+  return enqueueJob({
+    id: nextJobId++,
+    mode: 'sources',
+    status: 'queued',
+    model,
+    sources,
+    options: {
+      ...(options || {}),
+      keepHistory: Boolean(options.keepHistory),
+      skipNasSync: Boolean(options.skipNasSync),
+    },
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    activeSourceIndex: null,
+    exitCode: null,
+    error: null,
+    runs: [],
+    log: [],
+    child: null,
+    liveProgress: null,
+  })
+}
+
+function createQueuedUtilityJob({ model, utility }) {
+  return enqueueJob({
+    id: nextJobId++,
+    mode: 'utility',
+    status: 'queued',
+    model,
+    sources: [],
+    options: {},
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    activeSourceIndex: null,
+    exitCode: null,
+    error: null,
+    runs: [],
+    log: [],
+    child: null,
+    utility,
+  })
+}
+
+function getFreshAuditQueues() {
+  syncLatestAllSourceReportToHistory()
+  return buildAuditQueues(readRunHistory())
+}
+
+function queueRecoveryJobs({ type, options = {} }) {
+  const queues = getFreshAuditQueues()
+  const grouped = new Map()
+  const addTarget = (model, sourceUrl) => {
+    const cleanModel = getKnownModel(model)
+    const cleanUrl = String(sourceUrl || '').trim()
+    if (!cleanModel || !cleanUrl || !parseSourceUrl(cleanUrl)) return
+    if (!grouped.has(cleanModel)) grouped.set(cleanModel, new Set())
+    grouped.get(cleanModel).add(cleanUrl)
+  }
+
+  if (type === 'oversized') {
+    for (const target of queues.oversizedVideos || []) {
+      addTarget(target.modelName, target.url)
+    }
+  } else if (type === 'slow') {
+    for (const failure of queues.slowMediaFailures || []) {
+      if (failure.canRepairSeen) continue
+      addTarget(failure.model, failure.sourceUrl)
+    }
+  } else {
+    throw new Error('type must be oversized or slow')
+  }
+
+  const retryOptions = {
+    ...(options || {}),
+    keepHistory: true,
+    downloadOversized: true,
+    videoConcurrency: '1',
+    skipNasSync: Boolean(options.skipNasSync),
+  }
+  return [...grouped.entries()].map(([model, sourceSet]) =>
+    createQueuedSourceJob({
+      model,
+      sources: [...sourceSet],
+      options: retryOptions,
+    })
+  )
+}
+
+function repairAllSeenMediaFailures() {
+  const queues = getFreshAuditQueues()
+  const byId = new Map()
+  for (const failure of [
+    ...(queues.mediaFailures || []),
+    ...(queues.slowMediaFailures || []),
+  ]) {
+    if (!failure?.canRepairSeen || !failure.queueId) continue
+    byId.set(failure.queueId, failure)
+  }
+
+  const failures = []
+  let repaired = 0
+  for (const [id, failure] of byId.entries()) {
+    try {
+      writeSuccessfulSeenMediaFromFailure(failure)
+      dismissMediaQueueItem({
+        type: 'media-failure',
+        id,
+        label: failure.filename || failure.postId || 'repaired media failure',
+      })
+      repaired += 1
+    } catch (err) {
+      failures.push({
+        id,
+        model: failure.model,
+        filename: failure.filename,
+        error: err.message,
+      })
+    }
+  }
+  return {
+    repaired,
+    failed: failures.length,
+    failures,
+  }
+}
+
 app.post('/api/jobs', (req, res) => {
   const mode = req.body.mode === 'all' ? 'all' : 'sources'
   const model = mode === 'all' ? 'ALL SOURCES' : getKnownModel(req.body.model)
@@ -2458,7 +3235,7 @@ app.post('/api/jobs', (req, res) => {
     sources: mode === 'all' ? [] : sources,
     options: {
       ...(req.body.options || {}),
-      skipNasSync: req.body.options?.skipNasSync !== false,
+      skipNasSync: Boolean(req.body.options?.skipNasSync),
     },
     createdAt: new Date().toISOString(),
     startedAt: null,
@@ -2500,6 +3277,103 @@ app.get('/api/history', (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+app.post('/api/media-queues/dismiss', (req, res) => {
+  try {
+    const record = dismissMediaQueueItem({
+      type: req.body.type,
+      id: req.body.id,
+      label: req.body.label,
+    })
+    res.json({ ok: true, dismissal: record })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/media-queues/repair-seen', (req, res) => {
+  try {
+    const existingMedia = writeSuccessfulSeenMediaFromFailure(req.body.failure)
+    let dismissal = null
+    if (req.body.id) {
+      dismissal = dismissMediaQueueItem({
+        type: 'media-failure',
+        id: req.body.id,
+        label:
+          req.body.failure?.filename ||
+          req.body.failure?.postId ||
+          'repaired media failure',
+      })
+    }
+    res.json({ ok: true, existingMedia, dismissal })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/media-queues/mark-dead', (req, res) => {
+  try {
+    const result = writeDeadMediaFromFailure({
+      ...(req.body.failure || {}),
+      reason: req.body.reason || 'dashboard_marked_dead',
+    })
+    let dismissal = null
+    if (req.body.id) {
+      dismissal = dismissMediaQueueItem({
+        type: 'media-failure',
+        id: req.body.id,
+        label:
+          req.body.failure?.filename ||
+          req.body.failure?.postId ||
+          'dead media failure',
+      })
+    }
+    res.json({ ok: true, result, dismissal })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/media-queues/repair-seen-all', (_req, res) => {
+  try {
+    res.json({ ok: true, ...repairAllSeenMediaFailures() })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/media-queues/retry-recovery', (req, res) => {
+  try {
+    const jobsForRetry = queueRecoveryJobs({
+      type: req.body.type,
+      options: req.body.options || {},
+    })
+    res.json({
+      ok: true,
+      jobs: jobsForRetry.map((job) => publicJob(job)),
+    })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/media-queues/quarantine-repair', (req, res) => {
+  const model = sanitize(req.body.model || '')
+  const args = [sessionRepairScript]
+  if (model) args.push('--model', model)
+  if (req.body.all) args.push('--all')
+  if (req.body.limit) args.push('--limit', String(req.body.limit))
+
+  const job = createQueuedUtilityJob({
+    model: model ? `QUARANTINE REPAIR: ${model}` : 'QUARANTINE REPAIR',
+    utility: {
+      type: 'quarantine-repair',
+      label: model ? `quarantine repair for ${model}` : 'quarantine repair',
+      args,
+    },
+  })
+  res.json({ ok: true, job: publicJob(job) })
 })
 
 app.post('/api/jobs/:id/cancel', (req, res) => {
