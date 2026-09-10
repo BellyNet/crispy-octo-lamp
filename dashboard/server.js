@@ -1405,12 +1405,18 @@ async function generateMobileVariant(srcPath, dstPath, isGif) {
   // never upscale. -movflags +faststart puts moov atom up front so playback
   // starts before the whole file is buffered.
   //
+  // The height side also gets floored to an even number via trunc(.../2)*2
+  // — libx264's yuv420p needs both dimensions even, but min(H,ih) alone
+  // isn't: any source shorter than H with an odd height (common in GIFs)
+  // made libx264 fail outright on "height not divisible by 2", every time,
+  // forever, for that file.
+  //
   // GIFs get a silent AAC audio track (not `-an`) — iOS Safari refuses to
   // autoplay muted <video> elements that lack an audio track, so an
   // audio-less clip just sits frozen on frame 0. `-f lavfi -i anullsrc`
   // supplies infinite silence as a second input; `-shortest` ends output
   // when the (finite) video does. Videos keep their real audio at 96k.
-  const scaleFilter = `scale=-2:'min(${MOBILE_MAX_HEIGHT},ih)':flags=lanczos`
+  const scaleFilter = `scale=-2:'trunc(min(${MOBILE_MAX_HEIGHT},ih)/2)*2':flags=lanczos`
   const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', srcPath]
   if (isGif) {
     args.push(
