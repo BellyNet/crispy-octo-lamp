@@ -500,7 +500,9 @@
       function mediaCardHref(item) {
         const openParam =
           encodeURIComponent(item.folder) + '/' + encodeURIComponent(item.filename)
-        return `/#/u/${encodeURIComponent(item.username)}?open=${openParam}`
+        const since = currentRun ? Date.parse(currentRun.startedAt) : 0
+        const until = currentRun ? Date.parse(currentRun.endedAt) : 0
+        return `/#/u/${encodeURIComponent(item.username)}?since=${since}&until=${until}&open=${openParam}`
       }
 
       function renderMediaGrid(items) {
