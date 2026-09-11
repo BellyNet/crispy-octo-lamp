@@ -765,6 +765,18 @@ async function main() {
     sourceType: 'coomerfans',
     rawName: 'name_here',
   })
+  const onlyHaven = await assertRouted(
+    'https://cum.st/creators/onlyfans/195143184?display=collages',
+    {
+      scraper: 'hoghaul',
+      sourceType: 'coomerfans',
+      rawName: '195143184',
+      origin: 'https://cum.st',
+      service: 'onlyfans',
+      userId: '195143184',
+      url: 'https://cum.st/creators/onlyfans/195143184',
+    }
+  )
   await assertRouted('https://coomer.su/onlyfans/user/name_here', {
     scraper: 'hoghaul',
     sourceType: 'coomer',
@@ -793,6 +805,7 @@ async function main() {
     url: `${PAWCHIVE_ORIGIN}/patreon/user/24586027`,
   })
   assert.strictEqual(shouldUseBrowserMediaForSource(pawchive, true), false)
+  assert.strictEqual(shouldUseBrowserMediaForSource(onlyHaven, true), false)
   assert.strictEqual(
     shouldUseBrowserMediaForSource(
       parseSourceUrl('https://coomer.su/onlyfans/user/name_here'),
@@ -1033,6 +1046,69 @@ async function main() {
       'abigailgray256'
     ),
     'A little teaser from a set I never released! Tip $5 to see the rest in your inbox! 😜'
+  )
+  const onlyHavenPosts = await fetchCoomerFansPosts(
+    {
+      origin: 'https://cum.st',
+      site: 'coomerfans',
+      service: 'onlyfans',
+      userId: '195143184',
+      rawName: '195143184',
+    },
+    {},
+    {
+      fetchJson: async (url) => {
+        if (url.includes('/profile')) {
+          return {
+            id: '195143184',
+            name: 'fattiebaddie1',
+            service: 'onlyfans',
+          }
+        }
+        if (url.includes('o=50')) return { total: 1, posts: [] }
+        return {
+          total: 1,
+          posts: [
+            {
+              id: '2720560178',
+              service: 'onlyfans',
+              captionHtml: '<p>Full OnlyHaven caption &amp; details</p>',
+              published: 1788467784,
+              attachments: [
+                {
+                  sha256:
+                    'f1059c5bbc160715efd6269705c96e68c89e65642355542933b14e0d4ac617c9',
+                  kind: 'video',
+                  mimeType: 'video/mp4',
+                  width: 1078,
+                  height: 1920,
+                  durationMs: 566000,
+                  bytes: 616755308,
+                  variants: [{ name: 'original.mp4', bytes: 616755308 }],
+                },
+              ],
+            },
+          ],
+        }
+      },
+      logger: {
+        status: () => {},
+        statusDone: () => {},
+      },
+    }
+  )
+  assert.strictEqual(onlyHavenPosts.length, 1)
+  assert.strictEqual(
+    onlyHavenPosts[0].title,
+    'Full OnlyHaven caption & details'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].mediaPageUrl,
+    'https://cum.st/creators/onlyfans/195143184/post/2720560178'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].mediaUrl,
+    'https://e1.cum.st/media/f1059c5bbc160715efd6269705c96e68c89e65642355542933b14e0d4ac617c9/original.mp4'
   )
 
   const coomerMediaEntries = getMediaEntriesFromPost(

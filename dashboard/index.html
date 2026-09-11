@@ -4,10 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dataset Dashboard</title>
-    <link
-      rel="stylesheet"
-      href="/vendor/photoswipe-5.4.4/photoswipe.css"
-    />
+    <link rel="stylesheet" href="/vendor/photoswipe-5.4.4/photoswipe.css" />
     <style>
       *,
       *::before,
@@ -216,13 +213,17 @@
         margin-left: 2px;
         transition: color 0.15s;
       }
-      #stats-toggle:hover { color: var(--accent); }
+      #stats-toggle:hover {
+        color: var(--accent);
+      }
 
       /* Slide-down details panel under the header — collapsed by default. */
       #stats-details {
         max-height: 0;
         overflow: hidden;
-        transition: max-height 0.25s ease, margin-top 0.25s ease;
+        transition:
+          max-height 0.25s ease,
+          margin-top 0.25s ease;
       }
       #stats-details.open {
         max-height: 220px;
@@ -246,8 +247,12 @@
         align-items: baseline;
         gap: 8px;
       }
-      .stats-label { color: var(--muted); }
-      .stats-value { color: var(--text); }
+      .stats-label {
+        color: var(--muted);
+      }
+      .stats-value {
+        color: var(--text);
+      }
 
       #filters {
         display: flex;
@@ -488,7 +493,9 @@
       }
       .media-card.flagged:hover {
         border-color: #ff6868;
-        box-shadow: 0 0 0 1px #ff6868 inset, 0 4px 20px rgba(255, 100, 100, 0.25);
+        box-shadow:
+          0 0 0 1px #ff6868 inset,
+          0 4px 20px rgba(255, 100, 100, 0.25);
       }
       .media-card.flagged .card-thumb img,
       .media-card.flagged .card-thumb video {
@@ -522,9 +529,15 @@
         z-index: 2;
         pointer-events: none;
       }
-      .card-res-badge.tier-hd  { color: #a8d5be; }
-      .card-res-badge.tier-fhd { color: #7ec7ff; }
-      .card-res-badge.tier-4k  { color: #f4c674; }
+      .card-res-badge.tier-hd {
+        color: #a8d5be;
+      }
+      .card-res-badge.tier-fhd {
+        color: #7ec7ff;
+      }
+      .card-res-badge.tier-4k {
+        color: #f4c674;
+      }
       .media-card:hover .card-overlay {
         opacity: 1;
       }
@@ -667,7 +680,7 @@
         color: #e88a6a;
       }
       /* Origin-site badge — where the media was scraped from
-         (reddit / stufferdb / coomer / kemono). Small text label
+         (reddit / stufferdb / coomer / kemono / bbwchan). Small text label
          with a site-tinted background. Replaces the ~useless
          "upload" date-source chip on cards. */
       .origin-badge {
@@ -698,6 +711,10 @@
       .origin-badge.kemono {
         background: #1a2a1e;
         color: #7fd39c;
+      }
+      .origin-badge.bbwchan {
+        background: #2b1b2f;
+        color: #d894f0;
       }
       .origin-badge.unknown {
         background: #2a2a2e;
@@ -733,6 +750,10 @@
       .pswp-origin-badge.kemono {
         background: rgba(90, 200, 130, 0.18);
         color: #9bdcae;
+      }
+      .pswp-origin-badge.bbwchan {
+        background: rgba(190, 105, 220, 0.18);
+        color: #e0a6f5;
       }
       .pswp-origin-badge.unknown {
         background: rgba(140, 140, 150, 0.18);
@@ -914,7 +935,9 @@
         box-shadow:
           0 0 0 3px rgba(124, 108, 252, 0.28),
           0 1px 4px rgba(0, 0, 0, 0.6);
-        transition: left 0.18s ease, transform 0.12s ease;
+        transition:
+          left 0.18s ease,
+          transform 0.12s ease;
       }
       .pswp-date-slider-track.pswp-date-slider-active .pswp-date-slider-thumb,
       .pswp-date-slider-track:hover .pswp-date-slider-thumb {
@@ -945,7 +968,9 @@
       }
       .pswp__pswp-chrome-toggle svg {
         opacity: 0.85;
-        transition: opacity 0.15s, transform 0.2s ease;
+        transition:
+          opacity 0.15s,
+          transform 0.2s ease;
       }
       .pswp__pswp-chrome-toggle:hover svg {
         opacity: 1;
@@ -1454,7 +1479,9 @@
         cursor: pointer;
         z-index: 5;
         backdrop-filter: blur(6px);
-        transition: background 0.15s, transform 0.15s;
+        transition:
+          background 0.15s,
+          transform 0.15s;
       }
       .pswp-video-unmute:hover {
         background: rgba(0, 0, 0, 0.8);
@@ -1464,9 +1491,15 @@
         width: 22px;
         height: 22px;
       }
-      .pswp-video-unmute .icon-unmuted { display: none; }
-      .pswp-video-unmute.is-unmuted .icon-muted { display: none; }
-      .pswp-video-unmute.is-unmuted .icon-unmuted { display: block; }
+      .pswp-video-unmute .icon-unmuted {
+        display: none;
+      }
+      .pswp-video-unmute.is-unmuted .icon-muted {
+        display: none;
+      }
+      .pswp-video-unmute.is-unmuted .icon-unmuted {
+        display: block;
+      }
 
       /* HD/SD chip inside the lightbox top bar was removed — the
          single toggle in the header is the source of truth. The
@@ -1543,7 +1576,9 @@
         opacity: 0.75;
         transition: opacity 0.15s;
       }
-      .pswp__pswp-flag-button:hover svg { opacity: 1; }
+      .pswp__pswp-flag-button:hover svg {
+        opacity: 1;
+      }
       .pswp__pswp-flag-button.pswp-flag-active {
         color: #ff6868;
       }
@@ -2080,8 +2115,13 @@
         animation: hdEncodingPulse 0.4s ease-out 3;
       }
       @keyframes hdEncodingPulse {
-        0%, 100% { opacity: 1; }
-        50%      { opacity: 0.45; }
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
       }
 
       /* ─── SCAN BANNER ────────────────────────────────────────── */
@@ -2301,7 +2341,14 @@
         <div id="header-left">
           <h1 id="current-user-name">All Models</h1>
           <span id="media-stats"></span>
-          <button id="stats-toggle" title="Show details" aria-label="Show details" style="display:none">▾</button>
+          <button
+            id="stats-toggle"
+            title="Show details"
+            aria-label="Show details"
+            style="display: none"
+          >
+            ▾
+          </button>
           <div id="source-links"></div>
           <div id="stats-details"></div>
         </div>
@@ -2502,11 +2549,7 @@
       const HD_MODE_KEY = 'dashboard-hd-mode'
       const storedHdMode = localStorage.getItem(HD_MODE_KEY)
       let hdMode =
-        storedHdMode === '1'
-          ? true
-          : storedHdMode === '0'
-            ? false
-            : !IS_MOBILE
+        storedHdMode === '1' ? true : storedHdMode === '0' ? false : !IS_MOBILE
       const hdListeners = new Set()
       function setHdMode(next) {
         hdMode = !!next
@@ -2530,7 +2573,8 @@
         if (typeof n !== 'number' || !isFinite(n) || n <= 0) return ''
         if (n < 1024) return `${n} B`
         if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
-        if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+        if (n < 1024 * 1024 * 1024)
+          return `${(n / (1024 * 1024)).toFixed(1)} MB`
         return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
       }
 
@@ -2884,7 +2928,10 @@
         const st = document.getElementById('stats-toggle')
         if (st) st.style.display = 'none'
         const sd = document.getElementById('stats-details')
-        if (sd) { sd.classList.remove('open'); sd.innerHTML = '' }
+        if (sd) {
+          sd.classList.remove('open')
+          sd.innerHTML = ''
+        }
         if (mediaStatsEl) mediaStatsEl.textContent = ''
         sourceLinksEl.innerHTML = ''
         if (!opts.skipHashUpdate) setHashRoute({ view: 'home' })
@@ -3032,6 +3079,7 @@
             ['coomer', 'OF'],
             ['kemono', 'K'],
             ['stufferdb', 'S'],
+            ['bbwchan', 'B'],
           ]) {
             const dot = document.createElement('span')
             dot.className =
@@ -3350,6 +3398,7 @@
         coomer: '', // coomer URLs already carry the service name
         kemono: 'K·',
         stufferdb: '',
+        bbwchan: '',
       }
 
       function renderSourceLinks(sources) {
@@ -3363,6 +3412,16 @@
           a.target = '_blank'
           a.rel = 'noopener noreferrer'
           a.innerHTML = `${LINK_ICON} StufferDB`
+          sourceLinksEl.appendChild(a)
+        }
+
+        for (const url of sources.bbwchan || []) {
+          const a = document.createElement('a')
+          a.className = 'src-link'
+          a.href = url
+          a.target = '_blank'
+          a.rel = 'noopener noreferrer'
+          a.innerHTML = `${LINK_ICON} BBW-Chan`
           sourceLinksEl.appendChild(a)
         }
 
@@ -3493,7 +3552,8 @@
         for (const [k, v] of counts) {
           if (!known.includes(k) && k !== 'unknown') entries.push([k, v])
         }
-        if (counts.has('unknown')) entries.push(['unknown', counts.get('unknown')])
+        if (counts.has('unknown'))
+          entries.push(['unknown', counts.get('unknown')])
 
         sourceSelect.innerHTML = ''
         const optAll = document.createElement('option')
@@ -3510,7 +3570,10 @@
         // Only 1 real site — hide the dropdown, force 'all'.
         const shouldShow = entries.length >= 2
         sourceSelect.style.display = shouldShow ? 'block' : 'none'
-        if (!entries.some(([k]) => k === activeSource) && activeSource !== 'all') {
+        if (
+          !entries.some(([k]) => k === activeSource) &&
+          activeSource !== 'all'
+        ) {
           activeSource = 'all'
         }
         sourceSelect.value = activeSource
@@ -3528,9 +3591,11 @@
       // ─── FILTER + SORT ────────────────────────────────────────────────────
       function applyFilter() {
         filtered =
-          activeType === 'all'      ? [...allMedia]
-          : activeType === 'flagged' ? allMedia.filter((m) => m.flagged)
-                                     : allMedia.filter((m) => m.type === activeType)
+          activeType === 'all'
+            ? [...allMedia]
+            : activeType === 'flagged'
+              ? allMedia.filter((m) => m.flagged)
+              : allMedia.filter((m) => m.type === activeType)
 
         // Second pass: origin site (reddit / stufferdb / …). `unknown`
         // matches every item whose sidecar didn't record a site so the
@@ -3644,13 +3709,26 @@
           updateStatsDetails(null)
           return
         }
-        let imgs = 0, gifs = 0, vids = 0, flagged = 0, captioned = 0
-        let sizeImgs = 0, sizeGifs = 0, sizeVids = 0
+        let imgs = 0,
+          gifs = 0,
+          vids = 0,
+          flagged = 0,
+          captioned = 0
+        let sizeImgs = 0,
+          sizeGifs = 0,
+          sizeVids = 0
         for (const m of allMedia) {
           const sz = m.size || 0
-          if (m.type === 'image') { imgs++; sizeImgs += sz }
-          else if (m.type === 'gif') { gifs++; sizeGifs += sz }
-          else if (m.type === 'video') { vids++; sizeVids += sz }
+          if (m.type === 'image') {
+            imgs++
+            sizeImgs += sz
+          } else if (m.type === 'gif') {
+            gifs++
+            sizeGifs += sz
+          } else if (m.type === 'video') {
+            vids++
+            sizeVids += sz
+          }
           if (m.flagged) flagged++
           if (m.hasCaption) captioned++
         }
@@ -3663,7 +3741,17 @@
         if (flagged) parts.push(`${flagged} flagged`)
         if (mediaStatsEl) mediaStatsEl.textContent = parts.join(' · ')
 
-        updateStatsDetails({ imgs, gifs, vids, flagged, captioned, sizeImgs, sizeGifs, sizeVids, totalSize })
+        updateStatsDetails({
+          imgs,
+          gifs,
+          vids,
+          flagged,
+          captioned,
+          sizeImgs,
+          sizeGifs,
+          sizeVids,
+          totalSize,
+        })
 
         // Update filter dropdown labels with counts.
         const labels = {
@@ -3687,19 +3775,23 @@
       function updateStatsDetails(s) {
         const panel = document.getElementById('stats-details')
         if (!panel) return
-        if (!s) { panel.innerHTML = ''; return }
-        const row = (label, value) => `<div class="stats-row"><span class="stats-label">${label}</span><span class="stats-value">${value}</span></div>`
-        const pct = (n, d) => d ? Math.round((n / d) * 100) + '%' : '—'
+        if (!s) {
+          panel.innerHTML = ''
+          return
+        }
+        const row = (label, value) =>
+          `<div class="stats-row"><span class="stats-label">${label}</span><span class="stats-value">${value}</span></div>`
+        const pct = (n, d) => (d ? Math.round((n / d) * 100) + '%' : '—')
         const total = allMedia.length
         panel.innerHTML = `
           <div class="stats-grid">
             ${row('Total size', formatFileSize(s.totalSize) || '—')}
-            ${row('Files',       total.toLocaleString())}
-            ${row('Images',     `${s.imgs.toLocaleString()} · ${formatFileSize(s.sizeImgs) || '0'}`)}
-            ${row('GIFs',       `${s.gifs.toLocaleString()} · ${formatFileSize(s.sizeGifs) || '0'}`)}
-            ${row('Videos',     `${s.vids.toLocaleString()} · ${formatFileSize(s.sizeVids) || '0'}`)}
-            ${row('Captioned',  `${s.captioned.toLocaleString()} (${pct(s.captioned, total)})`)}
-            ${row('Flagged',    `${s.flagged.toLocaleString()}${s.flagged ? ` (${pct(s.flagged, total)})` : ''}`)}
+            ${row('Files', total.toLocaleString())}
+            ${row('Images', `${s.imgs.toLocaleString()} · ${formatFileSize(s.sizeImgs) || '0'}`)}
+            ${row('GIFs', `${s.gifs.toLocaleString()} · ${formatFileSize(s.sizeGifs) || '0'}`)}
+            ${row('Videos', `${s.vids.toLocaleString()} · ${formatFileSize(s.sizeVids) || '0'}`)}
+            ${row('Captioned', `${s.captioned.toLocaleString()} (${pct(s.captioned, total)})`)}
+            ${row('Flagged', `${s.flagged.toLocaleString()}${s.flagged ? ` (${pct(s.flagged, total)})` : ''}`)}
           </div>
         `
       }
@@ -3759,12 +3851,14 @@
         stufferdb: 'stufferdb',
         coomerfans: 'coomer',
         kemono: 'kemono',
+        bbwchan: 'bbwchan',
       }
       const ORIGIN_TIPS = {
         reddit: 'Scraped from reddit',
         stufferdb: 'Scraped from stufferdb',
         coomerfans: 'Scraped from coomerfans',
         kemono: 'Scraped from kemono',
+        bbwchan: 'Scraped from bbw-chan',
       }
       // Pull the origin site off an item — the scrapers write it into
       // .media-dates.json under `source.site`, and the server puts it
@@ -4034,9 +4128,14 @@
               // fast; syncVideos promotes the active slide to "auto" and
               // calls play(), and the cached animated GIF preview is the
               // poster so the slide is never black.
-              const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
-                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
-              )
+              const esc = (s) =>
+                String(s).replace(
+                  /[&<>"]/g,
+                  (c) =>
+                    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[
+                      c
+                    ]
+                )
               // Prefer the mobile MP4 when SD mode is active on mobile
               // AND the server offered one. HD mode, desktop, and any
               // missing mobileUrl fall through to the original.
@@ -4050,7 +4149,7 @@
               // without us calling load() or pause() in the middle.
               const html =
                 `<div class="pswp-video-wrap">` +
-                  `<video src="${src}" loop muted autoplay playsinline preload="auto"></video>` +
+                `<video src="${src}" loop muted autoplay playsinline preload="auto"></video>` +
                 `</div>`
               return { html, _item: item }
             }
@@ -4083,17 +4182,20 @@
             // `object-fit: contain` behavior. The max-zoom raises
             // proportionally so pinch-zoom still has room.
             initialZoomLevel: (z) => {
-              const pa = z.panAreaSize, es = z.elementSize
+              const pa = z.panAreaSize,
+                es = z.elementSize
               if (!pa || !es || !es.x || !es.y) return 1
               return Math.min(pa.x / es.x, pa.y / es.y)
             },
             secondaryZoomLevel: (z) => {
-              const pa = z.panAreaSize, es = z.elementSize
+              const pa = z.panAreaSize,
+                es = z.elementSize
               if (!pa || !es || !es.x || !es.y) return 2
               return Math.min(pa.x / es.x, pa.y / es.y) * 2
             },
             maxZoomLevel: (z) => {
-              const pa = z.panAreaSize, es = z.elementSize
+              const pa = z.panAreaSize,
+                es = z.elementSize
               if (!pa || !es || !es.x || !es.y) return 4
               return Math.min(pa.x / es.x, pa.y / es.y) * 4
             },
@@ -4309,7 +4411,9 @@
                     e.stopPropagation()
                     captured = true
                     track.classList.add('pswp-date-slider-active')
-                    try { track.setPointerCapture(e.pointerId) } catch {}
+                    try {
+                      track.setPointerCapture(e.pointerId)
+                    } catch {}
                     scrubTo(e.clientX)
                   })
                   track.addEventListener('pointermove', (e) => {
@@ -4319,7 +4423,9 @@
                     if (!captured) return
                     captured = false
                     track.classList.remove('pswp-date-slider-active')
-                    try { track.releasePointerCapture(e.pointerId) } catch {}
+                    try {
+                      track.releasePointerCapture(e.pointerId)
+                    } catch {}
                   }
                   track.addEventListener('pointerup', release)
                   track.addEventListener('pointercancel', release)
@@ -4517,9 +4623,7 @@
                     // Re-render when the header toggle flips.
                     // queueMicrotask defers so if any DOM swap happens
                     // synchronously it settles before we re-inspect.
-                    const off = onHdChange(() =>
-                      queueMicrotask(refreshSize)
-                    )
+                    const off = onHdChange(() => queueMicrotask(refreshSize))
                     pswp.on('destroy', off)
                   }
 
@@ -4670,11 +4774,11 @@
             pswp.on('destroy', offSwap)
 
             pswp.ui.registerElement({
-              name:     'pswp-link-button',
-              order:    8,
+              name: 'pswp-link-button',
+              order: 8,
               isButton: true,
-              title:    'Open source post',
-              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4h4v4"/><path d="M16 4l-7 7"/><path d="M14 11v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
+              title: 'Open source post',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4h4v4"/><path d="M16 4l-7 7"/><path d="M14 11v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
               onInit(el) {
                 linkBtnEl = el
                 refreshLinkBtn()
@@ -4695,14 +4799,16 @@
               const item = filtered[pswp.currIndex]
               if (!item || !flagBtnEl) return
               flagBtnEl.classList.toggle('pswp-flag-active', !!item.flagged)
-              flagBtnEl.title = item.flagged ? 'Unflag (was marked for deletion)' : 'Flag for deletion'
+              flagBtnEl.title = item.flagged
+                ? 'Unflag (was marked for deletion)'
+                : 'Flag for deletion'
             }
             pswp.ui.registerElement({
-              name:     'pswp-flag-button',
-              order:    7,
+              name: 'pswp-flag-button',
+              order: 7,
               isButton: true,
-              title:    'Flag for deletion',
-              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="2" x2="5" y2="18"/><path d="M5 3.5h10l-2 3 2 3H5"/></svg>',
+              title: 'Flag for deletion',
+              html: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="2" x2="5" y2="18"/><path d="M5 3.5h10l-2 3 2 3H5"/></svg>',
               onInit(el) {
                 flagBtnEl = el
                 refreshFlagBtn()
@@ -4719,16 +4825,25 @@
                     {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ folder: item.folder, filename: item.filename, flagged: next }),
+                      body: JSON.stringify({
+                        folder: item.folder,
+                        filename: item.filename,
+                        flagged: next,
+                      }),
                     }
                   )
                   if (!r.ok) throw new Error('flag failed')
                   item.flagged = next
                   // Patch the underlying allMedia entry too (filtered may be a copy).
-                  const src = allMedia.find((m) => m.folder === item.folder && m.filename === item.filename)
+                  const src = allMedia.find(
+                    (m) =>
+                      m.folder === item.folder && m.filename === item.filename
+                  )
                   if (src) src.flagged = next
                   // Refresh the affected card in the grid without re-rendering everything.
-                  const card = gridEl.querySelector(`.media-card[data-index="${pswp.currIndex}"]`)
+                  const card = gridEl.querySelector(
+                    `.media-card[data-index="${pswp.currIndex}"]`
+                  )
                   if (card) {
                     card.classList.toggle('flagged', next)
                     let ribbon = card.querySelector('.card-flag-ribbon')
@@ -4796,10 +4911,7 @@
               hdToggleEl.textContent = hdMode ? 'HD' : 'SD'
               hdToggleEl.classList.toggle('is-on', hdMode)
               hdToggleEl.classList.toggle('is-sd', !hdMode)
-              hdToggleEl.setAttribute(
-                'aria-pressed',
-                hdMode ? 'true' : 'false'
-              )
+              hdToggleEl.setAttribute('aria-pressed', hdMode ? 'true' : 'false')
               hdToggleEl.title = hdMode
                 ? 'HD mode on — tap for SD (data saver)'
                 : 'SD mode on — tap for HD (full resolution)'
@@ -4846,9 +4958,11 @@
                 // would hide controls mid-interaction), so this button
                 // is the one place to clear them.
                 if (hidden) {
-                  root.querySelectorAll('.pswp-video-wrap video').forEach((v) => {
-                    v.removeAttribute('controls')
-                  })
+                  root
+                    .querySelectorAll('.pswp-video-wrap video')
+                    .forEach((v) => {
+                      v.removeAttribute('controls')
+                    })
                   root.classList.remove('pswp--video-controls')
                 }
               },
@@ -4938,8 +5052,7 @@
               attempts++
               const isCurrent =
                 pswp.currSlide?.holderElement?.contains(v) === true
-              const isPlaying =
-                !v.paused && !v.ended && v.readyState >= 2
+              const isPlaying = !v.paused && !v.ended && v.readyState >= 2
               if (attempts > 30 || !isCurrent || isPlaying) {
                 clearInterval(interval)
                 playPolls.delete(v)
@@ -4957,7 +5070,9 @@
             if (currentVideo) pollPlay(currentVideo)
             root.querySelectorAll('video').forEach((v) => {
               if (v !== currentVideo) {
-                try { v.pause() } catch {}
+                try {
+                  v.pause()
+                } catch {}
                 const prev = playPolls.get(v)
                 if (prev) {
                   clearInterval(prev)
@@ -5080,7 +5195,6 @@
               pswp.element?.classList.add('pswp--video-controls')
             })
 
-
             // Dedicated unmute button (bottom-right). Primary affordance
             // for audio — outside the native controls' shadow DOM so the
             // click doesn't race with anything. Honors a session-level
@@ -5098,10 +5212,14 @@
               btn.setAttribute('aria-label', video.muted ? 'Unmute' : 'Mute')
             }
             if (videoUnmutedPref) {
-              video.addEventListener('playing', () => {
-                video.muted = false
-                syncBtn()
-              }, { once: true })
+              video.addEventListener(
+                'playing',
+                () => {
+                  video.muted = false
+                  syncBtn()
+                },
+                { once: true }
+              )
             }
             btn.addEventListener('click', (ev) => {
               ev.stopPropagation()
@@ -5127,7 +5245,9 @@
             }
           })
           pswp.on('close', () => {
-            try { mountObserver.disconnect() } catch {}
+            try {
+              mountObserver.disconnect()
+            } catch {}
             const root = pswp.element
             if (!root) return
             root.querySelectorAll('video').forEach((v) => {

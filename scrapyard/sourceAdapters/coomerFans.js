@@ -8,6 +8,10 @@ const { createBoundaryPageFilter } = require('../sourceFrontier')
 
 const DEFAULT_COOMERFANS_RETRY_DELAY_MS = 5000
 const DEFAULT_COOMERFANS_MAX_RETRIES = 2
+const ONLYHAVEN_ORIGIN = 'https://cum.st'
+const ONLYHAVEN_MEDIA_ORIGIN =
+  process.env.ONLYHAVEN_MEDIA_ORIGIN || 'https://e1.cum.st'
+const ONLYHAVEN_PAGE_SIZE = 50
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -59,7 +63,11 @@ function absoluteUrl(source, href) {
 
 function getCoomerFansMaxRetries(deps = {}) {
   const value = Number.parseInt(
-    String(deps.coomerFansMaxRetries ?? process.env.HOGHAUL_COOMERFANS_MAX_RETRIES ?? ''),
+    String(
+      deps.coomerFansMaxRetries ??
+        process.env.HOGHAUL_COOMERFANS_MAX_RETRIES ??
+        ''
+    ),
     10
   )
   return Number.isFinite(value) && value >= 0
@@ -126,7 +134,119 @@ function filenameFromMediaUrl(mediaUrl) {
   }
 }
 
+function isOnlyHavenSource(source = {}) {
+  try {
+    const host = new URL(
+      source.origin || source.inputUrl || ''
+    ).hostname.toLowerCase()
+    return host === 'cum.st' || host.endsWith('.cum.st')
+  } catch {
+    return false
+  }
+}
+
+function unwrapJsonPayload(result) {
+  return result?.data && typeof result.data === 'object' ? result.data : result
+}
+
+function getOnlyHavenCreatorUrl(source) {
+  return `${source.origin || ONLYHAVEN_ORIGIN}/creators/${source.service}/${source.userId}`
+}
+
+function getOnlyHavenProfileApiUrl(source) {
+  return `${source.origin || ONLYHAVEN_ORIGIN}/api/v1/${source.service}/user/${source.userId}/profile`
+}
+
+function getOnlyHavenPostsApiUrl(source, pageNumber = 1) {
+  const offset = Math.max(pageNumber - 1, 0) * ONLYHAVEN_PAGE_SIZE
+  return `${source.origin || ONLYHAVEN_ORIGIN}/api/v1/${source.service}/user/${source.userId}/posts?o=${offset}&n=${ONLYHAVEN_PAGE_SIZE}`
+}
+
+function getOnlyHavenPostUrl(source, postId) {
+  return `${getOnlyHavenCreatorUrl(source)}/post/${postId}`
+}
+
+function getOnlyHavenMediaUrl(attachment) {
+  if (!attachment || attachment.locked || !attachment.sha256) return null
+  const original = (attachment.variants || []).find((variant) =>
+    /^original\./i.test(String(variant?.name || ''))
+  )
+  let filename = original?.name || ''
+  if (!filename) {
+    if (/^video\//i.test(attachment.mimeType || '')) filename = 'original.mp4'
+    else if (/^image\/png/i.test(attachment.mimeType || '')) {
+      filename = 'original.png'
+    } else if (/^image\/webp/i.test(attachment.mimeType || '')) {
+      filename = 'original.webp'
+    } else if (/^image\//i.test(attachment.mimeType || '')) {
+      filename = 'original.jpg'
+    }
+  }
+  if (!filename) return null
+  return `${ONLYHAVEN_MEDIA_ORIGIN}/media/${attachment.sha256}/${filename}`
+}
+
+function parseOnlyHavenDate(value) {
+  const seconds = Number(value || 0)
+  if (!Number.isFinite(seconds) || seconds <= 0) return null
+  return new Date(seconds * 1000).toISOString()
+}
+
+function getOnlyHavenPostText(post = {}) {
+  return cleanPostText(post.captionHtml || post.title || '')
+}
+
+async function resolveOnlyHavenCreator(source, deps = {}) {
+  if (typeof deps.fetchJson !== 'function') {
+    throw new Error('resolveOnlyHavenCreator requires fetchJson')
+  }
+
+  if (source.userId) {
+    const profile = unwrapJsonPayload(
+      await deps.fetchJson(getOnlyHavenProfileApiUrl(source), {
+        headers: { Accept: 'application/json' },
+      })
+    )
+    source.rawName = sanitizeToken(profile?.name || source.rawName)
+    source.username = profile?.name || source.username || null
+    source.inputUrl = getOnlyHavenCreatorUrl(source)
+    return source
+  }
+
+  const searchUrl = `${source.origin || ONLYHAVEN_ORIGIN}/api/v1/creators?q=${encodeURIComponent(source.rawName)}&service=${encodeURIComponent(source.service || 'onlyfans')}&n=5`
+  const result = unwrapJsonPayload(
+    await deps.fetchJson(searchUrl, {
+      headers: { Accept: 'application/json' },
+    })
+  )
+  const candidates = Array.isArray(result?.creators) ? result.creators : []
+  const resolved =
+    candidates.find(
+      (candidate) =>
+        candidate.service === source.service &&
+        sanitizeToken(candidate.name) === sanitizeToken(source.rawName)
+    ) ||
+    candidates.find((candidate) => candidate.service === source.service) ||
+    candidates[0]
+
+  if (!resolved) {
+    throw new Error(`No OnlyHaven creator found for ${source.rawName}`)
+  }
+
+  source.service = resolved.service
+  source.userId = String(resolved.id)
+  source.rawName = sanitizeToken(resolved.name)
+  source.username = resolved.name || null
+  source.inputUrl = getOnlyHavenCreatorUrl(source)
+  deps.logger?.log?.(
+    `Resolved OnlyHaven creator ${source.rawName} -> ${source.service}/${source.userId}`
+  )
+  return source
+}
+
 async function resolveCoomerFansCreator(source, deps = {}) {
+  if (isOnlyHavenSource(source)) return resolveOnlyHavenCreator(source, deps)
+
   if (source.userId) return source
   if (typeof deps.fetchHtml !== 'function') {
     throw new Error('resolveCoomerFansCreator requires fetchHtml')
@@ -174,6 +294,10 @@ async function resolveCoomerFansCreator(source, deps = {}) {
 }
 
 function getCoomerFansPageUrl(source, pageNumber = 1) {
+  if (isOnlyHavenSource(source)) {
+    return getOnlyHavenCreatorUrl(source)
+  }
+
   const base = `${source.origin}/u/${source.service}/${source.userId}/${source.rawName}`
   return pageNumber <= 1 ? base : `${base}?page=${pageNumber}`
 }
@@ -288,7 +412,81 @@ function parseCoomerFansMediaEntries(source, post, html) {
   })
 }
 
+function parseOnlyHavenMediaEntries(source, post) {
+  const title = getOnlyHavenPostText(post) || null
+  const uploadedDate = parseOnlyHavenDate(post.published || post.added)
+  const mediaPageUrl = getOnlyHavenPostUrl(source, post.id)
+  const entries = (post.attachments || [])
+    .map((attachment) => {
+      const mediaUrl = getOnlyHavenMediaUrl(attachment)
+      if (!mediaUrl) return null
+      const filename = filenameFromMediaUrl(mediaUrl)
+      if (!filename) return null
+      return {
+        postId: String(post.id || ''),
+        title,
+        text: title,
+        mediaPageUrl,
+        mediaPageUrls: [mediaPageUrl],
+        mediaUrl,
+        mediaUrls: [mediaUrl],
+        filename,
+        originalName: null,
+        uploadedDate,
+        expectedBytes: Number(attachment.bytes || 0) || null,
+        width: Number(attachment.width || 0) || null,
+        height: Number(attachment.height || 0) || null,
+        durationMs: Number(attachment.durationMs || 0) || null,
+      }
+    })
+    .filter(Boolean)
+
+  return normalizeMediaEntries(entries, {
+    sourceSite: source.site,
+    sourceService: source.service,
+    sourceUserId: source.userId,
+    sourceUsername: source.rawName || source.username || source.userId,
+  })
+}
+
+function normalizeOnlyHavenPost(source, post) {
+  const mediaEntries = parseOnlyHavenMediaEntries(source, post)
+  return {
+    id: String(post.id || ''),
+    url: getOnlyHavenPostUrl(source, post.id),
+    title: mediaEntries[0]?.title || getOnlyHavenPostText(post) || null,
+    text: mediaEntries[0]?.text || getOnlyHavenPostText(post) || null,
+    published:
+      mediaEntries[0]?.uploadedDate || parseOnlyHavenDate(post.published),
+    mediaEntries,
+  }
+}
+
+async function preflightOnlyHavenSource(source, page = 0, deps = {}) {
+  await resolveOnlyHavenCreator(source, deps)
+  const pageNumber = page + 1
+  const apiUrl = getOnlyHavenPostsApiUrl(source, pageNumber)
+  const result = await deps.fetchJson(apiUrl, {
+    headers: { Accept: 'application/json' },
+  })
+  const data = unwrapJsonPayload(result)
+  const posts = Array.isArray(data?.posts) ? data.posts : []
+
+  return {
+    apiUrl,
+    byteLength:
+      result?.byteLength || Buffer.byteLength(JSON.stringify(data || {})),
+    postCount: posts.length,
+    newest: posts[0]?.published ? parseOnlyHavenDate(posts[0].published) : null,
+    firstPostId: posts[0]?.id ? String(posts[0].id) : null,
+  }
+}
+
 async function preflightCoomerFansSource(source, page = 0, deps = {}) {
+  if (isOnlyHavenSource(source)) {
+    return preflightOnlyHavenSource(source, page, deps)
+  }
+
   await resolveCoomerFansCreator(source, deps)
   const pageNumber = page + 1
   const pageUrl = getCoomerFansPageUrl(source, pageNumber)
@@ -305,7 +503,11 @@ async function preflightCoomerFansSource(source, page = 0, deps = {}) {
 }
 
 async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
-  if (typeof deps.fetchHtml !== 'function') {
+  if (isOnlyHavenSource(source)) {
+    if (typeof deps.fetchJson !== 'function') {
+      throw new Error('fetchCoomerFansPosts requires fetchJson for OnlyHaven')
+    }
+  } else if (typeof deps.fetchHtml !== 'function') {
     throw new Error('fetchCoomerFansPosts requires fetchHtml')
   }
 
@@ -329,7 +531,55 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
   while (true) {
     if (options.endPage !== null && page > options.endPage) break
     const pageNumber = page + 1
-    const pageUrl = getCoomerFansPageUrl(source, pageNumber)
+    const pageUrl = isOnlyHavenSource(source)
+      ? getOnlyHavenPostsApiUrl(source, pageNumber)
+      : getCoomerFansPageUrl(source, pageNumber)
+
+    if (isOnlyHavenSource(source)) {
+      const data = unwrapJsonPayload(
+        await deps.fetchJson(pageUrl, {
+          headers: { Accept: 'application/json' },
+        })
+      )
+      const pagePosts = (Array.isArray(data?.posts) ? data.posts : []).map(
+        (post) => normalizeOnlyHavenPost(source, post)
+      )
+      if (pagePosts.length === 0) break
+
+      const newPosts = pagePosts.filter((post) => !seenPostIds.has(post.id))
+      if (newPosts.length === 0) break
+      for (const post of newPosts) seenPostIds.add(post.id)
+      const filteredPage = pageFilter.filterPage(newPosts)
+      const selectedPosts =
+        Number.isFinite(options.maxPosts) && options.maxPosts > 0
+          ? filteredPage.items.slice(
+              0,
+              Math.max(options.maxPosts - posts.length, 0)
+            )
+          : filteredPage.items
+
+      posts.push(...selectedPosts)
+      fetchedPages += 1
+      fetchedMedia += selectedPosts.reduce(
+        (total, post) => total + (post.mediaEntries?.length || 0),
+        0
+      )
+      deps.logger?.status?.(
+        `Fetching onlyhaven pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media, ${filteredPage.completedCount || 0} complete skipped`
+      )
+
+      if (
+        Number.isFinite(options.maxPosts) &&
+        options.maxPosts > 0 &&
+        posts.length >= options.maxPosts
+      ) {
+        break
+      }
+
+      if (filteredPage.stopAfterPage) break
+      page += 1
+      continue
+    }
 
     const { html } = await fetchCoomerFansHtml(pageUrl, deps)
     const postLinks = parseCoomerFansPostLinks(source, html)
@@ -392,15 +642,21 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
 
   deps.logger?.statusDone?.(
     fetchedPages > 0
-      ? `Fetched coomerfans pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media`
+      ? `Fetched ${isOnlyHavenSource(source) ? 'onlyhaven' : 'coomerfans'} pages: ${fetchedPages} page(s), ${posts.length} post(s), ${fetchedMedia} media`
       : ''
   )
   return posts
 }
 
 module.exports = {
+  ONLYHAVEN_MEDIA_ORIGIN,
+  ONLYHAVEN_ORIGIN,
   fetchCoomerFansPosts,
   getCoomerFansPageUrl,
+  getOnlyHavenMediaUrl,
+  getOnlyHavenPostsApiUrl,
+  isOnlyHavenSource,
+  parseOnlyHavenMediaEntries,
   parseCoomerFansCaption,
   parseCoomerFansMediaEntries,
   parseCoomerFansPostLinks,

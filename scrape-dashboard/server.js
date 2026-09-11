@@ -14,7 +14,6 @@ const {
   findCanonicalModelName,
   findCanonicalModelNameBySource,
   upsertStufferdbSource,
-  upsertCoomerSource,
   upsertRedditSource,
   upsertSourceInfo,
 } = require('../scrapyard/modelRegistry')
@@ -69,8 +68,9 @@ const quarantineManifestPath = path.join(
 )
 const historyDir = path.join(__dirname, 'data')
 const runHistoryPath = path.join(historyDir, 'run-history.json')
+const ONLYHAVEN_ORIGIN = 'https://cum.st'
 
-const SOURCE_KEYS = ['reddit', 'kemono', 'coomer', 'stufferdb']
+const SOURCE_KEYS = ['reddit', 'kemono', 'coomer', 'stufferdb', 'bbwchan']
 const HISTORY_VERSION = 2
 const JOB_LOG_LIMIT = 2500
 const jobs = new Map()
@@ -135,6 +135,23 @@ function normalizeLooseSearch(value) {
     .replace(/[^a-z0-9]/g, '')
 }
 
+function normalizeOnlyHavenName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function cleanOnlyHavenSearchTerm(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/^u\//i, '')
+    .replace(/^user\//i, '')
+    .replace(/\s+/g, '')
+}
+
 function editDistanceWithinOne(left, right) {
   if (left === right) return true
   if (Math.abs(left.length - right.length) > 1) return false
@@ -163,9 +180,12 @@ function editDistanceWithinOne(left, right) {
 
 function getPlatformLabel(platform) {
   if (platform === 'kemono') return 'Pawchive'
+  if (platform === 'onlyhaven') return 'OnlyHaven'
   if (platform === 'coomer') return 'CoomerFans'
+  if (platform === 'coomerfans') return 'CoomerFans'
   if (platform === 'reddit') return 'Reddit'
   if (platform === 'stufferdb') return 'StufferDB'
+  if (platform === 'bbwchan') return 'BBW-Chan'
   return platform || 'Unknown'
 }
 
@@ -179,6 +199,7 @@ function getStufferDbDirectSearchUrl(username) {
 }
 
 function getManualSourceSearchUrl(platform, username) {
+  if (platform === 'onlyhaven') return getOnlyHavenCreatorSearchUrl(username)
   if (platform === 'stufferdb') return getStufferDbDirectSearchUrl(username)
   return PLATFORMS[platform]?.searchUrl
     ? PLATFORMS[platform].searchUrl(username)
@@ -361,6 +382,55 @@ function inactiveSourceListFor(entry, sourceKey) {
     : []
 }
 
+function isLegacyCoomerFansUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    return (
+      parsed.hostname.replace(/^www\./i, '').toLowerCase() === 'coomerfans.com'
+    )
+  } catch {
+    return false
+  }
+}
+
+function isOnlyHavenUrl(value) {
+  try {
+    const host = new URL(String(value || '').trim()).hostname.toLowerCase()
+    return host === 'cum.st' || host.endsWith('.cum.st')
+  } catch {
+    return false
+  }
+}
+
+function parseLegacyCoomerFansSourceUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    if (
+      parsed.hostname.replace(/^www\./i, '').toLowerCase() !== 'coomerfans.com'
+    ) {
+      return null
+    }
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
+      return {
+        service: parts[1].toLowerCase(),
+        userId: parts[2],
+        username: decodeURIComponent(parts.slice(3).join('/')),
+      }
+    }
+    if (parts[0] && parts[1] === 'user' && parts[2]) {
+      return {
+        service: parts[0].toLowerCase(),
+        userId: null,
+        username: decodeURIComponent(parts.slice(2).join('/')),
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 function countModelSources(entry) {
   return SOURCE_KEYS.reduce(
     (count, key) => count + sourceListFor(entry, key).length,
@@ -376,11 +446,19 @@ function getModels() {
       const sources = Object.fromEntries(
         SOURCE_KEYS.map((key) => [key, sourceListFor(entry, key)])
       )
+      const inactiveSources = Object.fromEntries(
+        SOURCE_KEYS.map((key) => [key, inactiveSourceListFor(entry, key)])
+      )
       return {
         name,
         aliases: Array.isArray(entry?.aliases) ? entry.aliases : [],
         sources,
+        inactiveSources,
         sourceCount: Object.values(sources).reduce(
+          (count, list) => count + list.length,
+          0
+        ),
+        inactiveSourceCount: Object.values(inactiveSources).reduce(
           (count, list) => count + list.length,
           0
         ),
@@ -443,6 +521,129 @@ function collectSourceSearchTerms(query) {
   return [...terms].slice(0, 8)
 }
 
+function addOnlyHavenTerm(terms, value) {
+  for (const item of String(value || '').split(',')) {
+    const term = cleanOnlyHavenSearchTerm(item)
+    if (!term || /^\d+$/.test(term)) continue
+    const key = normalizeOnlyHavenName(term)
+    if (
+      !key ||
+      terms.some((existing) => normalizeOnlyHavenName(existing) === key)
+    )
+      continue
+    terms.push(term)
+  }
+}
+
+function getOnlyHavenSearchTerms(modelName, entry) {
+  const terms = []
+  addOnlyHavenTerm(terms, modelName)
+  for (const alias of Array.isArray(entry?.aliases) ? entry.aliases : []) {
+    addOnlyHavenTerm(terms, alias)
+  }
+
+  const sourceGroups = [
+    ...Object.values(entry?.sources || {}),
+    ...Object.values(entry?.inactiveSources || {}),
+  ]
+  for (const list of sourceGroups) {
+    for (const source of Array.isArray(list) ? list : []) {
+      addOnlyHavenTerm(terms, source?.username)
+      addOnlyHavenTerm(terms, source?.discoveredAs)
+      addOnlyHavenTerm(terms, source?.userId)
+      const legacy = parseLegacyCoomerFansSourceUrl(source?.url)
+      if (legacy?.username) addOnlyHavenTerm(terms, legacy.username)
+    }
+  }
+
+  return terms.slice(0, 12)
+}
+
+function getOnlyHavenCreatorSearchUrl(term) {
+  return `${ONLYHAVEN_ORIGIN}/creators?cq=${encodeURIComponent(term)}`
+}
+
+function getOnlyHavenReviewState(entry) {
+  return entry?.sourceReview?.onlyhaven || {}
+}
+
+function getOnlyHavenReviewRows() {
+  const registry = loadModelRegistry(registryPath)
+  const allRows = Object.entries(registry).map(([model, entry]) => {
+    const activeCoomerSources = sourceListFor(entry, 'coomer')
+    const inactiveCoomerSources = inactiveSourceListFor(entry, 'coomer')
+    const legacyCoomerSources = activeCoomerSources.filter((source) =>
+      isLegacyCoomerFansUrl(source?.url)
+    )
+    const onlyHavenSources = activeCoomerSources.filter((source) =>
+      isOnlyHavenUrl(source?.url)
+    )
+    const searchTerms = getOnlyHavenSearchTerms(model, entry)
+    const review = getOnlyHavenReviewState(entry)
+    return {
+      model,
+      aliases: Array.isArray(entry?.aliases) ? entry.aliases : [],
+      sourceCount: countModelSources(entry),
+      inactiveCoomerCount: inactiveCoomerSources.length,
+      hasOnlyHaven: onlyHavenSources.length > 0,
+      onlyHavenSources,
+      legacyCoomerSources,
+      reviewStatus: review.status || null,
+      reviewedAt: review.reviewedAt || review.matchedAt || null,
+      searchTerms,
+      searchLinks: searchTerms.map((term) => ({
+        term,
+        url: getOnlyHavenCreatorSearchUrl(term),
+      })),
+    }
+  })
+
+  const rows = allRows.filter(
+    (row) => !row.hasOnlyHaven && row.reviewStatus !== 'not_found'
+  )
+
+  rows.sort((left, right) => {
+    if (left.hasOnlyHaven !== right.hasOnlyHaven) {
+      return left.hasOnlyHaven ? 1 : -1
+    }
+    if (left.legacyCoomerSources.length !== right.legacyCoomerSources.length) {
+      return right.legacyCoomerSources.length - left.legacyCoomerSources.length
+    }
+    return left.model.localeCompare(right.model, undefined, {
+      sensitivity: 'base',
+    })
+  })
+
+  return {
+    rows,
+    totals: {
+      models: allRows.length,
+      queue: rows.length,
+      hasOnlyHaven: allRows.filter((row) => row.hasOnlyHaven).length,
+      notFound: allRows.filter((row) => row.reviewStatus === 'not_found')
+        .length,
+      legacyCoomer: allRows.filter((row) => row.legacyCoomerSources.length)
+        .length,
+    },
+  }
+}
+
+function getOnlyHavenSearchLinksForModel(modelName) {
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+  const entry = registry[canonical]
+  const searchTerms = getOnlyHavenSearchTerms(canonical, entry)
+  return {
+    model: canonical,
+    searchTerms,
+    searchLinks: searchTerms.map((term) => ({
+      term,
+      url: getOnlyHavenCreatorSearchUrl(term),
+    })),
+  }
+}
+
 function findSourceOwner(parsed) {
   if (!parsed) return null
   const registry = loadModelRegistry(registryPath)
@@ -490,6 +691,149 @@ function removeSourceFromModel(modelName, sourceUrl) {
     model: canonical,
     source: removedSource,
     remainingSourceCount: countModelSources(registry[canonical]),
+  }
+}
+
+function archiveLegacyCoomerSources(entry, replacement, reason) {
+  const activeSources = sourceListFor(entry, 'coomer')
+  const legacySources = activeSources.filter((source) =>
+    isLegacyCoomerFansUrl(source?.url)
+  )
+  if (!legacySources.length) return []
+
+  entry.sources.coomer = activeSources.filter(
+    (source) => !isLegacyCoomerFansUrl(source?.url)
+  )
+  if (!entry.inactiveSources) entry.inactiveSources = {}
+  if (!Array.isArray(entry.inactiveSources.coomer)) {
+    entry.inactiveSources.coomer = []
+  }
+
+  const archivedAt = new Date().toISOString()
+  const archived = legacySources.map((source) => {
+    const parsedLegacy = parseLegacyCoomerFansSourceUrl(source?.url) || {}
+    return {
+      ...source,
+      service: source.service || parsedLegacy.service || replacement.service,
+      userId: source.userId || parsedLegacy.userId || null,
+      username:
+        source.username || parsedLegacy.username || source.discoveredAs || null,
+      inactiveAt: archivedAt,
+      inactiveReason: reason || 'replaced_by_onlyhaven',
+      replacementUrl: replacement.url,
+      replacementService: replacement.service,
+      replacementUserId: replacement.userId,
+    }
+  })
+
+  for (const record of archived) {
+    const existingIndex = entry.inactiveSources.coomer.findIndex(
+      (source) =>
+        normalizeHistoryUrl(source?.url) === normalizeHistoryUrl(record.url)
+    )
+    if (existingIndex >= 0) {
+      entry.inactiveSources.coomer[existingIndex] = {
+        ...entry.inactiveSources.coomer[existingIndex],
+        ...record,
+      }
+    } else {
+      entry.inactiveSources.coomer.push(record)
+    }
+  }
+
+  return archived
+}
+
+function saveOnlyHavenSourceForModel(modelName, sourceUrl, options = {}) {
+  const parsed = parseSourceUrl(sourceUrl)
+  if (
+    !parsed ||
+    parsed.sourceType !== 'coomerfans' ||
+    !isOnlyHavenUrl(parsed.url)
+  ) {
+    throw new Error('Expected an OnlyHaven creator URL on cum.st')
+  }
+
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+
+  registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
+  const rawName = sanitize(options.username || options.displayName || canonical)
+  const username = options.username || null
+  upsertSourceInfo(
+    registry[canonical],
+    {
+      site: parsed.site,
+      service: parsed.service,
+      userId: parsed.userId,
+      username,
+      inputUrl: parsed.url,
+    },
+    rawName || canonical
+  )
+
+  const archived = options.archiveLegacyCoomer
+    ? archiveLegacyCoomerSources(
+        registry[canonical],
+        {
+          url: parsed.url,
+          service: parsed.service,
+          userId: parsed.userId,
+        },
+        options.reason || 'replaced_by_onlyhaven'
+      )
+    : []
+
+  registry[canonical].sourceReview = {
+    ...(registry[canonical].sourceReview || {}),
+    onlyhaven: {
+      status: 'matched',
+      matchedAt: new Date().toISOString(),
+      url: parsed.url,
+      service: parsed.service,
+      userId: parsed.userId,
+      username,
+      coomerFansKeptActive: !options.archiveLegacyCoomer,
+      archivedCount: archived.length,
+    },
+  }
+
+  saveModelRegistry(registryPath, registry)
+  auditCache = null
+  return {
+    model: canonical,
+    source: {
+      url: parsed.url,
+      service: parsed.service,
+      userId: parsed.userId,
+      username,
+    },
+    archived,
+    sourceCount: countModelSources(registry[canonical]),
+  }
+}
+
+function markOnlyHavenNotFoundForModel(modelName, options = {}) {
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+
+  registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
+  registry[canonical].sourceReview = {
+    ...(registry[canonical].sourceReview || {}),
+    onlyhaven: {
+      status: 'not_found',
+      reviewedAt: new Date().toISOString(),
+      reason: options.reason || 'manual_review_no_match',
+      searchTerms: getOnlyHavenSearchTerms(canonical, registry[canonical]),
+    },
+  }
+  saveModelRegistry(registryPath, registry)
+  auditCache = null
+  return {
+    model: canonical,
+    review: registry[canonical].sourceReview.onlyhaven,
   }
 }
 
@@ -804,7 +1148,10 @@ function registerParsedSourceForSelectedModel(parsed, requestedModel) {
   if (!cleanedModel) throw new Error('model is required')
   const canonical =
     findCanonicalModelName(registry, cleanedModel) || cleanedModel
-  const rawName = sanitize(parsed.rawName || parsed.username || canonical)
+  const parsedRawName = /^\d+$/.test(String(parsed.rawName || ''))
+    ? ''
+    : parsed.rawName
+  const rawName = sanitize(parsed.username || parsedRawName || canonical)
 
   registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
   if (
@@ -817,7 +1164,17 @@ function registerParsedSourceForSelectedModel(parsed, requestedModel) {
   if (parsed.sourceType === 'stufferdb') {
     upsertStufferdbSource(registry[canonical], parsed.url, rawName || canonical)
   } else if (parsed.sourceType === 'coomerfans') {
-    upsertCoomerSource(registry[canonical], parsed.url, rawName || canonical)
+    upsertSourceInfo(
+      registry[canonical],
+      {
+        site: parsed.site || parsed.sourceType,
+        service: parsed.service,
+        userId: parsed.userId,
+        username: parsed.username || parsed.rawName || null,
+        inputUrl: parsed.url,
+      },
+      rawName || canonical
+    )
   } else if (parsed.sourceType === 'reddit') {
     upsertRedditSource(registry[canonical], parsed.url, rawName || canonical)
   } else {
@@ -845,7 +1202,10 @@ function toCandidate(hit, overrides = {}) {
     id: `${platform}:${hit.url}`,
     type: 'source',
     platform,
-    label: getPlatformLabel(platform),
+    label:
+      platform === 'coomerfans' && parsed && isOnlyHavenUrl(parsed.url)
+        ? 'OnlyHaven'
+        : getPlatformLabel(platform),
     service: hit.service || parsed?.service || null,
     userId: hit.id || hit.userId || parsed?.userId || null,
     username: hit.username || hit.name || parsed?.username || null,
@@ -901,6 +1261,26 @@ async function searchSourceCandidates(rawQuery) {
     ) {
       candidates.push(redditCandidate)
     }
+  }
+
+  for (const term of terms) {
+    const url = getManualSourceSearchUrl('onlyhaven', term)
+    if (!url) continue
+    candidates.push({
+      id: `onlyhaven-search:${term}`,
+      type: 'manual-search',
+      platform: 'onlyhaven',
+      label: getPlatformLabel('onlyhaven'),
+      service: null,
+      userId: null,
+      username: term,
+      name: term,
+      url,
+      parseable: false,
+      existingModel: null,
+      verified: false,
+      source: 'manual-search',
+    })
   }
 
   for (const term of terms) {
@@ -2961,6 +3341,29 @@ app.get('/api/source-search', async (req, res) => {
   }
 })
 
+app.get('/api/onlyhaven/review', (_req, res) => {
+  try {
+    const review = getOnlyHavenReviewRows()
+    res.json({
+      onlyHavenOrigin: ONLYHAVEN_ORIGIN,
+      models: review.rows,
+      totals: review.totals,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/api/onlyhaven/search', (req, res) => {
+  try {
+    const model = getKnownModel(req.query.model)
+    if (!model) return res.status(400).json({ error: 'model is required' })
+    res.json(getOnlyHavenSearchLinksForModel(model))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.post('/api/models/:model/sources', (req, res) => {
   const model = getKnownModel(req.params.model || req.body.model)
   const parsed = parseSourceUrl(req.body.url)
@@ -2974,12 +3377,56 @@ app.post('/api/models/:model/sources', (req, res) => {
       model: savedModel,
       source: {
         platform: parsed.sourceType,
-        label: getPlatformLabel(parsed.sourceType),
+        label:
+          parsed.sourceType === 'coomerfans' && isOnlyHavenUrl(parsed.url)
+            ? 'OnlyHaven'
+            : getPlatformLabel(parsed.sourceType),
         url: parsed.url,
       },
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/models/:model/onlyhaven-source', (req, res) => {
+  const model = getKnownModel(req.params.model || req.body.model)
+  const url = String(req.body.url || '').trim()
+  if (!model) return res.status(400).json({ error: 'model is required' })
+  if (!url) return res.status(400).json({ error: 'source url is required' })
+
+  try {
+    res.json({
+      ok: true,
+      ...saveOnlyHavenSourceForModel(model, url, {
+        username: req.body.username,
+        displayName: req.body.displayName,
+        archiveLegacyCoomer: req.body.archiveLegacyCoomer === true,
+        reason: req.body.reason,
+      }),
+    })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/models/:model/onlyhaven-review', (req, res) => {
+  const model = getKnownModel(req.params.model || req.body.model)
+  const status = String(req.body.status || '').trim()
+  if (!model) return res.status(400).json({ error: 'model is required' })
+  if (status !== 'not_found') {
+    return res.status(400).json({ error: 'status must be not_found' })
+  }
+
+  try {
+    res.json({
+      ok: true,
+      ...markOnlyHavenNotFoundForModel(model, {
+        reason: req.body.reason,
+      }),
+    })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
   }
 })
 

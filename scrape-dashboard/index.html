@@ -344,6 +344,8 @@
       .alert-list,
       .stale-model-list,
       .source-state-list,
+      .onlyhaven-list,
+      .onlyhaven-candidates,
       .model-run-list,
       .media-queue-list {
         display: grid;
@@ -367,6 +369,8 @@
       .alert-row,
       .stale-model-row,
       .source-state-row,
+      .onlyhaven-row,
+      .onlyhaven-candidate,
       .model-run,
       .media-queue-row {
         border: 1px solid var(--border-soft);
@@ -402,6 +406,8 @@
       .job-row,
       .history-row,
       .alert-row,
+      .onlyhaven-row,
+      .onlyhaven-candidate,
       .model-run {
         padding: 11px;
       }
@@ -439,6 +445,8 @@
       .alert-summary,
       .stale-model-head,
       .source-state-head,
+      .onlyhaven-head,
+      .onlyhaven-candidate-head,
       .model-run-head,
       .media-queue-head {
         display: grid;
@@ -454,10 +462,22 @@
       .alert-title,
       .stale-model-title,
       .source-state-title,
+      .onlyhaven-title,
       .model-run-title,
       .media-queue-title {
         font-weight: 700;
         overflow-wrap: anywhere;
+      }
+
+      .onlyhaven-toolbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) auto auto;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .onlyhaven-candidates {
+        margin-top: 10px;
       }
 
       .url,
@@ -673,7 +693,10 @@
         .workflow-grid,
         .candidate-top,
         .source-row,
-        .job-row {
+        .job-row,
+        .onlyhaven-toolbar,
+        .onlyhaven-head,
+        .onlyhaven-candidate-head {
           grid-template-columns: 1fr;
         }
 
@@ -696,6 +719,9 @@
           </button>
           <button id="show-history" class="nav-button" type="button">
             Audit
+          </button>
+          <button id="show-onlyhaven" class="nav-button" type="button">
+            OnlyHaven
           </button>
           <button id="refresh-models">Refresh</button>
           <button id="run-all" class="primary">Run Full Scrape</button>
@@ -1001,6 +1027,54 @@
           </div>
         </div>
       </main>
+
+      <main id="onlyhaven-view" class="content history-content hidden">
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">OnlyHaven Review</div>
+                <div id="onlyhaven-meta" class="muted">
+                  Loading model review queue...
+                </div>
+              </div>
+              <div class="actions">
+                <button id="refresh-onlyhaven" type="button">Refresh</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="onlyhaven-toolbar">
+                <input
+                  id="onlyhaven-filter"
+                  placeholder="Filter models or aliases"
+                />
+                <button
+                  id="onlyhaven-search-next"
+                  class="secondary"
+                  type="button"
+                >
+                  Search Current
+                </button>
+                <button id="onlyhaven-clear-filter" type="button">Clear</button>
+              </div>
+              <div
+                id="onlyhaven-status"
+                class="muted"
+                style="margin-top: 9px"
+              ></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Current Model</div>
+            </div>
+            <div class="panel-body">
+              <div id="onlyhaven-list" class="onlyhaven-list"></div>
+            </div>
+          </section>
+        </div>
+      </main>
     </div>
 
     <script>
@@ -1013,12 +1087,19 @@
         repairContext: null,
         modelPickerOpen: false,
         modelPickerActiveIndex: 0,
+        onlyHaven: {
+          models: [],
+          totals: {},
+          results: {},
+        },
       }
 
       const liveViewEl = document.getElementById('live-view')
       const historyViewEl = document.getElementById('history-view')
+      const onlyHavenViewEl = document.getElementById('onlyhaven-view')
       const showLiveEl = document.getElementById('show-live')
       const showHistoryEl = document.getElementById('show-history')
+      const showOnlyHavenEl = document.getElementById('show-onlyhaven')
       const registryMetaEl = document.getElementById('registry-meta')
       const sourceTotalEl = document.getElementById('source-total')
       const modelSummaryEl = document.getElementById('model-summary')
@@ -1056,6 +1137,10 @@
         'history-detail-label'
       )
       const historyDetailEl = document.getElementById('history-detail')
+      const onlyHavenMetaEl = document.getElementById('onlyhaven-meta')
+      const onlyHavenStatusEl = document.getElementById('onlyhaven-status')
+      const onlyHavenListEl = document.getElementById('onlyhaven-list')
+      const onlyHavenFilterEl = document.getElementById('onlyhaven-filter')
 
       function escapeHtml(value) {
         return String(value || '').replace(/[&<>"']/g, (char) => {
@@ -1133,18 +1218,28 @@
 
       function setView(view) {
         const showHistory = view === 'history'
-        liveViewEl.classList.toggle('hidden', showHistory)
+        const showOnlyHaven = view === 'onlyhaven'
+        liveViewEl.classList.toggle('hidden', showHistory || showOnlyHaven)
         historyViewEl.classList.toggle('hidden', !showHistory)
-        showLiveEl.classList.toggle('active', !showHistory)
+        onlyHavenViewEl.classList.toggle('hidden', !showOnlyHaven)
+        showLiveEl.classList.toggle('active', !showHistory && !showOnlyHaven)
         showHistoryEl.classList.toggle('active', showHistory)
+        showOnlyHavenEl.classList.toggle('active', showOnlyHaven)
         if (showHistory) loadHistory().catch(renderHistoryError)
+        if (showOnlyHaven) loadOnlyHavenReview().catch(renderOnlyHavenError)
       }
 
-      function sourceLabel(key) {
+      function sourceLabel(key, url = '') {
         if (key === 'kemono') return 'Pawchive'
-        if (key === 'coomer') return 'CoomerFans'
+        if (key === 'coomer') {
+          return /(?:^|\\.)cum\\.st\\/ /
+            i.test(String(url).replace(/^https?:\/\//i, ''))
+            ? 'OnlyHaven'
+            : 'CoomerFans'
+        }
         if (key === 'reddit') return 'Reddit'
         if (key === 'stufferdb') return 'StufferDB'
+        if (key === 'bbwchan') return 'BBW-Chan'
         return key
       }
 
@@ -1266,7 +1361,7 @@
           for (const source of list || []) {
             rows.push({
               key,
-              label: sourceLabel(key),
+              label: sourceLabel(key, source.url),
               url: source.url,
               service: source.service || '',
               userId: source.userId || source.categoryId || '',
@@ -2550,6 +2645,174 @@
         inactiveSourcesEl.innerHTML = ''
       }
 
+      function onlyHavenVisibleRows() {
+        const filter = onlyHavenFilterEl.value.trim().toLowerCase()
+        const rows = state.onlyHaven.models || []
+        if (!filter) return rows
+        return rows.filter((row) => {
+          const haystack = [
+            row.model,
+            ...(row.aliases || []),
+            ...(row.searchTerms || []),
+          ]
+            .join(' ')
+            .toLowerCase()
+          return haystack.includes(filter)
+        })
+      }
+
+      function onlyHavenCurrentRow() {
+        return onlyHavenVisibleRows()[0] || null
+      }
+
+      function renderOnlyHavenReview() {
+        const totals = state.onlyHaven.totals || {}
+        const row = onlyHavenCurrentRow()
+        onlyHavenMetaEl.textContent = `${formatNumber(totals.queue || 0)} left | ${formatNumber(totals.hasOnlyHaven || 0)} matched | ${formatNumber(totals.notFound || 0)} not found | ${formatNumber(totals.legacyCoomer || 0)} with legacy CoomerFans`
+
+        if (!row) {
+          onlyHavenListEl.innerHTML =
+            '<div class="empty">No models left in this OnlyHaven review queue.</div>'
+          return
+        }
+
+        const result = state.onlyHaven.results[row.model]
+        const terms = (row.searchTerms || []).slice(0, 12)
+        const aliases = (row.aliases || []).slice(0, 10).join(', ')
+        const legacy = row.legacyCoomerSources || []
+        const chips = [
+          `<span class="chip warn">reviewing</span>`,
+          legacy.length
+            ? `<span class="chip warn">${legacy.length} legacy CoomerFans</span>`
+            : '',
+          row.inactiveCoomerCount
+            ? `<span class="chip">${row.inactiveCoomerCount} inactive coomer</span>`
+            : '',
+        ].join('')
+        const sources = legacy
+          .map(
+            (source) =>
+              `<span class="detail">Legacy ${linkMarkup(source.url)}</span>`
+          )
+          .join('')
+
+        onlyHavenListEl.innerHTML = `
+          <article class="onlyhaven-row" data-model="${escapeHtml(row.model)}">
+            <div class="onlyhaven-head">
+              <div>
+                <div class="onlyhaven-title">${escapeHtml(row.model)}</div>
+                <div class="detail">${aliases ? `aliases ${escapeHtml(aliases)} | ` : ''}terms ${escapeHtml(terms.join(', ') || row.model)}</div>
+                <div class="chips">${chips}</div>
+                ${sources}
+              </div>
+              <div class="actions">
+                <button class="onlyhaven-search-model secondary" type="button">Search</button>
+                <button class="repair-stale-model" type="button" data-model="${escapeHtml(row.model)}">Sources</button>
+              </div>
+            </div>
+            <div class="onlyhaven-candidates">
+              ${result ? onlyHavenSearchLinksMarkup(result) : '<div class="empty">Click Search, open the matching OnlyHaven search link, then paste the verified creator URL below.</div>'}
+              <div class="row" style="margin-top: 10px">
+                <input class="onlyhaven-url-input" placeholder="Paste verified https://cum.st/creators/service/id URL" />
+                <button class="onlyhaven-apply primary" type="button">Add OnlyHaven Source</button>
+              </div>
+              <div class="actions" style="margin-top: 8px; justify-content: flex-start">
+                <button class="onlyhaven-not-found danger" type="button">Mark Not Found</button>
+              </div>
+            </div>
+          </article>
+        `
+      }
+
+      function onlyHavenSearchLinksMarkup(result) {
+        const links = result.searchLinks || []
+        if (!links.length) {
+          return '<div class="empty">No usable aliases were found for this model.</div>'
+        }
+        return links
+          .map(
+            (link) => `
+              <article class="onlyhaven-candidate">
+                <div class="onlyhaven-candidate-head">
+                  <div>
+                    <div class="onlyhaven-title">${escapeHtml(link.term)}</div>
+                    ${linkMarkup(link.url)}
+                  </div>
+                  <div class="actions">
+                    <a class="button" href="${escapeHtml(link.url)}" target="_blank" rel="noreferrer">Open Search</a>
+                  </div>
+                </div>
+              </article>
+            `
+          )
+          .join('')
+      }
+
+      function renderOnlyHavenError(err) {
+        onlyHavenStatusEl.textContent = err.message
+        onlyHavenListEl.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`
+      }
+
+      async function loadOnlyHavenReview() {
+        const payload = await api('/api/onlyhaven/review')
+        state.onlyHaven.models = payload.models || []
+        state.onlyHaven.totals = payload.totals || {}
+        renderOnlyHavenReview()
+      }
+
+      async function searchOnlyHavenModel(model) {
+        onlyHavenStatusEl.textContent = `Prepared search links for ${model}.`
+        const result = await api(
+          `/api/onlyhaven/search?model=${encodeURIComponent(model)}`
+        )
+        state.onlyHaven.results[result.model || model] = result
+        onlyHavenStatusEl.textContent = `${result.model || model}: ${(result.searchLinks || []).length} search link${(result.searchLinks || []).length === 1 ? '' : 's'}`
+        renderOnlyHavenReview()
+      }
+
+      async function applyOnlyHavenPastedLink(model, input) {
+        const url = input.value.trim()
+        if (!model || !url) return
+        const payload = await api(
+          `/api/models/${encodeURIComponent(model)}/onlyhaven-source`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              url,
+              archiveLegacyCoomer: false,
+              reason: 'added_onlyhaven_alongside_coomerfans',
+            }),
+          }
+        )
+        onlyHavenStatusEl.textContent = `${payload.model || model}: saved OnlyHaven and kept CoomerFans active.`
+        await Promise.all([loadModels(), loadOnlyHavenReview()])
+      }
+
+      async function markOnlyHavenNotFound(model) {
+        if (!model) return
+        const payload = await api(
+          `/api/models/${encodeURIComponent(model)}/onlyhaven-review`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              status: 'not_found',
+              reason: 'manual_review_no_match',
+            }),
+          }
+        )
+        onlyHavenStatusEl.textContent = `${payload.model || model}: marked not found.`
+        await loadOnlyHavenReview()
+      }
+
+      async function searchCurrentOnlyHavenModel() {
+        const row = onlyHavenCurrentRow()
+        if (!row) {
+          onlyHavenStatusEl.textContent = 'No model is visible in the queue.'
+          return
+        }
+        await searchOnlyHavenModel(row.model)
+      }
+
       async function loadHistory() {
         const payload = await api('/api/history')
         renderHistory(payload)
@@ -2599,6 +2862,23 @@
         renderHistoryRuns(state.history?.runs || [])
       })
 
+      onlyHavenListEl.addEventListener('click', (event) => {
+        const row = event.target.closest('.onlyhaven-row')
+        if (!row) return
+        const model = row.dataset.model || ''
+        const search = event.target.closest('.onlyhaven-search-model')
+        const apply = event.target.closest('.onlyhaven-apply')
+        const notFound = event.target.closest('.onlyhaven-not-found')
+        if (search) {
+          searchOnlyHavenModel(model).catch(renderOnlyHavenError)
+        } else if (apply) {
+          const input = row.querySelector('.onlyhaven-url-input')
+          applyOnlyHavenPastedLink(model, input).catch(renderOnlyHavenError)
+        } else if (notFound) {
+          if (!confirm(`Mark ${model} as not found on OnlyHaven?`)) return
+          markOnlyHavenNotFound(model).catch(renderOnlyHavenError)
+        }
+      })
       sourceAlertsEl.addEventListener('click', (event) => {
         const repair = event.target.closest('.repair-source')
         const remove = event.target.closest('.remove-source')
@@ -2960,11 +3240,29 @@
         .addEventListener('click', loadModels)
       showLiveEl.addEventListener('click', () => setView('live'))
       showHistoryEl.addEventListener('click', () => setView('history'))
+      showOnlyHavenEl.addEventListener('click', () => setView('onlyhaven'))
       document
         .getElementById('refresh-history')
         .addEventListener('click', () =>
           loadHistory().catch(renderHistoryError)
         )
+      document
+        .getElementById('refresh-onlyhaven')
+        .addEventListener('click', () =>
+          loadOnlyHavenReview().catch(renderOnlyHavenError)
+        )
+      document
+        .getElementById('onlyhaven-search-next')
+        .addEventListener('click', () =>
+          searchCurrentOnlyHavenModel().catch(renderOnlyHavenError)
+        )
+      document
+        .getElementById('onlyhaven-clear-filter')
+        .addEventListener('click', () => {
+          onlyHavenFilterEl.value = ''
+          renderOnlyHavenReview()
+        })
+      onlyHavenFilterEl.addEventListener('input', renderOnlyHavenReview)
       document
         .getElementById('run-selected')
         .addEventListener('click', runSelectedSources)

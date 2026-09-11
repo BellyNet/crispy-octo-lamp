@@ -14,13 +14,15 @@ function parseHoghaulSourceUrl(inputUrl) {
   const host = parsed.hostname.toLowerCase()
   const site = host.includes('coomerfans')
     ? 'coomerfans'
-    : host.includes('coomer')
-      ? 'coomer'
-      : isPawchiveOrKemonoHost(host)
-        ? 'kemono'
-        : host.endsWith('reddit.com')
-          ? 'reddit'
-          : null
+    : host === 'cum.st' || host.endsWith('.cum.st')
+      ? 'coomerfans'
+      : host.includes('coomer')
+        ? 'coomer'
+        : isPawchiveOrKemonoHost(host)
+          ? 'kemono'
+          : host.endsWith('reddit.com')
+            ? 'reddit'
+            : null
   if (!site) throw new Error(`Unsupported Hoghaul host: ${parsed.hostname}`)
 
   const parts = parsed.pathname.split('/').filter(Boolean)
@@ -49,6 +51,36 @@ function parseHoghaulSourceUrl(inputUrl) {
   }
 
   if (site === 'coomerfans') {
+    if (host === 'cum.st' || host.endsWith('.cum.st')) {
+      if (parts[0] === 'creators' && parts[1] && parts[2]) {
+        return {
+          inputUrl: `${parsed.origin}/creators/${parts[1]}/${parts[2]}`,
+          origin: parsed.origin,
+          site,
+          service: parts[1],
+          userId: parts[2],
+          rawName: sanitize(parts[2]),
+        }
+      }
+
+      const queryName =
+        parsed.searchParams.get('q') || parsed.searchParams.get('search')
+      if (queryName) {
+        return {
+          inputUrl: parsed.toString(),
+          origin: parsed.origin,
+          site,
+          service: 'onlyfans',
+          userId: null,
+          rawName: sanitize(queryName),
+        }
+      }
+
+      throw new Error(
+        'Expected an OnlyHaven URL like /creators/onlyfans/id or /creators?q=name'
+      )
+    }
+
     if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
       return {
         inputUrl: parsed.toString(),
@@ -122,6 +154,8 @@ function parseSourceUrl(inputUrl) {
     if (
       host === 'reddit.com' ||
       host.endsWith('.reddit.com') ||
+      host === 'cum.st' ||
+      host.endsWith('.cum.st') ||
       host.includes('coomer') ||
       isPawchiveOrKemonoHost(host)
     ) {

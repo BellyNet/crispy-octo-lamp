@@ -85,37 +85,43 @@ function sortSourcesObject(sources) {
   )
 }
 
-function sortInactiveSourcesObject(sources) {
-  const sorted = sortSourcesObject(sources)
+function sortInactiveSourcesObject(inactiveSources) {
   return Object.fromEntries(
-    Object.entries(sorted).filter(([, list]) => list.length > 0)
+    Object.entries(
+      inactiveSources && typeof inactiveSources === 'object'
+        ? inactiveSources
+        : {}
+    )
+      .filter(([, srcs]) => Array.isArray(srcs) && srcs.length > 0)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([platform, srcs]) => [platform, sortPlatformSources(srcs)])
   )
 }
 
-function hasInactiveSources(entry) {
-  return Object.values(sortInactiveSourcesObject(entry?.inactiveSources)).some(
-    (sources) => sources.length > 0
-  )
+function hasObjectEntries(value) {
+  return value && typeof value === 'object' && Object.keys(value).length > 0
 }
 
 function sortModelRegistry(registry) {
   return Object.fromEntries(
     Object.entries(registry || {})
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([canonicalName, entry]) => [
-        canonicalName,
-        {
+      .map(([canonicalName, entry]) => {
+        const sortedEntry = {
           aliases: sortStringValues(entry?.aliases),
           sources: sortSourcesObject(entry?.sources),
-          ...(hasInactiveSources(entry)
-            ? {
-                inactiveSources: sortInactiveSourcesObject(
-                  entry.inactiveSources
-                ),
-              }
-            : {}),
-        },
-      ])
+        }
+        const inactiveSources = sortInactiveSourcesObject(
+          entry?.inactiveSources
+        )
+        if (hasObjectEntries(inactiveSources)) {
+          sortedEntry.inactiveSources = inactiveSources
+        }
+        if (hasObjectEntries(entry?.sourceReview)) {
+          sortedEntry.sourceReview = entry.sourceReview
+        }
+        return [canonicalName, sortedEntry]
+      })
   )
 }
 
@@ -127,9 +133,13 @@ function ensureModelEntryShape(entry, canonicalName) {
   if (canonicalName) aliasSet.add(canonicalName)
   const existingSources =
     entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
-  const inactiveSources =
+  const existingInactiveSources =
     entry?.inactiveSources && typeof entry.inactiveSources === 'object'
       ? entry.inactiveSources
+      : {}
+  const existingSourceReview =
+    entry?.sourceReview && typeof entry.sourceReview === 'object'
+      ? entry.sourceReview
       : {}
   return {
     aliases: Array.from(aliasSet),
@@ -140,11 +150,12 @@ function ensureModelEntryShape(entry, canonicalName) {
       ])
     ),
     inactiveSources: Object.fromEntries(
-      Object.entries(inactiveSources).map(([sourceName, sources]) => [
+      Object.entries(existingInactiveSources).map(([sourceName, sources]) => [
         sourceName,
         Array.isArray(sources) ? [...sources] : [],
       ])
     ),
+    sourceReview: { ...existingSourceReview },
   }
 }
 

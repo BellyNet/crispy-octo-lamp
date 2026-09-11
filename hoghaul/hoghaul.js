@@ -714,6 +714,12 @@ function normalizeSeenUrl(url) {
       return `${parsed.protocol}//${host}${pathname}`
     }
 
+    if (/(^|\.)cum\.st$/i.test(host) && /^\/media\/[^/]+\//i.test(pathname)) {
+      return `onlyhaven-media:${pathname
+        .replace(/^\/media\/?/i, '')
+        .toLowerCase()}`
+    }
+
     if (
       /(^|\.)coomer\.(?:su|party)$/i.test(host) &&
       /^\/data\//i.test(pathname)
@@ -1177,6 +1183,7 @@ async function preflightSourceJson(source, page = 0) {
   if (source.site === 'coomerfans') {
     return preflightCoomerFansSource(source, page, {
       fetchHtml,
+      fetchJson,
       logger: console,
     })
   }
@@ -1223,6 +1230,7 @@ async function fetchPosts(source, options, deps = {}) {
   if (source.site === 'coomerfans') {
     return fetchCoomerFansAdapterPosts(source, options, {
       fetchHtml,
+      fetchJson,
       fullSourceRefresh: deps.fullSourceRefresh,
       logger: pageLogger,
       sourceFrontier: deps.sourceFrontier,

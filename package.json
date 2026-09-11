@@ -73,6 +73,7 @@
     "backfill:coomer-interactive": "node hoghaul/backfill-coomer-sources-interactive.js",
     "backfill:sources-interactive": "node hoghaul/backfill-sources-interactive.js",
     "backfill:sources-export": "node hoghaul/export-source-backfill-review.js",
+    "match:coomerfans-onlyhaven": "node hoghaul/match-coomerfans-onlyhaven.js",
     "sources:backfill-interactive": "node hoghaul/backfill-sources-interactive.js",
     "reddit:oauth-login": "node scrapyard/reddit-oauth-login.js",
     "scrape:dashboard": "node scrape-dashboard/server.js",

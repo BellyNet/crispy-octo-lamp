@@ -210,11 +210,11 @@ async function generatePreviewGif(videoPath, gifPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer, kemono, stufferdb }
+// Build a map of username → { coomer, kemono, stufferdb, bbwchan }
 // from model_aliases.json so the /api/users route can include source links.
 // Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
 // each time, so changes to the bind-mounted file are picked up immediately.
-const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb']
+const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb', 'bbwchan']
 
 // Cached source map — rebuilt only when model_aliases.json mtime changes.
 // loadModelRegistry was previously called on every /api/users request, doing a
