@@ -1087,6 +1087,7 @@
         repairContext: null,
         modelPickerOpen: false,
         modelPickerActiveIndex: 0,
+        pendingRunSelectedSources: null,
         onlyHaven: {
           models: [],
           totals: {},
@@ -1630,20 +1631,37 @@
         const model = findTargetModel()
         const targetModel = model?.name || getTargetModelName()
         if (!targetModel) return
-        const sources = [
-          ...document.querySelectorAll('.source-check:checked'),
-        ].map((input) => input.dataset.url)
-        if (!sources.length) return
-        const payload = await api('/api/jobs', {
-          method: 'POST',
-          body: JSON.stringify({
-            model: targetModel,
-            sources,
-            options: getRunOptions(),
-          }),
-        })
-        state.selectedJobId = payload.job.id
-        await refreshJobs()
+        const sources = Array.isArray(state.pendingRunSelectedSources)
+          ? [...state.pendingRunSelectedSources]
+          : [...document.querySelectorAll('.source-check:checked')].map(
+              (input) => input.dataset.url
+            )
+        state.pendingRunSelectedSources = null
+        if (!sources.length) {
+          searchStatusEl.textContent = 'Check at least one saved source to run.'
+          return
+        }
+        const runButton = document.getElementById('run-selected')
+        runButton.disabled = true
+        searchStatusEl.textContent = `Queueing ${sources.length} source${sources.length === 1 ? '' : 's'} for ${targetModel}...`
+        try {
+          const payload = await api('/api/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+              model: targetModel,
+              sources,
+              options: getRunOptions(),
+            }),
+          })
+          state.selectedJobId = payload.job.id
+          searchStatusEl.textContent = `Queued job ${payload.job.id} for ${targetModel}.`
+          await refreshJobs()
+          setView('live')
+        } catch (err) {
+          searchStatusEl.textContent = err.message
+        } finally {
+          runButton.disabled = false
+        }
       }
 
       async function runAllSources() {
@@ -3267,6 +3285,13 @@
       document
         .getElementById('run-selected')
         .addEventListener('click', runSelectedSources)
+      document
+        .getElementById('run-selected')
+        .addEventListener('mousedown', () => {
+          state.pendingRunSelectedSources = [
+            ...document.querySelectorAll('.source-check:checked'),
+          ].map((input) => input.dataset.url)
+        })
       document
         .getElementById('run-all')
         .addEventListener('click', runAllSources)

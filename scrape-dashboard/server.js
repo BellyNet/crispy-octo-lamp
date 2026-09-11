@@ -189,6 +189,16 @@ function getPlatformLabel(platform) {
   return platform || 'Unknown'
 }
 
+function getSourceLabel(platform, url = '') {
+  if (
+    (platform === 'coomerfans' || platform === 'coomer') &&
+    isOnlyHavenUrl(url)
+  ) {
+    return 'OnlyHaven'
+  }
+  return getPlatformLabel(platform)
+}
+
 function getStufferDbSearchUrl(username) {
   const query = `site:stufferdb.com ${username}`
   return `https://duckduckgo.com/?q=${encodeURIComponent(query)}`
@@ -1738,7 +1748,7 @@ function summarizeHistorySource(run, index, total) {
     sourceTotal: total,
     sourceKey: run?.sourceKey || run?.sourceType || null,
     sourceType: run?.sourceType || null,
-    label: run?.label || getPlatformLabel(run?.sourceType),
+    label: run?.label || getSourceLabel(run?.sourceType, run?.url),
     url: run?.url || '',
     ok: run?.ok !== false,
     code: run?.code ?? null,
@@ -2810,7 +2820,7 @@ function sourceRunView(run, index, total) {
   return {
     sourceIndex: index + 1,
     sourceTotal: total,
-    label: getPlatformLabel(run?.sourceType) || run?.label || 'Source',
+    label: run?.label || getSourceLabel(run?.sourceType, run?.url) || 'Source',
     url: run?.url || '',
     ok: run?.ok !== false,
     status: summary.status || (run?.ok === false ? 'failed' : 'pending'),
@@ -2860,7 +2870,7 @@ function allSourceRunView(run, index, total) {
   return {
     sourceIndex: index + 1,
     sourceTotal: total,
-    label: run?.label || getPlatformLabel(run?.sourceType),
+    label: run?.label || getSourceLabel(run?.sourceType, run?.url),
     url: run?.url || '',
     ok: run?.ok !== false,
     status: summary.status || (run?.ok === false ? 'failed' : 'finished'),
@@ -3097,8 +3107,9 @@ function runChildForSource(job, sourceUrl, index) {
     const args = buildScrapeArgs(sourceUrl, job.model, job.options)
     appendJobLog(
       job,
-      `[${index + 1}/${job.sources.length}] ${job.model} -> ${getPlatformLabel(
-        parsed?.sourceType
+      `[${index + 1}/${job.sources.length}] ${job.model} -> ${getSourceLabel(
+        parsed?.sourceType,
+        sourceUrl
       )}: ${sourceUrl}`
     )
     appendJobLog(
