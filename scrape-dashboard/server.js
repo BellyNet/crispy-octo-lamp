@@ -3320,9 +3320,13 @@ app.post('/auth', (req, res) => {
 app.use(requireAuth)
 app.use(express.static(__dirname))
 
-app.get('/', (_req, res) => {
+function sendDashboardPage(_req, res) {
   res.sendFile('index.html', { root: __dirname })
-})
+}
+
+app.get('/', sendDashboardPage)
+app.get('/history', sendDashboardPage)
+app.get('/onlyhaven', sendDashboardPage)
 
 app.get('/api/models', (_req, res) => {
   res.json({

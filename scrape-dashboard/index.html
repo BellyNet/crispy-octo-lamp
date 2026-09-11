@@ -1232,8 +1232,9 @@
       function sourceLabel(key, url = '') {
         if (key === 'kemono') return 'Pawchive'
         if (key === 'coomer') {
-          return /(?:^|\\.)cum\\.st\\/ /
-            i.test(String(url).replace(/^https?:\/\//i, ''))
+          return /(?:^|\.)cum\.st(?:\/|$)/i.test(
+            String(url).replace(/^https?:\/\//i, '')
+          )
             ? 'OnlyHaven'
             : 'CoomerFans'
         }
@@ -3300,6 +3301,15 @@
       setInterval(refreshJobs, 800)
       setInterval(() => loadHistory().catch(() => {}), 30000)
       setInterval(() => loadModels().catch(() => {}), 30000)
+
+      const initialPath = window.location.pathname
+        .replace(/\/+$/, '')
+        .toLowerCase()
+      if (initialPath === '/onlyhaven') {
+        setView('onlyhaven')
+      } else if (initialPath === '/history') {
+        setView('history')
+      }
     </script>
   </body>
 </html>
