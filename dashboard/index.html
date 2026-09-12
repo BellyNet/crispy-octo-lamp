@@ -680,7 +680,7 @@
         color: #e88a6a;
       }
       /* Origin-site badge — where the media was scraped from
-         (reddit / stufferdb / coomer / kemono / bbwchan). Small text label
+         (reddit / stufferdb / coomer / kemono / bbwchan / tumblr). Small text label
          with a site-tinted background. Replaces the ~useless
          "upload" date-source chip on cards. */
       .origin-badge {
@@ -715,6 +715,10 @@
       .origin-badge.bbwchan {
         background: #2b1b2f;
         color: #d894f0;
+      }
+      .origin-badge.tumblr {
+        background: #142034;
+        color: #8fb4ff;
       }
       .origin-badge.unknown {
         background: #2a2a2e;
@@ -754,6 +758,10 @@
       .pswp-origin-badge.bbwchan {
         background: rgba(190, 105, 220, 0.18);
         color: #e0a6f5;
+      }
+      .pswp-origin-badge.tumblr {
+        background: rgba(100, 145, 220, 0.18);
+        color: #aac8ff;
       }
       .pswp-origin-badge.unknown {
         background: rgba(140, 140, 150, 0.18);
@@ -2390,12 +2398,7 @@
             />
           </svg>
         </button>
-        <a
-          id="admin-link"
-          href="/admin"
-          title="Admin"
-          aria-label="Admin"
-        >
+        <a id="admin-link" href="/admin" title="Admin" aria-label="Admin">
           <svg
             width="16"
             height="16"
@@ -2839,7 +2842,9 @@
           const u = usersData.find((x) => x.name === route.username)
           if (u) {
             activeAddedRange =
-              route.since != null ? { since: route.since, until: route.until } : null
+              route.since != null
+                ? { since: route.since, until: route.until }
+                : null
             selectUser(u, null, { skipHashUpdate: true }).then(() => {
               if (route.openFolder && route.openFilename) {
                 const idx = filtered.findIndex(
@@ -3080,6 +3085,7 @@
             ['kemono', 'K'],
             ['stufferdb', 'S'],
             ['bbwchan', 'B'],
+            ['tumblr', 'T'],
           ]) {
             const dot = document.createElement('span')
             dot.className =
@@ -3399,6 +3405,7 @@
         kemono: 'K·',
         stufferdb: '',
         bbwchan: '',
+        tumblr: '',
       }
 
       function renderSourceLinks(sources) {
@@ -3422,6 +3429,16 @@
           a.target = '_blank'
           a.rel = 'noopener noreferrer'
           a.innerHTML = `${LINK_ICON} BBW-Chan`
+          sourceLinksEl.appendChild(a)
+        }
+
+        for (const url of sources.tumblr || []) {
+          const a = document.createElement('a')
+          a.className = 'src-link'
+          a.href = url
+          a.target = '_blank'
+          a.rel = 'noopener noreferrer'
+          a.innerHTML = `${LINK_ICON} Tumblr`
           sourceLinksEl.appendChild(a)
         }
 
@@ -3656,8 +3673,12 @@
           return
         }
         addedRangeBannerEl.style.display = 'flex'
-        const since = formatDateShort(new Date(activeAddedRange.since).toISOString())
-        const until = formatDateShort(new Date(activeAddedRange.until).toISOString())
+        const since = formatDateShort(
+          new Date(activeAddedRange.since).toISOString()
+        )
+        const until = formatDateShort(
+          new Date(activeAddedRange.until).toISOString()
+        )
         const range = since === until ? since : `${since} – ${until}`
         addedRangeTextEl.textContent = `Showing ${filtered.length} file${filtered.length === 1 ? '' : 's'} added ${range}`
       }
@@ -3852,6 +3873,7 @@
         coomerfans: 'coomer',
         kemono: 'kemono',
         bbwchan: 'bbwchan',
+        tumblr: 'tumblr',
       }
       const ORIGIN_TIPS = {
         reddit: 'Scraped from reddit',
@@ -3859,6 +3881,7 @@
         coomerfans: 'Scraped from coomerfans',
         kemono: 'Scraped from kemono',
         bbwchan: 'Scraped from bbw-chan',
+        tumblr: 'Scraped from tumblr',
       }
       // Pull the origin site off an item — the scrapers write it into
       // .media-dates.json under `source.site`, and the server puts it
@@ -4223,7 +4246,10 @@
           commentsPanelCloseEl.type = 'button'
           commentsPanelCloseEl.setAttribute('aria-label', 'Close comments')
           commentsPanelCloseEl.textContent = '×'
-          commentsPanelHeaderEl.append(commentsPanelTitleEl, commentsPanelCloseEl)
+          commentsPanelHeaderEl.append(
+            commentsPanelTitleEl,
+            commentsPanelCloseEl
+          )
           const commentsListEl = document.createElement('div')
           commentsListEl.className = 'pswp-info-comments'
           commentsPanelEl.append(commentsPanelHeaderEl, commentsListEl)
@@ -4243,7 +4269,9 @@
             commentsBackdropEl.classList.remove('open')
           }
           function renderCommentsPanel(item) {
-            const comments = Array.isArray(item?.post?.comments) ? item.post.comments : []
+            const comments = Array.isArray(item?.post?.comments)
+              ? item.post.comments
+              : []
             const total =
               typeof item?.post?.commentCount === 'number' &&
               item.post.commentCount > comments.length
@@ -4495,7 +4523,8 @@
                   if (postId) {
                     const siblingIdxs = []
                     for (let i = 0; i < filtered.length; i++) {
-                      if (filtered[i]?.post?.postId === postId) siblingIdxs.push(i)
+                      if (filtered[i]?.post?.postId === postId)
+                        siblingIdxs.push(i)
                     }
                     if (siblingIdxs.length > 1) {
                       const posInGroup = siblingIdxs.indexOf(pswp.currIndex) + 1

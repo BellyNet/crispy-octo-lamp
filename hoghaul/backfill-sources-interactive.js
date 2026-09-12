@@ -120,10 +120,20 @@ const PLATFORMS = {
     probeUrl: (username) =>
       `https://old.reddit.com/user/${encodeURIComponent(username)}/submitted/?over18=1`,
   },
+  tumblr: {
+    host: 'www.tumblr.com',
+    label: 'Tumblr',
+    urlPattern:
+      /^https?:\/\/(?:(?:www\.)?tumblr\.com\/(?:blog\/view\/)?([^/?#\s]+)|([^./?#\s]+)\.tumblr\.com)(?:[/?#]|$)/i,
+    searchUrl: (name) =>
+      `https://www.tumblr.com/search/${encodeURIComponent(name)}`,
+    userUrl: (username) =>
+      `https://www.tumblr.com/${encodeURIComponent(username)}`,
+  },
 }
 
 const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
-const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb']
+const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb', 'tumblr']
 const REDDIT_PROBE_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36'
 const REDDIT_PROBE_RETRY_DELAY_MS = parseNonNegativeInteger(
@@ -1061,6 +1071,19 @@ function parseSourceUrl(input) {
 
   if (STUFFERDB_PATTERN.test(str)) {
     return { platform: 'stufferdb', url: str }
+  }
+
+  const tumblrM = str.match(PLATFORMS.tumblr.urlPattern)
+  if (tumblrM) {
+    const username = (tumblrM[1] || tumblrM[2] || '').toLowerCase()
+    if (username) {
+      return {
+        platform: 'tumblr',
+        service: 'blog',
+        username,
+        url: PLATFORMS.tumblr.userUrl(username),
+      }
+    }
   }
 
   return null

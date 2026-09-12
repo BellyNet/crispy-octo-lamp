@@ -70,7 +70,14 @@ const historyDir = path.join(__dirname, 'data')
 const runHistoryPath = path.join(historyDir, 'run-history.json')
 const ONLYHAVEN_ORIGIN = 'https://cum.st'
 
-const SOURCE_KEYS = ['reddit', 'kemono', 'coomer', 'stufferdb', 'bbwchan']
+const SOURCE_KEYS = [
+  'reddit',
+  'kemono',
+  'coomer',
+  'stufferdb',
+  'bbwchan',
+  'tumblr',
+]
 const HISTORY_VERSION = 2
 const JOB_LOG_LIMIT = 2500
 const jobs = new Map()
@@ -186,6 +193,7 @@ function getPlatformLabel(platform) {
   if (platform === 'reddit') return 'Reddit'
   if (platform === 'stufferdb') return 'StufferDB'
   if (platform === 'bbwchan') return 'BBW-Chan'
+  if (platform === 'tumblr') return 'Tumblr'
   return platform || 'Unknown'
 }
 
@@ -1338,7 +1346,7 @@ async function searchSourceCandidates(rawQuery) {
   }
 
   for (const term of terms) {
-    for (const platform of ['coomer', 'kemono', 'stufferdb']) {
+    for (const platform of ['coomer', 'kemono', 'stufferdb', 'tumblr']) {
       const url = getManualSourceSearchUrl(platform, term)
       if (!url) continue
       candidates.push({
@@ -3672,21 +3680,24 @@ function repairAllSeenMediaFailures() {
 app.post('/api/jobs', (req, res) => {
   const mode = req.body.mode === 'all' ? 'all' : 'sources'
   const model = mode === 'all' ? 'ALL SOURCES' : getKnownModel(req.body.model)
-  const sources = Array.isArray(req.body.sources)
+  const rawSources = Array.isArray(req.body.sources)
     ? req.body.sources.map((url) => String(url || '').trim()).filter(Boolean)
     : []
+  const sources = []
   if (mode !== 'all' && !model) {
     return res.status(400).json({ error: 'model is required' })
   }
-  if (mode !== 'all' && !sources.length) {
+  if (mode !== 'all' && !rawSources.length) {
     return res.status(400).json({ error: 'at least one source is required' })
   }
-  for (const source of mode === 'all' ? [] : sources) {
-    if (!parseSourceUrl(source)) {
+  for (const source of mode === 'all' ? [] : rawSources) {
+    const parsed = parseSourceUrl(source)
+    if (!parsed) {
       return res
         .status(400)
         .json({ error: `Unsupported source URL: ${source}` })
     }
+    sources.push(parsed.url)
   }
 
   const job = {

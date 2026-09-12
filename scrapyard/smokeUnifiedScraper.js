@@ -61,6 +61,10 @@ const {
   parseCoomerFansCaption,
 } = require('./sourceAdapters/coomerFans')
 const {
+  fetchTumblrPosts,
+  parseTumblrJsonpBody,
+} = require('./sourceAdapters/tumblr')
+const {
   fetchCoomerKemonoPosts,
   getMediaEntriesFromPost,
 } = require('./sourceAdapters/coomerKemono')
@@ -596,10 +600,7 @@ async function main() {
   const pawchiveDeadData = pawchiveDeadIndex.loadMediaSeenIndex(metadataLogDir)
   pawchiveDeadData.deadMediaUrls['pawchive-data:a/b/legacy.jpg'] = {
     mediaUrl: 'pawchive-data:a/b/legacy.jpg',
-    mediaUrls: [
-      'pawchive-data:a/b/legacy.jpg',
-      'kemono-data:a/b/legacy.jpg',
-    ],
+    mediaUrls: ['pawchive-data:a/b/legacy.jpg', 'kemono-data:a/b/legacy.jpg'],
     status: 'dead',
     reason: 'not_found_404',
     error: 'HTTP 404',
@@ -777,6 +778,36 @@ async function main() {
       url: 'https://cum.st/creators/onlyfans/195143184',
     }
   )
+  await assertRouted(
+    '[https://cum.st/creators/onlyfans/195143184](https://cum.st/creators/onlyfans/195143184)',
+    {
+      scraper: 'hoghaul',
+      sourceType: 'coomerfans',
+      rawName: '195143184',
+      origin: 'https://cum.st',
+      service: 'onlyfans',
+      userId: '195143184',
+      url: 'https://cum.st/creators/onlyfans/195143184',
+    }
+  )
+  const tumblr = await assertRouted('https://www.tumblr.com/bellaabbondanza', {
+    scraper: 'hoghaul',
+    sourceType: 'tumblr',
+    rawName: 'bellaabbondanza',
+    origin: 'https://bellaabbondanza.tumblr.com',
+    service: 'blog',
+    userId: 'bellaabbondanza',
+    url: 'https://bellaabbondanza.tumblr.com/',
+  })
+  await assertRouted('https://bellaabbondanza.tumblr.com/', {
+    scraper: 'hoghaul',
+    sourceType: 'tumblr',
+    rawName: 'bellaabbondanza',
+    origin: 'https://bellaabbondanza.tumblr.com',
+    service: 'blog',
+    userId: 'bellaabbondanza',
+    url: 'https://bellaabbondanza.tumblr.com/',
+  })
   await assertRouted('https://coomer.su/onlyfans/user/name_here', {
     scraper: 'hoghaul',
     sourceType: 'coomer',
@@ -806,6 +837,7 @@ async function main() {
   })
   assert.strictEqual(shouldUseBrowserMediaForSource(pawchive, true), false)
   assert.strictEqual(shouldUseBrowserMediaForSource(onlyHaven, true), false)
+  assert.strictEqual(shouldUseBrowserMediaForSource(tumblr, true), false)
   assert.strictEqual(
     shouldUseBrowserMediaForSource(
       parseSourceUrl('https://coomer.su/onlyfans/user/name_here'),
@@ -818,7 +850,12 @@ async function main() {
     false
   )
   assert.strictEqual(
-    shouldUseBrowserMediaForSource(reddit, true, { redditBrowserMedia: true }, {}),
+    shouldUseBrowserMediaForSource(
+      reddit,
+      true,
+      { redditBrowserMedia: true },
+      {}
+    ),
     true
   )
   const stufferdb = await assertRouted(
@@ -1110,6 +1147,64 @@ async function main() {
     onlyHavenPosts[0].mediaEntries[0].mediaUrl,
     'https://e1.cum.st/media/f1059c5bbc160715efd6269705c96e68c89e65642355542933b14e0d4ac617c9/original.mp4'
   )
+  const tumblrPayload = parseTumblrJsonpBody(
+    `var tumblr_api_read = ${JSON.stringify({
+      'posts-total': 3,
+      posts: [
+        {
+          id: '826213585755815936',
+          url: 'https://bellaabbondanza.tumblr.com/post/826213585755815936/photo',
+          type: 'regular',
+          'unix-timestamp': 1788387600,
+          'regular-title': 'Tumblr sample',
+          'regular-body': [
+            '<p>Photo &amp; video caption</p>',
+            '<figure><img src="https://64.media.tumblr.com/small.jpg" srcset="https://64.media.tumblr.com/small.jpg 540w, https://64.media.tumblr.com/original.jpg 1280w"></figure>',
+            '<figure><video><source src="https://64.media.tumblr.com/sample.mov"></video></figure>',
+          ].join(''),
+          tags: ['bella abbondanza'],
+          'note-count': '12',
+        },
+        {
+          id: '826000000000000000',
+          url: 'https://bellaabbondanza.tumblr.com/post/826000000000000000/reblog',
+          type: 'regular',
+          reblogged_from_url: 'https://other.tumblr.com/post/1',
+          'regular-body':
+            '<figure><img src="https://64.media.tumblr.com/reblog.jpg"></figure>',
+        },
+      ],
+    })};`
+  )
+  const tumblrPosts = await fetchTumblrPosts(
+    {
+      origin: 'https://bellaabbondanza.tumblr.com',
+      site: 'tumblr',
+      service: 'blog',
+      userId: 'bellaabbondanza',
+      rawName: 'bellaabbondanza',
+    },
+    {},
+    {
+      fetchJson: async () => ({ data: tumblrPayload, byteLength: 1234 }),
+      logger: {
+        log: () => {},
+        status: () => {},
+        statusDone: () => {},
+      },
+    }
+  )
+  assert.strictEqual(tumblrPosts.length, 1)
+  assert.strictEqual(tumblrPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(
+    tumblrPosts[0].mediaEntries[0].mediaUrl,
+    'https://64.media.tumblr.com/original.jpg'
+  )
+  assert.strictEqual(
+    tumblrPosts[0].mediaEntries[1].mediaUrl,
+    'https://64.media.tumblr.com/sample.mov'
+  )
+  assert.strictEqual(tumblrPosts[0].mediaEntries[0].sourceSite, 'tumblr')
 
   const coomerMediaEntries = getMediaEntriesFromPost(
     {

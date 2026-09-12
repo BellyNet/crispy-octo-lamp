@@ -673,6 +673,16 @@
           "discoveredAs": "bella_abbondanza",
           "lastCheckedAt": "2026-07-30T14:52:16.286Z"
         }
+      ],
+      "tumblr": [
+        {
+          "url": "https://bellaabbondanza.tumblr.com/",
+          "service": "blog",
+          "userId": "bellaabbondanza",
+          "username": "bellaabbondanza",
+          "discoveredAs": "bellaabbondanza",
+          "lastCheckedAt": "2026-09-11T19:11:09.815Z"
+        }
       ]
     },
     "sourceReview": {

@@ -26,7 +26,7 @@ const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
-const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb']
+const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb', 'tumblr']
 const temporarilyDisabledSources = new Map()
 const activeChildProcesses = new Set()
 let hardInterruptHandlersInstalled = false
@@ -1504,7 +1504,7 @@ function printAllSourcesHelp() {
   console.log(`Usage: node scrapyard/run-all-source-updates.js [options]
 
 Runs every selected model source before moving to the next model.
-Registered Reddit, Pawchive, Coomer/CoomerFans, and StufferDB sources are included.
+Registered Reddit, Pawchive, Coomer/CoomerFans, StufferDB, and Tumblr sources are included.
 
 Options:
   --model <name>              Update one model only.
@@ -1940,7 +1940,8 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
       target === 'coomer' ||
       target === 'kemono' ||
       target === 'pawchive' ||
-      target === 'reddit'
+      target === 'reddit' ||
+      target === 'tumblr'
     ) {
       return runSourceBatch(target, updateArgs)
     }

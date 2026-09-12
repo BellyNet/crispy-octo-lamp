@@ -198,6 +198,15 @@ function getRequestTimeoutMs(fallback = 30000) {
   )
 }
 
+function normalizeSourceUrlArg(value) {
+  const raw = String(value || '').trim()
+  const markdownMatch = raw.match(/^\[[^\]]+\]\((https?:\/\/[^)]+)\)$/i)
+  if (markdownMatch) return markdownMatch[1].trim()
+  const angleMatch = raw.match(/^<\s*(https?:\/\/[^>]+)\s*>$/i)
+  if (angleMatch) return angleMatch[1].trim()
+  return /^https?:\/\//i.test(raw) ? raw : ''
+}
+
 function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
   const argv = Array.isArray(input)
     ? parseHoghaulArgs(input)
@@ -207,7 +216,9 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       }
   const existingBrowserOptions = argv.browserOptions || {}
   const inputUrl =
-    argv._.find((arg) => /^https?:\/\//i.test(arg)) ||
+    argv._.map(normalizeSourceUrlArg).find(Boolean) ||
+    normalizeSourceUrlArg(argv.inputUrl) ||
+    normalizeSourceUrlArg(argv.url) ||
     argv.inputUrl ||
     argv.url ||
     ''

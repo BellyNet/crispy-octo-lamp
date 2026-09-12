@@ -210,11 +210,11 @@ async function generatePreviewGif(videoPath, gifPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer, kemono, stufferdb, bbwchan }
+// Build a map of username → { coomer, kemono, stufferdb, bbwchan, tumblr }
 // from model_aliases.json so the /api/users route can include source links.
 // Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
 // each time, so changes to the bind-mounted file are picked up immediately.
-const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb', 'bbwchan']
+const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb', 'bbwchan', 'tumblr']
 
 // Cached source map — rebuilt only when model_aliases.json mtime changes.
 // loadModelRegistry was previously called on every /api/users request, doing a
@@ -1017,7 +1017,9 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 
 app.use(express.static(__dirname))
 app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
-app.get('/admin', (_req, res) => res.sendFile('admin.html', { root: __dirname }))
+app.get('/admin', (_req, res) =>
+  res.sendFile('admin.html', { root: __dirname })
+)
 
 // Users list — returns [{ name, sources, featured }, ...]
 // Sets Cache-Control: no-cache so the browser revalidates on every fetch; the
@@ -2087,7 +2089,9 @@ async function runEmbedJob({ trigger = 'manual' } = {}) {
     // failure here leaves the last good file in place for discover.js.
     embedState.lastExitCode = typeof err.code === 'number' ? err.code : -1
     embedState.lastError = err.message
-    embedState.log = `${err.stdout || ''}\n${err.stderr || ''}`.trim().slice(-8000)
+    embedState.log = `${err.stdout || ''}\n${err.stderr || ''}`
+      .trim()
+      .slice(-8000)
     console.warn(`  Embed:     failed — ${err.message}`)
   }
   embedState.step = null

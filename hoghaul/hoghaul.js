@@ -77,6 +77,11 @@ const {
   preflightCoomerFansSource,
 } = require('../scrapyard/sourceAdapters/coomerFans')
 const {
+  fetchTumblrPosts: fetchTumblrAdapterPosts,
+  parseTumblrJsonpBody,
+  preflightTumblrSource: preflightTumblrAdapterSource,
+} = require('../scrapyard/sourceAdapters/tumblr')
+const {
   PAWCHIVE_ORIGIN,
   isPawchiveHost,
   shouldUsePawchiveDeadMediaMatch,
@@ -118,6 +123,7 @@ const registryPath =
   process.env.HOGHAUL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
 const API_PAGE_SIZE = 50
 const REDDIT_PAGE_SIZE = 100
+const TUMBLR_PAGE_SIZE = 50
 const API_ACCEPT_HEADER = 'text/css'
 const PAWCHIVE_RATE_LIMIT_RETRIES =
   Number.parseInt(process.env.HOGHAUL_PAWCHIVE_429_RETRIES || '', 10) || 3
@@ -240,7 +246,7 @@ function registerSourceForRun(source, inputUrl, canonicalOverride) {
     source.rawName,
     {
       ...source,
-      inputUrl,
+      inputUrl: source.inputUrl || inputUrl,
     },
     canonicalOverride,
     { unknownName: 'unknown_model' }
@@ -257,7 +263,7 @@ function resolveModelNameForRun(source, inputUrl, canonicalOverride) {
   const cleanedRawName = sanitize(source.rawName) || 'unknown_model'
   const sourceInfo = {
     ...source,
-    inputUrl,
+    inputUrl: source.inputUrl || inputUrl,
   }
   return (
     (cleanedOverride && findCanonicalModelName(registry, cleanedOverride)) ||
@@ -727,10 +733,7 @@ function normalizeSeenUrl(url) {
       return `${parsed.protocol}//${host}${pathname}`
     }
 
-    if (
-      isPawchiveHost(host) &&
-      /^\/(?:thumbnail\/)?data\//i.test(pathname)
-    ) {
+    if (isPawchiveHost(host) && /^\/(?:thumbnail\/)?data\//i.test(pathname)) {
       return `pawchive-data:${pathname
         .replace(/^\/(?:thumbnail\/)?data\/?/i, '')
         .toLowerCase()}`
@@ -789,7 +792,10 @@ async function fetchPawchiveJsonWithRetry(url, requestOptions = {}) {
       return await httpClient.fetchJson(url, requestOptions)
     } catch (err) {
       lastError = err
-      if (!isHttpRateLimitError(err) || attempt >= PAWCHIVE_RATE_LIMIT_RETRIES) {
+      if (
+        !isHttpRateLimitError(err) ||
+        attempt >= PAWCHIVE_RATE_LIMIT_RETRIES
+      ) {
         throw err
       }
 
@@ -896,6 +902,28 @@ async function closeBrowserMediaDownloader() {
 async function fetchJson(url, requestOptions = {}) {
   const parsed = new URL(url)
   const isReddit = parsed.hostname.toLowerCase().endsWith('reddit.com')
+  const isTumblr = parsed.hostname.toLowerCase().endsWith('tumblr.com')
+  if (isTumblr) {
+    if (!browserMediaDownloader?.fetchText) {
+      throw new Error(
+        'Tumblr JSON fetches require the browser media downloader, but none is active'
+      )
+    }
+    const { text, byteLength, statusCode } =
+      await browserMediaDownloader.fetchText(url, {
+        headers: {
+          Accept: 'text/javascript, application/json',
+          ...(requestOptions.headers || {}),
+        },
+      })
+    return {
+      data: parseTumblrJsonpBody(text),
+      byteLength,
+      url,
+      headers: {},
+      statusCode,
+    }
+  }
   if (isReddit) {
     try {
       const access = await redditOAuth.getRedditOAuthAccess()
@@ -1052,6 +1080,7 @@ function shouldUseBrowserMediaForSource(
   env = process.env
 ) {
   if (source.site === 'coomerfans') return false
+  if (source.site === 'tumblr') return false
   if (isPawchiveSource(source)) return false
   if (
     source.site === 'reddit' &&
@@ -1187,6 +1216,12 @@ async function preflightSourceJson(source, page = 0) {
       logger: console,
     })
   }
+  if (source.site === 'tumblr') {
+    return preflightTumblrAdapterSource(source, page, {
+      fetchJson,
+      pageSize: TUMBLR_PAGE_SIZE,
+    })
+  }
   return preflightCoomerKemonoSource(source, page, {
     fetchJson,
     pageSize: API_PAGE_SIZE,
@@ -1225,6 +1260,25 @@ async function ensureBrowserMediaDownloader(source, browserOptions) {
   return browserMediaDownloader
 }
 
+function getBrowserOptionsForSource(source, browserOptions = {}) {
+  if (
+    source?.site !== 'tumblr' ||
+    browserOptions.browserProfile ||
+    browserOptions.browserConnect
+  ) {
+    return browserOptions
+  }
+
+  return {
+    ...browserOptions,
+    browserProfile: path.join(
+      slopvaultRoot,
+      'hoghaul-browser-profile',
+      `tumblr-${process.pid}-${Date.now()}`
+    ),
+  }
+}
+
 async function fetchPosts(source, options, deps = {}) {
   const pageLogger = createStatusLineLogger(console)
   if (source.site === 'coomerfans') {
@@ -1256,6 +1310,16 @@ async function fetchPosts(source, options, deps = {}) {
       suppressIncrementalLog: true,
     })
   }
+  if (source.site === 'tumblr') {
+    return fetchTumblrAdapterPosts(source, options, {
+      fetchJson,
+      fullSourceRefresh: deps.fullSourceRefresh,
+      logger: pageLogger,
+      sourceFrontier: deps.sourceFrontier,
+      sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
+      pageSize: TUMBLR_PAGE_SIZE,
+    })
+  }
 
   return fetchCoomerKemonoPosts(source, options, {
     fetchJson,
@@ -1263,9 +1327,7 @@ async function fetchPosts(source, options, deps = {}) {
     logger: pageLogger,
     normalizeUrl: normalizeSeenUrl,
     pageSize: API_PAGE_SIZE,
-    postConcurrency: isPawchiveUrl(source.origin)
-      ? 1
-      : options.postConcurrency,
+    postConcurrency: isPawchiveUrl(source.origin) ? 1 : options.postConcurrency,
     sourceFrontier: deps.sourceFrontier,
     sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
   })
@@ -1800,7 +1862,7 @@ async function run(argvInput = process.argv.slice(2)) {
   let useBrowserMedia = runOptions.useBrowserMedia
   if (!inputUrl) {
     console.error(
-      'Usage: npm run hoghaul -- "<coomer-kemono-or-reddit-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--download-oversized] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
+      'Usage: npm run hoghaul -- "<coomer-kemono-reddit-tumblr-user-url>" [--pages=1 or 1-3] [--model=name] [--preflight] [--dry-run] [--track-source] [--skip-nas-sync] [--download-oversized] [--cookie-file=cookies.json] [--browser-profile=path] [--browser-connect=http://127.0.0.1:9222] [--browser-validate-ms=60000] [--post-concurrency=8] [--image-concurrency=3] [--video-concurrency=2]'
     )
     return 1
   }
@@ -1809,6 +1871,10 @@ async function run(argvInput = process.argv.slice(2)) {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
+  const browserOptionsForSource = getBrowserOptionsForSource(
+    source,
+    browserOptions
+  )
   useBrowserMedia = shouldUseBrowserMediaForSource(
     source,
     useBrowserMedia,
@@ -1820,11 +1886,7 @@ async function run(argvInput = process.argv.slice(2)) {
   )
   const postConcurrency = parsePositiveInteger(
     runOptions.postConcurrency || process.env.HOGHAUL_POST_CONCURRENCY,
-    source.site === 'coomerfans'
-      ? 8
-      : source.origin === PAWCHIVE_ORIGIN
-        ? 4
-        : 1
+    source.site === 'coomerfans' ? 8 : source.origin === PAWCHIVE_ORIGIN ? 4 : 1
   )
   const videoConcurrency = parsePositiveInteger(
     runOptions.videoConcurrency || process.env.HOGHAUL_VIDEO_CONCURRENCY,
@@ -1877,6 +1939,10 @@ async function run(argvInput = process.argv.slice(2)) {
     }
   }
 
+  if (source.site === 'tumblr') {
+    await ensureBrowserMediaDownloader(source, browserOptionsForSource)
+  }
+
   if (preflight) {
     let report
     try {
@@ -1906,16 +1972,19 @@ async function run(argvInput = process.argv.slice(2)) {
   if (source.site === 'reddit' && useBrowserMedia) {
     let redditBrowserFetchLogged = false
     redditBrowserFetchHtml = async (...args) => {
-      const browser = await ensureBrowserMediaDownloader(source, browserOptions)
+      const browser = await ensureBrowserMediaDownloader(
+        source,
+        browserOptionsForSource
+      )
       if (!redditBrowserFetchLogged) {
         redditBrowserFetchLogged = true
         appendRunEvent('reddit_browser_fetch_enabled', {
           browserProfile:
-            browserOptions.browserProfile ||
+            browserOptionsForSource.browserProfile ||
             getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
-              headless: Boolean(browserOptions.headless),
+              headless: Boolean(browserOptionsForSource.headless),
             }),
-          browserConnect: browserOptions.browserConnect || null,
+          browserConnect: browserOptionsForSource.browserConnect || null,
         })
       }
       return browser.fetchHtml(...args)
@@ -2150,7 +2219,7 @@ async function run(argvInput = process.argv.slice(2)) {
 
   const useBrowserDomEnrichment = useBrowserMedia && source.site !== 'reddit'
   if (useBrowserDomEnrichment) {
-    await ensureBrowserMediaDownloader(source, browserOptions)
+    await ensureBrowserMediaDownloader(source, browserOptionsForSource)
     selectedMedia = await enrichMediaEntriesFromBrowserDom(
       selectedMedia,
       browserMediaDownloader
