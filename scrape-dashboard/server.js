@@ -1302,7 +1302,7 @@ async function searchSourceCandidates(rawQuery) {
   }
 
   for (const term of terms) {
-    for (const platform of ['coomer', 'kemono']) {
+    for (const platform of ['coomer', 'kemono', 'tumblr']) {
       let hits = []
       try {
         hits = await probeUsername(platform, term)

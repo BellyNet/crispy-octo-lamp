@@ -24,6 +24,7 @@ const {
   runScraperCli,
   summarizeSourceRunSummary,
 } = require('./scraperRunner')
+const { probeUsername } = require('../hoghaul/backfill-sources-interactive')
 const { parseSourceUrl } = require('./sourceRouter')
 const {
   backfillSeenSourcePostsFromRunEvents,
@@ -808,6 +809,34 @@ async function main() {
     userId: 'bellaabbondanza',
     url: 'https://bellaabbondanza.tumblr.com/',
   })
+  const originalFetch = global.fetch
+  global.fetch = async (url) => {
+    assert.strictEqual(
+      url,
+      'https://bellaabbondanza.tumblr.com/api/read/json?start=0&num=1'
+    )
+    return {
+      status: 200,
+      ok: true,
+      text: async () =>
+        'var tumblr_api_read = {"tumblelog":{"title":"Bella Abbondanza"},"posts":[]};',
+    }
+  }
+  try {
+    const tumblrProbeHits = await probeUsername('tumblr', 'bellaabbondanza')
+    assert.deepStrictEqual(tumblrProbeHits, [
+      {
+        platform: 'tumblr',
+        service: 'blog',
+        id: 'bellaabbondanza',
+        username: 'bellaabbondanza',
+        url: 'https://bellaabbondanza.tumblr.com/',
+        name: 'Bella Abbondanza',
+      },
+    ])
+  } finally {
+    global.fetch = originalFetch
+  }
   await assertRouted('https://coomer.su/onlyfans/user/name_here', {
     scraper: 'hoghaul',
     sourceType: 'coomer',
