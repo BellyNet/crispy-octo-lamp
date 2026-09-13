@@ -1236,6 +1236,34 @@ function toCandidate(hit, overrides = {}) {
   }
 }
 
+function addManualSearchCandidate(candidates, platform, term) {
+  const url = getManualSourceSearchUrl(platform, term)
+  if (!url) return
+  const id = `${platform}-search:${term}`
+  if (
+    candidates.some(
+      (candidate) => candidate.id === id || candidate.url === url
+    )
+  ) {
+    return
+  }
+  candidates.push({
+    id,
+    type: 'manual-search',
+    platform,
+    label: getPlatformLabel(platform),
+    service: null,
+    userId: null,
+    username: term,
+    name: term,
+    url,
+    parseable: false,
+    existingModel: null,
+    verified: false,
+    source: 'manual-search',
+  })
+}
+
 async function searchSourceCandidates(rawQuery) {
   const query = String(rawQuery || '').trim()
   if (!query) return []
@@ -1282,23 +1310,15 @@ async function searchSourceCandidates(rawQuery) {
   }
 
   for (const term of terms) {
-    const url = getManualSourceSearchUrl('onlyhaven', term)
-    if (!url) continue
-    candidates.push({
-      id: `onlyhaven-search:${term}`,
-      type: 'manual-search',
-      platform: 'onlyhaven',
-      label: getPlatformLabel('onlyhaven'),
-      service: null,
-      userId: null,
-      username: term,
-      name: term,
-      url,
-      parseable: false,
-      existingModel: null,
-      verified: false,
-      source: 'manual-search',
-    })
+    for (const platform of [
+      'onlyhaven',
+      'coomer',
+      'kemono',
+      'stufferdb',
+      'tumblr',
+    ]) {
+      addManualSearchCandidate(candidates, platform, term)
+    }
   }
 
   for (const term of terms) {
@@ -1343,28 +1363,6 @@ async function searchSourceCandidates(rawQuery) {
         }
       )
     )
-  }
-
-  for (const term of terms) {
-    for (const platform of ['coomer', 'kemono', 'stufferdb', 'tumblr']) {
-      const url = getManualSourceSearchUrl(platform, term)
-      if (!url) continue
-      candidates.push({
-        id: `${platform}-search:${term}`,
-        type: 'manual-search',
-        platform,
-        label: getPlatformLabel(platform),
-        service: null,
-        userId: null,
-        username: term,
-        name: term,
-        url,
-        parseable: false,
-        existingModel: null,
-        verified: false,
-        source: 'manual-search',
-      })
-    }
   }
 
   return candidates
@@ -2682,9 +2680,28 @@ function readQuarantineSummary() {
       }
     }
 
+    const tailDecodeItems = items.filter((item) =>
+      (item?.reasons || []).includes('tail_decode_error')
+    )
+    const actionableTailDecode = tailDecodeItems.filter((item) => {
+      const state =
+        item?.state?.repairState ||
+        item?.repairState ||
+        item?.status ||
+        'unknown'
+      return (
+        state !== 'repaired' &&
+        item?.state?.quarantineExists &&
+        item?.quarantinePath &&
+        fs.existsSync(item.quarantinePath)
+      )
+    }).length
+
     return {
       path: quarantineManifestPath,
       total: items.length,
+      tailDecode: tailDecodeItems.length,
+      actionableTailDecode,
       countsByState,
       countsByReason,
       countsByMediaType,
@@ -2701,6 +2718,8 @@ function readQuarantineSummary() {
     return {
       path: quarantineManifestPath,
       total: 0,
+      tailDecode: 0,
+      actionableTailDecode: 0,
       countsByState: {},
       countsByReason: {},
       countsByMediaType: {},
@@ -3489,6 +3508,16 @@ app.post('/api/models/:model/sources/reddit-state', (req, res) => {
         ...markRedditSourceDeleted(model, url, reason),
       })
     }
+    if (state === 'banned') {
+      return res.json({
+        ok: true,
+        ...markRedditSourceDeleted(
+          model,
+          url,
+          reason || 'reddit_account_suspended'
+        ),
+      })
+    }
     if (state === 'active') {
       return res.json({
         ok: true,
@@ -3503,7 +3532,9 @@ app.post('/api/models/:model/sources/reddit-state', (req, res) => {
     }
     res
       .status(400)
-      .json({ error: 'state must be suspended, deleted, active, or valid' })
+      .json({
+        error: 'state must be suspended, deleted, banned, active, or valid',
+      })
   } catch (err) {
     res.status(400).json({ error: err.message })
   }
@@ -3519,7 +3550,11 @@ app.post('/api/models/:model/sources/ban', (req, res) => {
   try {
     res.json({
       ok: true,
-      ...markRedditSourceSuspended(model, url, reason || 'marked_suspended'),
+      ...markRedditSourceDeleted(
+        model,
+        url,
+        reason || 'reddit_account_suspended'
+      ),
     })
   } catch (err) {
     res.status(400).json({ error: err.message })
@@ -3833,6 +3868,29 @@ app.post('/api/media-queues/retry-recovery', (req, res) => {
 
 app.post('/api/media-queues/quarantine-repair', (req, res) => {
   const model = sanitize(req.body.model || '')
+  const quarantine = readQuarantineSummary()
+  if (model) {
+    const hasActionableModelItem = (quarantine.items || []).some((item) => {
+      return (
+        item.model === model &&
+        Array.isArray(item.reasons) &&
+        item.reasons.includes('tail_decode_error') &&
+        item.quarantinePath &&
+        fs.existsSync(item.quarantinePath)
+      )
+    })
+    if (!hasActionableModelItem) {
+      return res
+        .status(400)
+        .json({
+          error: `No actionable quarantine candidates found for ${model}.`,
+        })
+    }
+  } else if (!Number(quarantine.actionableTailDecode || 0)) {
+    return res
+      .status(400)
+      .json({ error: 'No actionable quarantine candidates found.' })
+  }
   const args = [sessionRepairScript]
   if (model) args.push('--model', model)
   if (req.body.all) args.push('--all')

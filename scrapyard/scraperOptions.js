@@ -111,7 +111,7 @@ function parseRunnerArgs(argvInput = process.argv.slice(2)) {
   if (Array.isArray(argvInput)) {
     return minimist(argvInput, {
       string: STRING_OPTIONS,
-      boolean: BOOLEAN_OPTIONS,
+      boolean: BOOLEAN_OPTIONS.filter((name) => name !== 'browser-media'),
       alias: {
         m: 'model',
         h: 'help',

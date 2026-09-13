@@ -15,6 +15,7 @@ const {
   buildAllSourceQueue,
   buildAllSourceRunOptions,
   buildRepairArgs,
+  buildScraperArgs,
   buildScraperOptions,
   buildSyncArgs,
   getTemporarilyDisabledSourceReason,
@@ -867,6 +868,13 @@ async function main() {
   assert.strictEqual(shouldUseBrowserMediaForSource(pawchive, true), false)
   assert.strictEqual(shouldUseBrowserMediaForSource(onlyHaven, true), false)
   assert.strictEqual(shouldUseBrowserMediaForSource(tumblr, true), false)
+  assert.strictEqual(
+    shouldUseBrowserMediaForSource(
+      parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+      true
+    ),
+    true
+  )
   assert.strictEqual(
     shouldUseBrowserMediaForSource(
       parseSourceUrl('https://coomer.su/onlyfans/user/name_here'),
@@ -1958,6 +1966,24 @@ async function main() {
   assert.strictEqual(redditOptions.sourceIncrementalOverlapPages, '2')
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
+  const coomerFansScraperArgs = buildScraperArgs(
+    parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+    {
+      _: ['https://coomerfans.com/u/onlyfans/123/name_here'],
+      model: 'name_here',
+      'skip-nas-sync': true,
+    }
+  )
+  assert.strictEqual(coomerFansScraperArgs.includes('--no-browser-media'), false)
+  const coomerFansNoBrowserArgs = buildScraperArgs(
+    parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+    {
+      _: ['https://coomerfans.com/u/onlyfans/123/name_here'],
+      model: 'name_here',
+      'browser-media': false,
+    }
+  )
+  assert.strictEqual(coomerFansNoBrowserArgs.includes('--no-browser-media'), true)
 
   const stufferOptions = buildScraperOptions(stufferdb, {
     model: 'sample_model',

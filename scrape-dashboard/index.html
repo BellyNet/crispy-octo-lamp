@@ -1554,8 +1554,13 @@
         })
       }
 
-      async function markRedditSourceState(model, url, stateName) {
+      async function markRedditSourceState(model, url, stateName, reason = '') {
         if (!model || !url) return null
+        const stateReason =
+          reason ||
+          (stateName === 'deleted'
+            ? 'reddit_account_deleted'
+            : 'reddit_account_suspended')
         return api(
           `/api/models/${encodeURIComponent(model)}/sources/reddit-state`,
           {
@@ -1563,21 +1568,10 @@
             body: JSON.stringify({
               url,
               state: stateName,
-              reason:
-                stateName === 'deleted'
-                  ? 'reddit_account_deleted'
-                  : 'reddit_account_suspended',
+              reason: stateReason,
             }),
           }
         )
-      }
-
-      async function markSourceBanned(model, url) {
-        if (!model || !url) return null
-        return api(`/api/models/${encodeURIComponent(model)}/sources/ban`, {
-          method: 'POST',
-          body: JSON.stringify({ url, reason: 'reddit_account_suspended' }),
-        })
       }
 
       function beginSourceRepair(alert) {
@@ -2160,7 +2154,7 @@
               )
               .join('')
             return `
-              <details class="alert-row" ${alert.savedBefore ? 'open' : ''}>
+              <details class="alert-row" ${alert.savedBefore || (alert.sourceType === 'reddit' && !alert.savedBefore) ? 'open' : ''}>
                 <summary class="alert-summary">
                   <div>
                     <div class="alert-title">${escapeHtml(alert.model)}: ${escapeHtml(alert.label || alert.sourceType || 'source')}</div>
@@ -2180,6 +2174,7 @@
                       alert.sourceType === 'reddit'
                         ? `<button class="valid-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Valid</button>
                            <button class="suspend-source secondary" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Suspended</button>
+                           <button class="ban-source danger" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Banned/Inactive</button>
                            <button class="delete-source danger" type="button" data-model="${escapeHtml(alert.model)}" data-url="${escapeHtml(alert.url)}">Mark Deleted</button>`
                         : ''
                     }
@@ -2298,6 +2293,9 @@
         const likelyDeadFailures = queues.likelyDeadMediaFailures || []
         const tailDecode = queues.tailDecodeQuarantine || []
         const quarantine = queues.quarantine || {}
+        const tailDecodeTotal =
+          Number(quarantine.tailDecode || 0) || tailDecode.length
+        const tailDecodeCount = Number(quarantine.actionableTailDecode || 0)
         const quarantineVisible = (quarantine.items || []).length
         const quarantineHidden = Math.max(
           0,
@@ -2314,14 +2312,14 @@
           (failure) => !failure.canRepairSeen && failure.sourceUrl
         ).length
         const recoveryCount =
-          oversized.length + slowFailures.length + tailDecode.length
-        mediaQueueMetaEl.textContent = `${formatNumber(recoveryCount)} recovery queue item${recoveryCount === 1 ? '' : 's'}; ${mediaFailures.length} latest media failure${mediaFailures.length === 1 ? '' : 's'}; ${likelyDeadFailures.length} likely dead; ${formatNumber(quarantine.needsReview || 0)} quarantine item${quarantine.needsReview === 1 ? '' : 's'} need review.`
+          oversized.length + slowFailures.length + tailDecodeCount
+        mediaQueueMetaEl.textContent = `${formatNumber(recoveryCount)} recovery queue item${recoveryCount === 1 ? '' : 's'}; ${mediaFailures.length} latest media failure${mediaFailures.length === 1 ? '' : 's'}; ${likelyDeadFailures.length} likely dead; ${formatNumber(quarantine.needsReview || 0)} quarantine item${quarantine.needsReview === 1 ? '' : 's'} need review; ${formatNumber(tailDecodeCount)} actionable tail-decode salvage candidate${tailDecodeCount === 1 ? '' : 's'} of ${formatNumber(tailDecodeTotal)} total.`
 
         const sections = []
         sections.push(`
           <div class="media-queue-actions">
             <button class="media-queue-action secondary" type="button" data-action="repair-indexes" ${repairableCount ? '' : 'disabled'}>Repair All Indexes</button>
-            <button class="media-queue-action secondary" type="button" data-action="salvage-all" ${tailDecode.length || quarantine.needsReview ? '' : 'disabled'}>Run Salvage All</button>
+            <button class="media-queue-action secondary" type="button" data-action="salvage-all" ${tailDecodeCount ? '' : 'disabled'}>Run Salvage All</button>
             <button class="media-queue-action" type="button" data-action="retry-slow" ${retryableSlowCount ? '' : 'disabled'}>Retry Slow</button>
             <button class="media-queue-action" type="button" data-action="retry-oversized" ${oversizedCount ? '' : 'disabled'}>Retry Oversized</button>
           </div>
@@ -2331,7 +2329,7 @@
             <summary class="media-queue-head">
               <div>
                 <div class="media-queue-title">Large / Slow Video Recovery</div>
-                <div class="detail">${formatNumber(oversizedCount)} oversized video${oversizedCount === 1 ? '' : 's'} | ${formatNumber(slowFailures.length)} slow/latest failure${slowFailures.length === 1 ? '' : 's'} | ${formatNumber(tailDecode.length)} tail-decode salvage candidate${tailDecode.length === 1 ? '' : 's'}</div>
+                <div class="detail">${formatNumber(oversizedCount)} oversized video${oversizedCount === 1 ? '' : 's'} | ${formatNumber(slowFailures.length)} slow/latest failure${slowFailures.length === 1 ? '' : 's'} | ${formatNumber(tailDecodeCount)} actionable tail-decode salvage candidate${tailDecodeCount === 1 ? '' : 's'} of ${formatNumber(tailDecodeTotal)}</div>
               </div>
               <span class="status ${recoveryCount ? 'warn' : 'success'}">${recoveryCount ? 'recover' : 'clean'}</span>
             </summary>
@@ -2958,13 +2956,20 @@
           const url = ban.dataset.url || ''
           if (
             !confirm(
-              `Mark this Reddit source as suspended but keep scraping it for ${model}?`
+              `Mark this Reddit source as banned/suspended and move it out of active sources for ${model}?`
             )
           )
             return
-          markSourceBanned(model, url)
+          markRedditSourceState(
+            model,
+            url,
+            'banned',
+            'reddit_account_suspended'
+          )
             .then((payload) => {
-              searchStatusEl.textContent = `Marked suspended for ${payload.model || model}; it will stay active for future checks.`
+              searchStatusEl.textContent = payload.stale
+                ? `${payload.model || model} now has no active sources.`
+                : `Moved banned/suspended Reddit account to old sources for ${payload.model || model}.`
               return Promise.all([loadModels(), loadHistory()])
             })
             .catch(renderHistoryError)

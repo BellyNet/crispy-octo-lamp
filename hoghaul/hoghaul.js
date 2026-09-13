@@ -74,6 +74,7 @@ const {
 } = require('../scrapyard/sourceAdapters/reddit')
 const {
   fetchCoomerFansPosts: fetchCoomerFansAdapterPosts,
+  isOnlyHavenSource,
   preflightCoomerFansSource,
 } = require('../scrapyard/sourceAdapters/coomerFans')
 const {
@@ -223,6 +224,8 @@ let errorCount = 0
 let queuedVideoCount = 0
 let savedBytes = 0
 let browserMediaDownloader = null
+let browserMediaDownloaderPromise = null
+let browserMediaEnabledLogged = false
 const MAX_FUZZY_IMAGE_VISUAL_DISTANCE = 8
 let runTerminationHandled = false
 let processTerminationHandlersInstalled = false
@@ -236,6 +239,8 @@ function resetRunState() {
   queuedVideoCount = 0
   savedBytes = 0
   browserMediaDownloader = null
+  browserMediaDownloaderPromise = null
+  browserMediaEnabledLogged = false
   runTerminationHandled = false
   activeMaxVideoDownloadBytes = MAX_VIDEO_DOWNLOAD_BYTES
 }
@@ -1079,7 +1084,9 @@ function shouldUseBrowserMediaForSource(
   runOptions = {},
   env = process.env
 ) {
-  if (source.site === 'coomerfans') return false
+  if (source.site === 'coomerfans') {
+    return !isOnlyHavenSource(source) && Boolean(requestedBrowserMedia)
+  }
   if (source.site === 'tumblr') return false
   if (isPawchiveSource(source)) return false
   if (
@@ -1090,6 +1097,68 @@ function shouldUseBrowserMediaForSource(
     return false
   }
   return Boolean(requestedBrowserMedia)
+}
+
+function isCoomerFansBrowserCheckHtml(html) {
+  const text = String(html || '')
+  return (
+    /<title>\s*Checking your browser\s*<\/title>/i.test(text) ||
+    /Checking your browser/i.test(text)
+  )
+}
+
+function isCoomerFansBrowserCheckError(err) {
+  const message = String(err?.message || err || '')
+  return (
+    /\bHTTP\s+(?:403|503)\b/i.test(message) ||
+    /Checking your browser/i.test(message)
+  )
+}
+
+function createCoomerFansBrowserFetchHtml(source, browserOptionsForSource) {
+  let browserFetchLogged = false
+
+  return async (url, requestOptions = {}) => {
+    try {
+      const direct = await fetchHtml(url, requestOptions)
+      if (!isCoomerFansBrowserCheckHtml(direct.html)) return direct
+      throw new Error('CoomerFans browser check page returned by direct HTTP')
+    } catch (err) {
+      if (!isCoomerFansBrowserCheckError(err)) throw err
+      const browser = await ensureBrowserMediaDownloader(
+        source,
+        browserOptionsForSource
+      )
+      if (!browserFetchLogged) {
+        browserFetchLogged = true
+        appendRunEvent('coomerfans_browser_fetch_enabled', {
+          browserProfile:
+            browserOptionsForSource.browserProfile ||
+            getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
+              headless: Boolean(browserOptionsForSource.headless),
+            }),
+          browserConnect: browserOptionsForSource.browserConnect || null,
+          directError: err.message,
+        })
+      }
+      const result = await browser.fetchHtml(url, {
+        ...requestOptions,
+        waitUntil: requestOptions.waitUntil || 'domcontentloaded',
+        settleMs:
+          Number.parseInt(
+            process.env.HOGHAUL_COOMERFANS_BROWSER_SETTLE_MS || '',
+            10
+          ) || 3500,
+        tolerateStatusCodes: [403, 503],
+      })
+      if (isCoomerFansBrowserCheckHtml(result.html)) {
+        throw new Error(
+          'CoomerFans browser check did not clear; rerun with --browser-visible --browser-validate-ms=60000 or pass --browser-connect to an unlocked browser'
+        )
+      }
+      return result
+    }
+  }
 }
 
 async function enrichMediaEntriesFromBrowserDom(entries, downloader) {
@@ -1237,26 +1306,35 @@ async function resolveKemonoCreatorIdForJson(source) {
 
 async function ensureBrowserMediaDownloader(source, browserOptions) {
   if (browserMediaDownloader) return browserMediaDownloader
-  browserMediaDownloader = await createSharedBrowserMediaDownloader(source, {
-    ...browserOptions,
-    slopvaultRoot,
-    requestBuffer,
-    requestToFile,
-    appendRunEvent,
-  })
-  appendRunEvent('browser_media_enabled', {
-    browserExecutable: browserOptions.browserExecutable || null,
-    browserProfile:
-      browserOptions.browserProfile ||
-      getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
-        headless: Boolean(browserOptions.headless),
-      }),
-    browserConnect: browserOptions.browserConnect || null,
-    headless: browserOptions.headless,
-    cookieFile: browserOptions.cookieFile || null,
-    hasCookieHeader: Boolean(browserOptions.cookieHeader),
-    validateMs: browserOptions.validateMs,
-  })
+  if (!browserMediaDownloaderPromise) {
+    browserMediaDownloaderPromise = createSharedBrowserMediaDownloader(source, {
+      ...browserOptions,
+      slopvaultRoot,
+      requestBuffer,
+      requestToFile,
+      appendRunEvent,
+    }).catch((err) => {
+      browserMediaDownloaderPromise = null
+      throw err
+    })
+  }
+  browserMediaDownloader = await browserMediaDownloaderPromise
+  if (!browserMediaEnabledLogged) {
+    browserMediaEnabledLogged = true
+    appendRunEvent('browser_media_enabled', {
+      browserExecutable: browserOptions.browserExecutable || null,
+      browserProfile:
+        browserOptions.browserProfile ||
+        getDefaultBrowserProfileDir(slopvaultRoot, source.site, {
+          headless: Boolean(browserOptions.headless),
+        }),
+      browserConnect: browserOptions.browserConnect || null,
+      headless: browserOptions.headless,
+      cookieFile: browserOptions.cookieFile || null,
+      hasCookieHeader: Boolean(browserOptions.cookieHeader),
+      validateMs: browserOptions.validateMs,
+    })
+  }
   return browserMediaDownloader
 }
 
@@ -1283,7 +1361,7 @@ async function fetchPosts(source, options, deps = {}) {
   const pageLogger = createStatusLineLogger(console)
   if (source.site === 'coomerfans') {
     return fetchCoomerFansAdapterPosts(source, options, {
-      fetchHtml,
+      fetchHtml: deps.fetchHtml || fetchHtml,
       fetchJson,
       fullSourceRefresh: deps.fullSourceRefresh,
       logger: pageLogger,
@@ -1348,7 +1426,7 @@ async function downloadMediaBuffer(mediaUrl, entry = {}) {
   })
 
   let buffer
-  if (browserMediaDownloader) {
+  if (browserMediaDownloader && entry.sourceSite !== 'coomerfans') {
     buffer = await browserMediaDownloader.download(mediaUrl, entry, {
       onProgress,
     })
@@ -1433,7 +1511,10 @@ async function downloadMediaToFile(mediaUrl, entry, destinationPath) {
   })
 
   let byteLength = 0
-  if (browserMediaDownloader?.downloadToFile) {
+  if (
+    browserMediaDownloader?.downloadToFile &&
+    entry.sourceSite !== 'coomerfans'
+  ) {
     byteLength = await browserMediaDownloader.downloadToFile(
       mediaUrl,
       destinationPath,
@@ -1969,6 +2050,7 @@ async function run(argvInput = process.argv.slice(2)) {
   }
 
   let redditBrowserFetchHtml = null
+  let coomerFansBrowserFetchHtml = null
   if (source.site === 'reddit' && useBrowserMedia) {
     let redditBrowserFetchLogged = false
     redditBrowserFetchHtml = async (...args) => {
@@ -1990,6 +2072,12 @@ async function run(argvInput = process.argv.slice(2)) {
       return browser.fetchHtml(...args)
     }
   }
+  if (source.site === 'coomerfans' && useBrowserMedia) {
+    coomerFansBrowserFetchHtml = createCoomerFansBrowserFetchHtml(
+      source,
+      browserOptionsForSource
+    )
+  }
 
   const posts = await fetchPosts(
     source,
@@ -2000,6 +2088,7 @@ async function run(argvInput = process.argv.slice(2)) {
       postConcurrency,
     },
     {
+      fetchHtml: coomerFansBrowserFetchHtml,
       fetchPostHtml: redditBrowserFetchHtml,
       fallbackDelayMs: runOptions.redditFallbackDelayMs,
       redditFullRefresh: runOptions.redditFullRefresh,
@@ -2217,7 +2306,8 @@ async function run(argvInput = process.argv.slice(2)) {
 
   setExpectedMediaCount(selectedMedia.length)
 
-  const useBrowserDomEnrichment = useBrowserMedia && source.site !== 'reddit'
+  const useBrowserDomEnrichment =
+    useBrowserMedia && !['reddit', 'coomerfans'].includes(source.site)
   if (useBrowserDomEnrichment) {
     await ensureBrowserMediaDownloader(source, browserOptionsForSource)
     selectedMedia = await enrichMediaEntriesFromBrowserDom(

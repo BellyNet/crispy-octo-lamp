@@ -281,7 +281,24 @@ async function createBrowserMediaDownloader(source, options = {}) {
       })
       if (!response) throw new Error('Browser returned no response')
       const status = response.status()
-      if (status < 200 || status >= 300) {
+      const toleratedStatuses = new Set(
+        Array.isArray(fetchOptions.tolerateStatusCodes)
+          ? fetchOptions.tolerateStatusCodes.map((value) => Number(value))
+          : []
+      )
+      if (
+        fetchOptions.settleMs &&
+        toleratedStatuses.has(status) &&
+        Number(fetchOptions.settleMs) > 0
+      ) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Number(fetchOptions.settleMs))
+        )
+      }
+      if (
+        (status < 200 || status >= 300) &&
+        !toleratedStatuses.has(status)
+      ) {
         throw new Error(`Browser HTTP ${status}`)
       }
       const html = await page.content()
