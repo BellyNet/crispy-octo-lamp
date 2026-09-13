@@ -1170,7 +1170,7 @@ async function main() {
   )
   assert.strictEqual(
     onlyHavenPosts[0].mediaEntries[0].mediaPageUrl,
-    'https://cum.st/creators/onlyfans/195143184/post/2720560178'
+    'https://cum.st/creators/onlyfans/195143184/post/2720560178#attachment-0-f1059c5bbc16'
   )
   assert.strictEqual(
     onlyHavenPosts[0].mediaEntries[0].mediaUrl,

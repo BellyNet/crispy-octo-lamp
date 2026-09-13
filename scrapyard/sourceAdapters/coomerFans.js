@@ -166,6 +166,21 @@ function getOnlyHavenPostUrl(source, postId) {
   return `${getOnlyHavenCreatorUrl(source)}/post/${postId}`
 }
 
+function getOnlyHavenAttachmentPageUrl(source, post, attachment) {
+  const postUrl = getOnlyHavenPostUrl(source, post.id)
+  const position = Number.isFinite(Number(attachment?.position))
+    ? String(Number(attachment.position))
+    : '0'
+  const hash = String(attachment?.sha256 || '')
+    .trim()
+    .slice(0, 12)
+  const fragment = [position, hash]
+    .map((part) => part.replace(/[^a-z0-9_-]+/gi, ''))
+    .filter(Boolean)
+    .join('-')
+  return fragment ? `${postUrl}#attachment-${fragment}` : postUrl
+}
+
 function getOnlyHavenMediaUrl(attachment) {
   if (!attachment || attachment.locked || !attachment.sha256) return null
   const original = (attachment.variants || []).find((variant) =>
@@ -432,11 +447,15 @@ function parseCoomerFansMediaEntries(source, post, html) {
 function parseOnlyHavenMediaEntries(source, post) {
   const title = getOnlyHavenPostText(post) || null
   const uploadedDate = parseOnlyHavenDate(post.published || post.added)
-  const mediaPageUrl = getOnlyHavenPostUrl(source, post.id)
   const entries = (post.attachments || [])
     .map((attachment) => {
       const mediaUrl = getOnlyHavenMediaUrl(attachment)
       if (!mediaUrl) return null
+      const mediaPageUrl = getOnlyHavenAttachmentPageUrl(
+        source,
+        post,
+        attachment
+      )
       const filename = getOnlyHavenAttachmentFilename(
         post,
         attachment,
