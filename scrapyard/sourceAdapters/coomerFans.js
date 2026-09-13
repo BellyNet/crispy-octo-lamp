@@ -186,6 +186,23 @@ function getOnlyHavenMediaUrl(attachment) {
   return `${ONLYHAVEN_MEDIA_ORIGIN}/media/${attachment.sha256}/${filename}`
 }
 
+function getOnlyHavenAttachmentFilename(post, attachment, mediaUrl) {
+  const originalName = filenameFromMediaUrl(mediaUrl)
+  if (!originalName) return null
+  const postId = String(post?.id || '').trim()
+  const position = Number.isFinite(Number(attachment?.position))
+    ? String(Number(attachment.position))
+    : '0'
+  const hash = String(attachment?.sha256 || '')
+    .trim()
+    .slice(0, 12)
+  const prefix = [postId, position, hash]
+    .map((part) => part.replace(/[^a-z0-9_-]+/gi, ''))
+    .filter(Boolean)
+    .join('-')
+  return prefix ? `${prefix}-${originalName}` : originalName
+}
+
 function parseOnlyHavenDate(value) {
   const seconds = Number(value || 0)
   if (!Number.isFinite(seconds) || seconds <= 0) return null
@@ -420,7 +437,11 @@ function parseOnlyHavenMediaEntries(source, post) {
     .map((attachment) => {
       const mediaUrl = getOnlyHavenMediaUrl(attachment)
       if (!mediaUrl) return null
-      const filename = filenameFromMediaUrl(mediaUrl)
+      const filename = getOnlyHavenAttachmentFilename(
+        post,
+        attachment,
+        mediaUrl
+      )
       if (!filename) return null
       return {
         postId: String(post.id || ''),
@@ -431,7 +452,7 @@ function parseOnlyHavenMediaEntries(source, post) {
         mediaUrl,
         mediaUrls: [mediaUrl],
         filename,
-        originalName: null,
+        originalName: filenameFromMediaUrl(mediaUrl),
         uploadedDate,
         expectedBytes: Number(attachment.bytes || 0) || null,
         width: Number(attachment.width || 0) || null,

@@ -1176,6 +1176,14 @@ async function main() {
     onlyHavenPosts[0].mediaEntries[0].mediaUrl,
     'https://e1.cum.st/media/f1059c5bbc160715efd6269705c96e68c89e65642355542933b14e0d4ac617c9/original.mp4'
   )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].filename,
+    '2720560178-0-f1059c5bbc16-original.mp4'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].originalName,
+    'original.mp4'
+  )
   const tumblrPayload = parseTumblrJsonpBody(
     `var tumblr_api_read = ${JSON.stringify({
       'posts-total': 3,
