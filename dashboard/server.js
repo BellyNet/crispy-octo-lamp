@@ -1500,27 +1500,20 @@ app.post('/api/users/:username/trash', async (req, res) => {
       }
     } catch {}
 
-    // Remove (not patch) the trashed items from the response caches, so the
-    // next /media request doesn't show ghosts.
-    const trashedKeys = new Set(
-      trashed.map((t) => `${t.folder}/${t.filename}`)
-    )
-    const removeItems = (response) =>
-      Array.isArray(response)
-        ? response.filter((m) => !trashedKeys.has(`${m.folder}/${m.filename}`))
-        : response
-
-    const memHit = mediaResponseCache.get(username)
-    if (memHit) memHit.response = removeItems(memHit.response)
+    // Evict (don't patch) the response caches. Patching .response in place
+    // while leaving the cached .fingerprint untouched is fragile: the
+    // fingerprint is a cheap, sampled stat of the model folder (see
+    // fingerprintTick), not a full hash — it can fail to notice a real
+    // change and let a stale-but-fingerprint-matching cache entry keep
+    // short-circuiting scanModel()'s rescan indefinitely, especially next
+    // to any out-of-band filesystem change (e.g. a maintenance script
+    // moving files directly) the running server has no other way to learn
+    // about. Evicting forces the next scanModel() call down its full
+    // rescan path, which is always correct, at the cost of one full rescan
+    // for this model.
+    mediaResponseCache.delete(username)
     try {
-      const diskFile = path.join(RESPONSE_CACHE_DIR, `${username}.json`)
-      if (fs.existsSync(diskFile)) {
-        const disk = JSON.parse(fs.readFileSync(diskFile, 'utf8'))
-        if (Array.isArray(disk.response)) {
-          disk.response = removeItems(disk.response)
-          fs.writeFileSync(diskFile, JSON.stringify(disk))
-        }
-      }
+      fs.unlinkSync(path.join(RESPONSE_CACHE_DIR, `${username}.json`))
     } catch {}
 
     // Stats (fileCount, totalBytes, coverPool, ...) are now stale — drop
