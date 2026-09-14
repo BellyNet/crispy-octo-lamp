@@ -902,6 +902,23 @@ function getInactiveSourceMap(inactiveSources = getInactiveRedditSources()) {
   return map
 }
 
+function getActiveSourceMap() {
+  const registry = loadModelRegistry(registryPath)
+  const map = new Map()
+  for (const [model, entry] of Object.entries(registry)) {
+    for (const sourceKey of SOURCE_KEYS) {
+      for (const source of sourceListFor(entry, sourceKey)) {
+        map.set(sourceStateKey(model, source.url), {
+          model,
+          sourceKey,
+          url: source.url,
+        })
+      }
+    }
+  }
+  return map
+}
+
 function getSourceStateMap(states = []) {
   const map = new Map()
   for (const state of states) {
@@ -2000,89 +2017,105 @@ function syncLatestAllSourceReportToHistory() {
 function buildSourceAlerts(
   runs,
   inactiveSourceMap = new Map(),
-  activeSourceStateMap = new Map()
+  activeSourceStateMap = new Map(),
+  activeSourceMap = new Map()
 ) {
   const sortedRuns = [...runs].sort(
     (left, right) =>
       new Date(right.startedAt || right.createdAt || 0) -
       new Date(left.startedAt || left.createdAt || 0)
   )
-  const latest = sortedRuns[0] || null
-  if (!latest) return []
+  if (!sortedRuns.length) return []
 
-  const priorWorked = new Map()
-  for (const run of sortedRuns.slice(1)) {
-    for (const model of run.models || []) {
-      for (const source of model.sources || []) {
-        if (!sourceWorked(source)) continue
-        const key = normalizeHistoryUrl(source.url)
-        if (!key || priorWorked.has(key)) continue
-        priorWorked.set(key, {
-          runId: run.id,
-          model: model.model,
-          label: source.label,
-          status: source.status,
-          finishedAt: source.finishedAt || run.finishedAt || run.startedAt,
-        })
+  const findPriorWorked = (sourceKey, firstOlderIndex) => {
+    for (let index = firstOlderIndex; index < sortedRuns.length; index += 1) {
+      const run = sortedRuns[index]
+      for (const model of run.models || []) {
+        for (const source of model.sources || []) {
+          if (sourceStateKey(model.model, source.url) !== sourceKey) continue
+          if (!sourceWorked(source)) continue
+          return {
+            runId: run.id,
+            model: model.model,
+            label: source.label,
+            status: source.status,
+            finishedAt: source.finishedAt || run.finishedAt || run.startedAt,
+          }
+        }
       }
     }
+    return null
   }
 
   const alerts = []
-  for (const model of latest.models || []) {
-    for (const source of model.sources || []) {
-      if (!sourceNeedsRepair(source)) continue
-      if (
-        inactiveSourceMap.has(sourceStateKey(model.model, source.url)) ||
-        inactiveSourceMap.has(
-          sourceStateKey(model.model, normalizeHistoryUrl(source.url))
-        )
-      ) {
-        continue
+  const resolvedSourceKeys = new Set()
+  for (let runIndex = 0; runIndex < sortedRuns.length; runIndex += 1) {
+    const run = sortedRuns[runIndex]
+    for (const model of run.models || []) {
+      for (const source of model.sources || []) {
+        const key = sourceStateKey(model.model, source.url)
+        if (!key || resolvedSourceKeys.has(key)) continue
+        if (activeSourceMap.size && !activeSourceMap.has(key)) {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        if (inactiveSourceMap.has(key)) {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        if (sourceWorked(source)) {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        if (!sourceNeedsRepair(source)) continue
+
+        const activeState = activeSourceStateMap.get(key) || null
+        if (activeState?.accountStatus === 'suspended') {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        const previous = findPriorWorked(key, runIndex + 1)
+        const savedEvidence = getSourceSavedEvidence(model.model, source)
+        const alertType = previous
+          ? 'regression'
+          : savedEvidence.exactSavedMedia > 0
+            ? 'saved_media_now_failing'
+            : classifySourceProblem(source)
+        resolvedSourceKeys.add(key)
+        if (
+          activeState?.accountStatus === 'valid' &&
+          alertType === 'deleted_or_empty_reddit'
+        ) {
+          continue
+        }
+        alerts.push({
+          alertType,
+          accountStatus: activeState?.accountStatus || null,
+          accountStatusAt: activeState?.accountStatusAt || null,
+          accountStatusReason: activeState?.accountStatusReason || '',
+          model: model.model,
+          sourceKey: source.sourceKey,
+          sourceType: source.sourceType,
+          label: source.label,
+          url: source.url,
+          status: source.status,
+          ok: source.ok,
+          saved: source.saved,
+          skipped: source.skipped,
+          duplicates: source.duplicates,
+          errors: source.errors,
+          processed: source.processed,
+          savedBefore: savedEvidence.exactSavedMedia > 0,
+          savedMediaCount: savedEvidence.exactSavedMedia,
+          modelSourceSavedMediaCount: savedEvidence.modelSourceSavedMedia,
+          failure: source.failure,
+          evidence: source.evidence,
+          latestRunId: run.id,
+          latestStartedAt: run.startedAt,
+          previousWorkedAt: previous?.finishedAt || null,
+          previousRunId: previous?.runId || null,
+        })
       }
-      const activeState =
-        activeSourceStateMap.get(sourceStateKey(model.model, source.url)) ||
-        null
-      const previous = priorWorked.get(normalizeHistoryUrl(source.url)) || null
-      const savedEvidence = getSourceSavedEvidence(model.model, source)
-      const alertType = previous
-        ? 'regression'
-        : savedEvidence.exactSavedMedia > 0
-          ? 'saved_media_now_failing'
-          : classifySourceProblem(source)
-      if (
-        activeState?.accountStatus === 'valid' &&
-        alertType === 'deleted_or_empty_reddit'
-      ) {
-        continue
-      }
-      alerts.push({
-        alertType,
-        accountStatus: activeState?.accountStatus || null,
-        accountStatusAt: activeState?.accountStatusAt || null,
-        accountStatusReason: activeState?.accountStatusReason || '',
-        model: model.model,
-        sourceKey: source.sourceKey,
-        sourceType: source.sourceType,
-        label: source.label,
-        url: source.url,
-        status: source.status,
-        ok: source.ok,
-        saved: source.saved,
-        skipped: source.skipped,
-        duplicates: source.duplicates,
-        errors: source.errors,
-        processed: source.processed,
-        savedBefore: savedEvidence.exactSavedMedia > 0,
-        savedMediaCount: savedEvidence.exactSavedMedia,
-        modelSourceSavedMediaCount: savedEvidence.modelSourceSavedMedia,
-        failure: source.failure,
-        evidence: source.evidence,
-        latestRunId: latest.id,
-        latestStartedAt: latest.startedAt,
-        previousWorkedAt: previous?.finishedAt || null,
-        previousRunId: previous?.runId || null,
-      })
     }
   }
 
@@ -2093,7 +2126,11 @@ function buildSourceAlerts(
       deleted_or_empty_reddit: 2,
       reddit_error: 3,
     }
-    return (rank[left.alertType] ?? 3) - (rank[right.alertType] ?? 3)
+    const rankDelta = (rank[left.alertType] ?? 3) - (rank[right.alertType] ?? 3)
+    if (rankDelta) return rankDelta
+    return (
+      new Date(right.latestStartedAt || 0) - new Date(left.latestStartedAt || 0)
+    )
   })
 }
 
@@ -2811,6 +2848,7 @@ function buildAuditQueues(history) {
   )
   const inactiveSourceMap = getInactiveSourceMap(inactiveRedditSources)
   const activeSourceStateMap = getSourceStateMap(activeRedditStates)
+  const activeSourceMap = getActiveSourceMap()
   const suspendedRedditSources = attachLatestSourceStatuses(
     activeRedditStates.filter((source) => source.accountStatus === 'suspended'),
     latestSourceStatuses
@@ -2820,7 +2858,12 @@ function buildAuditQueues(history) {
     latestSourceStatuses
   )
   const queues = {
-    sources: buildSourceAlerts(runs, inactiveSourceMap, activeSourceStateMap),
+    sources: buildSourceAlerts(
+      runs,
+      inactiveSourceMap,
+      activeSourceStateMap,
+      activeSourceMap
+    ),
     suspendedRedditSources,
     validRedditSources,
     inactiveRedditSources,

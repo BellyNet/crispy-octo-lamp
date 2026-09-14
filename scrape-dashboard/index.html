@@ -2121,7 +2121,7 @@
         repairMetaEl.textContent = `${savedBefore} saved-before source${savedBefore === 1 ? '' : 's'} need repair; ${neverSavedReddit} never-saved Reddit source${neverSavedReddit === 1 ? '' : 's'} may be empty or deleted; ${otherFailures} other failure${otherFailures === 1 ? '' : 's'} need review.`
         if (!alerts.length) {
           sourceAlertsEl.innerHTML =
-            '<div class="empty">No failing or unavailable sources in the latest run.</div>'
+            '<div class="empty">No unresolved failing or unavailable sources.</div>'
           return
         }
         sourceAlertsEl.innerHTML = alerts
