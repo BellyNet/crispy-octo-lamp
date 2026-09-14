@@ -1,8 +1,6 @@
 {
   "abigailgray256": {
-    "aliases": [
-      "abigailgray256"
-    ],
+    "aliases": ["abigailgray256"],
     "sources": {
       "coomer": [
         {
@@ -21,7 +19,7 @@
           "userId": "abigailgray256",
           "username": "abigailgray256",
           "discoveredAs": "abigailgray256",
-          "lastCheckedAt": "2026-09-08T02:23:09.509Z"
+          "lastCheckedAt": "2026-09-13T21:23:45.675Z"
         }
       ],
       "stufferdb": [
@@ -29,7 +27,7 @@
           "url": "https://stufferdb.com/index?/category/16368",
           "categoryId": "16368",
           "discoveredAs": "abigailgray256",
-          "lastCheckedAt": "2026-09-08T02:23:34.883Z"
+          "lastCheckedAt": "2026-09-14T14:02:56.056Z"
         }
       ]
     },
@@ -38,18 +36,12 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:11:03.641Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "abigailgray256"
-        ]
+        "searchTerms": ["abigailgray256"]
       }
     }
   },
   "acdc34434_laura_fatty": {
-    "aliases": [
-      "11678891",
-      "acdc34434_laura_fatty",
-      "laurafatty"
-    ],
+    "aliases": ["11678891", "acdc34434_laura_fatty", "laurafatty"],
     "sources": {
       "coomer": [
         {
@@ -65,20 +57,10 @@
         {
           "url": "https://pawchive.pw/patreon/user/11678891",
           "discoveredAs": "11678891",
-          "lastCheckedAt": "2026-09-08T02:24:34.350Z",
+          "lastCheckedAt": "2026-09-14T13:24:12.183Z",
           "service": "patreon",
           "userId": "11678891",
           "username": null
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/Laura_Fatty/submitted/",
-          "service": "submitted",
-          "userId": "Laura_Fatty",
-          "username": "Laura_Fatty",
-          "discoveredAs": "acdc34434_laura_fatty",
-          "lastCheckedAt": "2026-05-11T16:22:04.390Z"
         }
       ],
       "stufferdb": [
@@ -86,7 +68,22 @@
           "url": "https://stufferdb.com/index?/category/2333",
           "categoryId": "2333",
           "discoveredAs": "acdc34434_laura_fatty",
-          "lastCheckedAt": "2026-09-08T02:24:43.741Z"
+          "lastCheckedAt": "2026-09-14T13:24:33.488Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/Laura_Fatty/submitted/",
+          "service": "submitted",
+          "userId": "Laura_Fatty",
+          "username": "Laura_Fatty",
+          "discoveredAs": "acdc34434_laura_fatty",
+          "lastCheckedAt": "2026-05-11T16:22:04.390Z",
+          "model": "acdc34434_laura_fatty",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     },
@@ -95,19 +92,12 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:11:50.342Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "acdc34434_laura_fatty",
-          "laurafatty"
-        ]
+        "searchTerms": ["acdc34434_laura_fatty", "laurafatty"]
       }
     }
   },
   "agirlwholikestoeat": {
-    "aliases": [
-      "44341497",
-      "agirlwholikestoeat",
-      "agirlwholyks2eat"
-    ],
+    "aliases": ["44341497", "agirlwholikestoeat", "agirlwholyks2eat"],
     "sources": {
       "coomer": [
         {
@@ -131,7 +121,7 @@
         {
           "url": "https://pawchive.pw/patreon/user/44341497",
           "discoveredAs": "44341497",
-          "lastCheckedAt": "2026-09-08T02:25:04.529Z",
+          "lastCheckedAt": "2026-09-14T14:05:35.932Z",
           "service": "patreon",
           "userId": "44341497",
           "username": null
@@ -152,7 +142,7 @@
           "url": "https://stufferdb.com/index?/category/14167",
           "categoryId": "14167",
           "discoveredAs": "agirlwholikestoeat",
-          "lastCheckedAt": "2026-09-08T02:25:16.660Z"
+          "lastCheckedAt": "2026-09-14T15:50:20.839Z"
         }
       ]
     },
@@ -170,17 +160,14 @@
     }
   },
   "ailihex": {
-    "aliases": [
-      "ailihex",
-      "xehilia"
-    ],
+    "aliases": ["ailihex", "xehilia"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/299601/xehilia",
           "service": "onlyfans",
           "discoveredAs": "xehilia",
-          "lastCheckedAt": "2026-09-08T02:26:11.440Z",
+          "lastCheckedAt": "2026-09-14T14:07:35.050Z",
           "userId": "299601",
           "username": null
         }
@@ -200,7 +187,7 @@
           "url": "https://stufferdb.com/index?/category/16757",
           "categoryId": "16757",
           "discoveredAs": "ailihex",
-          "lastCheckedAt": "2026-09-08T02:26:16.004Z"
+          "lastCheckedAt": "2026-09-14T14:07:40.387Z"
         }
       ]
     },
@@ -209,44 +196,29 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:15:25.569Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "ailihex",
-          "xehilia"
-        ]
+        "searchTerms": ["ailihex", "xehilia"]
       }
     }
   },
   "alissbonyt": {
-    "aliases": [
-      "alissbonyt"
-    ],
+    "aliases": ["alissbonyt", "alissbonytfree"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/313685/alissbonyt",
           "service": "onlyfans",
           "discoveredAs": "alissbonyt",
-          "lastCheckedAt": "2026-09-08T02:27:34.155Z",
+          "lastCheckedAt": "2026-09-14T13:25:59.701Z",
           "userId": "313685",
-          "username": "alissbonyt"
+          "username": null
         },
         {
           "url": "https://cum.st/creators/onlyfans/413152253",
           "service": "onlyfans",
           "userId": "413152253",
-          "username": null,
-          "discoveredAs": "alissbonyt",
-          "lastCheckedAt": "2026-09-11T17:16:12.275Z"
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/alissbonyt/submitted/",
-          "service": "submitted",
-          "userId": "alissbonyt",
-          "username": "alissbonyt",
-          "discoveredAs": "alissbonyt",
-          "lastCheckedAt": "2026-05-29T01:29:04.328Z"
+          "username": "alissbonytfree",
+          "discoveredAs": "alissbonytfree",
+          "lastCheckedAt": "2026-09-14T13:26:01.967Z"
         }
       ],
       "stufferdb": [
@@ -254,7 +226,22 @@
           "url": "https://stufferdb.com/index?/category/3249",
           "categoryId": "3249",
           "discoveredAs": "alissbonyt",
-          "lastCheckedAt": "2026-09-08T02:27:37.289Z"
+          "lastCheckedAt": "2026-09-14T13:26:09.828Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/alissbonyt/submitted/",
+          "service": "submitted",
+          "userId": "alissbonyt",
+          "username": "alissbonyt",
+          "discoveredAs": "alissbonyt",
+          "lastCheckedAt": "2026-05-29T01:29:04.328Z",
+          "model": "alissbonyt",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     },
@@ -272,10 +259,7 @@
     }
   },
   "anybodylost6726": {
-    "aliases": [
-      "anybodylost6726",
-      "kailmessy"
-    ],
+    "aliases": ["anybodylost6726", "kailmessy"],
     "sources": {
       "coomer": [
         {
@@ -294,7 +278,7 @@
           "userId": "anybodylost6726",
           "username": "anybodylost6726",
           "discoveredAs": "anybodylost6726",
-          "lastCheckedAt": "2026-09-08T02:28:07.377Z"
+          "lastCheckedAt": "2026-09-14T14:08:08.094Z"
         }
       ],
       "stufferdb": [
@@ -302,7 +286,7 @@
           "url": "https://stufferdb.com/index?/category/16772",
           "categoryId": "16772",
           "discoveredAs": "anybodylost6726",
-          "lastCheckedAt": "2026-09-08T02:28:18.760Z"
+          "lastCheckedAt": "2026-09-14T14:08:27.783Z"
         }
       ]
     },
@@ -311,18 +295,12 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:19:13.926Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "anybodylost6726",
-          "kailmessy"
-        ]
+        "searchTerms": ["anybodylost6726", "kailmessy"]
       }
     }
   },
   "aphrodite": {
-    "aliases": [
-      "aphrodite",
-      "eddielander"
-    ],
+    "aliases": ["aphrodite", "eddielander"],
     "sources": {
       "reddit": [
         {
@@ -331,35 +309,22 @@
           "userId": "eddielander",
           "username": "eddielander",
           "discoveredAs": "eddielander",
-          "lastCheckedAt": "2026-07-30T14:44:06.427Z"
+          "lastCheckedAt": "2026-09-14T14:09:05.289Z"
         }
       ]
     }
   },
   "arilove": {
-    "aliases": [
-      "arilove",
-      "arisfans"
-    ],
+    "aliases": ["arilove", "arisfans"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/297531/arisfans",
           "service": "onlyfans",
           "discoveredAs": "arisfans",
-          "lastCheckedAt": "2026-07-30T14:45:09.806Z",
+          "lastCheckedAt": "2026-09-14T13:27:05.966Z",
           "userId": "297531",
           "username": null
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/arilove/submitted/",
-          "service": "submitted",
-          "userId": "arilove",
-          "username": "arilove",
-          "discoveredAs": "arilove",
-          "lastCheckedAt": "2026-05-29T01:29:29.162Z"
         }
       ],
       "stufferdb": [
@@ -367,7 +332,22 @@
           "url": "https://stufferdb.com/index?/category/10779",
           "categoryId": "10779",
           "discoveredAs": "arilove",
-          "lastCheckedAt": "2026-07-30T14:45:11.375Z"
+          "lastCheckedAt": "2026-09-14T13:27:08.438Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/arilove/submitted/",
+          "service": "submitted",
+          "userId": "arilove",
+          "username": "arilove",
+          "discoveredAs": "arilove",
+          "lastCheckedAt": "2026-05-29T01:29:29.162Z",
+          "model": "arilove",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     },
@@ -376,39 +356,32 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:20:39.627Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "arilove",
-          "arisfans"
-        ]
+        "searchTerms": ["arilove", "arisfans"]
       }
     }
   },
   "ashakayx3": {
-    "aliases": [
-      "ashakayx3"
-    ],
+    "aliases": ["ashakayx3"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/29060",
           "categoryId": "29060",
           "discoveredAs": "ashakayx3",
-          "lastCheckedAt": "2026-07-30T14:45:18.375Z"
+          "lastCheckedAt": "2026-09-14T14:09:11.322Z"
         }
       ]
     }
   },
   "azismiss": {
-    "aliases": [
-      "azismiss"
-    ],
+    "aliases": ["azismiss"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/189496/azismiss",
           "service": "onlyfans",
           "discoveredAs": "azismiss",
-          "lastCheckedAt": "2026-07-30T14:46:07.745Z",
+          "lastCheckedAt": "2026-09-14T14:10:11.077Z",
           "userId": "189496",
           "username": null
         }
@@ -428,7 +401,7 @@
           "url": "https://stufferdb.com/index?/category/10869",
           "categoryId": "10869",
           "discoveredAs": "azismiss",
-          "lastCheckedAt": "2026-07-30T14:46:09.343Z"
+          "lastCheckedAt": "2026-09-14T14:10:16.162Z"
         }
       ]
     },
@@ -437,16 +410,12 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:20:46.182Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "azismiss"
-        ]
+        "searchTerms": ["azismiss"]
       }
     }
   },
   "babypinkcow": {
-    "aliases": [
-      "babypinkcow"
-    ],
+    "aliases": ["babypinkcow"],
     "sources": {
       "reddit": [
         {
@@ -455,7 +424,7 @@
           "userId": "babypinkcow",
           "username": "babypinkcow",
           "discoveredAs": "babypinkcow",
-          "lastCheckedAt": "2026-07-24T16:25:12.307Z"
+          "lastCheckedAt": "2026-09-14T14:11:08.518Z"
         }
       ],
       "stufferdb": [
@@ -463,22 +432,20 @@
           "url": "https://stufferdb.com/index?/category/28588",
           "categoryId": "28588",
           "discoveredAs": "babypinkcow",
-          "lastCheckedAt": "2026-07-30T14:47:09.144Z"
+          "lastCheckedAt": "2026-09-14T14:11:14.827Z"
         }
       ]
     }
   },
   "bbw_bonnie": {
-    "aliases": [
-      "bbw_bonnie"
-    ],
+    "aliases": ["bbw_bonnie"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/307467/bbw_bonnie",
           "service": "onlyfans",
           "discoveredAs": "bbw_bonnie",
-          "lastCheckedAt": "2026-07-30T14:47:26.754Z",
+          "lastCheckedAt": "2026-09-14T14:11:35.581Z",
           "userId": "307467",
           "username": null
         }
@@ -490,17 +457,23 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:21:26.603Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "bbw_bonnie"
-        ]
+        "searchTerms": ["bbw_bonnie"]
       }
     }
   },
   "bbw_breanna": {
-    "aliases": [
-      "bbw_breanna"
-    ],
+    "aliases": ["bbw_breanna"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/7712",
+          "categoryId": "7712",
+          "discoveredAs": "bbw_breanna",
+          "lastCheckedAt": "2026-09-14T13:27:20.282Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/bbw_breanna/submitted/",
@@ -508,30 +481,23 @@
           "userId": "bbw_breanna",
           "username": "bbw_breanna",
           "discoveredAs": "bbw_breanna",
-          "lastCheckedAt": "2026-05-29T01:29:50.193Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/7712",
-          "categoryId": "7712",
-          "discoveredAs": "bbw_breanna",
-          "lastCheckedAt": "2026-07-30T14:48:06.936Z"
+          "lastCheckedAt": "2026-05-29T01:29:50.193Z",
+          "model": "bbw_breanna",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "bbw_demetra": {
-    "aliases": [
-      "bbw_demetra"
-    ],
+    "aliases": ["bbw_demetra"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/335133/bbw_demetra",
           "service": "onlyfans",
           "discoveredAs": "bbw_demetra",
-          "lastCheckedAt": "2026-07-30T14:49:12.715Z",
+          "lastCheckedAt": "2026-09-14T14:12:14.184Z",
           "userId": "335133",
           "username": null
         }
@@ -543,7 +509,7 @@
           "userId": "bbw_demetra",
           "username": "bbw_demetra",
           "discoveredAs": "bbw_demetra",
-          "lastCheckedAt": "2026-07-30T14:49:05.380Z"
+          "lastCheckedAt": "2026-09-14T14:12:06.819Z"
         }
       ],
       "stufferdb": [
@@ -551,7 +517,7 @@
           "url": "https://stufferdb.com/index?/category/21048",
           "categoryId": "21048",
           "discoveredAs": "bbw_demetra",
-          "lastCheckedAt": "2026-07-30T14:49:15.994Z"
+          "lastCheckedAt": "2026-09-14T14:12:34.676Z"
         }
       ]
     },
@@ -560,25 +526,19 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:22:11.511Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "bbw_demetra"
-        ]
+        "searchTerms": ["bbw_demetra"]
       }
     }
   },
   "bbwbellla": {
-    "aliases": [
-      "bbwbella",
-      "bbwbellla",
-      "bbwkbella"
-    ],
+    "aliases": ["bbwbella", "bbwbellla", "bbwkbella"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/304758/bbwkbella",
           "service": "onlyfans",
           "discoveredAs": "bbwkbella",
-          "lastCheckedAt": "2026-07-30T14:50:26.792Z",
+          "lastCheckedAt": "2026-09-14T14:13:54.265Z",
           "userId": "304758",
           "username": null
         }
@@ -598,7 +558,7 @@
           "url": "https://stufferdb.com/index?/category/15222",
           "categoryId": "15222",
           "discoveredAs": "bbwbellla",
-          "lastCheckedAt": "2026-07-30T14:50:31.120Z"
+          "lastCheckedAt": "2026-09-14T14:13:58.186Z"
         }
       ]
     },
@@ -607,19 +567,23 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:22:51.620Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "bbwbellla",
-          "bbwbella",
-          "bbwkbella"
-        ]
+        "searchTerms": ["bbwbellla", "bbwbella", "bbwkbella"]
       }
     }
   },
   "beccabae": {
-    "aliases": [
-      "beccabae"
-    ],
+    "aliases": ["beccabae"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/496",
+          "categoryId": "496",
+          "discoveredAs": "beccabae",
+          "lastCheckedAt": "2026-09-14T14:14:21.827Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/beccabae/submitted/",
@@ -627,31 +591,23 @@
           "userId": "beccabae",
           "username": "beccabae",
           "discoveredAs": "beccabae",
-          "lastCheckedAt": "2026-07-30T14:51:05.071Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/496",
-          "categoryId": "496",
-          "discoveredAs": "beccabae",
-          "lastCheckedAt": "2026-07-30T14:51:06.879Z"
+          "lastCheckedAt": "2026-09-13T21:40:13.601Z",
+          "model": "beccabae",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "bella_abbondanza": {
-    "aliases": [
-      "bella_abbondanza",
-      "bellaabbondanza"
-    ],
+    "aliases": ["bella_abbondanza", "bellaabbondanza"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/305971/bellaabbondanza",
           "service": "onlyfans",
           "discoveredAs": "bellaabbondanza",
-          "lastCheckedAt": "2026-07-30T14:52:14.461Z",
+          "lastCheckedAt": "2026-09-14T14:15:17.789Z",
           "userId": "305971",
           "username": null
         }
@@ -671,7 +627,7 @@
           "url": "https://stufferdb.com/index?/category/8483",
           "categoryId": "8483",
           "discoveredAs": "bella_abbondanza",
-          "lastCheckedAt": "2026-07-30T14:52:16.286Z"
+          "lastCheckedAt": "2026-09-14T14:15:41.649Z"
         }
       ],
       "tumblr": [
@@ -681,7 +637,7 @@
           "userId": "bellaabbondanza",
           "username": "bellaabbondanza",
           "discoveredAs": "bellaabbondanza",
-          "lastCheckedAt": "2026-09-11T19:11:09.815Z"
+          "lastCheckedAt": "2026-09-14T14:17:09.688Z"
         }
       ]
     },
@@ -690,31 +646,25 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:23:18.896Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "bella_abbondanza"
-        ]
+        "searchTerms": ["bella_abbondanza"]
       }
     }
   },
   "bellasky_": {
-    "aliases": [
-      "bellasky_"
-    ],
+    "aliases": ["bellasky_"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/23184",
           "categoryId": "23184",
           "discoveredAs": "bellasky",
-          "lastCheckedAt": "2026-07-30T14:53:09.130Z"
+          "lastCheckedAt": "2026-09-14T14:17:17.065Z"
         }
       ]
     }
   },
   "bellissimobelly": {
-    "aliases": [
-      "bellissimobelly"
-    ],
+    "aliases": ["bellissimobelly"],
     "sources": {
       "reddit": [
         {
@@ -731,42 +681,38 @@
           "url": "https://stufferdb.com/index?/category/22375",
           "categoryId": "22375",
           "discoveredAs": "bellissimobelly",
-          "lastCheckedAt": "2026-07-30T14:54:09.131Z"
+          "lastCheckedAt": "2026-09-14T14:17:36.030Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/14154",
           "categoryId": "14154",
           "discoveredAs": "bellissimobelly",
-          "lastCheckedAt": "2026-07-30T15:14:19.276Z"
+          "lastCheckedAt": "2026-09-14T14:17:43.541Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/27832",
           "categoryId": "27832",
           "discoveredAs": "bellissimobelly",
-          "lastCheckedAt": "2026-07-30T15:19:21.045Z"
+          "lastCheckedAt": "2026-09-14T14:17:52.298Z"
         }
       ]
     }
   },
   "bigbravebabe": {
-    "aliases": [
-      "bigbravebabe"
-    ],
+    "aliases": ["bigbravebabe"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/12161",
           "categoryId": "12161",
           "discoveredAs": "bigbravebabe",
-          "lastCheckedAt": "2026-07-30T14:54:15.330Z"
+          "lastCheckedAt": "2026-09-14T14:20:02.132Z"
         }
       ]
     }
   },
   "bit-chh": {
-    "aliases": [
-      "bit-chh"
-    ],
+    "aliases": ["bit-chh"],
     "sources": {
       "reddit": [
         {
@@ -775,7 +721,7 @@
           "userId": "bit-chh",
           "username": "bit-chh",
           "discoveredAs": "bit-chh",
-          "lastCheckedAt": "2026-07-24T16:33:12.066Z"
+          "lastCheckedAt": "2026-09-14T14:20:14.994Z"
         }
       ],
       "stufferdb": [
@@ -783,15 +729,13 @@
           "url": "https://stufferdb.com/index?/category/23801",
           "categoryId": "23801",
           "discoveredAs": "bit-chh",
-          "lastCheckedAt": "2026-07-24T16:33:16.459Z"
+          "lastCheckedAt": "2026-09-14T14:20:18.394Z"
         }
       ]
     }
   },
   "blondiee188": {
-    "aliases": [
-      "blondiee188"
-    ],
+    "aliases": ["blondiee188"],
     "sources": {
       "reddit": [
         {
@@ -808,22 +752,20 @@
           "url": "https://stufferdb.com/index?/category/16599",
           "categoryId": "16599",
           "discoveredAs": "blondiee188",
-          "lastCheckedAt": "2026-07-24T16:34:24.061Z"
+          "lastCheckedAt": "2026-09-14T14:21:09.920Z"
         }
       ]
     }
   },
   "bodylovebritt": {
-    "aliases": [
-      "bodylovebritt"
-    ],
+    "aliases": ["bodylovebritt"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/317075/bodylovebritt",
           "service": "onlyfans",
           "discoveredAs": "bodylovebritt",
-          "lastCheckedAt": "2026-07-24T16:34:37.946Z",
+          "lastCheckedAt": "2026-09-14T14:21:19.454Z",
           "userId": "317075",
           "username": null
         }
@@ -833,7 +775,7 @@
           "url": "https://stufferdb.com/index?/category/7696",
           "categoryId": "7696",
           "discoveredAs": "bodylovebritt",
-          "lastCheckedAt": "2026-07-24T16:34:40.203Z"
+          "lastCheckedAt": "2026-09-14T14:21:24.918Z"
         }
       ]
     },
@@ -842,16 +784,12 @@
         "status": "not_found",
         "reviewedAt": "2026-09-11T17:25:12.954Z",
         "reason": "manual_review_no_match",
-        "searchTerms": [
-          "bodylovebritt"
-        ]
+        "searchTerms": ["bodylovebritt"]
       }
     }
   },
   "bustyy_b3lle": {
-    "aliases": [
-      "bustyy_b3lle"
-    ],
+    "aliases": ["bustyy_b3lle"],
     "sources": {
       "reddit": [
         {
@@ -860,7 +798,7 @@
           "userId": "Bustyy_B3lle",
           "username": "Bustyy_B3lle",
           "discoveredAs": "bustyy_b3lle",
-          "lastCheckedAt": "2026-07-24T16:35:12.558Z"
+          "lastCheckedAt": "2026-09-14T14:22:07.758Z"
         }
       ],
       "stufferdb": [
@@ -868,30 +806,26 @@
           "url": "https://stufferdb.com/index?/category/23966",
           "categoryId": "23966",
           "discoveredAs": "bustyy_b3lle",
-          "lastCheckedAt": "2026-07-24T16:36:08.188Z"
+          "lastCheckedAt": "2026-09-14T14:22:15.648Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/23922",
           "categoryId": "23922",
           "discoveredAs": "bustyy_b3lle",
-          "lastCheckedAt": "2026-09-09T10:46:21.638Z"
+          "lastCheckedAt": "2026-09-14T14:22:21.816Z"
         }
       ]
     }
   },
   "cakedupkayyla": {
-    "aliases": [
-      "CakedduppKayyla",
-      "cakedupkayla",
-      "cakedupkayyla"
-    ],
+    "aliases": ["CakedduppKayyla", "cakedupkayla", "cakedupkayyla"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/333819/cakedupkayyla",
           "service": "onlyfans",
           "discoveredAs": "cakedupkayyla",
-          "lastCheckedAt": "2026-07-24T16:36:42.887Z",
+          "lastCheckedAt": "2026-09-14T14:23:13.914Z",
           "userId": "333819",
           "username": null
         }
@@ -911,29 +845,25 @@
           "url": "https://stufferdb.com/index?/category/12333",
           "categoryId": "12333",
           "discoveredAs": "cakedupkayyla",
-          "lastCheckedAt": "2026-07-24T16:36:44.629Z"
+          "lastCheckedAt": "2026-09-14T14:23:18.372Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/16472",
           "categoryId": "16472",
           "discoveredAs": "cakedupkayyla",
-          "lastCheckedAt": "2026-07-24T16:36:52.676Z"
+          "lastCheckedAt": "2026-09-14T14:23:30.834Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/14176",
           "categoryId": "14176",
           "discoveredAs": "cakedupkayyla",
-          "lastCheckedAt": "2026-07-24T16:36:59.752Z"
+          "lastCheckedAt": "2026-09-14T14:23:38.994Z"
         }
       ]
     }
   },
   "candii_kayn": {
-    "aliases": [
-      "24586027",
-      "candii_kayin",
-      "candii_kayn"
-    ],
+    "aliases": ["24586027", "candii_kayin", "candii_kayn"],
     "sources": {
       "coomer": [
         {
@@ -952,7 +882,7 @@
           "userId": "24586027",
           "username": null,
           "discoveredAs": "24586027",
-          "lastCheckedAt": "2026-08-10T15:41:10.354Z"
+          "lastCheckedAt": "2026-09-14T14:24:16.086Z"
         }
       ],
       "reddit": [
@@ -970,7 +900,7 @@
           "url": "https://stufferdb.com/index?/category/8586",
           "categoryId": "8586",
           "discoveredAs": "candii_kayn",
-          "lastCheckedAt": "2026-07-24T16:37:29.089Z"
+          "lastCheckedAt": "2026-09-14T14:24:20.978Z"
         }
       ]
     },
@@ -992,16 +922,14 @@
     }
   },
   "carmen_lafox": {
-    "aliases": [
-      "carmen_lafox"
-    ],
+    "aliases": ["carmen_lafox"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/1600",
           "categoryId": "1600",
           "discoveredAs": "carmen_lafox",
-          "lastCheckedAt": "2026-07-24T16:38:12.739Z"
+          "lastCheckedAt": "2026-09-14T14:24:27.554Z"
         }
       ]
     }
@@ -1044,40 +972,37 @@
           "url": "https://stufferdb.com/index?/category/21830",
           "categoryId": "21830",
           "discoveredAs": "cassandracavallieri",
-          "lastCheckedAt": "2026-07-24T16:38:38.885Z"
+          "lastCheckedAt": "2026-09-14T14:25:20.994Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/21820",
           "categoryId": "21820",
           "discoveredAs": "cassandracavallieri",
-          "lastCheckedAt": "2026-07-24T16:38:46.781Z"
+          "lastCheckedAt": "2026-09-14T14:25:27.110Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/23051",
           "categoryId": "23051",
           "discoveredAs": "cassandracavallieri",
-          "lastCheckedAt": "2026-07-24T16:38:52.974Z"
+          "lastCheckedAt": "2026-09-14T14:25:32.518Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/24089",
           "categoryId": "24089",
           "discoveredAs": "cassandracavallieri",
-          "lastCheckedAt": "2026-07-24T16:39:00.726Z"
+          "lastCheckedAt": "2026-09-14T14:25:40.722Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/21746",
           "categoryId": "21746",
           "discoveredAs": "cassandracavallieri",
-          "lastCheckedAt": "2026-07-24T16:39:11.131Z"
+          "lastCheckedAt": "2026-09-14T14:25:47.148Z"
         }
       ]
     }
   },
   "cecehectori": {
-    "aliases": [
-      "cecehectori",
-      "cecehectorireal"
-    ],
+    "aliases": ["cecehectori", "cecehectorireal"],
     "sources": {
       "coomer": [
         {
@@ -1094,21 +1019,19 @@
           "url": "https://stufferdb.com/index?/category/14882",
           "categoryId": "14882",
           "discoveredAs": "cecehectori",
-          "lastCheckedAt": "2026-07-24T16:39:36.534Z"
+          "lastCheckedAt": "2026-09-14T14:26:15.902Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/21178",
           "categoryId": "21178",
           "discoveredAs": "cecehectori",
-          "lastCheckedAt": "2026-07-24T16:39:42.393Z"
+          "lastCheckedAt": "2026-09-14T14:26:27.169Z"
         }
       ]
     }
   },
   "cherryxbomb69x": {
-    "aliases": [
-      "cherryxbomb69x"
-    ],
+    "aliases": ["cherryxbomb69x"],
     "sources": {
       "reddit": [
         {
@@ -1125,31 +1048,37 @@
           "url": "https://stufferdb.com/index?/category/23218",
           "categoryId": "23218",
           "discoveredAs": "cherryxbomb69x",
-          "lastCheckedAt": "2026-07-24T16:40:00.298Z"
+          "lastCheckedAt": "2026-09-14T14:26:45.975Z"
         }
       ]
     }
   },
   "chloe_curvingchloe_bigcuties_": {
-    "aliases": [
-      "chloe_curvingchloe_bigcuties_"
-    ],
+    "aliases": ["chloe_curvingchloe_bigcuties_"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/4193",
           "categoryId": "4193",
           "discoveredAs": "chloe_curvingchloe_bigcuties",
-          "lastCheckedAt": "2026-07-24T16:40:06.389Z"
+          "lastCheckedAt": "2026-09-14T14:26:53.894Z"
         }
       ]
     }
   },
   "chubbycat666": {
-    "aliases": [
-      "chubbycat666"
-    ],
+    "aliases": ["chubbycat666"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/6808",
+          "categoryId": "6808",
+          "discoveredAs": "chubbycat666",
+          "lastCheckedAt": "2026-09-14T13:29:46.840Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/chubbycat666/submitted/",
@@ -1157,30 +1086,23 @@
           "userId": "chubbycat666",
           "username": "chubbycat666",
           "discoveredAs": "chubbycat666",
-          "lastCheckedAt": "2026-05-29T01:32:30.607Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/6808",
-          "categoryId": "6808",
-          "discoveredAs": "chubbycat666",
-          "lastCheckedAt": "2026-07-24T16:40:22.086Z"
+          "lastCheckedAt": "2026-05-29T01:32:30.607Z",
+          "model": "chubbycat666",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "chubbychiquita": {
-    "aliases": [
-      "chubbychiquita"
-    ],
+    "aliases": ["chubbychiquita"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/294423/chubbychiquita",
           "service": "onlyfans",
           "discoveredAs": "chubbychiquita",
-          "lastCheckedAt": "2026-07-24T16:41:19.981Z",
+          "lastCheckedAt": "2026-09-14T14:27:17.253Z",
           "userId": "294423",
           "username": null
         }
@@ -1200,21 +1122,19 @@
           "url": "https://stufferdb.com/index?/category/9247",
           "categoryId": "9247",
           "discoveredAs": "chubbychiquita",
-          "lastCheckedAt": "2026-07-24T16:41:21.651Z"
+          "lastCheckedAt": "2026-09-14T14:27:19.173Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/27485",
           "categoryId": "27485",
           "discoveredAs": "chubbychiquita",
-          "lastCheckedAt": "2026-07-24T16:41:30.680Z"
+          "lastCheckedAt": "2026-09-14T14:27:26.410Z"
         }
       ]
     }
   },
   "couchqueenie": {
-    "aliases": [
-      "couchqueenie"
-    ],
+    "aliases": ["couchqueenie"],
     "sources": {
       "coomer": [
         {
@@ -1231,7 +1151,7 @@
           "url": "https://www.reddit.com/user/CouchQueenie/submitted/",
           "service": "submitted",
           "discoveredAs": "couchqueenie",
-          "lastCheckedAt": "2026-07-24T16:42:12.318Z",
+          "lastCheckedAt": "2026-09-14T14:28:08.732Z",
           "userId": "CouchQueenie",
           "username": "CouchQueenie"
         }
@@ -1241,16 +1161,24 @@
           "url": "https://stufferdb.com/index?/category/14207",
           "categoryId": "14207",
           "discoveredAs": "couchqueenie",
-          "lastCheckedAt": "2026-07-24T16:43:10.556Z"
+          "lastCheckedAt": "2026-09-14T14:28:49.772Z"
         }
       ]
     }
   },
   "cowcake": {
-    "aliases": [
-      "cowcake"
-    ],
+    "aliases": ["cowcake"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/7798",
+          "categoryId": "7798",
+          "discoveredAs": "cowcake",
+          "lastCheckedAt": "2026-09-14T14:29:02.728Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/Cowcake/submitted/",
@@ -1258,23 +1186,16 @@
           "userId": "Cowcake",
           "username": "Cowcake",
           "discoveredAs": "cowcake",
-          "lastCheckedAt": "2026-07-24T16:43:39.472Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/7798",
-          "categoryId": "7798",
-          "discoveredAs": "cowcake",
-          "lastCheckedAt": "2026-07-24T16:43:41.098Z"
+          "lastCheckedAt": "2026-09-13T22:00:05.157Z",
+          "model": "cowcake",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "creative_load_2311": {
-    "aliases": [
-      "creative_load_2311"
-    ],
+    "aliases": ["creative_load_2311"],
     "sources": {
       "reddit": [
         {
@@ -1291,52 +1212,45 @@
           "url": "https://stufferdb.com/index?/category/28547",
           "categoryId": "28547",
           "discoveredAs": "creative_load_2311",
-          "lastCheckedAt": "2026-07-24T16:44:15.626Z"
+          "lastCheckedAt": "2026-09-14T14:29:20.523Z"
         }
       ]
     }
   },
   "curvage_casey": {
-    "aliases": [
-      "curvage_casey",
-      "curvagecaseybbw"
-    ],
+    "aliases": ["curvage_casey", "curvagecaseybbw"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/10878",
           "categoryId": "10878",
           "discoveredAs": "curvage_casey",
-          "lastCheckedAt": "2026-07-24T16:44:23.736Z"
+          "lastCheckedAt": "2026-09-14T14:29:26.916Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/27867",
           "categoryId": "27867",
           "discoveredAs": "curvage_casey",
-          "lastCheckedAt": "2026-07-24T16:44:29.749Z"
+          "lastCheckedAt": "2026-09-14T14:29:31.659Z"
         }
       ]
     }
   },
   "curvyberardi": {
-    "aliases": [
-      "curvyberardi"
-    ],
+    "aliases": ["curvyberardi"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/7456",
           "categoryId": "7456",
           "discoveredAs": "curvyberardi",
-          "lastCheckedAt": "2026-07-24T16:44:38.013Z"
+          "lastCheckedAt": "2026-09-14T14:29:39.203Z"
         }
       ]
     }
   },
   "curvygothgf": {
-    "aliases": [
-      "curvygothgf"
-    ],
+    "aliases": ["curvygothgf"],
     "sources": {
       "coomer": [
         {
@@ -1363,45 +1277,39 @@
           "url": "https://stufferdb.com/index?/category/12355",
           "categoryId": "12355",
           "discoveredAs": "curvygothgf",
-          "lastCheckedAt": "2026-07-24T16:45:17.437Z"
+          "lastCheckedAt": "2026-09-14T14:30:13.564Z"
         }
       ]
     }
   },
   "cutiehex": {
-    "aliases": [
-      "cutiehex"
-    ],
+    "aliases": ["cutiehex"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/27814",
           "categoryId": "27814",
           "discoveredAs": "cutiehex",
-          "lastCheckedAt": "2026-07-24T16:45:23.115Z"
+          "lastCheckedAt": "2026-09-14T14:30:25.969Z"
         }
       ]
     }
   },
   "darya_smirnova": {
-    "aliases": [
-      "darya_smirnova"
-    ],
+    "aliases": ["darya_smirnova"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/7012",
           "categoryId": "7012",
           "discoveredAs": "darya_smirnova",
-          "lastCheckedAt": "2026-07-24T16:45:30.804Z"
+          "lastCheckedAt": "2026-09-14T14:30:31.805Z"
         }
       ]
     }
   },
   "desiretara": {
-    "aliases": [
-      "desiretara"
-    ],
+    "aliases": ["desiretara"],
     "sources": {
       "reddit": [
         {
@@ -1410,30 +1318,26 @@
           "userId": "desiretara",
           "username": "desiretara",
           "discoveredAs": "desiretara",
-          "lastCheckedAt": "2026-07-24T16:46:14.559Z"
+          "lastCheckedAt": "2026-09-14T14:31:07.669Z"
         }
       ]
     }
   },
   "devi_thikk": {
-    "aliases": [
-      "devi_thikk"
-    ],
+    "aliases": ["devi_thikk"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/10577",
           "categoryId": "10577",
           "discoveredAs": "devi_thikk",
-          "lastCheckedAt": "2026-07-24T16:46:39.314Z"
+          "lastCheckedAt": "2026-09-14T14:31:12.550Z"
         }
       ]
     }
   },
   "diablapr": {
-    "aliases": [
-      "diablapr"
-    ],
+    "aliases": ["diablapr"],
     "sources": {
       "reddit": [
         {
@@ -1450,22 +1354,20 @@
           "url": "https://stufferdb.com/index?/category/23128",
           "categoryId": "23128",
           "discoveredAs": "diablapr",
-          "lastCheckedAt": "2026-07-24T16:47:30.260Z"
+          "lastCheckedAt": "2026-09-14T14:32:10.013Z"
         }
       ]
     }
   },
   "distorsion_foodie": {
-    "aliases": [
-      "distorsion_foodie"
-    ],
+    "aliases": ["distorsion_foodie"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/319656/distorsion_foodie",
           "service": "onlyfans",
           "discoveredAs": "distorsion_foodie",
-          "lastCheckedAt": "2026-07-24T16:48:25.892Z",
+          "lastCheckedAt": "2026-09-14T14:33:17.312Z",
           "userId": "319656",
           "username": null
         }
@@ -1477,7 +1379,7 @@
           "userId": "distorsion_foodie",
           "username": "distorsion_foodie",
           "discoveredAs": "distorsion_foodie",
-          "lastCheckedAt": "2026-07-24T16:48:12.012Z"
+          "lastCheckedAt": "2026-09-13T22:05:11.708Z"
         }
       ],
       "stufferdb": [
@@ -1485,30 +1387,26 @@
           "url": "https://stufferdb.com/index?/category/16507",
           "categoryId": "16507",
           "discoveredAs": "distorsion_foodie",
-          "lastCheckedAt": "2026-07-24T16:48:27.679Z"
+          "lastCheckedAt": "2026-09-14T14:33:20.594Z"
         }
       ]
     }
   },
   "doubledenise": {
-    "aliases": [
-      "doubledenise"
-    ],
+    "aliases": ["doubledenise"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/11361",
           "categoryId": "11361",
           "discoveredAs": "doubledenise",
-          "lastCheckedAt": "2026-07-24T16:48:33.850Z"
+          "lastCheckedAt": "2026-09-14T14:33:27.837Z"
         }
       ]
     }
   },
   "elea-goddess": {
-    "aliases": [
-      "elea-goddess"
-    ],
+    "aliases": ["elea-goddess"],
     "sources": {
       "reddit": [
         {
@@ -1517,7 +1415,7 @@
           "userId": "elea-goddess",
           "username": "elea-goddess",
           "discoveredAs": "elea-goddess",
-          "lastCheckedAt": "2026-07-24T16:49:10.786Z"
+          "lastCheckedAt": "2026-09-13T22:06:06.224Z"
         }
       ],
       "stufferdb": [
@@ -1525,21 +1423,19 @@
           "url": "https://stufferdb.com/index?/category/27880",
           "categoryId": "27880",
           "discoveredAs": "elea-goddess",
-          "lastCheckedAt": "2026-07-24T16:49:24.971Z"
+          "lastCheckedAt": "2026-09-14T14:34:09.269Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/10805",
           "categoryId": "10805",
           "discoveredAs": "elea-goddess",
-          "lastCheckedAt": "2026-07-24T16:49:32.275Z"
+          "lastCheckedAt": "2026-09-14T14:34:15.363Z"
         }
       ]
     }
   },
   "electriclolaaa": {
-    "aliases": [
-      "electriclolaaa"
-    ],
+    "aliases": ["electriclolaaa"],
     "sources": {
       "reddit": [
         {
@@ -1559,67 +1455,59 @@
           "url": "https://stufferdb.com/index?/category/28595",
           "categoryId": "28595",
           "discoveredAs": "electriclolaaa",
-          "lastCheckedAt": "2026-07-24T16:50:40.001Z"
+          "lastCheckedAt": "2026-09-14T14:35:08.960Z"
         }
       ]
     }
   },
   "elizashawww": {
-    "aliases": [
-      "elizashawww"
-    ],
+    "aliases": ["elizashawww"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/16858",
           "categoryId": "16858",
           "discoveredAs": "elizashawww",
-          "lastCheckedAt": "2026-07-24T16:50:47.262Z"
+          "lastCheckedAt": "2026-09-14T14:35:15.863Z"
         }
       ]
     }
   },
   "erika_lipps": {
-    "aliases": [
-      "erika_lipps"
-    ],
+    "aliases": ["erika_lipps"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/10382",
           "categoryId": "10382",
           "discoveredAs": "erika_lipps",
-          "lastCheckedAt": "2026-07-24T16:50:57.170Z"
+          "lastCheckedAt": "2026-09-14T14:35:22.486Z"
         }
       ]
     }
   },
   "fat_ass_ruby": {
-    "aliases": [
-      "fat_ass_ruby"
-    ],
+    "aliases": ["fat_ass_ruby"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/9259",
           "categoryId": "9259",
           "discoveredAs": "fat_ass_ruby",
-          "lastCheckedAt": "2026-07-24T16:51:02.862Z"
+          "lastCheckedAt": "2026-09-14T14:35:27.566Z"
         }
       ]
     }
   },
   "fatmerida": {
-    "aliases": [
-      "fatmerida"
-    ],
+    "aliases": ["fatmerida"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/207870/fatmerida",
           "service": "onlyfans",
           "discoveredAs": "fatmerida",
-          "lastCheckedAt": "2026-07-24T16:51:22.892Z",
+          "lastCheckedAt": "2026-09-14T14:36:13.619Z",
           "userId": "207870",
           "username": null
         }
@@ -1639,15 +1527,13 @@
           "url": "https://stufferdb.com/index?/category/14246",
           "categoryId": "14246",
           "discoveredAs": "fatmerida",
-          "lastCheckedAt": "2026-07-24T16:51:30.299Z"
+          "lastCheckedAt": "2026-09-14T14:36:17.877Z"
         }
       ]
     }
   },
   "fatteningprincess": {
-    "aliases": [
-      "fatteningprincess"
-    ],
+    "aliases": ["fatteningprincess"],
     "sources": {
       "reddit": [
         {
@@ -1664,17 +1550,13 @@
           "url": "https://stufferdb.com/index?/category/16375",
           "categoryId": "16375",
           "discoveredAs": "fatteningprincess",
-          "lastCheckedAt": "2026-07-24T16:52:13.901Z"
+          "lastCheckedAt": "2026-09-14T14:37:10.543Z"
         }
       ]
     }
   },
   "fattiebaddie": {
-    "aliases": [
-      "fattiebaddie",
-      "fattiebaddie, fattiebaddie1",
-      "fattiebaddie1"
-    ],
+    "aliases": ["fattiebaddie", "fattiebaddie, fattiebaddie1", "fattiebaddie1"],
     "sources": {
       "coomer": [
         {
@@ -1682,8 +1564,8 @@
           "service": "onlyfans",
           "discoveredAs": "fattiebaddie1",
           "userId": "277373",
-          "username": "fattiebaddie1",
-          "lastCheckedAt": "2026-09-11T17:35:14.375Z"
+          "username": null,
+          "lastCheckedAt": "2026-09-14T13:30:26.759Z"
         },
         {
           "url": "https://cum.st/creators/onlyfans/195143184",
@@ -1691,17 +1573,7 @@
           "discoveredAs": "fattiebaddie1",
           "userId": "195143184",
           "username": "fattiebaddie1",
-          "lastCheckedAt": "2026-07-24T16:53:18.544Z"
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/Fattiebaddie/submitted/",
-          "service": "submitted",
-          "userId": "Fattiebaddie",
-          "username": "Fattiebaddie",
-          "discoveredAs": "fattiebaddie",
-          "lastCheckedAt": "2026-05-29T01:34:33.325Z"
+          "lastCheckedAt": "2026-09-14T13:30:35.931Z"
         }
       ],
       "stufferdb": [
@@ -1709,7 +1581,22 @@
           "url": "https://stufferdb.com/index?/category/20832",
           "categoryId": "20832",
           "discoveredAs": "fattiebaddie",
-          "lastCheckedAt": "2026-07-24T16:53:23.999Z"
+          "lastCheckedAt": "2026-09-14T13:30:42.720Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/Fattiebaddie/submitted/",
+          "service": "submitted",
+          "userId": "Fattiebaddie",
+          "username": "Fattiebaddie",
+          "discoveredAs": "fattiebaddie",
+          "lastCheckedAt": "2026-05-29T01:34:33.325Z",
+          "model": "fattiebaddie",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     },
@@ -1727,16 +1614,14 @@
     }
   },
   "feederandfeedee": {
-    "aliases": [
-      "feederandfeedee"
-    ],
+    "aliases": ["feederandfeedee"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/312526/feederandfeedee",
           "service": "onlyfans",
           "discoveredAs": "feederandfeedee",
-          "lastCheckedAt": "2026-07-24T16:54:26.984Z",
+          "lastCheckedAt": "2026-09-14T14:38:22.679Z",
           "userId": "312526",
           "username": null
         }
@@ -1756,7 +1641,7 @@
           "url": "https://stufferdb.com/index?/category/199",
           "categoryId": "199",
           "discoveredAs": "feederandfeedee",
-          "lastCheckedAt": "2026-07-24T16:54:32.742Z"
+          "lastCheckedAt": "2026-09-14T14:38:32.564Z"
         }
       ]
     }
@@ -1786,7 +1671,7 @@
           "userId": "FeederAndBreedHer",
           "username": "FeederAndBreedHer",
           "discoveredAs": "feederandbreedher",
-          "lastCheckedAt": "2026-09-09T03:40:11.696Z"
+          "lastCheckedAt": "2026-09-14T14:39:13.379Z"
         },
         {
           "url": "https://www.reddit.com/user/lysiwicked19/submitted/",
@@ -1794,7 +1679,7 @@
           "userId": "lysiwicked19",
           "username": "lysiwicked19",
           "discoveredAs": "lysiwicked19",
-          "lastCheckedAt": "2026-09-09T03:41:04.865Z"
+          "lastCheckedAt": "2026-09-14T14:40:07.358Z"
         }
       ],
       "stufferdb": [
@@ -1802,16 +1687,24 @@
           "url": "https://stufferdb.com/index?/category/29322",
           "categoryId": "29322",
           "discoveredAs": "feedherandbreedher",
-          "lastCheckedAt": "2026-09-09T03:44:12.097Z"
+          "lastCheckedAt": "2026-09-14T14:40:11.381Z"
         }
       ]
     }
   },
   "freya": {
-    "aliases": [
-      "freya"
-    ],
+    "aliases": ["freya"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/6956",
+          "categoryId": "6956",
+          "discoveredAs": "freya",
+          "lastCheckedAt": "2026-09-14T13:31:09.656Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/freya/submitted/",
@@ -1819,39 +1712,40 @@
           "userId": "freya",
           "username": "freya",
           "discoveredAs": "freya",
-          "lastCheckedAt": "2026-05-29T01:34:44.662Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/6956",
-          "categoryId": "6956",
-          "discoveredAs": "freya",
-          "lastCheckedAt": "2026-07-24T16:55:33.377Z"
+          "lastCheckedAt": "2026-05-29T01:34:44.662Z",
+          "model": "freya",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "gatsbysgal": {
-    "aliases": [
-      "gatsbysgal"
-    ],
+    "aliases": ["gatsbysgal"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/8369",
           "categoryId": "8369",
           "discoveredAs": "gatsbysgal",
-          "lastCheckedAt": "2026-07-24T16:56:14.306Z"
+          "lastCheckedAt": "2026-09-14T14:40:20.322Z"
         }
       ]
     }
   },
   "goddess_shar": {
-    "aliases": [
-      "goddess_shar"
-    ],
+    "aliases": ["goddess_shar"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/12700",
+          "categoryId": "12700",
+          "discoveredAs": "goddess_shar",
+          "lastCheckedAt": "2026-09-14T13:31:26.663Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/Goddess_shar/submitted/",
@@ -1859,23 +1753,16 @@
           "userId": "Goddess_shar",
           "username": "Goddess_shar",
           "discoveredAs": "goddess_shar",
-          "lastCheckedAt": "2026-05-29T01:34:50.343Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/12700",
-          "categoryId": "12700",
-          "discoveredAs": "goddess_shar",
-          "lastCheckedAt": "2026-07-24T16:57:37.168Z"
+          "lastCheckedAt": "2026-05-29T01:34:50.343Z",
+          "model": "goddess_shar",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "gurlinaura": {
-    "aliases": [
-      "gurlinaura"
-    ],
+    "aliases": ["gurlinaura"],
     "sources": {
       "reddit": [
         {
@@ -1884,7 +1771,7 @@
           "userId": "GurlInAura",
           "username": "GurlInAura",
           "discoveredAs": "gurlinaura",
-          "lastCheckedAt": "2026-07-24T16:58:45.600Z"
+          "lastCheckedAt": "2026-09-12T02:08:06.422Z"
         }
       ],
       "stufferdb": [
@@ -1892,37 +1779,33 @@
           "url": "https://stufferdb.com/index?/category/23087",
           "categoryId": "23087",
           "discoveredAs": "gurlinaura",
-          "lastCheckedAt": "2026-07-24T17:00:15.910Z"
+          "lastCheckedAt": "2026-09-14T14:41:08.395Z"
         }
       ]
     }
   },
   "hellysbigfatstash": {
-    "aliases": [
-      "hellysbigfatstash"
-    ],
+    "aliases": ["hellysbigfatstash"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/27560",
           "categoryId": "27560",
           "discoveredAs": "hellysbigfatstash",
-          "lastCheckedAt": "2026-07-24T17:03:33.004Z"
+          "lastCheckedAt": "2026-09-14T14:41:16.691Z"
         }
       ]
     }
   },
   "here_p1ggy": {
-    "aliases": [
-      "here_p1ggy"
-    ],
+    "aliases": ["here_p1ggy"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/366757/here_p1ggy",
           "service": "onlyfans",
           "discoveredAs": "here_p1ggy",
-          "lastCheckedAt": "2026-07-24T17:05:12.004Z",
+          "lastCheckedAt": "2026-09-14T14:42:14.399Z",
           "userId": "366757",
           "username": null
         }
@@ -1934,7 +1817,7 @@
           "userId": "Here_p1ggy",
           "username": "Here_p1ggy",
           "discoveredAs": "here_p1ggy",
-          "lastCheckedAt": "2026-07-24T17:04:57.785Z"
+          "lastCheckedAt": "2026-09-13T22:17:06.684Z"
         }
       ],
       "stufferdb": [
@@ -1942,16 +1825,13 @@
           "url": "https://stufferdb.com/index?/category/21602",
           "categoryId": "21602",
           "discoveredAs": "here_p1ggy",
-          "lastCheckedAt": "2026-07-24T17:05:16.080Z"
+          "lastCheckedAt": "2026-09-14T14:42:18.925Z"
         }
       ]
     }
   },
   "heyyadriana": {
-    "aliases": [
-      "heyyadriana",
-      "passengerok6043"
-    ],
+    "aliases": ["heyyadriana", "passengerok6043"],
     "sources": {
       "reddit": [
         {
@@ -1971,35 +1851,22 @@
           "url": "https://stufferdb.com/index?/category/22889",
           "categoryId": "22889",
           "discoveredAs": "heyyadriana",
-          "lastCheckedAt": "2026-07-24T17:06:00.992Z"
+          "lastCheckedAt": "2026-09-14T14:43:10.996Z"
         }
       ]
     }
   },
   "housecow": {
-    "aliases": [
-      "housecow",
-      "housecowz"
-    ],
+    "aliases": ["housecow", "housecowz"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/367018/housecow",
           "service": "onlyfans",
           "discoveredAs": "housecow",
-          "lastCheckedAt": "2026-07-24T17:06:40.871Z",
+          "lastCheckedAt": "2026-09-14T13:34:46.555Z",
           "userId": "367018",
           "username": null
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/housecow/submitted/",
-          "service": "submitted",
-          "userId": "housecow",
-          "username": "housecow",
-          "discoveredAs": "housecow",
-          "lastCheckedAt": "2026-06-08T15:41:25.176Z"
         }
       ],
       "stufferdb": [
@@ -2007,15 +1874,28 @@
           "url": "https://stufferdb.com/index?/category/22916",
           "categoryId": "22916",
           "discoveredAs": "housecow",
-          "lastCheckedAt": "2026-07-24T17:07:03.409Z"
+          "lastCheckedAt": "2026-09-14T13:34:50.490Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/housecow/submitted/",
+          "service": "submitted",
+          "userId": "housecow",
+          "username": "housecow",
+          "discoveredAs": "housecow",
+          "lastCheckedAt": "2026-06-08T15:41:25.176Z",
+          "model": "housecow",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "hungrylilkitty1": {
-    "aliases": [
-      "hungrylilkitty1"
-    ],
+    "aliases": ["hungrylilkitty1"],
     "sources": {
       "reddit": [
         {
@@ -2032,16 +1912,28 @@
           "url": "https://stufferdb.com/index?/category/16145",
           "categoryId": "16145",
           "discoveredAs": "hungrylilkitty1",
-          "lastCheckedAt": "2026-07-24T17:08:24.144Z"
+          "lastCheckedAt": "2026-09-14T14:44:09.167Z"
+        }
+      ]
+    }
+  },
+  "ilovecaroline": {
+    "aliases": ["ilovecaroline"],
+    "sources": {
+      "coomer": [
+        {
+          "url": "https://coomerfans.com/u/onlyfans/340329/ilovecaroline",
+          "service": "onlyfans",
+          "userId": "340329",
+          "username": null,
+          "discoveredAs": "ilovecaroline",
+          "lastCheckedAt": "2026-09-14T14:44:24.934Z"
         }
       ]
     }
   },
   "jam_jiggle": {
-    "aliases": [
-      "jam_jiggle",
-      "jam-jiggle"
-    ],
+    "aliases": ["jam_jiggle", "jam-jiggle"],
     "sources": {
       "reddit": [
         {
@@ -2050,7 +1942,7 @@
           "userId": "Jam-Jiggle",
           "username": "Jam-Jiggle",
           "discoveredAs": "jam-jiggle",
-          "lastCheckedAt": "2026-07-24T17:11:11.646Z"
+          "lastCheckedAt": "2026-09-14T14:45:13.811Z"
         }
       ],
       "stufferdb": [
@@ -2058,15 +1950,13 @@
           "url": "https://stufferdb.com/index?/category/24241",
           "categoryId": "24241",
           "discoveredAs": "jam_jiggle",
-          "lastCheckedAt": "2026-07-24T17:14:12.769Z"
+          "lastCheckedAt": "2026-09-14T14:45:30.455Z"
         }
       ]
     }
   },
   "jasminexo2000": {
-    "aliases": [
-      "jasminexo2000"
-    ],
+    "aliases": ["jasminexo2000"],
     "sources": {
       "coomer": [
         {
@@ -2093,31 +1983,37 @@
           "url": "https://stufferdb.com/index?/category/12288",
           "categoryId": "12288",
           "discoveredAs": "jasminexo2000",
-          "lastCheckedAt": "2026-07-24T17:15:26.793Z"
+          "lastCheckedAt": "2026-09-14T15:51:13.471Z"
         }
       ]
     }
   },
   "jordanjigglez": {
-    "aliases": [
-      "jordanjigglez"
-    ],
+    "aliases": ["jordanjigglez"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/16116",
           "categoryId": "16116",
           "discoveredAs": "jordanjigglez",
-          "lastCheckedAt": "2026-09-09T03:57:17.320Z"
+          "lastCheckedAt": "2026-09-14T14:46:39.222Z"
         }
       ]
     }
   },
   "juicyangel": {
-    "aliases": [
-      "juicyangel"
-    ],
+    "aliases": ["juicyangel"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/23335",
+          "categoryId": "23335",
+          "discoveredAs": "juicyangel",
+          "lastCheckedAt": "2026-09-14T13:36:34.365Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/juicyangel/submitted/",
@@ -2125,45 +2021,36 @@
           "userId": "juicyangel",
           "username": "juicyangel",
           "discoveredAs": "juicyangel",
-          "lastCheckedAt": "2026-06-08T15:41:53.838Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/23335",
-          "categoryId": "23335",
-          "discoveredAs": "juicyangel",
-          "lastCheckedAt": "2026-07-24T17:16:02.568Z"
+          "lastCheckedAt": "2026-06-08T15:41:53.838Z",
+          "model": "juicyangel",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "kayla_paolini": {
-    "aliases": [
-      "kayla_paolini"
-    ],
+    "aliases": ["kayla_paolini"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/1356",
           "categoryId": "1356",
           "discoveredAs": "kayla_paolini",
-          "lastCheckedAt": "2026-07-24T17:16:19.766Z"
+          "lastCheckedAt": "2026-09-14T14:46:51.837Z"
         }
       ]
     }
   },
   "kellijellibelli": {
-    "aliases": [
-      "kellijellibelli"
-    ],
+    "aliases": ["kellijellibelli"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/309545/kellijellibelli",
           "service": "onlyfans",
           "discoveredAs": "kellijellibelli",
-          "lastCheckedAt": "2026-07-24T17:16:52.333Z",
+          "lastCheckedAt": "2026-09-13T22:23:34.629Z",
           "userId": "309545",
           "username": null
         }
@@ -2173,31 +2060,26 @@
           "url": "https://stufferdb.com/index?/category/8661",
           "categoryId": "8661",
           "discoveredAs": "kellijellibelli",
-          "lastCheckedAt": "2026-07-24T17:16:55.106Z"
+          "lastCheckedAt": "2026-09-14T15:51:32.620Z"
         }
       ]
     }
   },
   "kitty_piggy": {
-    "aliases": [
-      "kitty_piggy"
-    ],
+    "aliases": ["kitty_piggy"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/8351",
           "categoryId": "8351",
           "discoveredAs": "kitty_piggy",
-          "lastCheckedAt": "2026-07-24T17:17:30.932Z"
+          "lastCheckedAt": "2026-09-14T14:47:25.559Z"
         }
       ]
     }
   },
   "kkupid05": {
-    "aliases": [
-      "ancient_direction_45",
-      "kkupid05"
-    ],
+    "aliases": ["ancient_direction_45", "kkupid05"],
     "sources": {
       "reddit": [
         {
@@ -2214,30 +2096,26 @@
           "url": "https://stufferdb.com/index?/category/24294",
           "categoryId": "24294",
           "discoveredAs": "kkupid05",
-          "lastCheckedAt": "2026-07-24T17:18:20.472Z"
+          "lastCheckedAt": "2026-09-14T14:47:44.149Z"
         }
       ]
     }
   },
   "lana2002x": {
-    "aliases": [
-      "lana2002x"
-    ],
+    "aliases": ["lana2002x"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/9046",
           "categoryId": "9046",
           "discoveredAs": "lana2002x",
-          "lastCheckedAt": "2026-07-24T17:20:20.260Z"
+          "lastCheckedAt": "2026-09-14T14:47:50.619Z"
         }
       ]
     }
   },
   "lanabells221": {
-    "aliases": [
-      "lanabells221"
-    ],
+    "aliases": ["lanabells221"],
     "sources": {
       "reddit": [
         {
@@ -2254,31 +2132,26 @@
           "url": "https://stufferdb.com/index?/category/27514",
           "categoryId": "27514",
           "discoveredAs": "lanabells221",
-          "lastCheckedAt": "2026-07-24T17:21:08.888Z"
+          "lastCheckedAt": "2026-09-14T14:48:14.914Z"
         }
       ]
     }
   },
   "laura_the_foodie": {
-    "aliases": [
-      "laura_the_foodie"
-    ],
+    "aliases": ["laura_the_foodie"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/824",
           "categoryId": "824",
           "discoveredAs": "laura_the_foodie",
-          "lastCheckedAt": "2026-07-24T17:21:35.927Z"
+          "lastCheckedAt": "2026-09-14T14:48:33.758Z"
         }
       ]
     }
   },
   "laurenlushh": {
-    "aliases": [
-      "laurenlush",
-      "laurenlushh"
-    ],
+    "aliases": ["laurenlush", "laurenlushh"],
     "sources": {
       "reddit": [
         {
@@ -2287,7 +2160,7 @@
           "userId": "laurenlushh",
           "username": "laurenlushh",
           "discoveredAs": "laurenlushh",
-          "lastCheckedAt": "2026-07-24T17:22:03.620Z"
+          "lastCheckedAt": "2026-09-13T22:26:05.606Z"
         }
       ],
       "stufferdb": [
@@ -2295,22 +2168,30 @@
           "url": "https://stufferdb.com/index?/category/18691",
           "categoryId": "18691",
           "discoveredAs": "laurenlushh",
-          "lastCheckedAt": "2026-07-24T17:22:14.879Z"
+          "lastCheckedAt": "2026-09-14T14:49:10.700Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/8548",
           "categoryId": "8548",
           "discoveredAs": "laurenlushh",
-          "lastCheckedAt": "2026-07-24T17:22:47.011Z"
+          "lastCheckedAt": "2026-09-14T14:49:17.868Z"
         }
       ]
     }
   },
   "lilmamakay": {
-    "aliases": [
-      "lilmamakay"
-    ],
+    "aliases": ["lilmamakay"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/10806",
+          "categoryId": "10806",
+          "discoveredAs": "lilmamakay",
+          "lastCheckedAt": "2026-09-14T13:38:05.417Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/lilmamakay/submitted/",
@@ -2318,30 +2199,23 @@
           "userId": "lilmamakay",
           "username": "lilmamakay",
           "discoveredAs": "lilmamakay",
-          "lastCheckedAt": "2026-06-08T15:42:52.271Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/10806",
-          "categoryId": "10806",
-          "discoveredAs": "lilmamakay",
-          "lastCheckedAt": "2026-07-24T17:23:10.335Z"
+          "lastCheckedAt": "2026-06-08T15:42:52.271Z",
+          "model": "lilmamakay",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "lisaloussbbw": {
-    "aliases": [
-      "lisaloussbbw"
-    ],
+    "aliases": ["lisaloussbbw"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/297098/lisaloussbbw",
           "service": "onlyfans",
           "discoveredAs": "lisaloussbbw",
-          "lastCheckedAt": "2026-09-10T18:10:20.125Z",
+          "lastCheckedAt": "2026-09-14T14:50:21.316Z",
           "userId": "297098",
           "username": null
         }
@@ -2361,37 +2235,33 @@
           "url": "https://stufferdb.com/index?/category/21347",
           "categoryId": "21347",
           "discoveredAs": "lisaloussbbw",
-          "lastCheckedAt": "2026-07-24T17:23:53.321Z"
+          "lastCheckedAt": "2026-09-14T14:50:23.432Z"
         }
       ]
     }
   },
   "littlecurvydevil": {
-    "aliases": [
-      "littlecurvydevil"
-    ],
+    "aliases": ["littlecurvydevil"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/7663",
           "categoryId": "7663",
           "discoveredAs": "littlecurvydevil",
-          "lastCheckedAt": "2026-07-24T17:24:09.662Z"
+          "lastCheckedAt": "2026-09-14T14:50:30.413Z"
         }
       ]
     }
   },
   "livpat3": {
-    "aliases": [
-      "livpat3"
-    ],
+    "aliases": ["livpat3"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/302714/livpat3",
           "service": "onlyfans",
           "discoveredAs": "livpat3",
-          "lastCheckedAt": "2026-07-24T17:24:37.528Z",
+          "lastCheckedAt": "2026-09-14T14:51:13.549Z",
           "userId": "302714",
           "username": null
         }
@@ -2403,7 +2273,7 @@
           "userId": "livpat3",
           "username": "livpat3",
           "discoveredAs": "livpat3",
-          "lastCheckedAt": "2026-07-24T17:24:29.252Z"
+          "lastCheckedAt": "2026-09-14T14:51:07.896Z"
         }
       ],
       "stufferdb": [
@@ -2411,23 +2281,20 @@
           "url": "https://stufferdb.com/index?/category/28453",
           "categoryId": "28453",
           "discoveredAs": "livpat3",
-          "lastCheckedAt": "2026-07-24T17:24:50.443Z"
+          "lastCheckedAt": "2026-09-14T14:51:16.868Z"
         }
       ]
     }
   },
   "lrm_bbw": {
-    "aliases": [
-      "lrm_bbw",
-      "lrmbbw"
-    ],
+    "aliases": ["lrm_bbw", "lrmbbw"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/311151/lrmbbw",
           "service": "onlyfans",
           "discoveredAs": "lrmbbw",
-          "lastCheckedAt": "2026-07-24T17:25:10.186Z",
+          "lastCheckedAt": "2026-09-14T14:51:27.898Z",
           "userId": "311151",
           "username": null
         }
@@ -2437,60 +2304,52 @@
           "url": "https://stufferdb.com/index?/category/21430",
           "categoryId": "21430",
           "discoveredAs": "lrm_bbw",
-          "lastCheckedAt": "2026-07-24T17:25:16.049Z"
+          "lastCheckedAt": "2026-09-14T14:51:30.028Z"
         }
       ]
     }
   },
   "mamahorker_amanda_faye": {
-    "aliases": [
-      "mamahorker_amanda_faye"
-    ],
+    "aliases": ["mamahorker_amanda_faye"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/4749",
           "categoryId": "4749",
           "discoveredAs": "mamahorker_amanda_faye",
-          "lastCheckedAt": "2026-07-24T17:25:33.078Z"
+          "lastCheckedAt": "2026-09-14T14:51:39.434Z"
         }
       ]
     }
   },
   "margot_bbw": {
-    "aliases": [
-      "margot_bbw"
-    ],
+    "aliases": ["margot_bbw"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/7733",
           "categoryId": "7733",
           "discoveredAs": "margot_bbw",
-          "lastCheckedAt": "2026-07-24T17:25:52.830Z"
+          "lastCheckedAt": "2026-09-14T14:51:48.639Z"
         }
       ]
     }
   },
   "maria_alive": {
-    "aliases": [
-      "maria_alive"
-    ],
+    "aliases": ["maria_alive"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/2904",
           "categoryId": "2904",
           "discoveredAs": "maria_alive",
-          "lastCheckedAt": "2026-07-24T17:26:18.494Z"
+          "lastCheckedAt": "2026-09-14T14:51:57.372Z"
         }
       ]
     }
   },
   "mary_boberry": {
-    "aliases": [
-      "mary_boberry"
-    ],
+    "aliases": ["mary_boberry"],
     "sources": {
       "reddit": [
         {
@@ -2499,7 +2358,7 @@
           "userId": "mary_boberry",
           "username": "mary_boberry",
           "discoveredAs": "mary_boberry",
-          "lastCheckedAt": "2026-07-24T17:26:36.799Z"
+          "lastCheckedAt": "2026-09-14T14:52:09.369Z"
         }
       ],
       "stufferdb": [
@@ -2507,15 +2366,13 @@
           "url": "https://stufferdb.com/index?/category/4286",
           "categoryId": "4286",
           "discoveredAs": "mary_boberry",
-          "lastCheckedAt": "2026-07-24T17:26:39.327Z"
+          "lastCheckedAt": "2026-09-14T14:52:11.351Z"
         }
       ]
     }
   },
   "melissexy12": {
-    "aliases": [
-      "melissexy12"
-    ],
+    "aliases": ["melissexy12"],
     "sources": {
       "reddit": [
         {
@@ -2524,16 +2381,24 @@
           "userId": "melissexy12",
           "username": "melissexy12",
           "discoveredAs": "melissexy12",
-          "lastCheckedAt": "2026-07-11T01:33:53.342Z"
+          "lastCheckedAt": "2026-09-14T14:53:08.861Z"
         }
       ]
     }
   },
   "mistress_bianca": {
-    "aliases": [
-      "mistress_bianca"
-    ],
+    "aliases": ["mistress_bianca"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/338",
+          "categoryId": "338",
+          "discoveredAs": "mistress_bianca",
+          "lastCheckedAt": "2026-09-14T14:53:17.107Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/Mistress_Bianca/submitted/",
@@ -2541,46 +2406,36 @@
           "userId": "Mistress_Bianca",
           "username": "Mistress_Bianca",
           "discoveredAs": "mistress_bianca",
-          "lastCheckedAt": "2026-07-24T17:28:10.443Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/338",
-          "categoryId": "338",
-          "discoveredAs": "mistress_bianca",
-          "lastCheckedAt": "2026-07-24T17:28:14.520Z"
+          "lastCheckedAt": "2026-09-13T22:32:05.200Z",
+          "model": "mistress_bianca",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "mochii_babii": {
-    "aliases": [
-      "mochii_babii"
-    ],
+    "aliases": ["mochii_babii"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/7590",
           "categoryId": "7590",
           "discoveredAs": "mochii_babii",
-          "lastCheckedAt": "2026-07-24T17:28:26.415Z"
+          "lastCheckedAt": "2026-09-14T14:53:25.029Z"
         }
       ]
     }
   },
   "moonikuko": {
-    "aliases": [
-      "inside_advantage2175",
-      "moonikuko"
-    ],
+    "aliases": ["inside_advantage2175", "moonikuko"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/317952/moonikuko",
           "service": "onlyfans",
           "discoveredAs": "moonikuko",
-          "lastCheckedAt": "2026-07-24T17:29:21.031Z",
+          "lastCheckedAt": "2026-09-14T14:54:22.232Z",
           "userId": "317952",
           "username": null
         }
@@ -2592,7 +2447,7 @@
           "userId": "Inside_Advantage2175",
           "username": "Inside_Advantage2175",
           "discoveredAs": "inside_advantage2175",
-          "lastCheckedAt": "2026-07-24T17:29:12.283Z"
+          "lastCheckedAt": "2026-09-14T14:54:13.433Z"
         }
       ],
       "stufferdb": [
@@ -2600,15 +2455,13 @@
           "url": "https://stufferdb.com/index?/category/16811",
           "categoryId": "16811",
           "discoveredAs": "moonikuko",
-          "lastCheckedAt": "2026-07-24T17:29:25.225Z"
+          "lastCheckedAt": "2026-09-14T14:54:24.841Z"
         }
       ]
     }
   },
   "mskristinaxo": {
-    "aliases": [
-      "mskristinaxo"
-    ],
+    "aliases": ["mskristinaxo"],
     "sources": {
       "reddit": [
         {
@@ -2625,40 +2478,28 @@
           "url": "https://stufferdb.com/index?/category/27949",
           "categoryId": "27949",
           "discoveredAs": "mskristinaxo",
-          "lastCheckedAt": "2026-07-24T17:30:14.315Z"
+          "lastCheckedAt": "2026-09-14T14:55:12.124Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/8915",
           "categoryId": "8915",
           "discoveredAs": "mskristinaxo",
-          "lastCheckedAt": "2026-07-24T17:30:32.339Z"
+          "lastCheckedAt": "2026-09-14T14:55:21.437Z"
         }
       ]
     }
   },
   "muffinmaid": {
-    "aliases": [
-      "muffinmaid"
-    ],
+    "aliases": ["muffinmaid"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/240070/muffinmaid",
           "service": "onlyfans",
           "discoveredAs": "muffinmaid",
-          "lastCheckedAt": "2026-07-24T17:31:13.838Z",
+          "lastCheckedAt": "2026-09-14T14:55:29.031Z",
           "userId": "240070",
           "username": null
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/muffinMaid/submitted/",
-          "service": "submitted",
-          "userId": "muffinMaid",
-          "username": "muffinMaid",
-          "discoveredAs": "muffinmaid",
-          "lastCheckedAt": "2026-06-08T15:44:12.844Z"
         }
       ],
       "stufferdb": [
@@ -2666,15 +2507,28 @@
           "url": "https://stufferdb.com/index?/category/12346",
           "categoryId": "12346",
           "discoveredAs": "muffinmaid",
-          "lastCheckedAt": "2026-07-24T17:31:18.597Z"
+          "lastCheckedAt": "2026-09-14T14:55:32.405Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/muffinMaid/submitted/",
+          "service": "submitted",
+          "userId": "muffinMaid",
+          "username": "muffinMaid",
+          "discoveredAs": "muffinmaid",
+          "lastCheckedAt": "2026-06-08T15:44:12.844Z",
+          "model": "muffinmaid",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "myfatblondegf": {
-    "aliases": [
-      "myfatblondegf"
-    ],
+    "aliases": ["myfatblondegf"],
     "sources": {
       "coomer": [
         {
@@ -2701,43 +2555,39 @@
           "url": "https://stufferdb.com/index?/category/14391",
           "categoryId": "14391",
           "discoveredAs": "myfatblondegf",
-          "lastCheckedAt": "2026-07-24T17:32:23.207Z"
+          "lastCheckedAt": "2026-09-14T14:56:20.226Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/27950",
           "categoryId": "27950",
           "discoveredAs": "myfatblondegf",
-          "lastCheckedAt": "2026-07-24T17:32:37.571Z"
+          "lastCheckedAt": "2026-09-14T14:56:27.796Z"
         }
       ]
     }
   },
   "natalia98x": {
-    "aliases": [
-      "natalia98x"
-    ],
+    "aliases": ["natalia98x"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/29173",
           "categoryId": "29173",
           "discoveredAs": "natalia98x",
-          "lastCheckedAt": "2026-09-09T04:10:31.207Z"
+          "lastCheckedAt": "2026-09-14T14:56:34.333Z"
         }
       ]
     }
   },
   "natygetsfatty": {
-    "aliases": [
-      "natygetsfatty"
-    ],
+    "aliases": ["natygetsfatty"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/346093/natygetsfatty",
           "service": "onlyfans",
           "discoveredAs": "natygetsfatty",
-          "lastCheckedAt": "2026-07-24T17:32:48.080Z",
+          "lastCheckedAt": "2026-09-14T14:56:41.850Z",
           "userId": "346093",
           "username": null
         }
@@ -2747,45 +2597,39 @@
           "url": "https://stufferdb.com/index?/category/16683",
           "categoryId": "16683",
           "discoveredAs": "natygetsfatty",
-          "lastCheckedAt": "2026-07-24T17:32:54.711Z"
+          "lastCheckedAt": "2026-09-14T14:56:47.596Z"
         }
       ]
     }
   },
   "naughty_salamander": {
-    "aliases": [
-      "naughty_salamander"
-    ],
+    "aliases": ["naughty_salamander"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/16434",
           "categoryId": "16434",
           "discoveredAs": "naughty_salamander",
-          "lastCheckedAt": "2026-07-24T17:33:07.122Z"
+          "lastCheckedAt": "2026-09-14T14:56:57.039Z"
         }
       ]
     }
   },
   "nora_ell": {
-    "aliases": [
-      "nora_ell"
-    ],
+    "aliases": ["nora_ell"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/8658",
           "categoryId": "8658",
           "discoveredAs": "nora_ell",
-          "lastCheckedAt": "2026-07-24T17:33:16.483Z"
+          "lastCheckedAt": "2026-09-14T14:57:03.969Z"
         }
       ]
     }
   },
   "paofedee": {
-    "aliases": [
-      "paofedee"
-    ],
+    "aliases": ["paofedee"],
     "sources": {
       "reddit": [
         {
@@ -2802,16 +2646,24 @@
           "url": "https://stufferdb.com/index?/category/27565",
           "categoryId": "27565",
           "discoveredAs": "paofedee",
-          "lastCheckedAt": "2026-07-24T17:33:42.949Z"
+          "lastCheckedAt": "2026-09-14T14:57:20.224Z"
         }
       ]
     }
   },
   "passion": {
-    "aliases": [
-      "passion"
-    ],
+    "aliases": ["passion"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/84",
+          "categoryId": "84",
+          "discoveredAs": "passion",
+          "lastCheckedAt": "2026-09-14T14:57:26.725Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/passion/submitted/",
@@ -2819,24 +2671,27 @@
           "userId": "passion",
           "username": "passion",
           "discoveredAs": "passion",
-          "lastCheckedAt": "2026-07-24T17:34:06.970Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/84",
-          "categoryId": "84",
-          "discoveredAs": "passion",
-          "lastCheckedAt": "2026-07-24T17:34:13.201Z"
+          "lastCheckedAt": "2026-09-13T22:38:05.043Z",
+          "model": "passion",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "piggyjrc": {
-    "aliases": [
-      "piggyjrc"
-    ],
+    "aliases": ["piggyjrc"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/9317",
+          "categoryId": "9317",
+          "discoveredAs": "piggyjrc",
+          "lastCheckedAt": "2026-09-14T13:39:00.403Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/PiggyJRC/submitted/",
@@ -2844,46 +2699,36 @@
           "userId": "PiggyJRC",
           "username": "PiggyJRC",
           "discoveredAs": "piggyjrc",
-          "lastCheckedAt": "2026-06-08T15:44:45.651Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/9317",
-          "categoryId": "9317",
-          "discoveredAs": "piggyjrc",
-          "lastCheckedAt": "2026-07-24T17:35:19.730Z"
+          "lastCheckedAt": "2026-06-08T15:44:45.651Z",
+          "model": "piggyjrc",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "plumpprincess": {
-    "aliases": [
-      "plumpprincess"
-    ],
+    "aliases": ["plumpprincess"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/14981",
           "categoryId": "14981",
           "discoveredAs": "plumpprincess",
-          "lastCheckedAt": "2026-07-24T17:35:55.572Z"
+          "lastCheckedAt": "2026-09-14T14:57:35.784Z"
         }
       ]
     }
   },
   "poptartbelly": {
-    "aliases": [
-      "36874343",
-      "poptartbelly"
-    ],
+    "aliases": ["36874343", "poptartbelly"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/319009/poptartbelly",
           "service": "onlyfans",
           "discoveredAs": "poptartbelly",
-          "lastCheckedAt": "2026-07-24T17:36:33.909Z",
+          "lastCheckedAt": "2026-09-14T14:58:03.291Z",
           "userId": "319009",
           "username": null
         }
@@ -2892,7 +2737,7 @@
         {
           "url": "https://pawchive.pw/patreon/user/36874343",
           "discoveredAs": "36874343",
-          "lastCheckedAt": "2026-07-11T01:44:05.122Z",
+          "lastCheckedAt": "2026-09-14T14:57:42.927Z",
           "service": "patreon",
           "userId": "36874343",
           "username": null
@@ -2903,15 +2748,13 @@
           "url": "https://stufferdb.com/index?/category/14429",
           "categoryId": "14429",
           "discoveredAs": "poptartbelly",
-          "lastCheckedAt": "2026-07-24T17:36:36.525Z"
+          "lastCheckedAt": "2026-09-14T14:58:05.587Z"
         }
       ]
     }
   },
   "pretty_pettybabe": {
-    "aliases": [
-      "pretty_pettybabe"
-    ],
+    "aliases": ["pretty_pettybabe"],
     "sources": {
       "reddit": [
         {
@@ -2928,22 +2771,20 @@
           "url": "https://stufferdb.com/index?/category/27238",
           "categoryId": "27238",
           "discoveredAs": "pretty_pettybabe",
-          "lastCheckedAt": "2026-07-24T17:37:17.137Z"
+          "lastCheckedAt": "2026-09-14T14:58:25.065Z"
         }
       ]
     }
   },
   "prettyplsgemini": {
-    "aliases": [
-      "prettyplsgemini"
-    ],
+    "aliases": ["prettyplsgemini"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/fansly/319413/prettyplsgemini",
           "service": "fansly",
           "discoveredAs": "prettyplsgemini",
-          "lastCheckedAt": "2026-07-24T17:38:07.713Z",
+          "lastCheckedAt": "2026-09-14T14:59:37.544Z",
           "userId": "319413",
           "username": null
         }
@@ -2961,28 +2802,16 @@
     }
   },
   "pumpkincakezz": {
-    "aliases": [
-      "pumpkincakezz"
-    ],
+    "aliases": ["pumpkincakezz"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/310597/pumpkincakezz",
           "service": "onlyfans",
           "discoveredAs": "pumpkincakezz",
-          "lastCheckedAt": "2026-07-24T17:38:29.274Z",
+          "lastCheckedAt": "2026-09-14T14:59:51.937Z",
           "userId": "310597",
           "username": null
-        }
-      ],
-      "reddit": [
-        {
-          "url": "https://www.reddit.com/user/pumpkincakezz/submitted/",
-          "service": "submitted",
-          "userId": "pumpkincakezz",
-          "username": "pumpkincakezz",
-          "discoveredAs": "pumpkincakezz",
-          "lastCheckedAt": "2026-06-08T15:45:07.853Z"
         }
       ],
       "stufferdb": [
@@ -2990,17 +2819,28 @@
           "url": "https://stufferdb.com/index?/category/12395",
           "categoryId": "12395",
           "discoveredAs": "pumpkincakezz",
-          "lastCheckedAt": "2026-07-24T17:38:31.796Z"
+          "lastCheckedAt": "2026-09-14T14:59:54.200Z"
+        }
+      ]
+    },
+    "inactiveSources": {
+      "reddit": [
+        {
+          "url": "https://www.reddit.com/user/pumpkincakezz/submitted/",
+          "service": "submitted",
+          "userId": "pumpkincakezz",
+          "username": "pumpkincakezz",
+          "discoveredAs": "pumpkincakezz",
+          "lastCheckedAt": "2026-06-08T15:45:07.853Z",
+          "model": "pumpkincakezz",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "ramenslurper": {
-    "aliases": [
-      "ramenslurper",
-      "ramenslurper-",
-      "ramenslurper, ramenslurper-"
-    ],
+    "aliases": ["ramenslurper", "ramenslurper-", "ramenslurper, ramenslurper-"],
     "sources": {
       "reddit": [
         {
@@ -3009,7 +2849,7 @@
           "userId": "ramenslurper-",
           "username": "ramenslurper-",
           "discoveredAs": "ramenslurper-",
-          "lastCheckedAt": "2026-07-24T17:39:16.952Z"
+          "lastCheckedAt": "2026-09-13T22:43:05.660Z"
         }
       ],
       "stufferdb": [
@@ -3017,15 +2857,13 @@
           "url": "https://stufferdb.com/index?/category/17262",
           "categoryId": "17262",
           "discoveredAs": "ramenslurper",
-          "lastCheckedAt": "2026-07-24T17:39:48.128Z"
+          "lastCheckedAt": "2026-09-14T15:00:18.240Z"
         }
       ]
     }
   },
   "redheadchubbybunni": {
-    "aliases": [
-      "redheadchubbybunni"
-    ],
+    "aliases": ["redheadchubbybunni"],
     "sources": {
       "reddit": [
         {
@@ -3034,7 +2872,7 @@
           "userId": "redheadchubbybunni",
           "username": "redheadchubbybunni",
           "discoveredAs": "redheadchubbybunni",
-          "lastCheckedAt": "2026-06-26T16:02:57.576Z"
+          "lastCheckedAt": "2026-09-13T22:44:06.174Z"
         }
       ],
       "stufferdb": [
@@ -3042,22 +2880,20 @@
           "url": "https://stufferdb.com/index?/category/23077",
           "categoryId": "23077",
           "discoveredAs": "redheadchubbybunni",
-          "lastCheckedAt": "2026-07-24T17:40:18.034Z"
+          "lastCheckedAt": "2026-09-14T15:01:12.351Z"
         }
       ]
     }
   },
   "ryliehaze": {
-    "aliases": [
-      "ryliehaze"
-    ],
+    "aliases": ["ryliehaze"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/348057/ryliehaze",
           "service": "onlyfans",
           "discoveredAs": "ryliehaze",
-          "lastCheckedAt": "2026-07-24T17:41:24.391Z",
+          "lastCheckedAt": "2026-09-14T15:02:15.150Z",
           "userId": "348057",
           "username": null
         }
@@ -3069,7 +2905,7 @@
           "userId": "RylieHaze",
           "username": "RylieHaze",
           "discoveredAs": "ryliehaze",
-          "lastCheckedAt": "2026-07-24T17:41:11.522Z"
+          "lastCheckedAt": "2026-09-13T22:45:06.058Z"
         }
       ],
       "stufferdb": [
@@ -3077,15 +2913,13 @@
           "url": "https://stufferdb.com/index?/category/14455",
           "categoryId": "14455",
           "discoveredAs": "ryliehaze",
-          "lastCheckedAt": "2026-07-24T17:41:27.982Z"
+          "lastCheckedAt": "2026-09-14T15:02:19.905Z"
         }
       ]
     }
   },
   "ryyds": {
-    "aliases": [
-      "ryyds"
-    ],
+    "aliases": ["ryyds"],
     "sources": {
       "reddit": [
         {
@@ -3094,7 +2928,7 @@
           "userId": "ryyds",
           "username": "ryyds",
           "discoveredAs": "ryyds",
-          "lastCheckedAt": "2026-07-24T17:42:12.708Z"
+          "lastCheckedAt": "2026-09-14T15:03:13.486Z"
         }
       ],
       "stufferdb": [
@@ -3102,7 +2936,7 @@
           "url": "https://stufferdb.com/index?/category/27200",
           "categoryId": "27200",
           "discoveredAs": "ryyds",
-          "lastCheckedAt": "2026-07-24T17:42:18.772Z"
+          "lastCheckedAt": "2026-09-14T15:03:17.975Z"
         }
       ]
     }
@@ -3119,7 +2953,7 @@
           "url": "https://stufferdb.com/index?/category/1734",
           "categoryId": "1734",
           "discoveredAs": "sabrina_ssbbw",
-          "lastCheckedAt": "2026-07-24T17:42:47.716Z"
+          "lastCheckedAt": "2026-09-14T13:40:14.074Z"
         },
         {
           "url": "https://stufferdb.com/index?/search/467339",
@@ -3131,9 +2965,7 @@
     }
   },
   "satanpanties666": {
-    "aliases": [
-      "satanpanties666"
-    ],
+    "aliases": ["satanpanties666"],
     "sources": {
       "coomer": [
         {
@@ -3141,7 +2973,7 @@
           "service": "onlyfans",
           "userId": "290505",
           "discoveredAs": "satanpanties666",
-          "lastCheckedAt": "2026-07-24T17:43:43.810Z",
+          "lastCheckedAt": "2026-09-14T15:04:15.423Z",
           "username": null
         }
       ],
@@ -3160,33 +2992,31 @@
           "url": "https://stufferdb.com/index?/category/14457",
           "categoryId": "14457",
           "discoveredAs": "satanpanties666",
-          "lastCheckedAt": "2026-07-24T17:43:45.656Z"
+          "lastCheckedAt": "2026-09-14T15:04:20.455Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/27972",
           "categoryId": "27972",
           "discoveredAs": "satanpanties666",
-          "lastCheckedAt": "2026-07-24T17:43:54.895Z"
+          "lastCheckedAt": "2026-09-14T15:04:28.391Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/8003",
           "categoryId": "8003",
           "discoveredAs": "satanpanties666",
-          "lastCheckedAt": "2026-07-24T17:44:01.291Z"
+          "lastCheckedAt": "2026-09-14T15:04:34.608Z"
         },
         {
           "url": "https://stufferdb.com/index?/category/8004",
           "categoryId": "8004",
           "discoveredAs": "satanpanties666",
-          "lastCheckedAt": "2026-07-24T17:44:10.088Z"
+          "lastCheckedAt": "2026-09-14T15:04:39.679Z"
         }
       ]
     }
   },
   "savannahmontana": {
-    "aliases": [
-      "savannahmontana"
-    ],
+    "aliases": ["savannahmontana"],
     "sources": {
       "reddit": [
         {
@@ -3203,46 +3033,39 @@
           "url": "https://stufferdb.com/index?/category/12313",
           "categoryId": "12313",
           "discoveredAs": "savannahmontana",
-          "lastCheckedAt": "2026-07-24T17:44:55.478Z"
+          "lastCheckedAt": "2026-09-14T15:05:11.944Z"
         }
       ]
     }
   },
   "sexy_curvi": {
-    "aliases": [
-      "sexy_curvi",
-      "sexy_curvi_karla_sexy_curvi"
-    ],
+    "aliases": ["sexy_curvi", "sexy_curvi_karla_sexy_curvi"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/11009",
           "categoryId": "11009",
           "discoveredAs": "sexy_curvi",
-          "lastCheckedAt": "2026-07-24T17:45:12.080Z"
+          "lastCheckedAt": "2026-09-14T15:05:19.391Z"
         }
       ]
     }
   },
   "sexy_signature": {
-    "aliases": [
-      "sexy_signature"
-    ],
+    "aliases": ["sexy_signature"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/382",
           "categoryId": "382",
           "discoveredAs": "sexy_signature",
-          "lastCheckedAt": "2026-07-24T17:45:20.959Z"
+          "lastCheckedAt": "2026-09-14T15:05:32.045Z"
         }
       ]
     }
   },
   "sexycreolyta4u": {
-    "aliases": [
-      "sexycreolyta4u"
-    ],
+    "aliases": ["sexycreolyta4u"],
     "sources": {
       "reddit": [
         {
@@ -3251,7 +3074,7 @@
           "userId": "sexycreolyta4u",
           "username": "sexycreolyta4u",
           "discoveredAs": "sexycreolyta4u",
-          "lastCheckedAt": "2026-07-24T17:46:11.084Z"
+          "lastCheckedAt": "2026-09-14T15:06:07.397Z"
         }
       ],
       "stufferdb": [
@@ -3259,22 +3082,20 @@
           "url": "https://stufferdb.com/index?/category/10992",
           "categoryId": "10992",
           "discoveredAs": "sexycreolyta4u",
-          "lastCheckedAt": "2026-07-24T17:48:34.864Z"
+          "lastCheckedAt": "2026-09-14T15:06:11.848Z"
         }
       ]
     }
   },
   "shroomprincess0": {
-    "aliases": [
-      "shroomprincess0"
-    ],
+    "aliases": ["shroomprincess0"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/232669/shroomprincess0",
           "service": "onlyfans",
           "discoveredAs": "shroomprincess0",
-          "lastCheckedAt": "2026-07-24T17:49:15.514Z",
+          "lastCheckedAt": "2026-09-14T15:07:28.206Z",
           "userId": "232669",
           "username": null
         }
@@ -3286,7 +3107,7 @@
           "userId": "shroomprincess0",
           "username": "shroomprincess0",
           "discoveredAs": "shroomprincess0",
-          "lastCheckedAt": "2026-07-24T17:49:00.098Z"
+          "lastCheckedAt": "2026-09-14T15:07:13.478Z"
         }
       ],
       "stufferdb": [
@@ -3294,31 +3115,37 @@
           "url": "https://stufferdb.com/index?/category/16439",
           "categoryId": "16439",
           "discoveredAs": "shroomprincess0",
-          "lastCheckedAt": "2026-07-24T17:49:17.220Z"
+          "lastCheckedAt": "2026-09-14T15:07:30.158Z"
         }
       ]
     }
   },
   "shymercat": {
-    "aliases": [
-      "shymercat"
-    ],
+    "aliases": ["shymercat"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/14602",
           "categoryId": "14602",
           "discoveredAs": "shymercat",
-          "lastCheckedAt": "2026-07-24T17:49:27.471Z"
+          "lastCheckedAt": "2026-09-14T15:07:53.818Z"
         }
       ]
     }
   },
   "skylar_bc": {
-    "aliases": [
-      "skylar_bc"
-    ],
+    "aliases": ["skylar_bc"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/4247",
+          "categoryId": "4247",
+          "discoveredAs": "skylar_bc",
+          "lastCheckedAt": "2026-09-14T15:08:02.356Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/Skylar_bc/submitted/",
@@ -3326,23 +3153,16 @@
           "userId": "Skylar_bc",
           "username": "Skylar_bc",
           "discoveredAs": "skylar_bc",
-          "lastCheckedAt": "2026-05-29T01:40:48.534Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/4247",
-          "categoryId": "4247",
-          "discoveredAs": "skylar_bc",
-          "lastCheckedAt": "2026-07-24T17:49:40.049Z"
+          "lastCheckedAt": "2026-05-29T01:40:48.534Z",
+          "model": "skylar_bc",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "snowangelcake": {
-    "aliases": [
-      "snowangelcake"
-    ],
+    "aliases": ["snowangelcake"],
     "sources": {
       "coomer": [
         {
@@ -3361,7 +3181,7 @@
           "userId": "Snowangelcake",
           "username": "Snowangelcake",
           "discoveredAs": "snowangelcake",
-          "lastCheckedAt": "2026-07-24T17:50:12.331Z"
+          "lastCheckedAt": "2026-09-14T15:08:44.495Z"
         }
       ],
       "stufferdb": [
@@ -3369,22 +3189,20 @@
           "url": "https://stufferdb.com/index?/category/16801",
           "categoryId": "16801",
           "discoveredAs": "snowangelcake",
-          "lastCheckedAt": "2026-07-24T17:51:08.903Z"
+          "lastCheckedAt": "2026-09-14T15:09:03.266Z"
         }
       ]
     }
   },
   "softshortnsweet": {
-    "aliases": [
-      "softshortnsweet"
-    ],
+    "aliases": ["softshortnsweet"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/327262/softshortnsweet",
           "service": "onlyfans",
           "discoveredAs": "softshortnsweet",
-          "lastCheckedAt": "2026-07-24T17:51:33.819Z",
+          "lastCheckedAt": "2026-09-14T15:09:29.069Z",
           "userId": "327262",
           "username": null
         }
@@ -3394,15 +3212,13 @@
           "url": "https://stufferdb.com/index?/category/14971",
           "categoryId": "14971",
           "discoveredAs": "softshortnsweet",
-          "lastCheckedAt": "2026-07-24T17:51:37.597Z"
+          "lastCheckedAt": "2026-09-14T15:09:52.830Z"
         }
       ]
     }
   },
   "sonyabbw": {
-    "aliases": [
-      "sonyabbw"
-    ],
+    "aliases": ["sonyabbw"],
     "sources": {
       "reddit": [
         {
@@ -3419,15 +3235,13 @@
           "url": "https://stufferdb.com/index?/category/24230",
           "categoryId": "24230",
           "discoveredAs": "sonyabbw",
-          "lastCheckedAt": "2026-07-24T17:51:52.951Z"
+          "lastCheckedAt": "2026-09-14T15:10:28.800Z"
         }
       ]
     }
   },
   "sophiesbelly": {
-    "aliases": [
-      "sophiesbelly"
-    ],
+    "aliases": ["sophiesbelly"],
     "sources": {
       "coomer": [
         {
@@ -3436,7 +3250,7 @@
           "userId": "362596",
           "username": null,
           "discoveredAs": "sophiesbelly",
-          "lastCheckedAt": "2026-09-09T04:33:43.496Z"
+          "lastCheckedAt": "2026-09-14T15:11:26.249Z"
         }
       ],
       "reddit": [
@@ -3446,7 +3260,7 @@
           "userId": "sophiesbelly",
           "username": "sophiesbelly",
           "discoveredAs": "sophiesbelly",
-          "lastCheckedAt": "2026-09-09T04:32:06.464Z"
+          "lastCheckedAt": "2026-09-14T15:11:08.431Z"
         }
       ],
       "stufferdb": [
@@ -3454,15 +3268,13 @@
           "url": "https://stufferdb.com/index?/category/29045",
           "categoryId": "29045",
           "discoveredAs": "sophiesbelly",
-          "lastCheckedAt": "2026-09-09T04:41:02.689Z"
+          "lastCheckedAt": "2026-09-14T15:11:31.148Z"
         }
       ]
     }
   },
   "starphucker": {
-    "aliases": [
-      "starphucker"
-    ],
+    "aliases": ["starphucker"],
     "sources": {
       "reddit": [
         {
@@ -3479,22 +3291,20 @@
           "url": "https://stufferdb.com/index?/category/11547",
           "categoryId": "11547",
           "discoveredAs": "starphucker",
-          "lastCheckedAt": "2026-07-24T17:52:25.422Z"
+          "lastCheckedAt": "2026-09-14T15:12:09.492Z"
         }
       ]
     }
   },
   "strawbrrymilk": {
-    "aliases": [
-      "strawbrrymilk"
-    ],
+    "aliases": ["strawbrrymilk"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/13034",
           "categoryId": "13034",
           "discoveredAs": "strawbrrymilk",
-          "lastCheckedAt": "2026-07-24T17:52:32.857Z"
+          "lastCheckedAt": "2026-09-14T15:12:15.543Z"
         }
       ]
     }
@@ -3511,7 +3321,7 @@
           "url": "https://coomerfans.com/u/onlyfans/337465/sweetsp666",
           "service": "onlyfans",
           "discoveredAs": "sweetsp666",
-          "lastCheckedAt": "2026-07-24T17:52:46.623Z",
+          "lastCheckedAt": "2026-09-14T15:12:28.660Z",
           "userId": "337465",
           "username": null
         }
@@ -3521,16 +3331,17 @@
           "url": "https://stufferdb.com/index?/category/1953",
           "categoryId": "1953",
           "discoveredAs": "sweetsp666",
-          "lastCheckedAt": "2026-07-24T17:52:48.350Z"
+          "lastCheckedAt": "2026-09-14T15:12:30.527Z"
         }
       ]
     }
   },
   "test": {
-    "aliases": [
-      "test"
-    ],
+    "aliases": ["test"],
     "sources": {
+      "stufferdb": []
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/test/submitted/",
@@ -3538,31 +3349,29 @@
           "userId": "test",
           "username": "test",
           "discoveredAs": "test",
-          "lastCheckedAt": "2026-05-29T01:41:26.637Z"
+          "lastCheckedAt": "2026-05-29T01:41:26.637Z",
+          "model": "test",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
-      ],
-      "stufferdb": []
+      ]
     }
   },
   "that-fatt-girl_bbw_bethany": {
-    "aliases": [
-      "that-fatt-girl_bbw_bethany"
-    ],
+    "aliases": ["that-fatt-girl_bbw_bethany"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/2234",
           "categoryId": "2234",
           "discoveredAs": "that-fatt-girl_bbw_bethany",
-          "lastCheckedAt": "2026-07-24T17:53:08.761Z"
+          "lastCheckedAt": "2026-09-14T15:12:43.135Z"
         }
       ]
     }
   },
   "thechloecream": {
-    "aliases": [
-      "thechloecream"
-    ],
+    "aliases": ["thechloecream"],
     "sources": {
       "coomer": [
         {
@@ -3587,9 +3396,7 @@
     }
   },
   "thedollbb": {
-    "aliases": [
-      "thedollbb"
-    ],
+    "aliases": ["thedollbb"],
     "sources": {
       "reddit": [
         {
@@ -3598,7 +3405,7 @@
           "userId": "thedollbb",
           "username": "thedollbb",
           "discoveredAs": "thedollbb",
-          "lastCheckedAt": "2026-07-24T17:54:11.856Z"
+          "lastCheckedAt": "2026-09-14T15:15:18.511Z"
         }
       ],
       "stufferdb": [
@@ -3606,15 +3413,13 @@
           "url": "https://stufferdb.com/index?/category/27628",
           "categoryId": "27628",
           "discoveredAs": "thedollbb",
-          "lastCheckedAt": "2026-07-24T17:55:04.430Z"
+          "lastCheckedAt": "2026-09-14T15:15:44.531Z"
         }
       ]
     }
   },
   "thedumplin": {
-    "aliases": [
-      "thedumplin"
-    ],
+    "aliases": ["thedumplin"],
     "sources": {
       "coomer": [
         {
@@ -3626,6 +3431,16 @@
           "username": null
         }
       ],
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/14593",
+          "categoryId": "14593",
+          "discoveredAs": "thedumplin",
+          "lastCheckedAt": "2026-09-14T15:52:15.676Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/thedumplin/submitted/",
@@ -3633,24 +3448,16 @@
           "userId": "thedumplin",
           "username": "thedumplin",
           "discoveredAs": "thedumplin",
-          "lastCheckedAt": "2026-05-29T01:41:37.094Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/14593",
-          "categoryId": "14593",
-          "discoveredAs": "thedumplin",
-          "lastCheckedAt": "2026-07-24T17:56:07.974Z"
+          "lastCheckedAt": "2026-05-29T01:41:37.094Z",
+          "model": "thedumplin",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "therachelhanna": {
-    "aliases": [
-      "relative-baby4332",
-      "therachelhanna"
-    ],
+    "aliases": ["relative-baby4332", "therachelhanna"],
     "sources": {
       "reddit": [
         {
@@ -3659,7 +3466,7 @@
           "userId": "Relative-Baby4332",
           "username": "Relative-Baby4332",
           "discoveredAs": "relative-baby4332",
-          "lastCheckedAt": "2026-07-24T17:56:38.928Z"
+          "lastCheckedAt": "2026-09-14T15:16:48.702Z"
         }
       ],
       "stufferdb": [
@@ -3667,15 +3474,13 @@
           "url": "https://stufferdb.com/index?/category/23064",
           "categoryId": "23064",
           "discoveredAs": "therachelhanna",
-          "lastCheckedAt": "2026-07-24T17:56:47.767Z"
+          "lastCheckedAt": "2026-09-14T15:17:21.786Z"
         }
       ]
     }
   },
   "theroxyclover": {
-    "aliases": [
-      "theroxyclover"
-    ],
+    "aliases": ["theroxyclover"],
     "sources": {
       "coomer": [
         {
@@ -3694,7 +3499,7 @@
           "userId": "TheRoxyClover",
           "username": "TheRoxyClover",
           "discoveredAs": "theroxyclover",
-          "lastCheckedAt": "2026-06-02T03:07:11.511Z"
+          "lastCheckedAt": "2026-09-14T15:18:38.327Z"
         }
       ],
       "stufferdb": [
@@ -3702,52 +3507,46 @@
           "url": "https://stufferdb.com/index?/category/16834",
           "categoryId": "16834",
           "discoveredAs": "theroxyclover",
-          "lastCheckedAt": "2026-07-24T17:57:21.582Z"
+          "lastCheckedAt": "2026-09-14T15:18:55.503Z"
         }
       ]
     }
   },
   "thiccollegegirl": {
-    "aliases": [
-      "thiccollegegirl"
-    ],
+    "aliases": ["thiccollegegirl"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/8056",
           "categoryId": "8056",
           "discoveredAs": "thiccollegegirl",
-          "lastCheckedAt": "2026-07-24T17:57:28.140Z"
+          "lastCheckedAt": "2026-09-14T15:19:03.317Z"
         }
       ]
     }
   },
   "thickashoney": {
-    "aliases": [
-      "thickashoney"
-    ],
+    "aliases": ["thickashoney"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/15653",
           "categoryId": "15653",
           "discoveredAs": "thickashoney",
-          "lastCheckedAt": "2026-07-24T17:57:38.216Z"
+          "lastCheckedAt": "2026-09-14T15:19:26.064Z"
         }
       ]
     }
   },
   "thickhungryhoney": {
-    "aliases": [
-      "thickhungryhoney"
-    ],
+    "aliases": ["thickhungryhoney"],
     "sources": {
       "coomer": [
         {
           "url": "https://coomerfans.com/u/onlyfans/327289/thickhungryhoney",
           "service": "onlyfans",
           "discoveredAs": "thickhungryhoney",
-          "lastCheckedAt": "2026-07-24T17:58:23.318Z",
+          "lastCheckedAt": "2026-09-14T15:19:48.402Z",
           "userId": "327289",
           "username": null
         }
@@ -3767,15 +3566,13 @@
           "url": "https://stufferdb.com/index?/category/15340",
           "categoryId": "15340",
           "discoveredAs": "thickhungryhoney",
-          "lastCheckedAt": "2026-07-24T17:58:25.801Z"
+          "lastCheckedAt": "2026-09-14T15:19:50.581Z"
         }
       ]
     }
   },
   "tianastummy": {
-    "aliases": [
-      "tianastummy"
-    ],
+    "aliases": ["tianastummy"],
     "sources": {
       "coomer": [
         {
@@ -3792,15 +3589,13 @@
           "url": "https://stufferdb.com/index?/category/5326",
           "categoryId": "5326",
           "discoveredAs": "tianastummy",
-          "lastCheckedAt": "2026-07-24T17:58:47.914Z"
+          "lastCheckedAt": "2026-09-14T15:20:19.924Z"
         }
       ]
     }
   },
   "tiffmcintosh": {
-    "aliases": [
-      "tiffmcintosh"
-    ],
+    "aliases": ["tiffmcintosh"],
     "sources": {
       "coomer": [
         {
@@ -3809,7 +3604,7 @@
           "userId": "312271",
           "username": null,
           "discoveredAs": "tiffmcintosh",
-          "lastCheckedAt": "2026-07-24T17:59:17.883Z"
+          "lastCheckedAt": "2026-09-14T15:20:41.009Z"
         }
       ],
       "reddit": [
@@ -3827,31 +3622,37 @@
           "url": "https://stufferdb.com/index?/category/21993",
           "categoryId": "21993",
           "discoveredAs": "tiffmcintosh",
-          "lastCheckedAt": "2026-07-24T17:59:21.282Z"
+          "lastCheckedAt": "2026-09-14T15:20:47.433Z"
         }
       ]
     }
   },
   "twinklehearts": {
-    "aliases": [
-      "twinklehearts"
-    ],
+    "aliases": ["twinklehearts"],
     "sources": {
       "stufferdb": [
         {
           "url": "https://stufferdb.com/index?/category/28729",
           "categoryId": "28729",
           "discoveredAs": "twinklehearts",
-          "lastCheckedAt": "2026-07-24T17:59:27.574Z"
+          "lastCheckedAt": "2026-09-14T15:20:57.955Z"
         }
       ]
     }
   },
   "udderly_adorable": {
-    "aliases": [
-      "udderly_adorable"
-    ],
+    "aliases": ["udderly_adorable"],
     "sources": {
+      "stufferdb": [
+        {
+          "url": "https://stufferdb.com/index?/category/7764",
+          "categoryId": "7764",
+          "discoveredAs": "udderly_adorable",
+          "lastCheckedAt": "2026-09-14T15:21:04.839Z"
+        }
+      ]
+    },
+    "inactiveSources": {
       "reddit": [
         {
           "url": "https://www.reddit.com/user/Udderly_adorable/submitted/",
@@ -3859,23 +3660,16 @@
           "userId": "Udderly_adorable",
           "username": "Udderly_adorable",
           "discoveredAs": "udderly_adorable",
-          "lastCheckedAt": "2026-05-29T01:42:19.556Z"
-        }
-      ],
-      "stufferdb": [
-        {
-          "url": "https://stufferdb.com/index?/category/7764",
-          "categoryId": "7764",
-          "discoveredAs": "udderly_adorable",
-          "lastCheckedAt": "2026-07-24T18:00:14.087Z"
+          "lastCheckedAt": "2026-05-29T01:42:19.556Z",
+          "model": "udderly_adorable",
+          "inactiveAt": "2026-09-14T00:12:55.536Z",
+          "inactiveReason": "never_saved_reddit_media"
         }
       ]
     }
   },
   "virethealark": {
-    "aliases": [
-      "virethealark"
-    ],
+    "aliases": ["virethealark"],
     "sources": {
       "reddit": [
         {
@@ -3892,15 +3686,13 @@
           "url": "https://stufferdb.com/index?/category/24151",
           "categoryId": "24151",
           "discoveredAs": "virethealark",
-          "lastCheckedAt": "2026-07-24T18:01:12.015Z"
+          "lastCheckedAt": "2026-09-14T15:21:31.945Z"
         }
       ]
     }
   },
   "wantstosleepwu": {
-    "aliases": [
-      "wantstosleepwu"
-    ],
+    "aliases": ["wantstosleepwu"],
     "sources": {
       "reddit": [
         {
@@ -3917,24 +3709,7 @@
           "url": "https://stufferdb.com/index?/category/27578",
           "categoryId": "27578",
           "discoveredAs": "wantstosleepwu",
-          "lastCheckedAt": "2026-07-24T18:02:23.159Z"
-        }
-      ]
-    }
-  },
-  "ilovecaroline": {
-    "aliases": [
-      "ilovecaroline"
-    ],
-    "sources": {
-      "coomer": [
-        {
-          "url": "https://coomerfans.com/u/onlyfans/340329/ilovecaroline",
-          "service": "onlyfans",
-          "userId": "340329",
-          "username": "ilovecaroline",
-          "discoveredAs": "ilovecaroline",
-          "lastCheckedAt": "2026-09-11T17:25:44.475Z"
+          "lastCheckedAt": "2026-09-14T15:22:10.006Z"
         }
       ]
     }
