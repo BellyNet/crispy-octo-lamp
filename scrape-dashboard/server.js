@@ -1719,6 +1719,30 @@ function makeHistoryId(parts) {
     .slice(0, 16)
 }
 
+function runStartedTime(run) {
+  return new Date(run?.startedAt || run?.createdAt || 0).getTime() || 0
+}
+
+function runFinishedTime(run) {
+  return new Date(run?.finishedAt || 0).getTime() || 0
+}
+
+function runCompletenessScore(run) {
+  return (
+    Number(run?.totals?.sources || 0) +
+    Number((run?.models || []).length || 0) +
+    (run?.finishedAt ? 1_000_000 : 0)
+  )
+}
+
+function compareRunsByRecency(left, right) {
+  return (
+    runStartedTime(right) - runStartedTime(left) ||
+    runFinishedTime(right) - runFinishedTime(left) ||
+    runCompletenessScore(right) - runCompletenessScore(left)
+  )
+}
+
 function sourceWorked(source) {
   if (!source || source.ok === false) return false
   if (source.status === 'failed' || source.status === 'source_unavailable') {
@@ -1850,6 +1874,20 @@ function summarizeHistoryModel(result, index, totalModels) {
   }
 }
 
+function allSourceReportResults(report) {
+  if (Array.isArray(report?.results)) return report.results
+  if (!report?.results || typeof report.results !== 'object') return []
+  return Object.entries(report.results)
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([, result]) => result)
+}
+
+function selectedModelCountFromReport(report, fallback) {
+  if (Array.isArray(report?.selectedModels)) return report.selectedModels.length
+  const count = Number(report?.selectedModels || report?.totalModelsInRegistry)
+  return Number.isFinite(count) && count > 0 ? count : fallback
+}
+
 function totalsFromReport(report, models) {
   const reportTotals = report?.totals || {}
   return {
@@ -1876,19 +1914,16 @@ function totalsFromReport(report, models) {
     nasSyncFailures: Number(reportTotals.nasSyncFailures || 0),
     localMp4sDeleted: Number(reportTotals.localMp4sDeleted || 0),
     localBytesReclaimed: Number(reportTotals.localBytesReclaimed || 0),
-    totalModels: Number(report?.selectedModels || models.length),
+    totalModels: selectedModelCountFromReport(report, models.length),
     totalSources: Number(report?.selectedSources || 0),
   }
 }
 
 function snapshotFromAllSourceReport(report, overrides = {}) {
-  const results = Array.isArray(report?.results) ? report.results : []
+  const results = allSourceReportResults(report)
+  const totalModels = selectedModelCountFromReport(report, results.length)
   const models = results.map((result, index) =>
-    summarizeHistoryModel(
-      result,
-      index,
-      Number(report?.selectedModels || results.length)
-    )
+    summarizeHistoryModel(result, index, totalModels)
   )
   const failed = Number(report?.totals?.failures || 0) > 0
   const startedAt = overrides.startedAt || report?.startedAt || null
@@ -2029,11 +2064,7 @@ function upsertHistorySnapshot(snapshot) {
   }
   const withoutExisting = history.runs.filter((run) => run.id !== snapshot.id)
   withoutExisting.push(snapshot)
-  withoutExisting.sort(
-    (left, right) =>
-      new Date(right.startedAt || right.createdAt || 0) -
-      new Date(left.startedAt || left.createdAt || 0)
-  )
+  withoutExisting.sort(compareRunsByRecency)
   history.runs = withoutExisting
   writeRunHistory(history)
   auditCache = null
@@ -2063,11 +2094,7 @@ function buildSeenSourceKeySet(history = readRunHistory()) {
 }
 
 function getLatestNonDryRunStartedAt(history = readRunHistory()) {
-  const runs = [...(history.runs || [])].sort(
-    (left, right) =>
-      new Date(right.startedAt || right.createdAt || 0) -
-      new Date(left.startedAt || left.createdAt || 0)
-  )
+  const runs = [...(history.runs || [])].sort(compareRunsByRecency)
   const latest = runs.find((run) => !run.options?.dryRun)
   return latest?.startedAt || null
 }
@@ -2199,11 +2226,7 @@ function buildSourceAlerts(
   activeSourceStateMap = new Map(),
   activeSourceMap = new Map()
 ) {
-  const sortedRuns = [...runs].sort(
-    (left, right) =>
-      new Date(right.startedAt || right.createdAt || 0) -
-      new Date(left.startedAt || left.createdAt || 0)
-  )
+  const sortedRuns = [...runs].sort(compareRunsByRecency)
   if (!sortedRuns.length) return []
 
   const findPriorWorked = (sourceKey, firstOlderIndex) => {
@@ -2973,11 +2996,7 @@ function buildAuditQueues(history) {
     return auditCache.queues
   }
 
-  const latestRun = [...runs].sort(
-    (left, right) =>
-      new Date(right.startedAt || right.createdAt || 0) -
-      new Date(left.startedAt || left.createdAt || 0)
-  )[0]
+  const latestRun = [...runs].sort(compareRunsByRecency)[0]
   const latestSourceStatuses = getLatestSourceStatusMap(latestRun)
   let oversizedVideos = []
   try {
