@@ -1046,17 +1046,30 @@
          specific selector + !important on both color and stroke. */
       .pswp button.pswp__button.pswp__pswp-flag-button,
       .pswp button.pswp__button.pswp__pswp-link-button,
+      .pswp button.pswp__button.pswp__pswp-rotate-button,
       .pswp button.pswp__button.pswp__pswp-chrome-toggle {
         color: #fff !important;
       }
       .pswp button.pswp__button.pswp__pswp-flag-button svg,
       .pswp button.pswp__button.pswp__pswp-link-button svg,
+      .pswp button.pswp__button.pswp__pswp-rotate-button svg,
       .pswp button.pswp__button.pswp__pswp-chrome-toggle svg,
       .pswp button.pswp__button.pswp__pswp-flag-button svg *,
       .pswp button.pswp__button.pswp__pswp-link-button svg *,
+      .pswp button.pswp__button.pswp__pswp-rotate-button svg *,
       .pswp button.pswp__button.pswp__pswp-chrome-toggle svg * {
         stroke: #fff !important;
         color: #fff !important;
+      }
+      .pswp button.pswp__button.pswp__pswp-rotate-button:disabled svg {
+        opacity: 0.4;
+      }
+      .pswp button.pswp__button.pswp__pswp-rotate-button.is-rotating svg {
+        animation: pswp-rotate-spin 0.5s ease-in-out;
+      }
+      @keyframes pswp-rotate-spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(90deg); }
       }
       .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active,
       .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg,
@@ -4748,6 +4761,91 @@
                   // Soft fail — the next reload from the server will reconcile.
                 } finally {
                   el.disabled = false
+                }
+              },
+            })
+
+            // Rotate 90° clockwise, in place on disk. Only offered for plain
+            // images — gifs and videos aren't re-encoded this way. Click it
+            // up to three times to reach any orientation.
+            let rotateBtnEl = null
+            const refreshRotateBtn = () => {
+              if (!rotateBtnEl) return
+              const item = filtered[pswp.currIndex]
+              const show = !!item && item.type === 'image'
+              rotateBtnEl.style.visibility = show ? 'visible' : 'hidden'
+              rotateBtnEl.style.pointerEvents = show ? 'auto' : 'none'
+            }
+            pswp.ui.registerElement({
+              name:     'pswp-rotate-button',
+              order:    9,
+              isButton: true,
+              title:    'Rotate image 90°',
+              html:     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 4 21 10 15 10"/><path d="M18.5 15a9 9 0 1 1-2-9.5L21 10"/></svg>',
+              onInit(el) {
+                rotateBtnEl = el
+                refreshRotateBtn()
+                pswp.on('change', refreshRotateBtn)
+              },
+              async onClick(e, el) {
+                const item = filtered[pswp.currIndex]
+                if (!item || item.type !== 'image' || !currentUsername) return
+                el.disabled = true
+                el.classList.add('is-rotating')
+                try {
+                  const r = await fetch(
+                    `/api/users/${encodeURIComponent(currentUsername)}/rotate`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ folder: item.folder, filename: item.filename, direction: 'cw' }),
+                    }
+                  )
+                  const data = await r.json().catch(() => null)
+                  if (!r.ok || !data?.ok) throw new Error((data && data.error) || 'rotate failed')
+
+                  // Cache-bust: same path, new query string, so neither the
+                  // full-res image nor the grid thumbnail can be served from
+                  // the browser's (immutable, year-long) HTTP cache below.
+                  const bust = `r=${Date.now()}`
+                  const freshUrl = item.url.split('?')[0] + '?' + bust
+                  item.url = freshUrl
+                  item.width = data.width
+                  item.height = data.height
+
+                  // Patch the underlying allMedia entry too (filtered may be a copy).
+                  const src = allMedia.find((m) => m.folder === item.folder && m.filename === item.filename)
+                  if (src) {
+                    src.url = freshUrl
+                    src.width = data.width
+                    src.height = data.height
+                  }
+
+                  // Mutate the live dataSource entry in place and ask
+                  // PhotoSwipe to reload this slide from it — getItemData()
+                  // reads pswp.options.dataSource[index] directly, so this
+                  // is picked up without rebuilding the whole gallery.
+                  const dsEntry = dataSource[pswp.currIndex]
+                  if (dsEntry) {
+                    dsEntry.src = freshUrl
+                    dsEntry.width = data.width
+                    dsEntry.height = data.height
+                  }
+                  pswp.refreshSlideContent(pswp.currIndex)
+
+                  // Grid thumbnail lives outside the lightbox entirely —
+                  // same cache-busting trick on its <img src>.
+                  const card = gridEl.querySelector(`.media-card[data-index="${pswp.currIndex}"]`)
+                  const cardImg = card?.querySelector('.card-thumb img')
+                  if (cardImg) {
+                    const cardBase = (cardImg.src || '').split('?')[0]
+                    cardImg.src = cardBase + '?' + bust
+                  }
+                } catch {
+                  // Soft fail — the next reload from the server will reconcile.
+                } finally {
+                  el.disabled = false
+                  setTimeout(() => el.classList.remove('is-rotating'), 500)
                 }
               },
             })
