@@ -2093,9 +2093,11 @@ function buildSeenSourceKeySet(history = readRunHistory()) {
   return seen
 }
 
-function getLatestNonDryRunStartedAt(history = readRunHistory()) {
+function getLatestFullSourceRunStartedAt(history = readRunHistory()) {
   const runs = [...(history.runs || [])].sort(compareRunsByRecency)
-  const latest = runs.find((run) => !run.options?.dryRun)
+  const latest = runs.find(
+    (run) => run.mode === 'all' && run.finishedAt && !run.options?.dryRun
+  )
   return latest?.startedAt || null
 }
 
@@ -2168,7 +2170,7 @@ function buildNewSourceQueue() {
   const history = readRunHistory()
   const registry = loadModelRegistry(registryPath)
   const seenSources = buildSeenSourceKeySet(history)
-  const latestRunStartedAt = getLatestNonDryRunStartedAt(history)
+  const latestRunStartedAt = getLatestFullSourceRunStartedAt(history)
   const latestRunStartedMs = Date.parse(latestRunStartedAt || '')
   const groups = []
 
