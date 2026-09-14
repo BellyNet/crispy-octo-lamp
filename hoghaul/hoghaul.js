@@ -981,7 +981,12 @@ async function fetchHtml(url, requestOptions = {}) {
         signal: controller.signal,
       })
       const html = await response.text()
-      if (!response.ok) {
+      const toleratedStatuses = new Set(
+        Array.isArray(requestOptions.tolerateStatusCodes)
+          ? requestOptions.tolerateStatusCodes.map((value) => Number(value))
+          : []
+      )
+      if (!response.ok && !toleratedStatuses.has(response.status)) {
         const retryAfterSeconds = Number.parseInt(
           response.headers.get('retry-after') ||
             response.headers.get('x-ratelimit-reset') ||
@@ -2167,6 +2172,21 @@ async function run(argvInput = process.argv.slice(2)) {
         reason: 'noNewPosts',
         details: {
           knownPostCount: sourceFrontier.knownPostCount || 0,
+        },
+      })
+      return 0
+    }
+    if (isOnlyHavenSource(source)) {
+      console.log(
+        `No OnlyHaven posts for ${source.rawName || source.userId}; source profile is reachable`
+      )
+      finalizeEmptyRun({
+        status: 'no_new_posts',
+        source,
+        modelName,
+        reason: 'emptyOnlyHavenProfile',
+        details: {
+          inputUrl,
         },
       })
       return 0

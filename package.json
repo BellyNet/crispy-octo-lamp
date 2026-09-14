@@ -36,6 +36,7 @@
     "repair:scrape-only": "node milkmaid/repair-stufferdb-models.js --scrape-only",
     "update:stufferdb": "node scrapyard/run-stufferdb-batch.js",
     "update:all-models": "node scrapyard/run-all-source-updates.js",
+    "update:all-models:nightly": "node scrapyard/run-all-source-updates.js --resume-latest --auto-inactivate-never-saved-reddit --skip-completed-legacy-coomerfans",
     "report:repair-failures": "node milkmaid/report-repair-failures.js",
     "audit:missing-media": "node audit/audit-missing-media-refs.js",
     "audit:exact-media-dupes": "node audit/audit-exact-media-duplicates.js",

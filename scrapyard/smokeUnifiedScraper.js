@@ -971,17 +971,68 @@ async function main() {
         coomer: [{ url: 'https://coomerfans.com/u/onlyfans/123/alpha_model' }],
         reddit: [{ url: 'https://www.reddit.com/user/alpha_model/submitted/' }],
         kemono: [{ url: `${PAWCHIVE_ORIGIN}/patreon/user/456` }],
-        stufferdb: [{ url: 'https://stufferdb.com/index?/category/1' }],
+        stufferdb: [
+          { url: 'https://stufferdb.com/index?/category/1' },
+          { url: 'https://stufferdb.com/index?/search/not-a-source' },
+        ],
+      },
+    },
+    dual_coomer_model: {
+      sources: {
+        coomer: [
+          { url: 'https://coomerfans.com/u/onlyfans/999/dual_coomer_model' },
+          { url: 'https://cum.st/creators/onlyfans/888' },
+        ],
       },
     },
   })
   assert.deepStrictEqual(
     allSourceQueue.map((item) => item.model),
-    ['alpha_model', 'beta_model']
+    ['alpha_model', 'beta_model', 'dual_coomer_model']
   )
   assert.deepStrictEqual(
     allSourceQueue[0].sources.map((source) => source.label),
     ['reddit', 'pawchive', 'coomerfans', 'stufferdb']
+  )
+  const completedLegacyDataset = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'completed-legacy-coomerfans-')
+  )
+  const completedLegacyLogDir = path.join(
+    completedLegacyDataset,
+    'dual_coomer_model',
+    'log'
+  )
+  fs.mkdirSync(completedLegacyLogDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(completedLegacyLogDir, 'source-frontier-state.json'),
+    JSON.stringify({
+      version: 1,
+      sources: {
+        'coomerfans/onlyfans/999': {
+          completedPostIds: ['post-1'],
+        },
+      },
+    })
+  )
+  const nightlySourceQueue = buildAllSourceQueue(
+    {
+      dual_coomer_model: {
+        sources: {
+          coomer: [
+            { url: 'https://coomerfans.com/u/onlyfans/999/dual_coomer_model' },
+            { url: 'https://cum.st/creators/onlyfans/888' },
+          ],
+        },
+      },
+    },
+    {
+      skipCompletedLegacyCoomerFans: true,
+      datasetPaths: { datasetDir: completedLegacyDataset },
+    }
+  )
+  assert.deepStrictEqual(
+    nightlySourceQueue[0].sources.map((source) => source.url),
+    ['https://cum.st/creators/onlyfans/888']
   )
 
   const tempRegistryDir = fs.mkdtempSync(
@@ -1543,6 +1594,7 @@ async function main() {
   const redditDiscoveryEvents = []
   const redditListingPages = []
   let redditFetchCount = 0
+  let redditRssTolerateStatusCodes = null
   const emptyRedditPosts = await fetchRedditPosts(
     {
       origin: 'https://www.reddit.com',
@@ -1553,8 +1605,11 @@ async function main() {
     },
     {},
     {
-      fetchHtml: async (url) => {
+      fetchHtml: async (url, requestOptions = {}) => {
         redditFetchCount += 1
+        if (url.includes('.rss')) {
+          redditRssTolerateStatusCodes = requestOptions.tolerateStatusCodes
+        }
         return {
           html: url.includes('.rss') ? '<feed></feed>' : '<html></html>',
           byteLength: 13,
@@ -1575,6 +1630,7 @@ async function main() {
   )
   assert.deepStrictEqual(emptyRedditPosts, [])
   assert.strictEqual(redditFetchCount, 2)
+  assert.deepStrictEqual(redditRssTolerateStatusCodes, [403, 404])
   assert.deepStrictEqual(
     redditListingPages.map((page) => page.mode),
     ['old_html', 'rss']

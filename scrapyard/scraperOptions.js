@@ -65,7 +65,9 @@ const RUNNER_STRING_OPTIONS = [
 ]
 
 const RUNNER_BOOLEAN_OPTIONS = [
+  'auto-inactivate-never-saved-reddit',
   'no-model-infer',
+  'resume-latest',
   'stop-on-error',
   'with-repair',
   'scrape',

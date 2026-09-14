@@ -94,6 +94,14 @@ function isCoomerFansTransientError(err) {
   return /\bHTTP\s+(?:429|502|503|504)\b/i.test(message)
 }
 
+function isCoomerFansBrowserBlockedError(err) {
+  const message = String(err?.message || err || '')
+  return (
+    /Checking your browser/i.test(message) ||
+    /browser check did not clear/i.test(message)
+  )
+}
+
 async function fetchCoomerFansHtml(url, deps = {}) {
   const maxRetries = getCoomerFansMaxRetries(deps)
   let lastError = null
@@ -621,7 +629,25 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
       continue
     }
 
-    const { html } = await fetchCoomerFansHtml(pageUrl, deps)
+    let html
+    try {
+      ;({ html } = await fetchCoomerFansHtml(pageUrl, deps))
+    } catch (err) {
+      if (posts.length > 0 && isCoomerFansBrowserBlockedError(err)) {
+        deps.appendRunEvent?.('coomerfans_partial_browser_block', {
+          page: page + 1,
+          url: pageUrl,
+          posts: posts.length,
+          media: fetchedMedia,
+          error: err.message,
+        })
+        deps.logger?.warn?.(
+          `CoomerFans browser check blocked page ${page + 1}; keeping ${posts.length} discovered post(s).`
+        )
+        break
+      }
+      throw err
+    }
     const postLinks = parseCoomerFansPostLinks(source, html)
     if (postLinks.length === 0) break
 
@@ -638,26 +664,44 @@ async function fetchCoomerFansPosts(source, options = {}, deps = {}) {
           )
         : filteredPage.items
 
-    const pagePosts = await Promise.all(
-      selectedPostLinks.map((post) =>
-        postLimit(async () => {
-          const { html: postHtml } = await fetchCoomerFansHtml(post.url, deps)
-          const mediaEntries = parseCoomerFansMediaEntries(
-            source,
-            post,
-            postHtml
-          )
-          return {
-            id: post.id,
-            url: post.url,
-            title: mediaEntries[0]?.title || null,
-            text: mediaEntries[0]?.text || null,
-            published: mediaEntries[0]?.uploadedDate || null,
-            mediaEntries,
-          }
-        })
+    let pagePosts
+    try {
+      pagePosts = await Promise.all(
+        selectedPostLinks.map((post) =>
+          postLimit(async () => {
+            const { html: postHtml } = await fetchCoomerFansHtml(post.url, deps)
+            const mediaEntries = parseCoomerFansMediaEntries(
+              source,
+              post,
+              postHtml
+            )
+            return {
+              id: post.id,
+              url: post.url,
+              title: mediaEntries[0]?.title || null,
+              text: mediaEntries[0]?.text || null,
+              published: mediaEntries[0]?.uploadedDate || null,
+              mediaEntries,
+            }
+          })
+        )
       )
-    )
+    } catch (err) {
+      if (posts.length > 0 && isCoomerFansBrowserBlockedError(err)) {
+        deps.appendRunEvent?.('coomerfans_partial_browser_block', {
+          page: page + 1,
+          url: pageUrl,
+          posts: posts.length,
+          media: fetchedMedia,
+          error: err.message,
+        })
+        deps.logger?.warn?.(
+          `CoomerFans browser check blocked post detail on page ${page + 1}; keeping ${posts.length} discovered post(s).`
+        )
+        break
+      }
+      throw err
+    }
     posts.push(...pagePosts)
     fetchedPages += 1
     fetchedMedia += pagePosts.reduce(
