@@ -1143,14 +1143,54 @@ app.get('/api/discover', async (_req, res) => {
 // Admin page — media added across every model, grouped into scrape "runs".
 // Backed by runIndexStore (dashboard/runIndex.js), a persisted THUMB_DIR
 // index — this route is a pure read, no per-request scanning. The index
-// itself is refreshed by refreshRunIndex() (below), called at startup, at
-// the end of every nightly pass, and on demand via /api/rebuild-run-index.
-//
-// "Run" isn't tracked anywhere at scrape time — it's derived from addedMs
-// timestamps. Real data check (500 items, 2026-09-01): gaps of 10-80 min
-// WITHIN a scrape session vs. 1,500-11,000+ min (1-8 days) BETWEEN
-// sessions — a clean bimodal split, so a fixed gap threshold reliably
-// separates runs without needing any new instrumentation.
+// itself is rebuilt at startup, at the end of every nightly pass, and on
+// demand via /api/rebuild-run-index. See runIndex.js's rebuild() for the
+// bucketing logic (addedMs gaps, refined by each item's invocationKey
+// below) and why it fully recomputes every time instead of only extending.
+
+// Each scraper writes <model>/<scraper>-last-run.json after every
+// invocation — the one place an actual "this batch came from one scrape
+// command" boundary is recorded, rather than inferred from timestamps.
+// Only the MOST RECENT invocation per model+scraper survives (the file is
+// overwritten each run), so this only ever disambiguates a model's newest
+// batch of files; anything older has no window to match and falls back to
+// runIndex's addedMs-gap heuristic.
+const RUN_SUMMARY_FILES = ['milkmaid-last-run.json', 'hoghaul-last-run.json']
+// Grace window on both sides — a file's disk birthtime can land a few
+// seconds after the recorded finishedAt (write/flush/rename lag).
+const INVOCATION_GRACE_MS = 2 * 60 * 1000
+
+async function readModelInvocationWindows(username) {
+  const windows = []
+  for (const filename of RUN_SUMMARY_FILES) {
+    try {
+      const raw = await fs.promises.readFile(
+        path.join(datasetDir, username, filename),
+        'utf8'
+      )
+      const data = JSON.parse(raw)
+      const startedAtMs = Date.parse(data.startedAt)
+      const finishedAtMs = Date.parse(data.finishedAt || data.startedAt)
+      if (Number.isFinite(startedAtMs) && Number.isFinite(finishedAtMs)) {
+        windows.push({ startedAtMs, finishedAtMs })
+      }
+    } catch {}
+  }
+  return windows
+}
+
+function findInvocationKey(windows, addedMs) {
+  for (const w of windows) {
+    if (
+      addedMs >= w.startedAtMs - INVOCATION_GRACE_MS &&
+      addedMs <= w.finishedAtMs + INVOCATION_GRACE_MS
+    ) {
+      return w.startedAtMs
+    }
+  }
+  return null
+}
+
 async function refreshRunIndex() {
   const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
   const usernames = entries
@@ -1161,7 +1201,10 @@ async function refreshRunIndex() {
     usernames.map((username) =>
       modelLimit(async () => {
         try {
-          const { response } = await scanModel(username)
+          const [{ response }, invocationWindows] = await Promise.all([
+            scanModel(username),
+            readModelInvocationWindows(username),
+          ])
           return response.map((item) => ({
             username,
             folder: item.folder,
@@ -1171,6 +1214,7 @@ async function refreshRunIndex() {
             size: item.size,
             url: item.url,
             thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+            invocationKey: findInvocationKey(invocationWindows, item.addedMs),
           }))
         } catch {
           return []
@@ -1180,10 +1224,10 @@ async function refreshRunIndex() {
   )
 
   const flatItems = perModel.flat()
-  const result = runIndexStore.addItems(flatItems)
+  const result = runIndexStore.rebuild(flatItems)
   console.log(
     `  Run index: scanned ${usernames.length} models, ${flatItems.length} total items, ` +
-      `${result.added} new, ${result.newRuns} new run(s)`
+      `${result.runs} run(s)`
   )
   return result
 }
