@@ -6,6 +6,7 @@ const fs = require('fs')
 const {
   loadModelRegistry,
   findCanonicalModelName,
+  saveModelRegistry,
   sanitize,
 } = require('./modelRegistry')
 const {
@@ -26,7 +27,7 @@ const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
-const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb']
+const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb', 'tumblr']
 const temporarilyDisabledSources = new Map()
 const activeChildProcesses = new Set()
 let hardInterruptHandlersInstalled = false
@@ -884,6 +885,172 @@ function normalizeRegistrySourceUrls(sourceList) {
     .filter(Boolean)
 }
 
+function readJsonFileIfExists(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function normalizeRedditUsername(value) {
+  return sanitize(String(value || '').replace(/^u_/i, ''))
+}
+
+function getRedditUsernameFromUrl(value) {
+  return (
+    String(value || '').match(/reddit\.com\/(?:user|u)\/([^/?#]+)/i)?.[1] ||
+    ''
+  )
+}
+
+function getRedditUsernameFromSource(source = {}) {
+  return (
+    source.username ||
+    source.userId ||
+    getRedditUsernameFromUrl(source.url) ||
+    ''
+  )
+}
+
+function isDirectSubmittedRedditSource(source = {}, username = '') {
+  if (String(source.site || source.sourceSite || '').toLowerCase() !== 'reddit')
+    return false
+  if (
+    String(source.service || source.sourceService || '').toLowerCase() !==
+    'submitted'
+  ) {
+    return false
+  }
+  const wanted = normalizeRedditUsername(username)
+  if (!wanted) return true
+  return [
+    source.username,
+    source.userId,
+    source.sourceUsername,
+    source.sourceUserId,
+  ]
+    .map(normalizeRedditUsername)
+    .some((value) => value === wanted)
+}
+
+function countDirectRedditSavedMedia(modelName, source = {}, datasetPaths) {
+  const username = getRedditUsernameFromSource(source)
+  const modelDir = path.join(datasetPaths.datasetDir, modelName)
+  let count = 0
+
+  const mediaDates = readJsonFileIfExists(
+    path.join(modelDir, '.media-dates.json')
+  )
+  if (mediaDates && typeof mediaDates === 'object') {
+    for (const entry of Object.values(mediaDates)) {
+      if (isDirectSubmittedRedditSource(entry?.source, username)) count += 1
+    }
+  }
+
+  const seenIndex = readJsonFileIfExists(
+    path.join(modelDir, 'log', 'milkmaid-seen-media-index.json')
+  )
+  if (seenIndex && typeof seenIndex === 'object') {
+    for (const bucketName of ['mediaPageUrls', 'mediaUrls', 'relativePaths']) {
+      const bucket = seenIndex[bucketName]
+      if (!bucket || typeof bucket !== 'object') continue
+      for (const entry of Object.values(bucket)) {
+        if (
+          isDirectSubmittedRedditSource(
+            {
+              site: entry?.sourceSite,
+              service: entry?.sourceService,
+              username: entry?.sourceUsername,
+              userId: entry?.sourceUserId,
+            },
+            username
+          )
+        ) {
+          count += 1
+        }
+      }
+    }
+  }
+
+  return count
+}
+
+function getSourceUrlKey(value) {
+  const parsed = parseSourceUrl(value)
+  return String(parsed?.url || value || '').trim()
+}
+
+function moveRedditSourceToInactive({
+  modelName,
+  source,
+  reason,
+  registryPath: targetRegistryPath = registryPath,
+}) {
+  const parsed = parseSourceUrl(source?.url)
+  if (!parsed || parsed.sourceType !== 'reddit') return null
+
+  const registry = loadRegistry(targetRegistryPath)
+  const canonical = findCanonicalModelName(registry, modelName)
+  if (!canonical) return null
+
+  const entry = registry[canonical]
+  if (!entry?.sources || !Array.isArray(entry.sources.reddit)) return null
+
+  const targetUrl = getSourceUrlKey(parsed.url)
+  let removedSource = null
+  entry.sources.reddit = entry.sources.reddit.filter((candidate) => {
+    const keep = getSourceUrlKey(candidate?.url) !== targetUrl
+    if (!keep) removedSource = candidate
+    return keep
+  })
+  if (!removedSource) return null
+  if (entry.sources.reddit.length === 0) delete entry.sources.reddit
+
+  if (!entry.inactiveSources) entry.inactiveSources = {}
+  if (!Array.isArray(entry.inactiveSources.reddit)) {
+    entry.inactiveSources.reddit = []
+  }
+
+  const inactiveRecord = {
+    ...removedSource,
+    model: canonical,
+    url: parsed.url,
+    service: parsed.service || removedSource.service || 'submitted',
+    userId:
+      removedSource.userId ||
+      parsed.userId ||
+      getRedditUsernameFromSource(source),
+    username:
+      removedSource.username ||
+      parsed.username ||
+      getRedditUsernameFromSource(source),
+    inactiveAt: new Date().toISOString(),
+    inactiveReason: reason,
+  }
+
+  const existingIndex = entry.inactiveSources.reddit.findIndex(
+    (candidate) => getSourceUrlKey(candidate?.url) === targetUrl
+  )
+  if (existingIndex >= 0) {
+    entry.inactiveSources.reddit[existingIndex] = {
+      ...entry.inactiveSources.reddit[existingIndex],
+      ...inactiveRecord,
+    }
+  } else {
+    entry.inactiveSources.reddit.push(inactiveRecord)
+  }
+
+  saveModelRegistry(targetRegistryPath, registry)
+  return inactiveRecord
+}
+
+function shouldAutoInactivateNeverSavedReddit(argv) {
+  const value = getOption(argv, 'auto-inactivate-never-saved-reddit')
+  return value !== false && value !== 'false'
+}
+
 function getOrderedSourceKeys(sources = {}) {
   const sourceKeys = Object.keys(sources || {})
   const known = ALL_SOURCE_ORDER.filter((sourceKey) =>
@@ -895,21 +1062,78 @@ function getOrderedSourceKeys(sources = {}) {
   return [...known, ...extra]
 }
 
-function buildAllSourceQueue(registry) {
+function isLegacyCoomerFansParsedSource(parsedSource) {
+  if (!parsedSource || parsedSource.sourceType !== 'coomerfans') return false
+  try {
+    const host = new URL(parsedSource.url || parsedSource.inputUrl).hostname
+      .toLowerCase()
+      .replace(/^www\./, '')
+    return host === 'coomerfans.com' || host.endsWith('.coomerfans.com')
+  } catch {
+    return false
+  }
+}
+
+function getSourceFrontierKey(parsedSource = {}) {
+  return [
+    String(parsedSource.site || '').trim().toLowerCase(),
+    String(parsedSource.service || '').trim().toLowerCase(),
+    String(
+      parsedSource.userId || parsedSource.username || parsedSource.rawName || ''
+    )
+      .trim()
+      .toLowerCase(),
+  ].join('/')
+}
+
+function hasCompletedSourceFrontier(modelName, parsedSource, datasetPaths) {
+  const frontierPath = path.join(
+    datasetPaths.datasetDir,
+    modelName,
+    'log',
+    'source-frontier-state.json'
+  )
+  const state = readJsonFileIfExists(frontierPath)
+  const sourceState = state?.sources?.[getSourceFrontierKey(parsedSource)]
+  return (
+    Array.isArray(sourceState?.completedPostIds) &&
+    sourceState.completedPostIds.length > 0
+  )
+}
+
+function buildAllSourceQueue(registry, options = {}) {
+  const skipCompletedLegacyCoomerFans = Boolean(
+    options.skipCompletedLegacyCoomerFans
+  )
+  const datasetPaths = options.datasetPaths || createDatasetPaths()
   return Object.entries(registry || {})
     .map(([model, entry]) => {
       const sources =
         entry?.sources && typeof entry.sources === 'object' ? entry.sources : {}
       const targets = []
+      const parsedEntries = []
 
       for (const sourceKey of getOrderedSourceKeys(sources)) {
         for (const url of normalizeRegistrySourceUrls(sources[sourceKey])) {
-          targets.push({
-            sourceKey,
-            url,
-            label: getSourceLabel(sourceKey, url),
-          })
+          const parsedSource = parseSourceUrl(url)
+          if (!parsedSource) continue
+          parsedEntries.push({ sourceKey, url, parsedSource })
         }
+      }
+
+      for (const { sourceKey, url, parsedSource } of parsedEntries) {
+        if (
+          skipCompletedLegacyCoomerFans &&
+          isLegacyCoomerFansParsedSource(parsedSource) &&
+          hasCompletedSourceFrontier(model, parsedSource, datasetPaths)
+        ) {
+          continue
+        }
+        targets.push({
+          sourceKey,
+          url,
+          label: getSourceLabel(sourceKey, url),
+        })
       }
 
       return {
@@ -950,6 +1174,49 @@ function selectAllSourceQueue(queue, argv) {
 
   if (limit > 0) next = next.slice(0, limit)
   return next
+}
+
+function isCompleteAllSourceResult(result) {
+  return (
+    result?.finishedAt &&
+    Array.isArray(result?.sources) &&
+    Array.isArray(result?.runs) &&
+    result.runs.length === result.sources.length &&
+    result.runs.every((run) => run?.ok) &&
+    result.nasSync?.ok !== false
+  )
+}
+
+function readLatestAllSourceReport(reportPath) {
+  const report = readJsonFileIfExists(reportPath)
+  return report && typeof report === 'object' ? report : null
+}
+
+function isIncompleteAllSourceReport(report) {
+  if (!report) return false
+  const selectedModels = Number(report.selectedModels || 0)
+  const results = Array.isArray(report.results) ? report.results : []
+  return (
+    !report.finishedAt ||
+    (selectedModels > 0 && results.length < selectedModels)
+  )
+}
+
+function resumeAllSourceQueueFromReport(queue, report) {
+  if (!isIncompleteAllSourceReport(report)) {
+    return { queue, skippedModels: [] }
+  }
+  const completed = new Set(
+    (Array.isArray(report.results) ? report.results : [])
+      .filter(isCompleteAllSourceResult)
+      .map((result) => result.model)
+  )
+  return {
+    queue: queue.filter((item) => !completed.has(item.model)),
+    skippedModels: [...completed].sort((left, right) =>
+      left.localeCompare(right)
+    ),
+  }
 }
 
 function buildSourceBatchOptions(argv) {
@@ -1504,7 +1771,7 @@ function printAllSourcesHelp() {
   console.log(`Usage: node scrapyard/run-all-source-updates.js [options]
 
 Runs every selected model source before moving to the next model.
-Registered Reddit, Pawchive, Coomer/CoomerFans, and StufferDB sources are included.
+Registered Reddit, Pawchive, Coomer/CoomerFans, StufferDB, and Tumblr sources are included.
 
 Options:
   --model <name>              Update one model only.
@@ -1524,6 +1791,11 @@ Options:
   --dry-run                   Dry run Hoghaul sources.
   --skip-nas-sync             Skip NAS sync.
   --download-oversized        Disable the 2 GiB video guard for retry runs.
+  --resume-latest             If latest report is incomplete, skip completed models.
+  --no-auto-inactivate-never-saved-reddit
+                              Do not archive unavailable Reddit sources with zero lifetime saves.
+  --skip-completed-legacy-coomerfans
+                              Skip coomerfans.com sources with completed source-frontier history.
   --stop-on-error             Stop when a source run fails.
   --help                      Show this help.
 `)
@@ -1580,6 +1852,7 @@ async function runAllSourceModelUpdate(item, context = {}) {
     runSource = runScrape,
     syncModel = syncModelToNas,
     datasetPaths = createDatasetPaths(),
+    registryPath: activeRegistryPath = registryPath,
     error = console.error,
   } = context
   const result = {
@@ -1638,6 +1911,34 @@ async function runAllSourceModelUpdate(item, context = {}) {
       label: sourceLabel,
       url: source.url,
       summary: summarizeSourceRunSummary(summary),
+    }
+    if (
+      shouldAutoInactivateNeverSavedReddit(argv) &&
+      parsedSource.sourceType === 'reddit' &&
+      run.summary.status === 'source_unavailable'
+    ) {
+      const savedCount = countDirectRedditSavedMedia(
+        item.model,
+        source,
+        datasetPaths
+      )
+      if (savedCount === 0) {
+        const inactiveRecord = moveRedditSourceToInactive({
+          modelName: item.model,
+          source,
+          registryPath: activeRegistryPath,
+          reason: 'never_saved_reddit_media_source_unavailable',
+        })
+        if (inactiveRecord) {
+          run.autoInactive = {
+            reason: inactiveRecord.inactiveReason,
+            inactiveAt: inactiveRecord.inactiveAt,
+          }
+          console.log(
+            `Auto-inactivated Reddit source with no lifetime saves: ${item.model} ${source.url}`
+          )
+        }
+      }
     }
     result.runs.push(run)
 
@@ -1806,8 +2107,11 @@ function writeAllSourceReport(report, latestReportPath, latestTextPath) {
       `${item.model} :: sources=${item.runs.length}/${item.sources.length} :: ${failedRuns || item.nasSync?.ok === false ? 'fail' : 'ok'} :: nas-sync=${syncStatus}${item.nasSync?.error ? ` (${item.nasSync.error})` : ''} :: local-mp4s-removed=${item.nasSync?.cleanup?.deletedFiles || 0} :: local-reclaimed=${formatBytes(item.nasSync?.cleanup?.deletedBytes || 0)}`
     )
     for (const run of item.runs) {
+      const autoInactive = run.autoInactive
+        ? ` auto-inactive=${run.autoInactive.reason}`
+        : ''
       lines.push(
-        `  ${run.label}: saved=${run.summary.saved} skipped=${run.summary.skipped} dupes=${run.summary.duplicates} errors=${run.summary.errors} status=${run.summary.status || 'unknown'}`
+        `  ${run.label}: saved=${run.summary.saved} skipped=${run.summary.skipped} dupes=${run.summary.duplicates} errors=${run.summary.errors} status=${run.summary.status || 'unknown'}${autoInactive}`
       )
     }
   }
@@ -1836,8 +2140,23 @@ async function runAllSourceUpdates(argvInput = {}) {
   fs.mkdirSync(logDir, { recursive: true })
 
   const registry = loadRegistry(allRegistryPath)
-  const queue = buildAllSourceQueue(registry)
-  const selectedQueue = selectAllSourceQueue(queue, argv)
+  const datasetPaths = createDatasetPaths()
+  const skipCompletedLegacyCoomerFans = isTruthy(
+    getOption(argv, 'skip-completed-legacy-coomerfans')
+  )
+  const queue = buildAllSourceQueue(registry, {
+    skipCompletedLegacyCoomerFans,
+    datasetPaths,
+  })
+  let selectedQueue = selectAllSourceQueue(queue, argv)
+  let resume = null
+  if (isTruthy(getOption(argv, 'resume-latest'))) {
+    resume = resumeAllSourceQueueFromReport(
+      selectedQueue,
+      readLatestAllSourceReport(latestReportPath)
+    )
+    selectedQueue = resume.queue
+  }
   const stopOnError = isTruthy(getOption(argv, 'stop-on-error'))
   const delayMs = Number.parseInt(getOption(argv, 'delay-ms'), 10) || 0
   const report = {
@@ -1847,6 +2166,10 @@ async function runAllSourceUpdates(argvInput = {}) {
     totalModelsInRegistry: queue.length,
     selectedModels: selectedQueue.length,
     stopOnError,
+    resumeLatest: Boolean(resume),
+    resumeSkippedModels: resume?.skippedModels || [],
+    autoInactivateNeverSavedReddit: shouldAutoInactivateNeverSavedReddit(argv),
+    skipCompletedLegacyCoomerFans,
     totals: {},
     results: [],
   }
@@ -1854,6 +2177,11 @@ async function runAllSourceUpdates(argvInput = {}) {
   console.log(
     `All-source update queue: ${selectedQueue.length} model(s) selected from ${queue.length} with saved sources`
   )
+  if (resume?.skippedModels?.length) {
+    console.log(
+      `Resume latest: skipped ${resume.skippedModels.length} completed model(s) from incomplete latest report.`
+    )
+  }
 
   for (let index = 0; index < selectedQueue.length; index += 1) {
     const item = selectedQueue[index]
@@ -1869,6 +2197,7 @@ async function runAllSourceUpdates(argvInput = {}) {
     const result = await runAllSourceModelUpdate(item, {
       argv,
       stopOnError,
+      registryPath: allRegistryPath,
     })
     report.results.push(result)
     writeAllSourceReport(report, latestReportPath, latestTextPath)
@@ -1940,7 +2269,8 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
       target === 'coomer' ||
       target === 'kemono' ||
       target === 'pawchive' ||
-      target === 'reddit'
+      target === 'reddit' ||
+      target === 'tumblr'
     ) {
       return runSourceBatch(target, updateArgs)
     }

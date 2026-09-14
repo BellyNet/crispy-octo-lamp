@@ -439,11 +439,7 @@ async function runInteractiveSourceGroup({
 
     const startedAtMs = Date.now()
     const status = parsed ? await runScrapeImpl(target.url, runOptions) : 1
-    const summary = getFreshRunSummary(
-      canonicalModel,
-      parsed,
-      startedAtMs
-    )
+    const summary = getFreshRunSummary(canonicalModel, parsed, startedAtMs)
     result.runs.push({
       ok: status === 0,
       code: status,
@@ -492,7 +488,7 @@ async function runModelAliasFlow(rl, sessionOptions) {
 
   const sourceAnswer = await ask(
     rl,
-    'Source to run: all, stufferdb, reddit, coomer, coomerfans, pawchive, or number [all]: '
+    'Source to run: all, stufferdb, reddit, coomer, coomerfans, pawchive, tumblr, or number [all]: '
   )
   const selectedTargets = selectModelSources(targets, sourceAnswer)
   if (!selectedTargets.length) {
@@ -631,6 +627,7 @@ function getPlatformLabel(platform) {
   if (platform === 'kemono') return 'Pawchive'
   if (platform === 'coomer') return 'CoomerFans'
   if (platform === 'stufferdb') return 'StufferDB'
+  if (platform === 'tumblr') return 'Tumblr'
   return SOURCE_DISCOVERY_PLATFORMS?.[platform]?.label || platform
 }
 
@@ -888,8 +885,7 @@ async function runUsernameSourceSearchFlow(rl, rawInput, sessionOptions) {
     sessionOptions,
     {
       dryRun: dryRunAnswer === 'y' || dryRunAnswer === 'yes',
-      skipNasSync:
-        skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
+      skipNasSync: skipNasSyncAnswer === 'y' || skipNasSyncAnswer === 'yes',
     }
   )
 }

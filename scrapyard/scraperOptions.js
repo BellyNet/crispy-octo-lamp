@@ -65,7 +65,9 @@ const RUNNER_STRING_OPTIONS = [
 ]
 
 const RUNNER_BOOLEAN_OPTIONS = [
+  'auto-inactivate-never-saved-reddit',
   'no-model-infer',
+  'resume-latest',
   'stop-on-error',
   'with-repair',
   'scrape',
@@ -111,7 +113,7 @@ function parseRunnerArgs(argvInput = process.argv.slice(2)) {
   if (Array.isArray(argvInput)) {
     return minimist(argvInput, {
       string: STRING_OPTIONS,
-      boolean: BOOLEAN_OPTIONS,
+      boolean: BOOLEAN_OPTIONS.filter((name) => name !== 'browser-media'),
       alias: {
         m: 'model',
         h: 'help',
@@ -198,6 +200,15 @@ function getRequestTimeoutMs(fallback = 30000) {
   )
 }
 
+function normalizeSourceUrlArg(value) {
+  const raw = String(value || '').trim()
+  const markdownMatch = raw.match(/^\[[^\]]+\]\((https?:\/\/[^)]+)\)$/i)
+  if (markdownMatch) return markdownMatch[1].trim()
+  const angleMatch = raw.match(/^<\s*(https?:\/\/[^>]+)\s*>$/i)
+  if (angleMatch) return angleMatch[1].trim()
+  return /^https?:\/\//i.test(raw) ? raw : ''
+}
+
 function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
   const argv = Array.isArray(input)
     ? parseHoghaulArgs(input)
@@ -207,7 +218,9 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       }
   const existingBrowserOptions = argv.browserOptions || {}
   const inputUrl =
-    argv._.find((arg) => /^https?:\/\//i.test(arg)) ||
+    argv._.map(normalizeSourceUrlArg).find(Boolean) ||
+    normalizeSourceUrlArg(argv.inputUrl) ||
+    normalizeSourceUrlArg(argv.url) ||
     argv.inputUrl ||
     argv.url ||
     ''

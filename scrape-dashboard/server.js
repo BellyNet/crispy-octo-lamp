@@ -14,7 +14,6 @@ const {
   findCanonicalModelName,
   findCanonicalModelNameBySource,
   upsertStufferdbSource,
-  upsertCoomerSource,
   upsertRedditSource,
   upsertSourceInfo,
 } = require('../scrapyard/modelRegistry')
@@ -69,8 +68,16 @@ const quarantineManifestPath = path.join(
 )
 const historyDir = path.join(__dirname, 'data')
 const runHistoryPath = path.join(historyDir, 'run-history.json')
+const ONLYHAVEN_ORIGIN = 'https://cum.st'
 
-const SOURCE_KEYS = ['reddit', 'kemono', 'coomer', 'stufferdb']
+const SOURCE_KEYS = [
+  'reddit',
+  'kemono',
+  'coomer',
+  'stufferdb',
+  'bbwchan',
+  'tumblr',
+]
 const HISTORY_VERSION = 2
 const JOB_LOG_LIMIT = 2500
 const jobs = new Map()
@@ -135,6 +142,23 @@ function normalizeLooseSearch(value) {
     .replace(/[^a-z0-9]/g, '')
 }
 
+function normalizeOnlyHavenName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function cleanOnlyHavenSearchTerm(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/^u\//i, '')
+    .replace(/^user\//i, '')
+    .replace(/\s+/g, '')
+}
+
 function editDistanceWithinOne(left, right) {
   if (left === right) return true
   if (Math.abs(left.length - right.length) > 1) return false
@@ -163,10 +187,24 @@ function editDistanceWithinOne(left, right) {
 
 function getPlatformLabel(platform) {
   if (platform === 'kemono') return 'Pawchive'
+  if (platform === 'onlyhaven') return 'OnlyHaven'
   if (platform === 'coomer') return 'CoomerFans'
+  if (platform === 'coomerfans') return 'CoomerFans'
   if (platform === 'reddit') return 'Reddit'
   if (platform === 'stufferdb') return 'StufferDB'
+  if (platform === 'bbwchan') return 'BBW-Chan'
+  if (platform === 'tumblr') return 'Tumblr'
   return platform || 'Unknown'
+}
+
+function getSourceLabel(platform, url = '') {
+  if (
+    (platform === 'coomerfans' || platform === 'coomer') &&
+    isOnlyHavenUrl(url)
+  ) {
+    return 'OnlyHaven'
+  }
+  return getPlatformLabel(platform)
 }
 
 function getStufferDbSearchUrl(username) {
@@ -179,6 +217,7 @@ function getStufferDbDirectSearchUrl(username) {
 }
 
 function getManualSourceSearchUrl(platform, username) {
+  if (platform === 'onlyhaven') return getOnlyHavenCreatorSearchUrl(username)
   if (platform === 'stufferdb') return getStufferDbDirectSearchUrl(username)
   return PLATFORMS[platform]?.searchUrl
     ? PLATFORMS[platform].searchUrl(username)
@@ -361,6 +400,55 @@ function inactiveSourceListFor(entry, sourceKey) {
     : []
 }
 
+function isLegacyCoomerFansUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    return (
+      parsed.hostname.replace(/^www\./i, '').toLowerCase() === 'coomerfans.com'
+    )
+  } catch {
+    return false
+  }
+}
+
+function isOnlyHavenUrl(value) {
+  try {
+    const host = new URL(String(value || '').trim()).hostname.toLowerCase()
+    return host === 'cum.st' || host.endsWith('.cum.st')
+  } catch {
+    return false
+  }
+}
+
+function parseLegacyCoomerFansSourceUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    if (
+      parsed.hostname.replace(/^www\./i, '').toLowerCase() !== 'coomerfans.com'
+    ) {
+      return null
+    }
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
+      return {
+        service: parts[1].toLowerCase(),
+        userId: parts[2],
+        username: decodeURIComponent(parts.slice(3).join('/')),
+      }
+    }
+    if (parts[0] && parts[1] === 'user' && parts[2]) {
+      return {
+        service: parts[0].toLowerCase(),
+        userId: null,
+        username: decodeURIComponent(parts.slice(2).join('/')),
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 function countModelSources(entry) {
   return SOURCE_KEYS.reduce(
     (count, key) => count + sourceListFor(entry, key).length,
@@ -376,11 +464,19 @@ function getModels() {
       const sources = Object.fromEntries(
         SOURCE_KEYS.map((key) => [key, sourceListFor(entry, key)])
       )
+      const inactiveSources = Object.fromEntries(
+        SOURCE_KEYS.map((key) => [key, inactiveSourceListFor(entry, key)])
+      )
       return {
         name,
         aliases: Array.isArray(entry?.aliases) ? entry.aliases : [],
         sources,
+        inactiveSources,
         sourceCount: Object.values(sources).reduce(
+          (count, list) => count + list.length,
+          0
+        ),
+        inactiveSourceCount: Object.values(inactiveSources).reduce(
           (count, list) => count + list.length,
           0
         ),
@@ -443,6 +539,129 @@ function collectSourceSearchTerms(query) {
   return [...terms].slice(0, 8)
 }
 
+function addOnlyHavenTerm(terms, value) {
+  for (const item of String(value || '').split(',')) {
+    const term = cleanOnlyHavenSearchTerm(item)
+    if (!term || /^\d+$/.test(term)) continue
+    const key = normalizeOnlyHavenName(term)
+    if (
+      !key ||
+      terms.some((existing) => normalizeOnlyHavenName(existing) === key)
+    )
+      continue
+    terms.push(term)
+  }
+}
+
+function getOnlyHavenSearchTerms(modelName, entry) {
+  const terms = []
+  addOnlyHavenTerm(terms, modelName)
+  for (const alias of Array.isArray(entry?.aliases) ? entry.aliases : []) {
+    addOnlyHavenTerm(terms, alias)
+  }
+
+  const sourceGroups = [
+    ...Object.values(entry?.sources || {}),
+    ...Object.values(entry?.inactiveSources || {}),
+  ]
+  for (const list of sourceGroups) {
+    for (const source of Array.isArray(list) ? list : []) {
+      addOnlyHavenTerm(terms, source?.username)
+      addOnlyHavenTerm(terms, source?.discoveredAs)
+      addOnlyHavenTerm(terms, source?.userId)
+      const legacy = parseLegacyCoomerFansSourceUrl(source?.url)
+      if (legacy?.username) addOnlyHavenTerm(terms, legacy.username)
+    }
+  }
+
+  return terms.slice(0, 12)
+}
+
+function getOnlyHavenCreatorSearchUrl(term) {
+  return `${ONLYHAVEN_ORIGIN}/creators?cq=${encodeURIComponent(term)}`
+}
+
+function getOnlyHavenReviewState(entry) {
+  return entry?.sourceReview?.onlyhaven || {}
+}
+
+function getOnlyHavenReviewRows() {
+  const registry = loadModelRegistry(registryPath)
+  const allRows = Object.entries(registry).map(([model, entry]) => {
+    const activeCoomerSources = sourceListFor(entry, 'coomer')
+    const inactiveCoomerSources = inactiveSourceListFor(entry, 'coomer')
+    const legacyCoomerSources = activeCoomerSources.filter((source) =>
+      isLegacyCoomerFansUrl(source?.url)
+    )
+    const onlyHavenSources = activeCoomerSources.filter((source) =>
+      isOnlyHavenUrl(source?.url)
+    )
+    const searchTerms = getOnlyHavenSearchTerms(model, entry)
+    const review = getOnlyHavenReviewState(entry)
+    return {
+      model,
+      aliases: Array.isArray(entry?.aliases) ? entry.aliases : [],
+      sourceCount: countModelSources(entry),
+      inactiveCoomerCount: inactiveCoomerSources.length,
+      hasOnlyHaven: onlyHavenSources.length > 0,
+      onlyHavenSources,
+      legacyCoomerSources,
+      reviewStatus: review.status || null,
+      reviewedAt: review.reviewedAt || review.matchedAt || null,
+      searchTerms,
+      searchLinks: searchTerms.map((term) => ({
+        term,
+        url: getOnlyHavenCreatorSearchUrl(term),
+      })),
+    }
+  })
+
+  const rows = allRows.filter(
+    (row) => !row.hasOnlyHaven && row.reviewStatus !== 'not_found'
+  )
+
+  rows.sort((left, right) => {
+    if (left.hasOnlyHaven !== right.hasOnlyHaven) {
+      return left.hasOnlyHaven ? 1 : -1
+    }
+    if (left.legacyCoomerSources.length !== right.legacyCoomerSources.length) {
+      return right.legacyCoomerSources.length - left.legacyCoomerSources.length
+    }
+    return left.model.localeCompare(right.model, undefined, {
+      sensitivity: 'base',
+    })
+  })
+
+  return {
+    rows,
+    totals: {
+      models: allRows.length,
+      queue: rows.length,
+      hasOnlyHaven: allRows.filter((row) => row.hasOnlyHaven).length,
+      notFound: allRows.filter((row) => row.reviewStatus === 'not_found')
+        .length,
+      legacyCoomer: allRows.filter((row) => row.legacyCoomerSources.length)
+        .length,
+    },
+  }
+}
+
+function getOnlyHavenSearchLinksForModel(modelName) {
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+  const entry = registry[canonical]
+  const searchTerms = getOnlyHavenSearchTerms(canonical, entry)
+  return {
+    model: canonical,
+    searchTerms,
+    searchLinks: searchTerms.map((term) => ({
+      term,
+      url: getOnlyHavenCreatorSearchUrl(term),
+    })),
+  }
+}
+
 function findSourceOwner(parsed) {
   if (!parsed) return null
   const registry = loadModelRegistry(registryPath)
@@ -493,6 +712,149 @@ function removeSourceFromModel(modelName, sourceUrl) {
   }
 }
 
+function archiveLegacyCoomerSources(entry, replacement, reason) {
+  const activeSources = sourceListFor(entry, 'coomer')
+  const legacySources = activeSources.filter((source) =>
+    isLegacyCoomerFansUrl(source?.url)
+  )
+  if (!legacySources.length) return []
+
+  entry.sources.coomer = activeSources.filter(
+    (source) => !isLegacyCoomerFansUrl(source?.url)
+  )
+  if (!entry.inactiveSources) entry.inactiveSources = {}
+  if (!Array.isArray(entry.inactiveSources.coomer)) {
+    entry.inactiveSources.coomer = []
+  }
+
+  const archivedAt = new Date().toISOString()
+  const archived = legacySources.map((source) => {
+    const parsedLegacy = parseLegacyCoomerFansSourceUrl(source?.url) || {}
+    return {
+      ...source,
+      service: source.service || parsedLegacy.service || replacement.service,
+      userId: source.userId || parsedLegacy.userId || null,
+      username:
+        source.username || parsedLegacy.username || source.discoveredAs || null,
+      inactiveAt: archivedAt,
+      inactiveReason: reason || 'replaced_by_onlyhaven',
+      replacementUrl: replacement.url,
+      replacementService: replacement.service,
+      replacementUserId: replacement.userId,
+    }
+  })
+
+  for (const record of archived) {
+    const existingIndex = entry.inactiveSources.coomer.findIndex(
+      (source) =>
+        normalizeHistoryUrl(source?.url) === normalizeHistoryUrl(record.url)
+    )
+    if (existingIndex >= 0) {
+      entry.inactiveSources.coomer[existingIndex] = {
+        ...entry.inactiveSources.coomer[existingIndex],
+        ...record,
+      }
+    } else {
+      entry.inactiveSources.coomer.push(record)
+    }
+  }
+
+  return archived
+}
+
+function saveOnlyHavenSourceForModel(modelName, sourceUrl, options = {}) {
+  const parsed = parseSourceUrl(sourceUrl)
+  if (
+    !parsed ||
+    parsed.sourceType !== 'coomerfans' ||
+    !isOnlyHavenUrl(parsed.url)
+  ) {
+    throw new Error('Expected an OnlyHaven creator URL on cum.st')
+  }
+
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+
+  registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
+  const rawName = sanitize(options.username || options.displayName || canonical)
+  const username = options.username || null
+  upsertSourceInfo(
+    registry[canonical],
+    {
+      site: parsed.site,
+      service: parsed.service,
+      userId: parsed.userId,
+      username,
+      inputUrl: parsed.url,
+    },
+    rawName || canonical
+  )
+
+  const archived = options.archiveLegacyCoomer
+    ? archiveLegacyCoomerSources(
+        registry[canonical],
+        {
+          url: parsed.url,
+          service: parsed.service,
+          userId: parsed.userId,
+        },
+        options.reason || 'replaced_by_onlyhaven'
+      )
+    : []
+
+  registry[canonical].sourceReview = {
+    ...(registry[canonical].sourceReview || {}),
+    onlyhaven: {
+      status: 'matched',
+      matchedAt: new Date().toISOString(),
+      url: parsed.url,
+      service: parsed.service,
+      userId: parsed.userId,
+      username,
+      coomerFansKeptActive: !options.archiveLegacyCoomer,
+      archivedCount: archived.length,
+    },
+  }
+
+  saveModelRegistry(registryPath, registry)
+  auditCache = null
+  return {
+    model: canonical,
+    source: {
+      url: parsed.url,
+      service: parsed.service,
+      userId: parsed.userId,
+      username,
+    },
+    archived,
+    sourceCount: countModelSources(registry[canonical]),
+  }
+}
+
+function markOnlyHavenNotFoundForModel(modelName, options = {}) {
+  const registry = loadModelRegistry(registryPath)
+  const canonical = findCanonicalModelName(registry, sanitize(modelName))
+  if (!canonical) throw new Error('model not found')
+
+  registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
+  registry[canonical].sourceReview = {
+    ...(registry[canonical].sourceReview || {}),
+    onlyhaven: {
+      status: 'not_found',
+      reviewedAt: new Date().toISOString(),
+      reason: options.reason || 'manual_review_no_match',
+      searchTerms: getOnlyHavenSearchTerms(canonical, registry[canonical]),
+    },
+  }
+  saveModelRegistry(registryPath, registry)
+  auditCache = null
+  return {
+    model: canonical,
+    review: registry[canonical].sourceReview.onlyhaven,
+  }
+}
+
 function sourceStateKey(model, url) {
   return `${sanitize(model)}|${normalizeHistoryUrl(url)}`
 }
@@ -536,6 +898,23 @@ function getInactiveSourceMap(inactiveSources = getInactiveRedditSources()) {
     const normalized = normalizeInactiveSourceRecord(record, record?.model)
     if (!normalized) continue
     map.set(sourceStateKey(normalized.model, normalized.url), normalized)
+  }
+  return map
+}
+
+function getActiveSourceMap() {
+  const registry = loadModelRegistry(registryPath)
+  const map = new Map()
+  for (const [model, entry] of Object.entries(registry)) {
+    for (const sourceKey of SOURCE_KEYS) {
+      for (const source of sourceListFor(entry, sourceKey)) {
+        map.set(sourceStateKey(model, source.url), {
+          model,
+          sourceKey,
+          url: source.url,
+        })
+      }
+    }
   }
   return map
 }
@@ -804,7 +1183,10 @@ function registerParsedSourceForSelectedModel(parsed, requestedModel) {
   if (!cleanedModel) throw new Error('model is required')
   const canonical =
     findCanonicalModelName(registry, cleanedModel) || cleanedModel
-  const rawName = sanitize(parsed.rawName || parsed.username || canonical)
+  const parsedRawName = /^\d+$/.test(String(parsed.rawName || ''))
+    ? ''
+    : parsed.rawName
+  const rawName = sanitize(parsed.username || parsedRawName || canonical)
 
   registry[canonical] = ensureModelEntryShape(registry[canonical], canonical)
   if (
@@ -817,7 +1199,17 @@ function registerParsedSourceForSelectedModel(parsed, requestedModel) {
   if (parsed.sourceType === 'stufferdb') {
     upsertStufferdbSource(registry[canonical], parsed.url, rawName || canonical)
   } else if (parsed.sourceType === 'coomerfans') {
-    upsertCoomerSource(registry[canonical], parsed.url, rawName || canonical)
+    upsertSourceInfo(
+      registry[canonical],
+      {
+        site: parsed.site || parsed.sourceType,
+        service: parsed.service,
+        userId: parsed.userId,
+        username: parsed.username || parsed.rawName || null,
+        inputUrl: parsed.url,
+      },
+      rawName || canonical
+    )
   } else if (parsed.sourceType === 'reddit') {
     upsertRedditSource(registry[canonical], parsed.url, rawName || canonical)
   } else {
@@ -845,7 +1237,10 @@ function toCandidate(hit, overrides = {}) {
     id: `${platform}:${hit.url}`,
     type: 'source',
     platform,
-    label: getPlatformLabel(platform),
+    label:
+      platform === 'coomerfans' && parsed && isOnlyHavenUrl(parsed.url)
+        ? 'OnlyHaven'
+        : getPlatformLabel(platform),
     service: hit.service || parsed?.service || null,
     userId: hit.id || hit.userId || parsed?.userId || null,
     username: hit.username || hit.name || parsed?.username || null,
@@ -856,6 +1251,34 @@ function toCandidate(hit, overrides = {}) {
     verified: hit.verified !== false,
     ...overrides,
   }
+}
+
+function addManualSearchCandidate(candidates, platform, term) {
+  const url = getManualSourceSearchUrl(platform, term)
+  if (!url) return
+  const id = `${platform}-search:${term}`
+  if (
+    candidates.some(
+      (candidate) => candidate.id === id || candidate.url === url
+    )
+  ) {
+    return
+  }
+  candidates.push({
+    id,
+    type: 'manual-search',
+    platform,
+    label: getPlatformLabel(platform),
+    service: null,
+    userId: null,
+    username: term,
+    name: term,
+    url,
+    parseable: false,
+    existingModel: null,
+    verified: false,
+    source: 'manual-search',
+  })
 }
 
 async function searchSourceCandidates(rawQuery) {
@@ -904,7 +1327,19 @@ async function searchSourceCandidates(rawQuery) {
   }
 
   for (const term of terms) {
-    for (const platform of ['coomer', 'kemono']) {
+    for (const platform of [
+      'onlyhaven',
+      'coomer',
+      'kemono',
+      'stufferdb',
+      'tumblr',
+    ]) {
+      addManualSearchCandidate(candidates, platform, term)
+    }
+  }
+
+  for (const term of terms) {
+    for (const platform of ['coomer', 'kemono', 'tumblr']) {
       let hits = []
       try {
         hits = await probeUsername(platform, term)
@@ -945,28 +1380,6 @@ async function searchSourceCandidates(rawQuery) {
         }
       )
     )
-  }
-
-  for (const term of terms) {
-    for (const platform of ['coomer', 'kemono', 'stufferdb']) {
-      const url = getManualSourceSearchUrl(platform, term)
-      if (!url) continue
-      candidates.push({
-        id: `${platform}-search:${term}`,
-        type: 'manual-search',
-        platform,
-        label: getPlatformLabel(platform),
-        service: null,
-        userId: null,
-        username: term,
-        name: term,
-        url,
-        parseable: false,
-        existingModel: null,
-        verified: false,
-        source: 'manual-search',
-      })
-    }
   }
 
   return candidates
@@ -1358,7 +1771,7 @@ function summarizeHistorySource(run, index, total) {
     sourceTotal: total,
     sourceKey: run?.sourceKey || run?.sourceType || null,
     sourceType: run?.sourceType || null,
-    label: run?.label || getPlatformLabel(run?.sourceType),
+    label: run?.label || getSourceLabel(run?.sourceType, run?.url),
     url: run?.url || '',
     ok: run?.ok !== false,
     code: run?.code ?? null,
@@ -1604,89 +2017,105 @@ function syncLatestAllSourceReportToHistory() {
 function buildSourceAlerts(
   runs,
   inactiveSourceMap = new Map(),
-  activeSourceStateMap = new Map()
+  activeSourceStateMap = new Map(),
+  activeSourceMap = new Map()
 ) {
   const sortedRuns = [...runs].sort(
     (left, right) =>
       new Date(right.startedAt || right.createdAt || 0) -
       new Date(left.startedAt || left.createdAt || 0)
   )
-  const latest = sortedRuns[0] || null
-  if (!latest) return []
+  if (!sortedRuns.length) return []
 
-  const priorWorked = new Map()
-  for (const run of sortedRuns.slice(1)) {
-    for (const model of run.models || []) {
-      for (const source of model.sources || []) {
-        if (!sourceWorked(source)) continue
-        const key = normalizeHistoryUrl(source.url)
-        if (!key || priorWorked.has(key)) continue
-        priorWorked.set(key, {
-          runId: run.id,
-          model: model.model,
-          label: source.label,
-          status: source.status,
-          finishedAt: source.finishedAt || run.finishedAt || run.startedAt,
-        })
+  const findPriorWorked = (sourceKey, firstOlderIndex) => {
+    for (let index = firstOlderIndex; index < sortedRuns.length; index += 1) {
+      const run = sortedRuns[index]
+      for (const model of run.models || []) {
+        for (const source of model.sources || []) {
+          if (sourceStateKey(model.model, source.url) !== sourceKey) continue
+          if (!sourceWorked(source)) continue
+          return {
+            runId: run.id,
+            model: model.model,
+            label: source.label,
+            status: source.status,
+            finishedAt: source.finishedAt || run.finishedAt || run.startedAt,
+          }
+        }
       }
     }
+    return null
   }
 
   const alerts = []
-  for (const model of latest.models || []) {
-    for (const source of model.sources || []) {
-      if (!sourceNeedsRepair(source)) continue
-      if (
-        inactiveSourceMap.has(sourceStateKey(model.model, source.url)) ||
-        inactiveSourceMap.has(
-          sourceStateKey(model.model, normalizeHistoryUrl(source.url))
-        )
-      ) {
-        continue
+  const resolvedSourceKeys = new Set()
+  for (let runIndex = 0; runIndex < sortedRuns.length; runIndex += 1) {
+    const run = sortedRuns[runIndex]
+    for (const model of run.models || []) {
+      for (const source of model.sources || []) {
+        const key = sourceStateKey(model.model, source.url)
+        if (!key || resolvedSourceKeys.has(key)) continue
+        if (activeSourceMap.size && !activeSourceMap.has(key)) {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        if (inactiveSourceMap.has(key)) {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        if (sourceWorked(source)) {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        if (!sourceNeedsRepair(source)) continue
+
+        const activeState = activeSourceStateMap.get(key) || null
+        if (activeState?.accountStatus === 'suspended') {
+          resolvedSourceKeys.add(key)
+          continue
+        }
+        const previous = findPriorWorked(key, runIndex + 1)
+        const savedEvidence = getSourceSavedEvidence(model.model, source)
+        const alertType = previous
+          ? 'regression'
+          : savedEvidence.exactSavedMedia > 0
+            ? 'saved_media_now_failing'
+            : classifySourceProblem(source)
+        resolvedSourceKeys.add(key)
+        if (
+          activeState?.accountStatus === 'valid' &&
+          alertType === 'deleted_or_empty_reddit'
+        ) {
+          continue
+        }
+        alerts.push({
+          alertType,
+          accountStatus: activeState?.accountStatus || null,
+          accountStatusAt: activeState?.accountStatusAt || null,
+          accountStatusReason: activeState?.accountStatusReason || '',
+          model: model.model,
+          sourceKey: source.sourceKey,
+          sourceType: source.sourceType,
+          label: source.label,
+          url: source.url,
+          status: source.status,
+          ok: source.ok,
+          saved: source.saved,
+          skipped: source.skipped,
+          duplicates: source.duplicates,
+          errors: source.errors,
+          processed: source.processed,
+          savedBefore: savedEvidence.exactSavedMedia > 0,
+          savedMediaCount: savedEvidence.exactSavedMedia,
+          modelSourceSavedMediaCount: savedEvidence.modelSourceSavedMedia,
+          failure: source.failure,
+          evidence: source.evidence,
+          latestRunId: run.id,
+          latestStartedAt: run.startedAt,
+          previousWorkedAt: previous?.finishedAt || null,
+          previousRunId: previous?.runId || null,
+        })
       }
-      const activeState =
-        activeSourceStateMap.get(sourceStateKey(model.model, source.url)) ||
-        null
-      const previous = priorWorked.get(normalizeHistoryUrl(source.url)) || null
-      const savedEvidence = getSourceSavedEvidence(model.model, source)
-      const alertType = previous
-        ? 'regression'
-        : savedEvidence.exactSavedMedia > 0
-          ? 'saved_media_now_failing'
-          : classifySourceProblem(source)
-      if (
-        activeState?.accountStatus === 'valid' &&
-        alertType === 'deleted_or_empty_reddit'
-      ) {
-        continue
-      }
-      alerts.push({
-        alertType,
-        accountStatus: activeState?.accountStatus || null,
-        accountStatusAt: activeState?.accountStatusAt || null,
-        accountStatusReason: activeState?.accountStatusReason || '',
-        model: model.model,
-        sourceKey: source.sourceKey,
-        sourceType: source.sourceType,
-        label: source.label,
-        url: source.url,
-        status: source.status,
-        ok: source.ok,
-        saved: source.saved,
-        skipped: source.skipped,
-        duplicates: source.duplicates,
-        errors: source.errors,
-        processed: source.processed,
-        savedBefore: savedEvidence.exactSavedMedia > 0,
-        savedMediaCount: savedEvidence.exactSavedMedia,
-        modelSourceSavedMediaCount: savedEvidence.modelSourceSavedMedia,
-        failure: source.failure,
-        evidence: source.evidence,
-        latestRunId: latest.id,
-        latestStartedAt: latest.startedAt,
-        previousWorkedAt: previous?.finishedAt || null,
-        previousRunId: previous?.runId || null,
-      })
     }
   }
 
@@ -1697,7 +2126,11 @@ function buildSourceAlerts(
       deleted_or_empty_reddit: 2,
       reddit_error: 3,
     }
-    return (rank[left.alertType] ?? 3) - (rank[right.alertType] ?? 3)
+    const rankDelta = (rank[left.alertType] ?? 3) - (rank[right.alertType] ?? 3)
+    if (rankDelta) return rankDelta
+    return (
+      new Date(right.latestStartedAt || 0) - new Date(left.latestStartedAt || 0)
+    )
   })
 }
 
@@ -2284,9 +2717,28 @@ function readQuarantineSummary() {
       }
     }
 
+    const tailDecodeItems = items.filter((item) =>
+      (item?.reasons || []).includes('tail_decode_error')
+    )
+    const actionableTailDecode = tailDecodeItems.filter((item) => {
+      const state =
+        item?.state?.repairState ||
+        item?.repairState ||
+        item?.status ||
+        'unknown'
+      return (
+        state !== 'repaired' &&
+        item?.state?.quarantineExists &&
+        item?.quarantinePath &&
+        fs.existsSync(item.quarantinePath)
+      )
+    }).length
+
     return {
       path: quarantineManifestPath,
       total: items.length,
+      tailDecode: tailDecodeItems.length,
+      actionableTailDecode,
       countsByState,
       countsByReason,
       countsByMediaType,
@@ -2303,6 +2755,8 @@ function readQuarantineSummary() {
     return {
       path: quarantineManifestPath,
       total: 0,
+      tailDecode: 0,
+      actionableTailDecode: 0,
       countsByState: {},
       countsByReason: {},
       countsByMediaType: {},
@@ -2394,6 +2848,7 @@ function buildAuditQueues(history) {
   )
   const inactiveSourceMap = getInactiveSourceMap(inactiveRedditSources)
   const activeSourceStateMap = getSourceStateMap(activeRedditStates)
+  const activeSourceMap = getActiveSourceMap()
   const suspendedRedditSources = attachLatestSourceStatuses(
     activeRedditStates.filter((source) => source.accountStatus === 'suspended'),
     latestSourceStatuses
@@ -2403,7 +2858,12 @@ function buildAuditQueues(history) {
     latestSourceStatuses
   )
   const queues = {
-    sources: buildSourceAlerts(runs, inactiveSourceMap, activeSourceStateMap),
+    sources: buildSourceAlerts(
+      runs,
+      inactiveSourceMap,
+      activeSourceStateMap,
+      activeSourceMap
+    ),
     suspendedRedditSources,
     validRedditSources,
     inactiveRedditSources,
@@ -2430,7 +2890,7 @@ function sourceRunView(run, index, total) {
   return {
     sourceIndex: index + 1,
     sourceTotal: total,
-    label: getPlatformLabel(run?.sourceType) || run?.label || 'Source',
+    label: run?.label || getSourceLabel(run?.sourceType, run?.url) || 'Source',
     url: run?.url || '',
     ok: run?.ok !== false,
     status: summary.status || (run?.ok === false ? 'failed' : 'pending'),
@@ -2480,7 +2940,7 @@ function allSourceRunView(run, index, total) {
   return {
     sourceIndex: index + 1,
     sourceTotal: total,
-    label: run?.label || getPlatformLabel(run?.sourceType),
+    label: run?.label || getSourceLabel(run?.sourceType, run?.url),
     url: run?.url || '',
     ok: run?.ok !== false,
     status: summary.status || (run?.ok === false ? 'failed' : 'finished'),
@@ -2717,8 +3177,9 @@ function runChildForSource(job, sourceUrl, index) {
     const args = buildScrapeArgs(sourceUrl, job.model, job.options)
     appendJobLog(
       job,
-      `[${index + 1}/${job.sources.length}] ${job.model} -> ${getPlatformLabel(
-        parsed?.sourceType
+      `[${index + 1}/${job.sources.length}] ${job.model} -> ${getSourceLabel(
+        parsed?.sourceType,
+        sourceUrl
       )}: ${sourceUrl}`
     )
     appendJobLog(
@@ -2940,9 +3401,13 @@ app.post('/auth', (req, res) => {
 app.use(requireAuth)
 app.use(express.static(__dirname))
 
-app.get('/', (_req, res) => {
+function sendDashboardPage(_req, res) {
   res.sendFile('index.html', { root: __dirname })
-})
+}
+
+app.get('/', sendDashboardPage)
+app.get('/history', sendDashboardPage)
+app.get('/onlyhaven', sendDashboardPage)
 
 app.get('/api/models', (_req, res) => {
   res.json({
@@ -2961,6 +3426,29 @@ app.get('/api/source-search', async (req, res) => {
   }
 })
 
+app.get('/api/onlyhaven/review', (_req, res) => {
+  try {
+    const review = getOnlyHavenReviewRows()
+    res.json({
+      onlyHavenOrigin: ONLYHAVEN_ORIGIN,
+      models: review.rows,
+      totals: review.totals,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/api/onlyhaven/search', (req, res) => {
+  try {
+    const model = getKnownModel(req.query.model)
+    if (!model) return res.status(400).json({ error: 'model is required' })
+    res.json(getOnlyHavenSearchLinksForModel(model))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.post('/api/models/:model/sources', (req, res) => {
   const model = getKnownModel(req.params.model || req.body.model)
   const parsed = parseSourceUrl(req.body.url)
@@ -2974,12 +3462,56 @@ app.post('/api/models/:model/sources', (req, res) => {
       model: savedModel,
       source: {
         platform: parsed.sourceType,
-        label: getPlatformLabel(parsed.sourceType),
+        label:
+          parsed.sourceType === 'coomerfans' && isOnlyHavenUrl(parsed.url)
+            ? 'OnlyHaven'
+            : getPlatformLabel(parsed.sourceType),
         url: parsed.url,
       },
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/models/:model/onlyhaven-source', (req, res) => {
+  const model = getKnownModel(req.params.model || req.body.model)
+  const url = String(req.body.url || '').trim()
+  if (!model) return res.status(400).json({ error: 'model is required' })
+  if (!url) return res.status(400).json({ error: 'source url is required' })
+
+  try {
+    res.json({
+      ok: true,
+      ...saveOnlyHavenSourceForModel(model, url, {
+        username: req.body.username,
+        displayName: req.body.displayName,
+        archiveLegacyCoomer: req.body.archiveLegacyCoomer === true,
+        reason: req.body.reason,
+      }),
+    })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.post('/api/models/:model/onlyhaven-review', (req, res) => {
+  const model = getKnownModel(req.params.model || req.body.model)
+  const status = String(req.body.status || '').trim()
+  if (!model) return res.status(400).json({ error: 'model is required' })
+  if (status !== 'not_found') {
+    return res.status(400).json({ error: 'status must be not_found' })
+  }
+
+  try {
+    res.json({
+      ok: true,
+      ...markOnlyHavenNotFoundForModel(model, {
+        reason: req.body.reason,
+      }),
+    })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
   }
 })
 
@@ -3019,6 +3551,16 @@ app.post('/api/models/:model/sources/reddit-state', (req, res) => {
         ...markRedditSourceDeleted(model, url, reason),
       })
     }
+    if (state === 'banned') {
+      return res.json({
+        ok: true,
+        ...markRedditSourceDeleted(
+          model,
+          url,
+          reason || 'reddit_account_suspended'
+        ),
+      })
+    }
     if (state === 'active') {
       return res.json({
         ok: true,
@@ -3033,7 +3575,9 @@ app.post('/api/models/:model/sources/reddit-state', (req, res) => {
     }
     res
       .status(400)
-      .json({ error: 'state must be suspended, deleted, active, or valid' })
+      .json({
+        error: 'state must be suspended, deleted, banned, active, or valid',
+      })
   } catch (err) {
     res.status(400).json({ error: err.message })
   }
@@ -3049,7 +3593,11 @@ app.post('/api/models/:model/sources/ban', (req, res) => {
   try {
     res.json({
       ok: true,
-      ...markRedditSourceSuspended(model, url, reason || 'marked_suspended'),
+      ...markRedditSourceDeleted(
+        model,
+        url,
+        reason || 'reddit_account_suspended'
+      ),
     })
   } catch (err) {
     res.status(400).json({ error: err.message })
@@ -3210,21 +3758,24 @@ function repairAllSeenMediaFailures() {
 app.post('/api/jobs', (req, res) => {
   const mode = req.body.mode === 'all' ? 'all' : 'sources'
   const model = mode === 'all' ? 'ALL SOURCES' : getKnownModel(req.body.model)
-  const sources = Array.isArray(req.body.sources)
+  const rawSources = Array.isArray(req.body.sources)
     ? req.body.sources.map((url) => String(url || '').trim()).filter(Boolean)
     : []
+  const sources = []
   if (mode !== 'all' && !model) {
     return res.status(400).json({ error: 'model is required' })
   }
-  if (mode !== 'all' && !sources.length) {
+  if (mode !== 'all' && !rawSources.length) {
     return res.status(400).json({ error: 'at least one source is required' })
   }
-  for (const source of mode === 'all' ? [] : sources) {
-    if (!parseSourceUrl(source)) {
+  for (const source of mode === 'all' ? [] : rawSources) {
+    const parsed = parseSourceUrl(source)
+    if (!parsed) {
       return res
         .status(400)
         .json({ error: `Unsupported source URL: ${source}` })
     }
+    sources.push(parsed.url)
   }
 
   const job = {
@@ -3360,6 +3911,29 @@ app.post('/api/media-queues/retry-recovery', (req, res) => {
 
 app.post('/api/media-queues/quarantine-repair', (req, res) => {
   const model = sanitize(req.body.model || '')
+  const quarantine = readQuarantineSummary()
+  if (model) {
+    const hasActionableModelItem = (quarantine.items || []).some((item) => {
+      return (
+        item.model === model &&
+        Array.isArray(item.reasons) &&
+        item.reasons.includes('tail_decode_error') &&
+        item.quarantinePath &&
+        fs.existsSync(item.quarantinePath)
+      )
+    })
+    if (!hasActionableModelItem) {
+      return res
+        .status(400)
+        .json({
+          error: `No actionable quarantine candidates found for ${model}.`,
+        })
+    }
+  } else if (!Number(quarantine.actionableTailDecode || 0)) {
+    return res
+      .status(400)
+      .json({ error: 'No actionable quarantine candidates found.' })
+  }
   const args = [sessionRepairScript]
   if (model) args.push('--model', model)
   if (req.body.all) args.push('--all')

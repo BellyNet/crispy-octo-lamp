@@ -42,6 +42,7 @@ const {
   getPawchiveProfileUrl,
   getPawchiveUserUrl,
 } = require('../scrapyard/pawchive')
+const { parseTumblrJsonpBody } = require('../scrapyard/sourceAdapters/tumblr')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
@@ -120,10 +121,20 @@ const PLATFORMS = {
     probeUrl: (username) =>
       `https://old.reddit.com/user/${encodeURIComponent(username)}/submitted/?over18=1`,
   },
+  tumblr: {
+    host: 'www.tumblr.com',
+    label: 'Tumblr',
+    urlPattern:
+      /^https?:\/\/(?:(?:www\.)?tumblr\.com\/(?:blog\/view\/)?([^/?#\s]+)|([^./?#\s]+)\.tumblr\.com)(?:[/?#]|$)/i,
+    searchUrl: (name) =>
+      `https://www.tumblr.com/search/${encodeURIComponent(name)}`,
+    userUrl: (username) =>
+      `https://${encodeURIComponent(cleanTumblrBlogName(username))}.tumblr.com/`,
+  },
 }
 
 const STUFFERDB_PATTERN = /^https?:\/\/(?:bbw\.)?stufferdb\.com\/[^\s]+/i
-const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb']
+const SOURCE_PLATFORMS = ['coomer', 'kemono', 'reddit', 'stufferdb', 'tumblr']
 const REDDIT_PROBE_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36'
 const REDDIT_PROBE_RETRY_DELAY_MS = parseNonNegativeInteger(
@@ -131,6 +142,15 @@ const REDDIT_PROBE_RETRY_DELAY_MS = parseNonNegativeInteger(
   30000
 )
 const REDDIT_PROBE_MAX_RETRIES = 2
+
+function cleanTumblrBlogName(value) {
+  const raw = String(value || '').trim()
+  const urlMatch = raw.match(PLATFORMS?.tumblr?.urlPattern)
+  return String(urlMatch?.[1] || urlMatch?.[2] || raw)
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+}
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 function httpsGet(host, url, headers = {}) {
@@ -584,9 +604,47 @@ async function lookupReddit(username) {
   return result.status === 'found' ? result : null
 }
 
+async function probeTumblr(username) {
+  const blogName = cleanTumblrBlogName(username)
+  if (!blogName || !/^[a-z0-9-]+$/i.test(blogName)) return null
+
+  const apiUrl = `https://${blogName}.tumblr.com/api/read/json?start=0&num=1`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10000)
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        Accept: 'text/javascript, application/json, */*',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+      },
+      signal: controller.signal,
+    })
+    if (response.status === 404) return null
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const data = parseTumblrJsonpBody(await response.text())
+    if (!data?.tumblelog && !Array.isArray(data?.posts)) return null
+    return {
+      platform: 'tumblr',
+      service: 'blog',
+      id: blogName,
+      username: blogName,
+      url: PLATFORMS.tumblr.userUrl(blogName),
+      name: data?.tumblelog?.title || blogName,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function probeUsername(platform, username) {
   if (platform === 'coomer') {
     return searchCoomer(username)
+  }
+  if (platform === 'tumblr') {
+    const hit = await probeTumblr(username)
+    return hit ? [hit] : []
   }
   if (platform === 'reddit') {
     const hit = await lookupReddit(username)
@@ -1061,6 +1119,19 @@ function parseSourceUrl(input) {
 
   if (STUFFERDB_PATTERN.test(str)) {
     return { platform: 'stufferdb', url: str }
+  }
+
+  const tumblrM = str.match(PLATFORMS.tumblr.urlPattern)
+  if (tumblrM) {
+    const username = (tumblrM[1] || tumblrM[2] || '').toLowerCase()
+    if (username) {
+      return {
+        platform: 'tumblr',
+        service: 'blog',
+        username,
+        url: PLATFORMS.tumblr.userUrl(username),
+      }
+    }
   }
 
   return null
@@ -1828,6 +1899,7 @@ module.exports = {
   parseSkipPlatforms,
   printAutoBackfillReport,
   probeReddit,
+  probeTumblr,
   probeUsername,
 }
 

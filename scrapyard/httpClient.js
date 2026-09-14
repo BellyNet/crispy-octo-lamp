@@ -31,7 +31,13 @@ function createHttpClient(options = {}) {
       timeoutMs = defaultTimeoutMs,
       maxRedirects = 5,
       onProgress = null,
+      tolerateStatusCodes = [],
     } = requestOptions
+    const toleratedStatusCodes = new Set(
+      Array.isArray(tolerateStatusCodes)
+        ? tolerateStatusCodes.map((value) => Number(value))
+        : []
+    )
 
     return new Promise((resolve, reject) => {
       const parsed = new URL(url)
@@ -67,7 +73,10 @@ function createHttpClient(options = {}) {
             return
           }
 
-          if (statusCode < 200 || statusCode >= 300) {
+          if (
+            (statusCode < 200 || statusCode >= 300) &&
+            !toleratedStatusCodes.has(statusCode)
+          ) {
             const chunks = []
             res.on('data', (chunk) => chunks.push(chunk))
             res.on('end', () => {

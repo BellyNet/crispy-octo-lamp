@@ -1614,6 +1614,7 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
           Referer: source.origin,
           'User-Agent': REDDIT_RSS_USER_AGENT,
         },
+        tolerateStatusCodes: [403, 404],
       },
       deps
     )

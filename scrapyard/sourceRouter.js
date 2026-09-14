@@ -9,18 +9,45 @@ const {
   isPawchiveOrKemonoHost,
 } = require('./pawchive')
 
+const TUMBLR_RESERVED_SUBDOMAINS = new Set([
+  'www',
+  'api',
+  'assets',
+  'embed',
+  'engine',
+  't',
+  'render',
+])
+
+function normalizeSourceUrlInput(inputUrl) {
+  const raw = String(inputUrl || '').trim()
+  const markdownMatch = raw.match(/^\[[^\]]+\]\((https?:\/\/[^)]+)\)$/i)
+  if (markdownMatch) return markdownMatch[1].trim()
+  const angleMatch = raw.match(/^<\s*(https?:\/\/[^>]+)\s*>$/i)
+  if (angleMatch) return angleMatch[1].trim()
+  return raw
+}
+
+function isTumblrHost(host) {
+  return host === 'tumblr.com' || host.endsWith('.tumblr.com')
+}
+
 function parseHoghaulSourceUrl(inputUrl) {
-  const parsed = new URL(String(inputUrl || '').trim())
+  const parsed = new URL(normalizeSourceUrlInput(inputUrl))
   const host = parsed.hostname.toLowerCase()
   const site = host.includes('coomerfans')
     ? 'coomerfans'
-    : host.includes('coomer')
-      ? 'coomer'
-      : isPawchiveOrKemonoHost(host)
-        ? 'kemono'
-        : host.endsWith('reddit.com')
-          ? 'reddit'
-          : null
+    : host === 'cum.st' || host.endsWith('.cum.st')
+      ? 'coomerfans'
+      : host.includes('coomer')
+        ? 'coomer'
+        : isPawchiveOrKemonoHost(host)
+          ? 'kemono'
+          : host.endsWith('reddit.com')
+            ? 'reddit'
+            : isTumblrHost(host)
+              ? 'tumblr'
+              : null
   if (!site) throw new Error(`Unsupported Hoghaul host: ${parsed.hostname}`)
 
   const parts = parsed.pathname.split('/').filter(Boolean)
@@ -49,6 +76,36 @@ function parseHoghaulSourceUrl(inputUrl) {
   }
 
   if (site === 'coomerfans') {
+    if (host === 'cum.st' || host.endsWith('.cum.st')) {
+      if (parts[0] === 'creators' && parts[1] && parts[2]) {
+        return {
+          inputUrl: `${parsed.origin}/creators/${parts[1]}/${parts[2]}`,
+          origin: parsed.origin,
+          site,
+          service: parts[1],
+          userId: parts[2],
+          rawName: sanitize(parts[2]),
+        }
+      }
+
+      const queryName =
+        parsed.searchParams.get('q') || parsed.searchParams.get('search')
+      if (queryName) {
+        return {
+          inputUrl: parsed.toString(),
+          origin: parsed.origin,
+          site,
+          service: 'onlyfans',
+          userId: null,
+          rawName: sanitize(queryName),
+        }
+      }
+
+      throw new Error(
+        'Expected an OnlyHaven URL like /creators/onlyfans/id or /creators?q=name'
+      )
+    }
+
     if (parts[0] === 'u' && parts[1] && parts[2] && parts[3]) {
       return {
         inputUrl: parsed.toString(),
@@ -77,6 +134,35 @@ function parseHoghaulSourceUrl(inputUrl) {
     )
   }
 
+  if (site === 'tumblr') {
+    const subdomain = host.replace(/\.tumblr\.com$/i, '')
+    let blogName = null
+    if (host !== 'tumblr.com' && !TUMBLR_RESERVED_SUBDOMAINS.has(subdomain)) {
+      blogName = subdomain
+    } else if (parts[0] === 'blog' && parts[1] === 'view' && parts[2]) {
+      blogName = parts[2]
+    } else if (parts[0] && parts[0] !== 'blog') {
+      blogName = parts[0]
+    }
+
+    if (!blogName) {
+      throw new Error(
+        'Expected a Tumblr blog URL like https://<blog>.tumblr.com or https://www.tumblr.com/<blog>'
+      )
+    }
+
+    const cleanBlogName = blogName.toLowerCase()
+    return {
+      inputUrl: `https://${cleanBlogName}.tumblr.com/`,
+      origin: `https://${cleanBlogName}.tumblr.com`,
+      site,
+      service: 'blog',
+      userId: cleanBlogName,
+      username: cleanBlogName,
+      rawName: sanitize(cleanBlogName),
+    }
+  }
+
   const userIndex = parts.indexOf('user')
   const service = parts[0]
   const userId = userIndex >= 0 ? parts[userIndex + 1] : null
@@ -102,7 +188,8 @@ function parseHoghaulSourceUrl(inputUrl) {
 
 function parseSourceUrl(inputUrl) {
   try {
-    const parsed = new URL(String(inputUrl || '').trim())
+    const normalizedInputUrl = normalizeSourceUrlInput(inputUrl)
+    const parsed = new URL(normalizedInputUrl)
     const host = parsed.hostname.toLowerCase()
 
     if (host.includes('stufferdb') || host.includes('stufferai')) {
@@ -122,10 +209,13 @@ function parseSourceUrl(inputUrl) {
     if (
       host === 'reddit.com' ||
       host.endsWith('.reddit.com') ||
+      host === 'cum.st' ||
+      host.endsWith('.cum.st') ||
       host.includes('coomer') ||
-      isPawchiveOrKemonoHost(host)
+      isPawchiveOrKemonoHost(host) ||
+      isTumblrHost(host)
     ) {
-      const source = parseHoghaulSourceUrl(inputUrl)
+      const source = parseHoghaulSourceUrl(normalizedInputUrl)
       return {
         ...source,
         scraper: 'hoghaul',
@@ -158,6 +248,7 @@ function describeSource(parsedSource) {
 module.exports = {
   parseSourceUrl,
   parseHoghaulSourceUrl,
+  normalizeSourceUrlInput,
   getScraperScript,
   describeSource,
 }

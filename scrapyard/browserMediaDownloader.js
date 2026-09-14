@@ -25,15 +25,15 @@ function getDefaultBrowserExecutablePath() {
   return existingPathFromCandidates([
     process.env.HOGHAUL_BROWSER_EXECUTABLE,
     process.env.PUPPETEER_EXECUTABLE_PATH,
-    '%LOCALAPPDATA%\\Yandex\\YandexBrowser\\Application\\browser.exe',
-    '%PROGRAMFILES%\\Yandex\\YandexBrowser\\Application\\browser.exe',
-    '%PROGRAMFILES(X86)%\\Yandex\\YandexBrowser\\Application\\browser.exe',
     '%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe',
     '%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe',
     '%PROGRAMFILES(X86)%\\Google\\Chrome\\Application\\chrome.exe',
     '%LOCALAPPDATA%\\Microsoft\\Edge\\Application\\msedge.exe',
     '%PROGRAMFILES(X86)%\\Microsoft\\Edge\\Application\\msedge.exe',
     '%PROGRAMFILES%\\Microsoft\\Edge\\Application\\msedge.exe',
+    '%LOCALAPPDATA%\\Yandex\\YandexBrowser\\Application\\browser.exe',
+    '%PROGRAMFILES%\\Yandex\\YandexBrowser\\Application\\browser.exe',
+    '%PROGRAMFILES(X86)%\\Yandex\\YandexBrowser\\Application\\browser.exe',
   ])
 }
 
@@ -281,7 +281,24 @@ async function createBrowserMediaDownloader(source, options = {}) {
       })
       if (!response) throw new Error('Browser returned no response')
       const status = response.status()
-      if (status < 200 || status >= 300) {
+      const toleratedStatuses = new Set(
+        Array.isArray(fetchOptions.tolerateStatusCodes)
+          ? fetchOptions.tolerateStatusCodes.map((value) => Number(value))
+          : []
+      )
+      if (
+        fetchOptions.settleMs &&
+        toleratedStatuses.has(status) &&
+        Number(fetchOptions.settleMs) > 0
+      ) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Number(fetchOptions.settleMs))
+        )
+      }
+      if (
+        (status < 200 || status >= 300) &&
+        !toleratedStatuses.has(status)
+      ) {
         throw new Error(`Browser HTTP ${status}`)
       }
       const html = await page.content()
@@ -299,6 +316,34 @@ async function createBrowserMediaDownloader(source, options = {}) {
 
   return {
     fetchHtml,
+    async fetchText(targetUrl, fetchOptions = {}) {
+      const result = await warmupPage.evaluate(
+        async (url, headers) => {
+          const response = await fetch(url, {
+            credentials: 'include',
+            headers,
+          })
+          const text = await response.text()
+          return {
+            text,
+            byteLength: new TextEncoder().encode(text).length,
+            statusCode: response.status,
+            ok: response.ok,
+          }
+        },
+        targetUrl,
+        {
+          Accept: '*/*',
+          ...(fetchOptions.headers || {}),
+        }
+      )
+      if (!result.ok) throw new Error(`Browser HTTP ${result.statusCode}`)
+      return {
+        text: result.text,
+        byteLength: result.byteLength,
+        statusCode: result.statusCode,
+      }
+    },
     async downloadToFile(
       mediaUrl,
       destinationPath,

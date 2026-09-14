@@ -15,6 +15,7 @@ const {
   buildAllSourceQueue,
   buildAllSourceRunOptions,
   buildRepairArgs,
+  buildScraperArgs,
   buildScraperOptions,
   buildSyncArgs,
   getTemporarilyDisabledSourceReason,
@@ -24,6 +25,7 @@ const {
   runScraperCli,
   summarizeSourceRunSummary,
 } = require('./scraperRunner')
+const { probeUsername } = require('../hoghaul/backfill-sources-interactive')
 const { parseSourceUrl } = require('./sourceRouter')
 const {
   backfillSeenSourcePostsFromRunEvents,
@@ -60,6 +62,10 @@ const {
   fetchCoomerFansPosts,
   parseCoomerFansCaption,
 } = require('./sourceAdapters/coomerFans')
+const {
+  fetchTumblrPosts,
+  parseTumblrJsonpBody,
+} = require('./sourceAdapters/tumblr')
 const {
   fetchCoomerKemonoPosts,
   getMediaEntriesFromPost,
@@ -596,10 +602,7 @@ async function main() {
   const pawchiveDeadData = pawchiveDeadIndex.loadMediaSeenIndex(metadataLogDir)
   pawchiveDeadData.deadMediaUrls['pawchive-data:a/b/legacy.jpg'] = {
     mediaUrl: 'pawchive-data:a/b/legacy.jpg',
-    mediaUrls: [
-      'pawchive-data:a/b/legacy.jpg',
-      'kemono-data:a/b/legacy.jpg',
-    ],
+    mediaUrls: ['pawchive-data:a/b/legacy.jpg', 'kemono-data:a/b/legacy.jpg'],
     status: 'dead',
     reason: 'not_found_404',
     error: 'HTTP 404',
@@ -765,6 +768,76 @@ async function main() {
     sourceType: 'coomerfans',
     rawName: 'name_here',
   })
+  const onlyHaven = await assertRouted(
+    'https://cum.st/creators/onlyfans/195143184?display=collages',
+    {
+      scraper: 'hoghaul',
+      sourceType: 'coomerfans',
+      rawName: '195143184',
+      origin: 'https://cum.st',
+      service: 'onlyfans',
+      userId: '195143184',
+      url: 'https://cum.st/creators/onlyfans/195143184',
+    }
+  )
+  await assertRouted(
+    '[https://cum.st/creators/onlyfans/195143184](https://cum.st/creators/onlyfans/195143184)',
+    {
+      scraper: 'hoghaul',
+      sourceType: 'coomerfans',
+      rawName: '195143184',
+      origin: 'https://cum.st',
+      service: 'onlyfans',
+      userId: '195143184',
+      url: 'https://cum.st/creators/onlyfans/195143184',
+    }
+  )
+  const tumblr = await assertRouted('https://www.tumblr.com/bellaabbondanza', {
+    scraper: 'hoghaul',
+    sourceType: 'tumblr',
+    rawName: 'bellaabbondanza',
+    origin: 'https://bellaabbondanza.tumblr.com',
+    service: 'blog',
+    userId: 'bellaabbondanza',
+    url: 'https://bellaabbondanza.tumblr.com/',
+  })
+  await assertRouted('https://bellaabbondanza.tumblr.com/', {
+    scraper: 'hoghaul',
+    sourceType: 'tumblr',
+    rawName: 'bellaabbondanza',
+    origin: 'https://bellaabbondanza.tumblr.com',
+    service: 'blog',
+    userId: 'bellaabbondanza',
+    url: 'https://bellaabbondanza.tumblr.com/',
+  })
+  const originalFetch = global.fetch
+  global.fetch = async (url) => {
+    assert.strictEqual(
+      url,
+      'https://bellaabbondanza.tumblr.com/api/read/json?start=0&num=1'
+    )
+    return {
+      status: 200,
+      ok: true,
+      text: async () =>
+        'var tumblr_api_read = {"tumblelog":{"title":"Bella Abbondanza"},"posts":[]};',
+    }
+  }
+  try {
+    const tumblrProbeHits = await probeUsername('tumblr', 'bellaabbondanza')
+    assert.deepStrictEqual(tumblrProbeHits, [
+      {
+        platform: 'tumblr',
+        service: 'blog',
+        id: 'bellaabbondanza',
+        username: 'bellaabbondanza',
+        url: 'https://bellaabbondanza.tumblr.com/',
+        name: 'Bella Abbondanza',
+      },
+    ])
+  } finally {
+    global.fetch = originalFetch
+  }
   await assertRouted('https://coomer.su/onlyfans/user/name_here', {
     scraper: 'hoghaul',
     sourceType: 'coomer',
@@ -793,6 +866,15 @@ async function main() {
     url: `${PAWCHIVE_ORIGIN}/patreon/user/24586027`,
   })
   assert.strictEqual(shouldUseBrowserMediaForSource(pawchive, true), false)
+  assert.strictEqual(shouldUseBrowserMediaForSource(onlyHaven, true), false)
+  assert.strictEqual(shouldUseBrowserMediaForSource(tumblr, true), false)
+  assert.strictEqual(
+    shouldUseBrowserMediaForSource(
+      parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+      true
+    ),
+    true
+  )
   assert.strictEqual(
     shouldUseBrowserMediaForSource(
       parseSourceUrl('https://coomer.su/onlyfans/user/name_here'),
@@ -805,7 +887,12 @@ async function main() {
     false
   )
   assert.strictEqual(
-    shouldUseBrowserMediaForSource(reddit, true, { redditBrowserMedia: true }, {}),
+    shouldUseBrowserMediaForSource(
+      reddit,
+      true,
+      { redditBrowserMedia: true },
+      {}
+    ),
     true
   )
   const stufferdb = await assertRouted(
@@ -884,17 +971,68 @@ async function main() {
         coomer: [{ url: 'https://coomerfans.com/u/onlyfans/123/alpha_model' }],
         reddit: [{ url: 'https://www.reddit.com/user/alpha_model/submitted/' }],
         kemono: [{ url: `${PAWCHIVE_ORIGIN}/patreon/user/456` }],
-        stufferdb: [{ url: 'https://stufferdb.com/index?/category/1' }],
+        stufferdb: [
+          { url: 'https://stufferdb.com/index?/category/1' },
+          { url: 'https://stufferdb.com/index?/search/not-a-source' },
+        ],
+      },
+    },
+    dual_coomer_model: {
+      sources: {
+        coomer: [
+          { url: 'https://coomerfans.com/u/onlyfans/999/dual_coomer_model' },
+          { url: 'https://cum.st/creators/onlyfans/888' },
+        ],
       },
     },
   })
   assert.deepStrictEqual(
     allSourceQueue.map((item) => item.model),
-    ['alpha_model', 'beta_model']
+    ['alpha_model', 'beta_model', 'dual_coomer_model']
   )
   assert.deepStrictEqual(
     allSourceQueue[0].sources.map((source) => source.label),
     ['reddit', 'pawchive', 'coomerfans', 'stufferdb']
+  )
+  const completedLegacyDataset = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'completed-legacy-coomerfans-')
+  )
+  const completedLegacyLogDir = path.join(
+    completedLegacyDataset,
+    'dual_coomer_model',
+    'log'
+  )
+  fs.mkdirSync(completedLegacyLogDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(completedLegacyLogDir, 'source-frontier-state.json'),
+    JSON.stringify({
+      version: 1,
+      sources: {
+        'coomerfans/onlyfans/999': {
+          completedPostIds: ['post-1'],
+        },
+      },
+    })
+  )
+  const nightlySourceQueue = buildAllSourceQueue(
+    {
+      dual_coomer_model: {
+        sources: {
+          coomer: [
+            { url: 'https://coomerfans.com/u/onlyfans/999/dual_coomer_model' },
+            { url: 'https://cum.st/creators/onlyfans/888' },
+          ],
+        },
+      },
+    },
+    {
+      skipCompletedLegacyCoomerFans: true,
+      datasetPaths: { datasetDir: completedLegacyDataset },
+    }
+  )
+  assert.deepStrictEqual(
+    nightlySourceQueue[0].sources.map((source) => source.url),
+    ['https://cum.st/creators/onlyfans/888']
   )
 
   const tempRegistryDir = fs.mkdtempSync(
@@ -1034,6 +1172,135 @@ async function main() {
     ),
     'A little teaser from a set I never released! Tip $5 to see the rest in your inbox! 😜'
   )
+  const onlyHavenPosts = await fetchCoomerFansPosts(
+    {
+      origin: 'https://cum.st',
+      site: 'coomerfans',
+      service: 'onlyfans',
+      userId: '195143184',
+      rawName: '195143184',
+    },
+    {},
+    {
+      fetchJson: async (url) => {
+        if (url.includes('/profile')) {
+          return {
+            id: '195143184',
+            name: 'fattiebaddie1',
+            service: 'onlyfans',
+          }
+        }
+        if (url.includes('o=50')) return { total: 1, posts: [] }
+        return {
+          total: 1,
+          posts: [
+            {
+              id: '2720560178',
+              service: 'onlyfans',
+              captionHtml: '<p>Full OnlyHaven caption &amp; details</p>',
+              published: 1788467784,
+              attachments: [
+                {
+                  sha256:
+                    'f1059c5bbc160715efd6269705c96e68c89e65642355542933b14e0d4ac617c9',
+                  kind: 'video',
+                  mimeType: 'video/mp4',
+                  width: 1078,
+                  height: 1920,
+                  durationMs: 566000,
+                  bytes: 616755308,
+                  variants: [{ name: 'original.mp4', bytes: 616755308 }],
+                },
+              ],
+            },
+          ],
+        }
+      },
+      logger: {
+        status: () => {},
+        statusDone: () => {},
+      },
+    }
+  )
+  assert.strictEqual(onlyHavenPosts.length, 1)
+  assert.strictEqual(
+    onlyHavenPosts[0].title,
+    'Full OnlyHaven caption & details'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].mediaPageUrl,
+    'https://cum.st/creators/onlyfans/195143184/post/2720560178#attachment-0-f1059c5bbc16'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].mediaUrl,
+    'https://e1.cum.st/media/f1059c5bbc160715efd6269705c96e68c89e65642355542933b14e0d4ac617c9/original.mp4'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].filename,
+    '2720560178-0-f1059c5bbc16-original.mp4'
+  )
+  assert.strictEqual(
+    onlyHavenPosts[0].mediaEntries[0].originalName,
+    'original.mp4'
+  )
+  const tumblrPayload = parseTumblrJsonpBody(
+    `var tumblr_api_read = ${JSON.stringify({
+      'posts-total': 3,
+      posts: [
+        {
+          id: '826213585755815936',
+          url: 'https://bellaabbondanza.tumblr.com/post/826213585755815936/photo',
+          type: 'regular',
+          'unix-timestamp': 1788387600,
+          'regular-title': 'Tumblr sample',
+          'regular-body': [
+            '<p>Photo &amp; video caption</p>',
+            '<figure><img src="https://64.media.tumblr.com/small.jpg" srcset="https://64.media.tumblr.com/small.jpg 540w, https://64.media.tumblr.com/original.jpg 1280w"></figure>',
+            '<figure><video><source src="https://64.media.tumblr.com/sample.mov"></video></figure>',
+          ].join(''),
+          tags: ['bella abbondanza'],
+          'note-count': '12',
+        },
+        {
+          id: '826000000000000000',
+          url: 'https://bellaabbondanza.tumblr.com/post/826000000000000000/reblog',
+          type: 'regular',
+          reblogged_from_url: 'https://other.tumblr.com/post/1',
+          'regular-body':
+            '<figure><img src="https://64.media.tumblr.com/reblog.jpg"></figure>',
+        },
+      ],
+    })};`
+  )
+  const tumblrPosts = await fetchTumblrPosts(
+    {
+      origin: 'https://bellaabbondanza.tumblr.com',
+      site: 'tumblr',
+      service: 'blog',
+      userId: 'bellaabbondanza',
+      rawName: 'bellaabbondanza',
+    },
+    {},
+    {
+      fetchJson: async () => ({ data: tumblrPayload, byteLength: 1234 }),
+      logger: {
+        log: () => {},
+        status: () => {},
+        statusDone: () => {},
+      },
+    }
+  )
+  assert.strictEqual(tumblrPosts.length, 1)
+  assert.strictEqual(tumblrPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(
+    tumblrPosts[0].mediaEntries[0].mediaUrl,
+    'https://64.media.tumblr.com/original.jpg'
+  )
+  assert.strictEqual(
+    tumblrPosts[0].mediaEntries[1].mediaUrl,
+    'https://64.media.tumblr.com/sample.mov'
+  )
+  assert.strictEqual(tumblrPosts[0].mediaEntries[0].sourceSite, 'tumblr')
 
   const coomerMediaEntries = getMediaEntriesFromPost(
     {
@@ -1327,6 +1594,7 @@ async function main() {
   const redditDiscoveryEvents = []
   const redditListingPages = []
   let redditFetchCount = 0
+  let redditRssTolerateStatusCodes = null
   const emptyRedditPosts = await fetchRedditPosts(
     {
       origin: 'https://www.reddit.com',
@@ -1337,8 +1605,11 @@ async function main() {
     },
     {},
     {
-      fetchHtml: async (url) => {
+      fetchHtml: async (url, requestOptions = {}) => {
         redditFetchCount += 1
+        if (url.includes('.rss')) {
+          redditRssTolerateStatusCodes = requestOptions.tolerateStatusCodes
+        }
         return {
           html: url.includes('.rss') ? '<feed></feed>' : '<html></html>',
           byteLength: 13,
@@ -1359,6 +1630,7 @@ async function main() {
   )
   assert.deepStrictEqual(emptyRedditPosts, [])
   assert.strictEqual(redditFetchCount, 2)
+  assert.deepStrictEqual(redditRssTolerateStatusCodes, [403, 404])
   assert.deepStrictEqual(
     redditListingPages.map((page) => page.mode),
     ['old_html', 'rss']
@@ -1750,6 +2022,24 @@ async function main() {
   assert.strictEqual(redditOptions.sourceIncrementalOverlapPages, '2')
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
+  const coomerFansScraperArgs = buildScraperArgs(
+    parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+    {
+      _: ['https://coomerfans.com/u/onlyfans/123/name_here'],
+      model: 'name_here',
+      'skip-nas-sync': true,
+    }
+  )
+  assert.strictEqual(coomerFansScraperArgs.includes('--no-browser-media'), false)
+  const coomerFansNoBrowserArgs = buildScraperArgs(
+    parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
+    {
+      _: ['https://coomerfans.com/u/onlyfans/123/name_here'],
+      model: 'name_here',
+      'browser-media': false,
+    }
+  )
+  assert.strictEqual(coomerFansNoBrowserArgs.includes('--no-browser-media'), true)
 
   const stufferOptions = buildScraperOptions(stufferdb, {
     model: 'sample_model',
