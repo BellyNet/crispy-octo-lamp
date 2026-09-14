@@ -1530,6 +1530,49 @@ app.post('/api/users/:username/trash', async (req, res) => {
   res.json({ ok: true, trashed: trashed.length, failed })
 })
 
+// Soft-delete an entire model folder in one shot: renames the whole
+// directory into datasetDir/.dashboard-trash/<runTimestamp>/<username>/ —
+// same trash root as the file-level endpoint above, just moving the folder
+// itself rather than walking its contents. Requires the client to echo the
+// exact model name back as confirmName — defense in depth on top of
+// whatever confirmation the UI does, given the blast radius here.
+app.post('/api/users/:username/delete-model', async (req, res) => {
+  const username = req.params.username
+  const userDir = safeSubPath(datasetDir, username)
+  if (!userDir) return res.status(403).json({ error: 'Forbidden' })
+  if (!fs.existsSync(userDir)) {
+    return res.status(404).json({ error: 'Model not found' })
+  }
+  if (req.body?.confirmName !== username) {
+    return res
+      .status(400)
+      .json({ error: 'confirmName must match the model name exactly' })
+  }
+
+  try {
+    const runTs = new Date().toISOString().replace(/[:.]/g, '-')
+    const dst = path.join(datasetDir, TRASH_DIRNAME, runTs, username)
+    await fs.promises.mkdir(path.dirname(dst), { recursive: true })
+    await fs.promises.rename(userDir, dst)
+
+    // Thumbnail/mobile-variant cache is derived data, not original content —
+    // delete outright rather than trashing it too.
+    await fs.promises
+      .rm(path.join(THUMB_DIR, username), { recursive: true, force: true })
+      .catch(() => {})
+
+    delete modelStatsCache[username]
+    mediaResponseCache.delete(username)
+    try {
+      fs.unlinkSync(path.join(RESPONSE_CACHE_DIR, `${username}.json`))
+    } catch {}
+
+    res.json({ ok: true, trashedTo: path.relative(datasetDir, dst) })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 async function warmGridThumbs(username, items) {
   const tasks = []
   for (const item of items) {
