@@ -2048,6 +2048,151 @@ function syncLatestAllSourceReportToHistory() {
   return snapshot
 }
 
+function buildSeenSourceKeySet(history = readRunHistory()) {
+  const seen = new Set()
+  for (const run of history.runs || []) {
+    if (run.options?.dryRun) continue
+    for (const model of run.models || []) {
+      for (const source of model.sources || []) {
+        const key = sourceStateKey(model.model, source.url)
+        if (key) seen.add(key)
+      }
+    }
+  }
+  return seen
+}
+
+function getLatestNonDryRunStartedAt(history = readRunHistory()) {
+  const runs = [...(history.runs || [])].sort(
+    (left, right) =>
+      new Date(right.startedAt || right.createdAt || 0) -
+      new Date(left.startedAt || left.createdAt || 0)
+  )
+  const latest = runs.find((run) => !run.options?.dryRun)
+  return latest?.startedAt || null
+}
+
+function getSourceRecordTimeMs(sourceRecord) {
+  const value =
+    sourceRecord?.lastCheckedAt ||
+    sourceRecord?.addedAt ||
+    sourceRecord?.createdAt ||
+    ''
+  const timeMs = Date.parse(value)
+  return Number.isFinite(timeMs) ? timeMs : 0
+}
+
+function normalizeFrontierKeyPart(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+}
+
+function getFrontierSourceKey(source = {}) {
+  return [
+    normalizeFrontierKeyPart(source.site),
+    normalizeFrontierKeyPart(source.service),
+    normalizeFrontierKeyPart(source.userId || source.username || source.rawName),
+  ].join('/')
+}
+
+function sourceRecordToFrontierSource(sourceRecord, parsed) {
+  if (parsed?.sourceType === 'stufferdb') {
+    const categoryId =
+      sourceRecord?.categoryId ||
+      parsed.url.match(/category\/?(\d+)/i)?.[1] ||
+      parsed.url.match(/search\/?(\d+)/i)?.[1] ||
+      ''
+    return {
+      site: 'stufferdb',
+      service: 'category',
+      userId: categoryId,
+      username: categoryId,
+      rawName: categoryId,
+    }
+  }
+  return parsed
+}
+
+function readSourceFrontierState(model) {
+  const statePath = path.join(
+    datasetDir,
+    sanitize(model),
+    'log',
+    'source-frontier-state.json'
+  )
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function hasRecordedSourceFrontier(model, sourceRecord, parsed) {
+  const state = readSourceFrontierState(model)
+  if (!state?.sources || typeof state.sources !== 'object') return false
+  const frontierSource = sourceRecordToFrontierSource(sourceRecord, parsed)
+  const key = getFrontierSourceKey(frontierSource)
+  return Boolean(key && state.sources[key])
+}
+
+function buildNewSourceQueue() {
+  syncLatestAllSourceReportToHistory()
+  const history = readRunHistory()
+  const registry = loadModelRegistry(registryPath)
+  const seenSources = buildSeenSourceKeySet(history)
+  const latestRunStartedAt = getLatestNonDryRunStartedAt(history)
+  const latestRunStartedMs = Date.parse(latestRunStartedAt || '')
+  const groups = []
+
+  for (const [model, entry] of Object.entries(registry)) {
+    const sources = []
+    const seenInModel = new Set()
+    for (const sourceKey of SOURCE_KEYS) {
+      for (const source of sourceListFor(entry, sourceKey)) {
+        const parsed = parseSourceUrl(source.url)
+        if (!parsed) continue
+        const key = sourceStateKey(model, parsed.url)
+        if (
+          Number.isFinite(latestRunStartedMs) &&
+          getSourceRecordTimeMs(source) <= latestRunStartedMs
+        ) {
+          continue
+        }
+        if (
+          seenSources.has(key) ||
+          seenInModel.has(key) ||
+          hasRecordedSourceFrontier(model, source, parsed)
+        ) {
+          continue
+        }
+        seenInModel.add(key)
+        sources.push(parsed.url)
+      }
+    }
+    if (sources.length) {
+      groups.push({
+        model,
+        sources,
+        sourceCount: sources.length,
+      })
+    }
+  }
+
+  groups.sort((left, right) =>
+    left.model.localeCompare(right.model, undefined, { sensitivity: 'base' })
+  )
+  return {
+    groups,
+    totalModels: groups.length,
+    totalSources: groups.reduce(
+      (count, group) => count + group.sources.length,
+      0
+    ),
+    since: latestRunStartedAt,
+  }
+}
+
 function buildSourceAlerts(
   runs,
   inactiveSourceMap = new Map(),
@@ -3418,6 +3563,37 @@ function runNextJob() {
   runJob(job)
 }
 
+function normalizeJobOptions(rawOptions = {}) {
+  return {
+    ...rawOptions,
+    skipNasSync: Boolean(rawOptions?.skipNasSync),
+  }
+}
+
+function createQueuedScrapeJob({ mode, model, sources, options }) {
+  const job = {
+    id: nextJobId++,
+    mode,
+    status: 'queued',
+    model,
+    sources,
+    options: normalizeJobOptions(options),
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    activeSourceIndex: null,
+    exitCode: null,
+    error: null,
+    runs: [],
+    log: [],
+    child: null,
+    liveProgress: null,
+  }
+  jobs.set(job.id, job)
+  queue.push(job)
+  return job
+}
+
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json({ limit: '128kb' }))
 
@@ -3449,6 +3625,14 @@ app.get('/api/models', (_req, res) => {
     datasetDir,
     models: getModels(),
   })
+})
+
+app.get('/api/new-sources', (_req, res) => {
+  try {
+    res.json(buildNewSourceQueue())
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 app.get('/api/source-search', async (req, res) => {
@@ -3790,7 +3974,48 @@ function repairAllSeenMediaFailures() {
 }
 
 app.post('/api/jobs', (req, res) => {
-  const mode = req.body.mode === 'all' ? 'all' : 'sources'
+  const mode =
+    req.body.mode === 'all'
+      ? 'all'
+      : req.body.mode === 'new-sources'
+        ? 'new-sources'
+        : 'sources'
+
+  if (mode === 'new-sources') {
+    try {
+      const newSourceQueue = buildNewSourceQueue()
+      if (!newSourceQueue.totalSources) {
+        return res.json({
+          ok: true,
+          jobs: [],
+          queued: 0,
+          totalModels: 0,
+          totalSources: 0,
+        })
+      }
+
+      const jobsToQueue = newSourceQueue.groups.map((group) =>
+        createQueuedScrapeJob({
+          mode: 'sources',
+          model: group.model,
+          sources: group.sources,
+          options: req.body.options || {},
+        })
+      )
+      runNextJob()
+      return res.json({
+        ok: true,
+        jobs: jobsToQueue.map((job) => publicJob(job)),
+        job: publicJob(jobsToQueue[0]),
+        queued: jobsToQueue.length,
+        totalModels: newSourceQueue.totalModels,
+        totalSources: newSourceQueue.totalSources,
+      })
+    } catch (err) {
+      return res.status(500).json({ error: err.message })
+    }
+  }
+
   const model = mode === 'all' ? 'ALL SOURCES' : getKnownModel(req.body.model)
   const rawSources = Array.isArray(req.body.sources)
     ? req.body.sources.map((url) => String(url || '').trim()).filter(Boolean)
@@ -3812,29 +4037,12 @@ app.post('/api/jobs', (req, res) => {
     sources.push(parsed.url)
   }
 
-  const job = {
-    id: nextJobId++,
+  const job = createQueuedScrapeJob({
     mode,
-    status: 'queued',
     model,
     sources: mode === 'all' ? [] : sources,
-    options: {
-      ...(req.body.options || {}),
-      skipNasSync: Boolean(req.body.options?.skipNasSync),
-    },
-    createdAt: new Date().toISOString(),
-    startedAt: null,
-    finishedAt: null,
-    activeSourceIndex: null,
-    exitCode: null,
-    error: null,
-    runs: [],
-    log: [],
-    child: null,
-    liveProgress: null,
-  }
-  jobs.set(job.id, job)
-  queue.push(job)
+    options: req.body.options || {},
+  })
   runNextJob()
   res.json({ ok: true, job: publicJob(job) })
 })

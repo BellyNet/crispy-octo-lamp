@@ -724,6 +724,7 @@
             OnlyHaven
           </button>
           <button id="refresh-models">Refresh</button>
+          <button id="run-new-sources">Run New Sources</button>
           <button id="run-all" class="primary">Run Full Scrape</button>
         </div>
       </header>
@@ -742,10 +743,18 @@
                     <div id="source-total" class="quick-meta">
                       Counting saved sources...
                     </div>
+                    <div id="new-source-total" class="quick-meta">
+                      Checking new sources...
+                    </div>
                   </div>
-                  <button id="run-all-panel" class="primary" type="button">
-                    Run Full Scrape
-                  </button>
+                  <div class="actions">
+                    <button id="run-new-sources-panel" type="button">
+                      Run New Sources
+                    </button>
+                    <button id="run-all-panel" class="primary" type="button">
+                      Run Full Scrape
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1103,6 +1112,7 @@
       const showOnlyHavenEl = document.getElementById('show-onlyhaven')
       const registryMetaEl = document.getElementById('registry-meta')
       const sourceTotalEl = document.getElementById('source-total')
+      const newSourceTotalEl = document.getElementById('new-source-total')
       const modelSummaryEl = document.getElementById('model-summary')
       const savedSourcesEl = document.getElementById('saved-sources')
       const candidatesEl = document.getElementById('candidates')
@@ -1497,6 +1507,21 @@
         state.models = payload.models || []
         renderRegistrySummary(payload)
         renderSavedSources()
+        await loadNewSourceSummary().catch((err) => {
+          newSourceTotalEl.textContent = `Could not check new sources: ${err.message}`
+        })
+      }
+
+      async function loadNewSourceSummary() {
+        const payload = await api('/api/new-sources')
+        const sourceCount = Number(payload.totalSources || 0)
+        const modelCount = Number(payload.totalModels || 0)
+        const sinceText = payload.since
+          ? ` since ${formatDateTime(payload.since)}`
+          : ''
+        newSourceTotalEl.textContent = sourceCount
+          ? `${formatNumber(sourceCount)} new source${sourceCount === 1 ? '' : 's'} across ${formatNumber(modelCount)} model${modelCount === 1 ? '' : 's'} have not been scraped${sinceText}.`
+          : `No new saved sources are waiting${sinceText}.`
       }
 
       async function searchSources() {
@@ -1668,6 +1693,26 @@
           }),
         })
         state.selectedJobId = payload.job.id
+        await refreshJobs()
+      }
+
+      async function runNewSources() {
+        const payload = await api('/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            mode: 'new-sources',
+            options: getRunOptions(),
+          }),
+        })
+        if (!payload.queued) {
+          searchStatusEl.textContent = 'No new saved sources are waiting.'
+          await loadNewSourceSummary()
+          await refreshJobs()
+          return
+        }
+        state.selectedJobId = payload.job.id
+        searchStatusEl.textContent = `Queued ${formatNumber(payload.totalSources)} new source${payload.totalSources === 1 ? '' : 's'} across ${formatNumber(payload.totalModels)} model${payload.totalModels === 1 ? '' : 's'}.`
+        await loadNewSourceSummary()
         await refreshJobs()
       }
 
@@ -3302,8 +3347,14 @@
         .getElementById('run-all')
         .addEventListener('click', runAllSources)
       document
+        .getElementById('run-new-sources')
+        .addEventListener('click', runNewSources)
+      document
         .getElementById('run-all-panel')
         .addEventListener('click', runAllSources)
+      document
+        .getElementById('run-new-sources-panel')
+        .addEventListener('click', runNewSources)
       document
         .getElementById('select-all-sources')
         .addEventListener('click', () => {
