@@ -378,6 +378,212 @@
         color: var(--accent);
       }
 
+      .select-mode-toggle {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 3px 6px;
+        border-radius: 4px;
+        transition: all 0.1s;
+        display: inline-flex;
+        align-items: center;
+      }
+      .select-mode-toggle:hover {
+        background: var(--card-bg);
+        color: var(--text);
+      }
+      .select-mode-toggle.active {
+        color: var(--accent);
+        background: var(--card-bg);
+      }
+      body.select-mode .media-card {
+        cursor: pointer;
+      }
+      .media-card.selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent) inset;
+      }
+      .media-card.selected .card-thumb img,
+      .media-card.selected .card-thumb video {
+        opacity: 0.7;
+      }
+      .card-select-check {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        z-index: 3;
+        pointer-events: none;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      }
+
+      #select-action-bar {
+        position: fixed;
+        left: 50%;
+        bottom: 20px;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 12px;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 14px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+        z-index: 50;
+      }
+      #select-action-bar.open {
+        display: flex;
+      }
+      #select-count {
+        font-size: 13px;
+        color: var(--text);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      #select-delete-btn {
+        background: #c64646;
+        color: #fff;
+        border: none;
+        padding: 7px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      #select-delete-btn:hover {
+        background: #e05d5d;
+      }
+      #select-delete-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #select-cancel-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 7px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #select-cancel-btn:hover {
+        color: var(--text);
+        border-color: var(--muted);
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 100;
+      }
+      .delete-model-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 360px;
+        max-width: calc(100vw - 32px);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px;
+        z-index: 101;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      }
+      .confirm-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 320px;
+        max-width: calc(100vw - 32px);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px;
+        z-index: 101;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      }
+      .confirm-modal p {
+        margin: 0 0 16px;
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.5;
+      }
+      .delete-model-modal h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+        color: var(--text);
+      }
+      .delete-model-modal p {
+        margin: 0 0 14px;
+        font-size: 12.5px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .delete-model-input {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 13px;
+        margin-bottom: 14px;
+      }
+      .delete-model-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .delete-model-modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .delete-model-cancel {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 7px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .delete-model-cancel:hover {
+        color: var(--text);
+        border-color: var(--muted);
+      }
+      .delete-model-confirm {
+        background: #c64646;
+        color: #fff;
+        border: none;
+        padding: 7px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .delete-model-confirm:hover:not(:disabled) {
+        background: #e05d5d;
+      }
+      .delete-model-confirm:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
       .card-added {
         font-size: 9px;
         color: var(--muted);
@@ -960,7 +1166,7 @@
       .pswp.pswp--chrome-hidden .pswp__button--fs,
       .pswp.pswp--chrome-hidden .pswp__button--arrow--prev,
       .pswp.pswp--chrome-hidden .pswp__button--arrow--next,
-      .pswp.pswp--chrome-hidden .pswp__button--pswp-flag-button,
+      .pswp.pswp--chrome-hidden .pswp__button--pswp-trash-button,
       .pswp.pswp--chrome-hidden .pswp__button--pswp-link-button,
       .pswp.pswp--chrome-hidden .pswp__button--pswp-hd-toggle,
       .pswp.pswp--chrome-hidden .pswp__pswp-origin-chip,
@@ -1044,24 +1250,25 @@
          PhotoSwipe v5's `.pswp__button { color: rgba(127,127,127,1) }`
          was painting our currentColor strokes gray. We win with a more
          specific selector + !important on both color and stroke. */
-      .pswp button.pswp__button.pswp__pswp-flag-button,
+      .pswp button.pswp__button.pswp__pswp-trash-button,
       .pswp button.pswp__button.pswp__pswp-link-button,
       .pswp button.pswp__button.pswp__pswp-rotate-button,
       .pswp button.pswp__button.pswp__pswp-chrome-toggle {
         color: #fff !important;
       }
-      .pswp button.pswp__button.pswp__pswp-flag-button svg,
+      .pswp button.pswp__button.pswp__pswp-trash-button svg,
       .pswp button.pswp__button.pswp__pswp-link-button svg,
       .pswp button.pswp__button.pswp__pswp-rotate-button svg,
       .pswp button.pswp__button.pswp__pswp-chrome-toggle svg,
-      .pswp button.pswp__button.pswp__pswp-flag-button svg *,
+      .pswp button.pswp__button.pswp__pswp-trash-button svg *,
       .pswp button.pswp__button.pswp__pswp-link-button svg *,
       .pswp button.pswp__button.pswp__pswp-rotate-button svg *,
       .pswp button.pswp__button.pswp__pswp-chrome-toggle svg * {
         stroke: #fff !important;
         color: #fff !important;
       }
-      .pswp button.pswp__button.pswp__pswp-rotate-button:disabled svg {
+      .pswp button.pswp__button.pswp__pswp-rotate-button:disabled svg,
+      .pswp button.pswp__button.pswp__pswp-trash-button:disabled svg {
         opacity: 0.4;
       }
       .pswp button.pswp__button.pswp__pswp-rotate-button.is-rotating svg {
@@ -1070,12 +1277,6 @@
       @keyframes pswp-rotate-spin {
         from { transform: rotate(0deg); }
         to   { transform: rotate(90deg); }
-      }
-      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active,
-      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg,
-      .pswp button.pswp__button.pswp__pswp-flag-button.pswp-flag-active svg * {
-        color: #ff6868 !important;
-        stroke: #ff6868 !important;
       }
 
       /* Info button style */
@@ -1551,18 +1752,12 @@
         text-transform: uppercase;
         margin-bottom: 8px;
       }
-      /* Flag-for-deletion button */
-      .pswp__pswp-flag-button svg {
+      /* Delete (trash) button */
+      .pswp__pswp-trash-button svg {
         opacity: 0.75;
         transition: opacity 0.15s;
       }
-      .pswp__pswp-flag-button:hover svg { opacity: 1; }
-      .pswp__pswp-flag-button.pswp-flag-active {
-        color: #ff6868;
-      }
-      .pswp__pswp-flag-button.pswp-flag-active svg {
-        opacity: 1;
-      }
+      .pswp__pswp-trash-button:hover svg { opacity: 1; }
 
       /* Caption button — same look as the info button */
       .pswp__pswp-caption-button svg {
@@ -1920,6 +2115,23 @@
       }
       #rescan-btn.spinning svg {
         animation: spin 1.2s linear infinite;
+      }
+      #delete-model-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        padding: 5px 8px;
+        border-radius: 6px;
+        flex-shrink: 0;
+      }
+      #delete-model-btn:hover {
+        background: rgba(198, 70, 70, 0.15);
+        color: #ff6868;
+        border-color: #c64646;
       }
       #admin-link {
         display: flex;
@@ -2356,6 +2568,29 @@
             />
           </svg>
         </button>
+        <button
+          id="delete-model-btn"
+          title="Delete this entire model"
+          aria-label="Delete this entire model"
+          style="display: none"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M4 5.5h12" />
+            <path d="M7.5 5.5V4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+            <path d="M5.5 5.5l.6 10a1 1 0 0 0 1 .9h5.8a1 1 0 0 0 1-.9l.6-10" />
+            <path d="M8.3 8.5v5" />
+            <path d="M11.7 8.5v5" />
+          </svg>
+        </button>
         <a
           id="admin-link"
           href="/admin"
@@ -2407,11 +2642,26 @@
         </select>
         <span id="date-range"></span>
         <div class="sort-bar-right">
+          <button
+            id="select-mode-toggle"
+            class="select-mode-toggle"
+            title="Select files to delete"
+            aria-label="Select files to delete"
+            aria-pressed="false"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h12"/><path d="M7.5 5.5V4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/><path d="M5.5 5.5l.6 10a1 1 0 0 0 1 .9h5.8a1 1 0 0 0 1-.9l.6-10"/></svg>
+          </button>
           <span class="sort-label">Card</span>
           <button class="size-btn active" data-size="small">S</button>
           <button class="size-btn" data-size="medium">M</button>
           <button class="size-btn" data-size="large">L</button>
         </div>
+      </div>
+
+      <div id="select-action-bar">
+        <span id="select-count"></span>
+        <button id="select-delete-btn" type="button">Delete</button>
+        <button id="select-cancel-btn" type="button">Cancel</button>
       </div>
 
       <div id="grid-container">
@@ -2484,6 +2734,11 @@
       // ─── STATE ────────────────────────────────────────────────────────────
       let allMedia = [] // full list for current user
       let filtered = [] // filtered + sorted list
+      // Grid multi-select ("pick files, then delete") — separate from the
+      // single-file lightbox delete button. Keyed by "folder/filename" so
+      // selection survives a re-render (index shifts, item identity doesn't).
+      let selectMode = false
+      const selectedKeys = new Set()
       let activeType = 'all'
       // Origin-site filter: 'all' or one of the site strings emitted by
       // the scrapers (reddit / stufferdb / coomerfans / kemono / ...).
@@ -2895,6 +3150,7 @@
       function showHomeView(opts = {}) {
         homeVisible = true
         currentUsername = null
+        if (selectMode) setSelectMode(false)
         document.getElementById('home-btn').classList.add('active')
         homeViewEl.classList.add('visible')
         loadingEl.style.display = 'none'
@@ -2903,6 +3159,7 @@
         sortBar.style.display = 'none'
         currentNameEl.textContent = 'All Models'
         filterSelect.style.display = 'none'
+        document.getElementById('delete-model-btn').style.display = 'none'
         const st = document.getElementById('stats-toggle')
         if (st) st.style.display = 'none'
         const sd = document.getElementById('stats-details')
@@ -3440,7 +3697,9 @@
         sortSelect.value = savedSort
 
         setActiveType('all')
+        if (selectMode) setSelectMode(false)
         filterSelect.style.display = 'block'
+        document.getElementById('delete-model-btn').style.display = 'flex'
         document.getElementById('stats-toggle').style.display = ''
         gridEl.innerHTML = ''
         noResultsEl.style.display = 'none'
@@ -3805,9 +4064,15 @@
       }
 
       function createCard(item, i) {
+        const key = `${item.folder}/${item.filename}`
+        const isSelected = selectMode && selectedKeys.has(key)
         const card = document.createElement('div')
-        card.className = 'media-card' + (item.flagged ? ' flagged' : '')
+        card.className =
+          'media-card' +
+          (item.flagged ? ' flagged' : '') +
+          (isSelected ? ' selected' : '')
         card.dataset.index = i
+        card.dataset.key = key
         const cleanedCardTitle = cleanPostTitle(item)
         if (item.flagged) {
           const ribbon = document.createElement('div')
@@ -3815,6 +4080,12 @@
           ribbon.title = 'Flagged for deletion'
           ribbon.textContent = '🚩'
           card.appendChild(ribbon)
+        }
+        if (isSelected) {
+          const check = document.createElement('div')
+          check.className = 'card-select-check'
+          check.textContent = '✓'
+          card.appendChild(check)
         }
 
         const thumb = document.createElement('div')
@@ -3925,7 +4196,10 @@
         footer.appendChild(addedEl)
         card.appendChild(thumb)
         card.appendChild(footer)
-        card.addEventListener('click', () => openLightbox(i))
+        card.addEventListener('click', () => {
+          if (selectMode) toggleCardSelection(key, card)
+          else openLightbox(i)
+        })
         return card
       }
 
@@ -4710,65 +4984,54 @@
               },
             })
 
-            // Flag-for-deletion toggle. POSTs to /api/users/:user/flag, updates
-            // the in-memory item, refreshes the card's red ribbon in the grid.
-            let flagBtnEl = null
-            const refreshFlagBtn = () => {
-              const item = filtered[pswp.currIndex]
-              if (!item || !flagBtnEl) return
-              flagBtnEl.classList.toggle('pswp-flag-active', !!item.flagged)
-              flagBtnEl.title = item.flagged ? 'Unflag (was marked for deletion)' : 'Flag for deletion'
-            }
+            // Delete this file. POSTs to /api/users/:user/trash (soft-delete —
+            // moves it to .dashboard-trash/, same as the CLI cleanup script),
+            // then removes it from allMedia and re-renders from that single
+            // source of truth rather than hand-patching indices, since a
+            // removed item shifts every index after it. Closing and
+            // reopening the lightbox at the same position is simpler and
+            // more robust than trying to surgically remove one slide from a
+            // live PhotoSwipe instance.
             pswp.ui.registerElement({
-              name:     'pswp-flag-button',
+              name:     'pswp-trash-button',
               order:    7,
               isButton: true,
-              title:    'Flag for deletion',
-              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="2" x2="5" y2="18"/><path d="M5 3.5h10l-2 3 2 3H5"/></svg>',
-              onInit(el) {
-                flagBtnEl = el
-                refreshFlagBtn()
-                pswp.on('change', refreshFlagBtn)
-              },
+              title:    'Delete (moves to trash)',
+              html:     '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h12"/><path d="M7.5 5.5V4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/><path d="M5.5 5.5l.6 10a1 1 0 0 0 1 .9h5.8a1 1 0 0 0 1-.9l.6-10"/><path d="M8.3 8.5v5"/><path d="M11.7 8.5v5"/></svg>',
               async onClick(e, el) {
                 const item = filtered[pswp.currIndex]
                 if (!item || !currentUsername) return
-                const next = !item.flagged
+                if (!(await confirmModal(`Delete ${item.filename}? It will be moved to trash.`))) return
                 el.disabled = true
                 try {
                   const r = await fetch(
-                    `/api/users/${encodeURIComponent(currentUsername)}/flag`,
+                    `/api/users/${encodeURIComponent(currentUsername)}/trash`,
                     {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ folder: item.folder, filename: item.filename, flagged: next }),
+                      body: JSON.stringify({
+                        files: [{ folder: item.folder, filename: item.filename }],
+                      }),
                     }
                   )
-                  if (!r.ok) throw new Error('flag failed')
-                  item.flagged = next
-                  // Patch the underlying allMedia entry too (filtered may be a copy).
-                  const src = allMedia.find((m) => m.folder === item.folder && m.filename === item.filename)
-                  if (src) src.flagged = next
-                  // Refresh the affected card in the grid without re-rendering everything.
-                  const card = gridEl.querySelector(`.media-card[data-index="${pswp.currIndex}"]`)
-                  if (card) {
-                    card.classList.toggle('flagged', next)
-                    let ribbon = card.querySelector('.card-flag-ribbon')
-                    if (next && !ribbon) {
-                      ribbon = document.createElement('div')
-                      ribbon.className = 'card-flag-ribbon'
-                      ribbon.title = 'Flagged for deletion'
-                      ribbon.textContent = '🚩'
-                      card.appendChild(ribbon)
-                    } else if (!next && ribbon) {
-                      ribbon.remove()
-                    }
+                  const data = await r.json().catch(() => null)
+                  if (!r.ok || !data?.ok || !data.trashed) {
+                    throw new Error((data && data.error) || 'delete failed')
                   }
-                  refreshFlagBtn()
+
+                  const deletedIndex = pswp.currIndex
+                  allMedia = allMedia.filter(
+                    (m) => !(m.folder === item.folder && m.filename === item.filename)
+                  )
+                  applyFilter()
                   updateStats()
+
+                  pswp.close()
+                  if (filtered.length) {
+                    openLightbox(Math.min(deletedIndex, filtered.length - 1))
+                  }
                 } catch {
-                  // Soft fail — the next reload from the server will reconcile.
-                } finally {
+                  alert('Delete failed — the file is likely still there. Try again.')
                   el.disabled = false
                 }
               },
@@ -5246,6 +5509,213 @@
 
           pswp.init()
         })
+      }
+
+      // ─── GRID MULTI-SELECT DELETE ────────────────────────────────────────
+      const selectModeToggleBtn = document.getElementById('select-mode-toggle')
+      const selectActionBarEl = document.getElementById('select-action-bar')
+      const selectCountEl = document.getElementById('select-count')
+      const selectDeleteBtn = document.getElementById('select-delete-btn')
+      const selectCancelBtn = document.getElementById('select-cancel-btn')
+
+      function updateSelectActionBar() {
+        const n = selectedKeys.size
+        selectActionBarEl.classList.toggle('open', selectMode && n > 0)
+        selectCountEl.textContent = `${n} selected`
+        selectDeleteBtn.disabled = n === 0
+      }
+
+      function toggleCardSelection(key, cardEl) {
+        const nowSelected = !selectedKeys.has(key)
+        if (nowSelected) selectedKeys.add(key)
+        else selectedKeys.delete(key)
+
+        cardEl.classList.toggle('selected', nowSelected)
+        let check = cardEl.querySelector('.card-select-check')
+        if (nowSelected && !check) {
+          check = document.createElement('div')
+          check.className = 'card-select-check'
+          check.textContent = '✓'
+          cardEl.appendChild(check)
+        } else if (!nowSelected && check) {
+          check.remove()
+        }
+        updateSelectActionBar()
+      }
+
+      function setSelectMode(on) {
+        selectMode = on
+        document.body.classList.toggle('select-mode', on)
+        selectModeToggleBtn.classList.toggle('active', on)
+        selectModeToggleBtn.setAttribute('aria-pressed', on ? 'true' : 'false')
+        selectModeToggleBtn.title = on
+          ? 'Exit select mode'
+          : 'Select files to delete'
+        if (!on) {
+          selectedKeys.clear()
+          renderGrid() // clear any leftover .selected/checkmarks from the DOM
+        }
+        updateSelectActionBar()
+      }
+
+      selectModeToggleBtn.addEventListener('click', () => setSelectMode(!selectMode))
+      selectCancelBtn.addEventListener('click', () => setSelectMode(false))
+
+      selectDeleteBtn.addEventListener('click', async () => {
+        if (!selectedKeys.size || !currentUsername) return
+        const keys = [...selectedKeys]
+        const ok = await confirmModal(
+          `Delete ${keys.length} file${keys.length === 1 ? '' : 's'}? They will be moved to trash.`
+        )
+        if (!ok) return
+
+        selectDeleteBtn.disabled = true
+        selectDeleteBtn.textContent = 'Deleting…'
+        try {
+          const files = keys.map((key) => {
+            const slash = key.indexOf('/')
+            return { folder: key.slice(0, slash), filename: key.slice(slash + 1) }
+          })
+          // Batch in chunks of 500 — the server's own per-request cap.
+          let anyFailed = false
+          for (let i = 0; i < files.length; i += 500) {
+            const chunk = files.slice(i, i + 500)
+            const r = await fetch(
+              `/api/users/${encodeURIComponent(currentUsername)}/trash`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: chunk }),
+              }
+            )
+            const data = await r.json().catch(() => null)
+            if (!r.ok || !data?.ok) anyFailed = true
+          }
+
+          allMedia = allMedia.filter((m) => !selectedKeys.has(`${m.folder}/${m.filename}`))
+          applyFilter()
+          updateStats()
+          setSelectMode(false)
+          if (anyFailed) {
+            alert('Some files failed to delete — reload to check what went through.')
+          }
+        } catch {
+          alert('Delete failed. Nothing was removed — try again.')
+        } finally {
+          selectDeleteBtn.disabled = false
+          selectDeleteBtn.textContent = 'Delete'
+        }
+      })
+
+      // Small reusable OK/Cancel modal — used anywhere a destructive action
+      // needs a confirm step, instead of the native confirm() dialog (looks
+      // out of place next to the rest of this app's custom-styled modals,
+      // and some automation/embedded contexts silently auto-dismiss it).
+      function confirmModal(message, confirmLabel = 'Delete') {
+        return new Promise((resolve) => {
+          const backdrop = document.createElement('div')
+          backdrop.className = 'modal-backdrop'
+          const modal = document.createElement('div')
+          modal.className = 'confirm-modal'
+          const esc = (s) =>
+            String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+          modal.innerHTML = `
+            <p>${esc(message)}</p>
+            <div class="delete-model-modal-actions">
+              <button type="button" class="delete-model-cancel">Cancel</button>
+              <button type="button" class="delete-model-confirm">${esc(confirmLabel)}</button>
+            </div>
+          `
+          document.body.append(backdrop, modal)
+          let done = false
+          const close = (result) => {
+            if (done) return
+            done = true
+            document.removeEventListener('keydown', onKey)
+            backdrop.remove()
+            modal.remove()
+            resolve(result)
+          }
+          const onKey = (e) => {
+            if (e.key === 'Escape') close(false)
+          }
+          document.addEventListener('keydown', onKey)
+          backdrop.addEventListener('click', () => close(false))
+          modal.querySelector('.delete-model-cancel').addEventListener('click', () => close(false))
+          modal.querySelector('.delete-model-confirm').addEventListener('click', () => close(true))
+        })
+      }
+
+      // ─── DELETE ENTIRE MODEL ──────────────────────────────────────────────
+      // Type-to-confirm modal, built on demand (same throwaway-DOM pattern as
+      // the lightbox comments panel) rather than static hidden HTML.
+      document.getElementById('delete-model-btn').addEventListener('click', () => {
+        if (currentUsername) openDeleteModelModal(currentUsername)
+      })
+
+      function openDeleteModelModal(username) {
+        const backdrop = document.createElement('div')
+        backdrop.className = 'modal-backdrop'
+        const modal = document.createElement('div')
+        modal.className = 'delete-model-modal'
+        const esc = (s) =>
+          String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+        modal.innerHTML = `
+          <h3>Delete "${esc(username)}"?</h3>
+          <p>Moves the model's entire folder to trash — recoverable, but gone from the dashboard immediately. Type the model name to confirm.</p>
+          <input type="text" class="delete-model-input" autocomplete="off" spellcheck="false" placeholder="${esc(username)}" />
+          <div class="delete-model-modal-actions">
+            <button type="button" class="delete-model-cancel">Cancel</button>
+            <button type="button" class="delete-model-confirm" disabled>Delete model</button>
+          </div>
+        `
+        document.body.append(backdrop, modal)
+
+        const input = modal.querySelector('.delete-model-input')
+        const confirmBtn = modal.querySelector('.delete-model-confirm')
+        const cancelBtn = modal.querySelector('.delete-model-cancel')
+
+        const close = () => {
+          backdrop.remove()
+          modal.remove()
+        }
+        backdrop.addEventListener('click', close)
+        cancelBtn.addEventListener('click', close)
+        input.addEventListener('input', () => {
+          confirmBtn.disabled = input.value !== username
+        })
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') close()
+          else if (e.key === 'Enter' && !confirmBtn.disabled) confirmBtn.click()
+        })
+
+        confirmBtn.addEventListener('click', async () => {
+          confirmBtn.disabled = true
+          confirmBtn.textContent = 'Deleting…'
+          try {
+            const r = await fetch(
+              `/api/users/${encodeURIComponent(username)}/delete-model`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmName: username }),
+              }
+            )
+            const data = await r.json().catch(() => null)
+            if (!r.ok || !data?.ok) {
+              throw new Error((data && data.error) || 'delete failed')
+            }
+            close()
+            usersData = usersData.filter((u) => u.name !== username)
+            showHomeView()
+          } catch (err) {
+            alert(`Delete failed: ${err.message}`)
+            confirmBtn.disabled = false
+            confirmBtn.textContent = 'Delete model'
+          }
+        })
+
+        requestAnimationFrame(() => input.focus())
       }
 
       // ─── CARD SIZE ────────────────────────────────────────────────────────
