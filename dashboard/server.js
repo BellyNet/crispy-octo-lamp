@@ -1408,6 +1408,128 @@ app.post('/api/users/:username/rotate', async (req, res) => {
   }
 })
 
+// Same layout convention as scrapyard/cleanupFlaggedFiles.js's --apply mode
+// (without --hard): datasetDir/.dashboard-trash/<runTimestamp>/<username>/<folder>/<filename>.
+// A file trashed from the dashboard is recoverable the same way a file
+// trashed by that CLI script is — move it back, there's no other bookkeeping.
+const TRASH_DIRNAME = '.dashboard-trash'
+function trashDestFor(username, folder, filename, runTimestamp) {
+  return path.join(
+    datasetDir,
+    TRASH_DIRNAME,
+    runTimestamp,
+    username,
+    folder,
+    filename
+  )
+}
+
+// Soft-delete one or more files in a single batch. Used by both the
+// lightbox's single-file delete and the grid's multi-select delete.
+app.post('/api/users/:username/trash', async (req, res) => {
+  const username = req.params.username
+  const userDir = safeSubPath(datasetDir, username)
+  if (!userDir) return res.status(403).json({ error: 'Forbidden' })
+
+  const files = Array.isArray(req.body?.files) ? req.body.files : []
+  if (!files.length) return res.status(400).json({ error: 'files required' })
+  if (files.length > 500) {
+    return res
+      .status(400)
+      .json({ error: 'Too many files in one request (max 500)' })
+  }
+
+  const runTs = new Date().toISOString().replace(/[:.]/g, '-')
+  const trashed = []
+  const failed = []
+
+  for (const f of files) {
+    const folder = f?.folder
+    const filename = f?.filename
+    if (!folder || !filename || !MEDIA_FOLDERS.includes(folder)) {
+      failed.push({ folder, filename, error: 'invalid folder/filename' })
+      continue
+    }
+    const filePath = safeSubPath(datasetDir, username, folder, filename)
+    if (!filePath) {
+      failed.push({ folder, filename, error: 'unsafe path' })
+      continue
+    }
+    if (!fs.existsSync(filePath)) {
+      failed.push({ folder, filename, error: 'not found' })
+      continue
+    }
+    try {
+      const dst = trashDestFor(username, folder, filename, runTs)
+      await fs.promises.mkdir(path.dirname(dst), { recursive: true })
+      await fs.promises.rename(filePath, dst)
+      trashed.push({ folder, filename })
+    } catch (err) {
+      failed.push({ folder, filename, error: err.message })
+    }
+  }
+
+  if (trashed.length) {
+    // Drop cached derived assets for the trashed files — dead weight now,
+    // and would otherwise linger on disk until a full rescan notices.
+    for (const { folder, filename } of trashed) {
+      fs.promises
+        .unlink(thumbDiskPath(username, folder, filename))
+        .catch(() => {})
+      fs.promises
+        .unlink(mobileVariantPath(username, folder, filename))
+        .catch(() => {})
+    }
+
+    // Clear any flag entries for the trashed files — they're gone, not just
+    // flagged. Mirrors cleanupFlaggedFiles.js clearing the sidecar after acting.
+    try {
+      const flagData = readFlagsForUser(userDir)
+      if (flagData.flags) {
+        let flagsChanged = false
+        for (const { folder, filename } of trashed) {
+          const key = `${folder}/${filename}`
+          if (flagData.flags[key]) {
+            delete flagData.flags[key]
+            flagsChanged = true
+          }
+        }
+        if (flagsChanged) writeFlagsForUser(userDir, flagData)
+      }
+    } catch {}
+
+    // Remove (not patch) the trashed items from the response caches, so the
+    // next /media request doesn't show ghosts.
+    const trashedKeys = new Set(
+      trashed.map((t) => `${t.folder}/${t.filename}`)
+    )
+    const removeItems = (response) =>
+      Array.isArray(response)
+        ? response.filter((m) => !trashedKeys.has(`${m.folder}/${m.filename}`))
+        : response
+
+    const memHit = mediaResponseCache.get(username)
+    if (memHit) memHit.response = removeItems(memHit.response)
+    try {
+      const diskFile = path.join(RESPONSE_CACHE_DIR, `${username}.json`)
+      if (fs.existsSync(diskFile)) {
+        const disk = JSON.parse(fs.readFileSync(diskFile, 'utf8'))
+        if (Array.isArray(disk.response)) {
+          disk.response = removeItems(disk.response)
+          fs.writeFileSync(diskFile, JSON.stringify(disk))
+        }
+      }
+    } catch {}
+
+    // Stats (fileCount, totalBytes, coverPool, ...) are now stale — drop
+    // the cache entry so the next /api/users request recomputes fresh
+    // instead of showing a wrong count indefinitely.
+    delete modelStatsCache[username]
+  }
+
+  res.json({ ok: true, trashed: trashed.length, failed })
+})
+
 async function warmGridThumbs(username, items) {
   const tasks = []
   for (const item of items) {

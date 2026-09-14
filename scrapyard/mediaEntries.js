@@ -7,7 +7,10 @@ function sanitizeToken(value) {
     .trim()
     .replace(/^r\//i, '')
     .replace(/^@+/, '')
-    .replace(/[^a-z0-9_-]/gi, '_')
+    // See modelRegistry.js's sanitize() for why hyphens fold to underscore
+    // before the general replace.
+    .replace(/-/g, '_')
+    .replace(/[^a-z0-9_]/gi, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase()

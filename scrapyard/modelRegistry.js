@@ -25,7 +25,13 @@ const { writeRepoJsonFileSync } = require('./repoFileWriter')
 // ─── SANITIZE ─────────────────────────────────────────────────────────────────
 function sanitize(name) {
   return String(name || '')
-    .replace(/[^a-z0-9_\-]/gi, '_')
+    // Fold hyphens into underscores FIRST so differently-punctuated forms of
+    // the same handle (e.g. "Powerful-Dog-7052" vs "powerful_dog_7052")
+    // always sanitize to the same string. Previously hyphens survived
+    // untouched while only underscores got collapsed, so the two forms
+    // compared unequal and a handle could silently miss its registered alias.
+    .replace(/-/g, '_')
+    .replace(/[^a-z0-9_]/gi, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase()
