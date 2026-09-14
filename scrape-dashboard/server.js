@@ -3870,11 +3870,7 @@ function createQueuedSourceJob({ model, sources, options = {} }) {
     status: 'queued',
     model,
     sources,
-    options: {
-      ...(options || {}),
-      keepHistory: Boolean(options.keepHistory),
-      skipNasSync: Boolean(options.skipNasSync),
-    },
+    options: normalizeJobOptions(options),
     createdAt: new Date().toISOString(),
     startedAt: null,
     finishedAt: null,
@@ -3942,6 +3938,7 @@ function queueRecoveryJobs({ type, options = {} }) {
     ...(options || {}),
     keepHistory: true,
     downloadOversized: true,
+    fullSourceRefresh: type === 'oversized',
     videoConcurrency: '1',
     skipNasSync: Boolean(options.skipNasSync),
   }
