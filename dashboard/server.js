@@ -127,6 +127,10 @@ function saveResponseCacheToDisk(username, response, fingerprint) {
 // ─── FFMPEG ───────────────────────────────────────────────────────────────────
 let ffprobePath = null
 let ffmpegPath = null
+let lastFfToolsCheckAt = null
+// Set once findFfTools() has run at least once, so /api/info can tell "still
+// booting" apart from "checked and genuinely missing".
+let ffToolsChecked = false
 
 async function findFfTools() {
   const ffprobeFound = await mediaDates.findFfprobe()
@@ -144,6 +148,27 @@ async function findFfTools() {
   }
   if (!ffmpegPath)
     console.log('  ffmpeg: not found — video previews unavailable')
+  ffToolsChecked = true
+  lastFfToolsCheckAt = new Date().toISOString()
+}
+
+// findFfTools() used to run exactly once, at boot. A single unlucky probe —
+// e.g. the 3 s "ffmpeg -version" timing out because the NAS was pegged by a
+// still-running encode job at that exact moment — permanently disabled every
+// ffmpeg-dependent feature (thumbnails, GIF previews, mobile-variant
+// encoding) for the rest of the process's life, with nothing surfacing it.
+// Re-probe on a cooldown instead: cheap once ffmpeg is found (immediate
+// return), and self-heals a transient boot-time failure within
+// FF_RECHECK_MS instead of requiring a manual restart to notice and fix.
+const FF_RECHECK_MS = parseInt(process.env.FF_RECHECK_MS, 10) || 5 * 60 * 1000 // 5 min
+async function ensureFfTools() {
+  if (ffmpegPath) return
+  if (
+    lastFfToolsCheckAt &&
+    Date.now() - Date.parse(lastFfToolsCheckAt) < FF_RECHECK_MS
+  )
+    return
+  await findFfTools()
 }
 
 // ─── ANIMATED GIF PREVIEWS ────────────────────────────────────────────────────
@@ -153,12 +178,14 @@ async function findFfTools() {
 // Single-ffprobe getDuration — used only by the GIF generator. The scan path
 // uses mediaDates.probeVideoFile which returns duration + date in one call.
 async function getDuration(videoPath) {
+  await ensureFfTools()
   if (!ffprobePath) return null
   const { duration } = await mediaDates.probeVideoFile(videoPath)
   return duration
 }
 
 async function generatePreviewGif(videoPath, gifPath) {
+  await ensureFfTools()
   if (!ffmpegPath) return false
   const duration = await getDuration(videoPath)
   if (!duration) return false
@@ -919,6 +946,11 @@ async function scanAll({ force = false, trigger = 'periodic' } = {}) {
 // only the models whose fingerprint changed. ~400 stat calls for 100 models —
 // fast enough to run every minute even on a NAS.
 async function fingerprintTick() {
+  // Passive self-heal: re-probe ffmpeg on the same cadence as the scan tick
+  // so a transient boot-time detection failure recovers within a few
+  // minutes even if nothing happens to hit an on-demand ffmpeg-dependent
+  // route in the meantime. No-op once ffmpeg is found.
+  await ensureFfTools()
   if (scanState.inProgress) return
   let dirs
   try {
@@ -1303,6 +1335,81 @@ app.post('/api/users/:username/flag', async (req, res) => {
   res.json({ ok: true, flagged })
 })
 
+// Rotate an image 90° clockwise in place. Mirrors the orientation-review
+// tool's rotateImage(), but reachable from the main lightbox instead of the
+// separate review app. Only plain images (not gifs/videos) are rotatable —
+// sharp re-encodes pixels, so this is a real irreversible edit of the file
+// on disk, not a view-only transform.
+app.post('/api/users/:username/rotate', async (req, res) => {
+  const username = req.params.username
+  const userDir = safeSubPath(datasetDir, username)
+  if (!userDir) return res.status(403).json({ error: 'Forbidden' })
+
+  const { folder, filename } = req.body || {}
+  const direction = req.body?.direction === 'ccw' ? 'ccw' : 'cw'
+  if (!folder || !filename || getMediaType(folder, filename) !== 'image') {
+    return res.status(400).json({ error: 'Only images can be rotated' })
+  }
+  const filePath = safeSubPath(datasetDir, username, folder, filename)
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' })
+  }
+
+  try {
+    const angle = direction === 'ccw' ? -90 : 90
+    const stat = await fs.promises.stat(filePath)
+    const tempPath = `${filePath}.rotate-tmp`
+    const buffer = await sharp(filePath)
+      .rotate(angle)
+      .withMetadata({ orientation: 1 })
+      .toBuffer()
+    await fs.promises.writeFile(tempPath, buffer)
+    await fs.promises.rename(tempPath, filePath)
+    // Preserve the original mtime/atime — rotation is a correction, not a
+    // new edit, and addedMs/sort order derive from filesystem times.
+    await fs.promises.utimes(filePath, stat.atime, stat.mtime)
+
+    // Drop the cached grid thumbnail so /thumb/ regenerates from the
+    // rotated pixels instead of serving the stale pre-rotation crop.
+    await fs.promises.unlink(thumbDiskPath(username, folder, filename)).catch(() => {})
+
+    // metaCache self-heals on next scan (the re-encoded file's byte size
+    // won't match the cached entry), but the response cache in front of it
+    // needs a direct patch so width/height are correct on the very next
+    // request — same approach as the /flag handler above.
+    const meta = await sharp(filePath)
+      .metadata()
+      .catch(() => ({}))
+    const width = meta.width || 0
+    const height = meta.height || 0
+    const patchItem = (response) => {
+      const it =
+        response &&
+        response.find((m) => m.folder === folder && m.filename === filename)
+      if (it) {
+        it.width = width
+        it.height = height
+      }
+    }
+    const memHit = mediaResponseCache.get(username)
+    if (memHit) patchItem(memHit.response)
+    try {
+      const diskFile = path.join(RESPONSE_CACHE_DIR, `${username}.json`)
+      if (fs.existsSync(diskFile)) {
+        const disk = JSON.parse(fs.readFileSync(diskFile, 'utf8'))
+        if (Array.isArray(disk.response)) {
+          patchItem(disk.response)
+          fs.writeFileSync(diskFile, JSON.stringify(disk))
+        }
+      }
+    } catch {}
+
+    res.json({ ok: true, width, height })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 async function warmGridThumbs(username, items) {
   const tasks = []
   for (const item of items) {
@@ -1400,6 +1507,7 @@ function mobileVariantPath(username, folder, filename) {
 }
 
 async function generateMobileVariant(srcPath, dstPath, isGif) {
+  await ensureFfTools()
   if (!ffmpegPath) return false
   await fs.promises.mkdir(path.dirname(dstPath), { recursive: true })
   const tmp = dstPath + '.tmp.mp4'
@@ -1550,6 +1658,7 @@ function schedulePrewarmIfIdle(trigger = 'auto') {
 // every model and generates any missing mobile variant. Uses the small
 // encode limit so it never starves the on-demand /media-mobile/ requests.
 async function prewarmMobileVariants() {
+  await ensureFfTools()
   if (!ffmpegPath) {
     console.log('  Mobile:    ffmpeg missing — skipping mobile variant prewarm')
     return
@@ -1642,6 +1751,7 @@ async function generateThumb(srcPath, dstPath) {
       // makes ffmpeg exit after a single decoded frame. Pipe through sharp
       // so the output respects the same THUMB_MAX_DIM / quality contract
       // as image thumbnails — keeping the cache layout uniform.
+      await ensureFfTools()
       if (!ffmpegPath) return false
       const raw = dstPath + '.tmp.raw.jpg'
       try {
@@ -1733,6 +1843,7 @@ app.get('/thumb/:username/:folder/:filename', async (req, res) => {
 // Video preview GIF (generated on demand, cached to disk)
 app.get('/thumbnail/:username/:filename', async (req, res) => {
   const { username, filename } = req.params
+  await ensureFfTools()
   if (!ffmpegPath) return res.status(503).send('ffmpeg not available')
 
   const userThumbDir = path.join(THUMB_DIR, username)
@@ -2134,6 +2245,7 @@ app.get('/media/:username/:folder/:filename', (req, res) => {
 // Walks all model webm folders and pre-generates any missing animated GIF previews.
 // Runs in the background after the server starts — doesn't block requests.
 async function prewarmThumbnails() {
+  await ensureFfTools()
   if (!ffmpegPath) return
 
   let dirs
@@ -2372,6 +2484,16 @@ app.get('/api/info', (_req, res) => {
     scan: {
       lastTickAt: scanState.lastTickAt,
       lastFullScanAt: scanState.lastFullScanAt,
+    },
+    // available: false here means every ffmpeg-dependent feature (video
+    // thumbnails, animated GIF previews, mobile-variant encoding) is
+    // silently degraded — checked is false only during the brief window
+    // before the first boot-time probe completes.
+    ffmpeg: {
+      available: !!ffmpegPath,
+      ffprobeAvailable: !!ffprobePath,
+      checked: ffToolsChecked,
+      lastCheckedAt: lastFfToolsCheckAt,
     },
   })
 })

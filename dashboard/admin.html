@@ -302,6 +302,7 @@
     <section id="nightly-section">
       <h2>Nightly pass</h2>
       <div class="status-line" id="nightly-live"></div>
+      <div class="status-line" id="ffmpeg-status"></div>
       <table>
         <thead>
           <tr>
@@ -725,7 +726,32 @@
         } catch {}
       }
 
+      // ffmpeg gates video thumbnails, animated previews, and mobile-variant
+      // encoding — all silently, with no error a viewer would ever see on
+      // the main dashboard. This is the one place that state is surfaced,
+      // so a future outage shows up here instead of requiring a network trace.
+      async function loadFfmpegStatus() {
+        try {
+          const r = await fetch('/api/info')
+          const info = await r.json()
+          const el = document.getElementById('ffmpeg-status')
+          if (!info.ffmpeg || !info.ffmpeg.checked) {
+            el.innerHTML = ''
+            return
+          }
+          el.innerHTML = info.ffmpeg.available
+            ? `<span class="badge ok">ffmpeg OK</span>`
+            : `<span class="badge err">ffmpeg unavailable</span> ` +
+              `<span>video thumbnails, previews, and mobile encoding are disabled` +
+              (info.ffmpeg.lastCheckedAt
+                ? ` — last checked ${fmtDateTime(Date.parse(info.ffmpeg.lastCheckedAt))}, retries every few minutes`
+                : '') +
+              `</span>`
+        } catch {}
+      }
+
       loadNightly()
+      loadFfmpegStatus()
       loadRun(0)
       loadEmbeddings()
 
@@ -737,6 +763,7 @@
       // shouldn't yank you back to the newest one.
       setInterval(() => {
         loadNightly()
+        loadFfmpegStatus()
         loadEmbeddings()
         if (currentRunIndex === 0) loadRun(0)
       }, 5 * 60 * 1000)
