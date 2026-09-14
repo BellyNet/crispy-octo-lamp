@@ -2919,6 +2919,15 @@
               }
             }
           }
+          // Drop any model no longer on disk (folder removed/merged since
+          // the last fetch). The loop above only ever adds or updates, so
+          // without this a long-lived tab keeps showing a stale sidebar
+          // entry forever even after the server-side duplicate is gone.
+          const freshNames = new Set(fresh.map((u) => u.name))
+          const beforeCount = usersData.length
+          usersData = usersData.filter((u) => freshNames.has(u.name))
+          if (usersData.length !== beforeCount) changed = true
+
           if (changed) {
             userCountEl.textContent = usersData.length
             renderUserList(usersData)

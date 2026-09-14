@@ -8,9 +8,6 @@ const slopvaultRoot = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   '.slopvault'
 )
-const datasetRoot = path.join(slopvaultRoot, 'dataset')
-const bitwiseV2Path = path.join(datasetRoot, 'bitwiseHashes.v2.json')
-const visualV2Path = path.join(datasetRoot, 'visualHashes.v2.json')
 
 main().catch((err) => {
   console.error(`Fatal remap error: ${err.stack || err.message}`)
@@ -19,7 +16,7 @@ main().catch((err) => {
 
 async function main() {
   const args = minimist(process.argv.slice(2), {
-    string: ['source', 'target'],
+    string: ['source', 'target', 'dataset'],
     boolean: ['yes'],
     alias: {
       s: 'source',
@@ -27,6 +24,16 @@ async function main() {
       y: 'yes',
     },
   })
+
+  // Defaults to the local Slopvault dataset (this tool's original target),
+  // but overridable so the same move/merge/hash-ref-rewrite logic can run
+  // directly against a NAS-mounted dataset root instead of requiring a
+  // pull-merge-push round trip through local when local is behind.
+  const datasetRoot = path.resolve(
+    args.dataset || process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+  )
+  const bitwiseV2Path = path.join(datasetRoot, 'bitwiseHashes.v2.json')
+  const visualV2Path = path.join(datasetRoot, 'visualHashes.v2.json')
 
   const sourceModel = sanitizeModelName(args.source)
     ? sanitizeModelName(args.source)
@@ -408,7 +415,10 @@ async function askYesNo(prompt, defaultValue = true) {
 
 function sanitizeModelName(value) {
   return String(value || '')
-    .replace(/[^a-z0-9_\-]/gi, '_')
+    // See modelRegistry.js's sanitize() for why hyphens fold to underscore
+    // before the general replace.
+    .replace(/-/g, '_')
+    .replace(/[^a-z0-9_]/gi, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase()
