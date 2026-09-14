@@ -1590,6 +1590,34 @@ function compactFailureMessage(value, limit = 220) {
     : normalized
 }
 
+function eventUrlKey(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .toLowerCase()
+}
+
+function redditRequestKey(event) {
+  return [
+    event?.requestKind || '',
+    eventUrlKey(event?.url || event?.mediaPageUrl || event?.mediaUrl || ''),
+  ].join('|')
+}
+
+function hasLaterSuccessfulRedditRequest(events, index, event) {
+  if (event?.type !== 'reddit_html_request_failed') return false
+  const key = redditRequestKey(event)
+  if (!key || key === '|') return false
+  for (let nextIndex = index + 1; nextIndex < events.length; nextIndex += 1) {
+    const next = events[nextIndex]
+    if (next?.type !== 'reddit_html_request_finished') continue
+    if (redditRequestKey(next) !== key) continue
+    const statusCode = Number(next.statusCode || 0)
+    return !statusCode || statusCode < 400
+  }
+  return false
+}
+
 function readRunEvidence(logPath) {
   if (!logPath) return { duplicates: [], errors: [] }
   try {
@@ -1598,15 +1626,20 @@ function readRunEvidence(logPath) {
     if (cached?.mtimeMs === stat.mtimeMs) return cached.evidence
 
     const evidence = { duplicates: [], errors: [] }
-    const lines = fs.readFileSync(logPath, 'utf8').split(/\r?\n/)
-    for (const line of lines) {
-      if (!line) continue
-      let event
-      try {
-        event = JSON.parse(line)
-      } catch {
-        continue
-      }
+    const events = fs
+      .readFileSync(logPath, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line)
+        } catch {
+          return null
+        }
+      })
+      .filter(Boolean)
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index]
 
       if (
         String(event.type || '').startsWith('duplicate') &&
@@ -1624,6 +1657,7 @@ function readRunEvidence(logPath) {
 
       if (
         /(error|failed|unavailable)/i.test(String(event.type || '')) &&
+        !hasLaterSuccessfulRedditRequest(events, index, event) &&
         evidence.errors.length < EVIDENCE_ERROR_LIMIT
       ) {
         evidence.errors.push({

@@ -1269,6 +1269,14 @@ async function main() {
           'regular-body':
             '<figure><img src="https://64.media.tumblr.com/reblog.jpg"></figure>',
         },
+        {
+          id: '826000000000000001',
+          url: 'https://bellaabbondanza.tumblr.com/post/826000000000000001/reblog-hyphen',
+          type: 'regular',
+          'reblogged-from-url': 'https://other.tumblr.com/post/2',
+          'regular-body':
+            '<figure><img src="https://64.media.tumblr.com/reblog-hyphen.jpg"></figure>',
+        },
       ],
     })};`
   )
@@ -1301,6 +1309,32 @@ async function main() {
     'https://64.media.tumblr.com/sample.mov'
   )
   assert.strictEqual(tumblrPosts[0].mediaEntries[0].sourceSite, 'tumblr')
+  const reblogFirstTumblrPayload = {
+    ...tumblrPayload,
+    posts: [...tumblrPayload.posts.slice(1), tumblrPayload.posts[0]],
+  }
+  const tumblrPostsWithLimit = await fetchTumblrPosts(
+    {
+      origin: 'https://bellaabbondanza.tumblr.com',
+      site: 'tumblr',
+      service: 'blog',
+      userId: 'bellaabbondanza',
+      rawName: 'bellaabbondanza',
+    },
+    { maxPosts: 1 },
+    {
+      fetchJson: async () => ({
+        data: reblogFirstTumblrPayload,
+        byteLength: 1234,
+      }),
+      logger: {
+        log: () => {},
+        status: () => {},
+        statusDone: () => {},
+      },
+    }
+  )
+  assert.strictEqual(tumblrPostsWithLimit.length, 1)
 
   const coomerMediaEntries = getMediaEntriesFromPost(
     {

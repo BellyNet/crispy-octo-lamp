@@ -141,7 +141,10 @@ function getPostUploadedDate(post = {}) {
 // Reblogs surface someone else's images under this blog's feed; a model's
 // dataset should only ever contain what the blog actually posted itself.
 function isReblog(post = {}) {
-  return Boolean(post['reblogged_from_url'] || post['reblogged_root_url'])
+  return Object.entries(post).some(
+    ([key, value]) =>
+      Boolean(value) && /^reblogged[-_](?:from|root)[-_]/i.test(key)
+  )
 }
 
 function getMediaEntriesFromPost(source, post = {}) {
@@ -239,15 +242,14 @@ async function fetchTumblrPosts(source, options = {}, deps = {}) {
     if (pagePosts.length === 0) break
 
     const filteredPage = pageFilter.filterPage(pagePosts)
-    const selectedPagePosts =
-      Number.isFinite(options.maxPosts) && options.maxPosts > 0
-        ? filteredPage.items.slice(
-            0,
-            Math.max(options.maxPosts - posts.length, 0)
-          )
-        : filteredPage.items
-
-    for (const post of selectedPagePosts) {
+    for (const post of filteredPage.items) {
+      if (
+        Number.isFinite(options.maxPosts) &&
+        options.maxPosts > 0 &&
+        posts.length >= options.maxPosts
+      ) {
+        break
+      }
       if (isReblog(post)) {
         skippedReblogCount += 1
         continue
