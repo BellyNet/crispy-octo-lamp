@@ -13,7 +13,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const RUN_GAP_MS = 3 * 60 * 60 * 1000 // 3 hours — see rebuild()'s comment.
+const RUN_GAP_MS = 15 * 60 * 1000 // 15 minutes — see rebuild()'s comment.
 
 class RunIndex {
   constructor(thumbDir) {
@@ -36,34 +36,29 @@ class RunIndex {
   }
 
   // items: flat array of already-formatted response items — see
-  // refreshRunIndex() in server.js for the shape, including the optional
-  // invocationKey used below.
+  // refreshRunIndex() in server.js for the shape.
   //
-  // Buckets by addedMs gaps (RUN_GAP_MS): real data (500 items, 2026-09-01)
-  // showed gaps of 10-80 min WITHIN one continuous automated multi-model
-  // scrape session vs. 1,500-11,000+ min (1-8 days) BETWEEN separate
-  // sessions — a clean bimodal split. But that same 10-80 min range also
-  // covers several distinct one-off single-model scrapes run back-to-back
-  // by hand (e.g. working through a queue via scrape:interactive) — a pure
-  // time gap can't tell those apart from one continuous automated batch,
-  // since both produce the same-looking gaps.
+  // Each scrape invocation walks the model roster alphabetically, so
+  // sorted newest-first (as below), model names trend backward through the
+  // alphabet WITHIN one run (run started at "aaa", so its latest-added
+  // file is from whichever model is furthest along the alphabet it got
+  // to). Crossing into the previous, older run flips that: the next item
+  // (older in time) jumps back UP the alphabet, because that earlier run
+  // also started at "aaa" and by the time it reached "z" was already done
+  // — so its LATEST file is from a late-alphabet model, higher than
+  // whatever early-alphabet model the newer run had just gotten to.
   //
-  // So items additionally carry invocationKey when available: the
-  // startedAt (ms) of the specific milkmaid/hoghaul invocation recorded in
-  // that model's own -last-run.json, if the item's addedMs falls inside
-  // that invocation's window (see findInvocationKey() in server.js). Two
-  // adjacent items with different known invocationKeys always split into
-  // separate runs, regardless of how small the time gap is — that's a
-  // real "this came from a different scrape command" signal the gap
-  // heuristic can't produce on its own. Items without a resolvable
-  // invocationKey (most historical data — each -last-run.json only ever
-  // holds the model's MOST RECENT invocation, so older batches lose this
-  // signal once it's overwritten by a newer scrape) fall back to the gap
-  // heuristic exactly as before.
+  // So a run boundary is: the model name goes UP instead of continuing
+  // down (or staying put, for same-model files) AND the time gap clears
+  // RUN_GAP_MS. Requiring both avoids two false-positive directions: a
+  // same-model gap alone (one model's own files, slow to scrape, more
+  // than RUN_GAP_MS apart — no alphabetic jump, so no split), and a
+  // same-run alphabetic bounce with no real gap (irrelevant in practice
+  // since a bounce that isn't a run boundary implies near-simultaneous
+  // timestamps anyway).
   //
   // Always rebuilding fully (not just appending new items to permanently-
-  // fixed old buckets) means a fix to this logic — or a model's -last-run
-  // window simply becoming available/fresher — is reflected everywhere
+  // fixed old buckets) means a fix to this logic is reflected everywhere
   // next refresh, not just at the front. The bucketing itself is cheap
   // (pure in-memory comparisons, no I/O per item), so there's no
   // meaningful cost to recomputing it for the whole dataset every time;
@@ -74,11 +69,11 @@ class RunIndex {
 
     const buckets = []
     let current = null
+    let prevItem = null
     for (const item of sorted) {
-      const startsNewBucket =
-        !current ||
-        current.startedAtMs - item.addedMs > RUN_GAP_MS ||
-        hasConflictingInvocation(current.items, item)
+      const gapMs = prevItem ? prevItem.addedMs - item.addedMs : 0
+      const alphabeticBreak = !!prevItem && item.username > prevItem.username
+      const startsNewBucket = !current || (alphabeticBreak && gapMs >= RUN_GAP_MS)
       if (startsNewBucket) {
         current = { startedAtMs: item.addedMs, endedAtMs: item.addedMs, items: [] }
         buckets.push(current)
@@ -86,6 +81,7 @@ class RunIndex {
       current.startedAtMs = Math.min(current.startedAtMs, item.addedMs)
       current.endedAtMs = Math.max(current.endedAtMs, item.addedMs)
       current.items.push(item)
+      prevItem = item
     }
 
     this.runs = buckets.map((b) => ({
@@ -127,18 +123,6 @@ class RunIndex {
       }
     })
   }
-}
-
-// True if `item` carries a known invocationKey that conflicts with a
-// DIFFERENT known invocationKey already present in this bucket. By
-// construction (this is the only place a bucket grows) a bucket only ever
-// accumulates items sharing one invocation key at most, so checking
-// against any single conflicting item already in it is sufficient.
-function hasConflictingInvocation(bucketItems, item) {
-  if (item.invocationKey == null) return false
-  return bucketItems.some(
-    (it) => it.invocationKey != null && it.invocationKey !== item.invocationKey
-  )
 }
 
 module.exports = RunIndex

@@ -1145,51 +1145,8 @@ app.get('/api/discover', async (_req, res) => {
 // index — this route is a pure read, no per-request scanning. The index
 // itself is rebuilt at startup, at the end of every nightly pass, and on
 // demand via /api/rebuild-run-index. See runIndex.js's rebuild() for the
-// bucketing logic (addedMs gaps, refined by each item's invocationKey
-// below) and why it fully recomputes every time instead of only extending.
-
-// Each scraper writes <model>/<scraper>-last-run.json after every
-// invocation — the one place an actual "this batch came from one scrape
-// command" boundary is recorded, rather than inferred from timestamps.
-// Only the MOST RECENT invocation per model+scraper survives (the file is
-// overwritten each run), so this only ever disambiguates a model's newest
-// batch of files; anything older has no window to match and falls back to
-// runIndex's addedMs-gap heuristic.
-const RUN_SUMMARY_FILES = ['milkmaid-last-run.json', 'hoghaul-last-run.json']
-// Grace window on both sides — a file's disk birthtime can land a few
-// seconds after the recorded finishedAt (write/flush/rename lag).
-const INVOCATION_GRACE_MS = 2 * 60 * 1000
-
-async function readModelInvocationWindows(username) {
-  const windows = []
-  for (const filename of RUN_SUMMARY_FILES) {
-    try {
-      const raw = await fs.promises.readFile(
-        path.join(datasetDir, username, filename),
-        'utf8'
-      )
-      const data = JSON.parse(raw)
-      const startedAtMs = Date.parse(data.startedAt)
-      const finishedAtMs = Date.parse(data.finishedAt || data.startedAt)
-      if (Number.isFinite(startedAtMs) && Number.isFinite(finishedAtMs)) {
-        windows.push({ startedAtMs, finishedAtMs })
-      }
-    } catch {}
-  }
-  return windows
-}
-
-function findInvocationKey(windows, addedMs) {
-  for (const w of windows) {
-    if (
-      addedMs >= w.startedAtMs - INVOCATION_GRACE_MS &&
-      addedMs <= w.finishedAtMs + INVOCATION_GRACE_MS
-    ) {
-      return w.startedAtMs
-    }
-  }
-  return null
-}
+// bucketing logic (alphabetic-order breaks + a time gap) and why it fully
+// recomputes every time instead of only extending.
 
 async function refreshRunIndex() {
   const entries = await fs.promises.readdir(datasetDir, { withFileTypes: true })
@@ -1201,10 +1158,7 @@ async function refreshRunIndex() {
     usernames.map((username) =>
       modelLimit(async () => {
         try {
-          const [{ response }, invocationWindows] = await Promise.all([
-            scanModel(username),
-            readModelInvocationWindows(username),
-          ])
+          const { response } = await scanModel(username)
           return response.map((item) => ({
             username,
             folder: item.folder,
@@ -1214,7 +1168,6 @@ async function refreshRunIndex() {
             size: item.size,
             url: item.url,
             thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
-            invocationKey: findInvocationKey(invocationWindows, item.addedMs),
           }))
         } catch {
           return []
