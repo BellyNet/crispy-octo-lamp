@@ -1759,13 +1759,20 @@ async function generateMobileVariant(srcPath, dstPath, isGif) {
   }
   args.push(tmp)
   try {
-    // 20 min, not 5 — at MOBILE_ENCODE_CONCURRENCY=6 on a 4-core NAS, a
+    // 90 min, not 20 — at MOBILE_ENCODE_CONCURRENCY=6 on a 4-core NAS, a
     // file that encodes in ~3-4 min alone can take well over 5 min under
-    // contention. A short timeout was silently killing legitimate (not
-    // stuck, not corrupt) encodes for anything but the shortest clips —
-    // discovered when a batch reported "1710 generated" but only 35 had
-    // actually landed on disk.
-    await execFileAsync(ffmpegPath, args, { timeout: 20 * 60 * 1000 })
+    // contention (that's the original reason this was bumped from 5 to 20
+    // min). Same problem showed up again one size class up: long-form
+    // videos (candii_kayn's ~30 min "stuffing" recordings, but even an
+    // 11-12 min clip under heavy contention) were blowing past 20 min too
+    // — silently killed mid-encode every single time, every nightly pass,
+    // forever, since a killed encode never produces an output file and so
+    // never satisfies the "already done" check that would stop it from
+    // being retried. 90 min gives real margin above the longest source
+    // durations seen in this dataset (~31 min) even under full 6-way
+    // contention, while still eventually killing a genuinely hung process
+    // instead of leaving it to run forever.
+    await execFileAsync(ffmpegPath, args, { timeout: 90 * 60 * 1000 })
     const stat = fs.statSync(tmp)
     if (stat.size < 1000) throw new Error('output too small')
     await fs.promises.rename(tmp, dstPath)
