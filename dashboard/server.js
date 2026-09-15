@@ -1842,10 +1842,11 @@ app.get('/media-mobile/:username/:folder/:filename', async (req, res) => {
 })
 
 // Throttled hook for the fingerprint tick + any other "new files
-// might have landed" trigger. At most one active prewarm at a time
-// (guarded by _prewarmInProgress), and a min gap between launches
-// (so a rapid burst of scan-hits doesn't spam the encode queue when
-// each pass is already long-running).
+// might have landed" trigger. A min gap between launches (so a rapid
+// burst of scan-hits doesn't spam the encode queue when each pass is
+// already long-running). Mutual exclusion against the OTHER two trigger
+// paths (startup chain, nightly step) lives inside prewarmMobileVariants()
+// itself via _prewarmInProgress — see that function for why.
 let _lastPrewarmAt = 0
 let _prewarmInProgress = false
 const AUTO_PREWARM_MIN_GAP_MS = 15 * 60 * 1000 // 15 min
@@ -1854,92 +1855,111 @@ function schedulePrewarmIfIdle(trigger = 'auto') {
   const now = Date.now()
   if (now - _lastPrewarmAt < AUTO_PREWARM_MIN_GAP_MS) return
   _lastPrewarmAt = now
-  _prewarmInProgress = true
   console.log(`  Mobile:    ${trigger}-triggered prewarm pass starting…`)
-  prewarmMobileVariants()
-    .catch((err) => console.warn('  Auto prewarm error:', err.message))
-    .finally(() => {
-      _prewarmInProgress = false
-    })
+  prewarmMobileVariants().catch((err) =>
+    console.warn('  Auto prewarm error:', err.message)
+  )
 }
 
 // Nightly / on-demand bulk prewarm — walks every video and every gif in
 // every model and generates any missing mobile variant. Uses the small
 // encode limit so it never starves the on-demand /media-mobile/ requests.
+//
+// Guarded by _prewarmInProgress against ALL THREE call sites (startup
+// chain, nightly step, schedulePrewarmIfIdle), not just the tick-triggered
+// one — found on 2026-09-15 that a restart (startup pass), the 15-min idle
+// tick, and that day's 04:00 nightly step all fired within one window and
+// stacked three independent passes onto the same 6-slot mobileEncodeLimit
+// pool. Each pass snapshots "what's missing" once at its own start, so none
+// of them see the others' progress — the same ~1400-file backlog got
+// queued 3x over, and throughput collapsed to ~11 files/hr (vs. the usual
+// 500-670/hr), with a lot of that being fully redundant re-encodes of files
+// a sibling pass had already produced (or, worse, two workers racing to
+// write the same `dstPath + '.tmp.mp4'` at once). One flag, checked first
+// thing here, makes every trigger path share a single in-flight pass.
 async function prewarmMobileVariants() {
-  await ensureFfTools()
-  if (!ffmpegPath) {
-    console.log('  Mobile:    ffmpeg missing — skipping mobile variant prewarm')
+  if (_prewarmInProgress) {
+    console.log('  Mobile:    prewarm already running — skipping overlapping pass')
     return
   }
-  let dirs
+  _prewarmInProgress = true
   try {
-    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  const modelDirs = dirs.filter(
-    (e) => e.isDirectory() && !e.name.startsWith('.')
-  )
-  const tasks = []
-  for (const d of modelDirs) {
-    const username = d.name
-    for (const folder of MEDIA_FOLDERS) {
-      let files
-      try {
-        files = await fs.promises.readdir(
-          path.join(datasetDir, username, folder)
-        )
-      } catch {
-        continue
-      }
-      for (const file of files) {
-        const ext = path.extname(file).toLowerCase()
-        const isVideo = VIDEO_EXTS_IN.has(ext)
-        const isGif = ext === '.gif'
-        if (!isVideo && !isGif) continue
-        const src = path.join(datasetDir, username, folder, file)
-        const dst = mobileVariantPath(username, folder, file)
-        if (fs.existsSync(dst)) continue
-        // Stat the source to get mtime. Cheap (~one syscall per file)
-        // and lets us encode newest-first below — recently scraped
-        // videos are the ones users are most likely to browse and were
-        // the ones stuck at the tail of the queue for days when we
-        // iterated in filesystem order.
-        let mtime = 0
+    await ensureFfTools()
+    if (!ffmpegPath) {
+      console.log('  Mobile:    ffmpeg missing — skipping mobile variant prewarm')
+      return
+    }
+    let dirs
+    try {
+      dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    const modelDirs = dirs.filter(
+      (e) => e.isDirectory() && !e.name.startsWith('.')
+    )
+    const tasks = []
+    for (const d of modelDirs) {
+      const username = d.name
+      for (const folder of MEDIA_FOLDERS) {
+        let files
         try {
-          mtime = fs.statSync(src).mtimeMs
-        } catch {}
-        tasks.push({ src, dst, isGif, mtime })
+          files = await fs.promises.readdir(
+            path.join(datasetDir, username, folder)
+          )
+        } catch {
+          continue
+        }
+        for (const file of files) {
+          const ext = path.extname(file).toLowerCase()
+          const isVideo = VIDEO_EXTS_IN.has(ext)
+          const isGif = ext === '.gif'
+          if (!isVideo && !isGif) continue
+          const src = path.join(datasetDir, username, folder, file)
+          const dst = mobileVariantPath(username, folder, file)
+          if (fs.existsSync(dst)) continue
+          // Stat the source to get mtime. Cheap (~one syscall per file)
+          // and lets us encode newest-first below — recently scraped
+          // videos are the ones users are most likely to browse and were
+          // the ones stuck at the tail of the queue for days when we
+          // iterated in filesystem order.
+          let mtime = 0
+          try {
+            mtime = fs.statSync(src).mtimeMs
+          } catch {}
+          tasks.push({ src, dst, isGif, mtime })
+        }
       }
     }
-  }
-  if (!tasks.length) {
-    console.log('  Mobile:    all mobile variants cached ✓')
-    return
-  }
-  // Newest first — biggest UX impact for the user's actual browsing
-  // pattern (they open the most recent uploads first).
-  tasks.sort((a, b) => b.mtime - a.mtime)
-  console.log(
-    `  Mobile:    generating ${tasks.length} mobile variants, newest first (this can take a while)…`
-  )
-  const t0 = Date.now()
-  let done = 0
-  await Promise.all(
-    tasks.map((t) =>
-      mobileEncodeLimit(async () => {
-        await generateMobileVariant(t.src, t.dst, t.isGif).catch(() => {})
-        done++
-        if (done % 25 === 0 || done === tasks.length) {
-          process.stdout.write(`\r  Mobile:    ${done}/${tasks.length} done`)
-        }
-      })
+    if (!tasks.length) {
+      console.log('  Mobile:    all mobile variants cached ✓')
+      return
+    }
+    // Newest first — biggest UX impact for the user's actual browsing
+    // pattern (they open the most recent uploads first).
+    tasks.sort((a, b) => b.mtime - a.mtime)
+    console.log(
+      `  Mobile:    generating ${tasks.length} mobile variants, newest first (this can take a while)…`
     )
-  )
-  console.log(
-    `\r  Mobile:    ${tasks.length} mobile variants generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `
-  )
+    const t0 = Date.now()
+    let done = 0
+    await Promise.all(
+      tasks.map((t) =>
+        mobileEncodeLimit(async () => {
+          await generateMobileVariant(t.src, t.dst, t.isGif).catch(() => {})
+          done++
+          if (done % 25 === 0 || done === tasks.length) {
+            process.stdout.write(`\r  Mobile:    ${done}/${tasks.length} done`)
+          }
+        })
+      )
+    )
+    console.log(
+      `\r  Mobile:    ${tasks.length} mobile variants generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `
+    )
+  } finally {
+    _prewarmInProgress = false
+  }
 }
 const _thumbInflight = new Map() // dedupe concurrent requests for the same file
 
