@@ -1470,6 +1470,34 @@ function trashDestFor(username, folder, filename, runTimestamp) {
   )
 }
 
+// Quarantine a file maint identified as structurally corrupt (missing moov
+// atom — see faststartMp4.js's remuxFaststart). Soft-delete via the same
+// trash convention a user-initiated delete uses, so it's recoverable and
+// consistent with the rest of the delete feature, and so it stops being
+// retried (and failing) on every single nightly pass forever. srcPath is
+// an absolute path under datasetDir/<username>/<folder>/<filename>.
+async function quarantineCorruptFile(srcPath) {
+  const rel = path.relative(datasetDir, srcPath)
+  const segments = rel.split(path.sep)
+  if (segments.length < 3) return false
+  const [username, folder, ...rest] = segments
+  const filename = rest.join(path.sep)
+  const runTs = new Date().toISOString().replace(/[:.]/g, '-')
+  const dest = trashDestFor(username, folder, filename, runTs)
+  try {
+    await fs.promises.mkdir(path.dirname(dest), { recursive: true })
+    await fs.promises.rename(srcPath, dest)
+  } catch (err) {
+    console.warn(`  Maint: quarantine failed for ${rel} —`, err.message)
+    return false
+  }
+  fs.promises.unlink(thumbDiskPath(username, folder, filename)).catch(() => {})
+  fs.promises
+    .unlink(mobileVariantPath(username, folder, filename))
+    .catch(() => {})
+  return true
+}
+
 // Soft-delete one or more files in a single batch. Used by both the
 // lightbox's single-file delete and the grid's multi-select delete.
 app.post('/api/users/:username/trash', async (req, res) => {
@@ -1691,6 +1719,73 @@ const THUMB_QUALITY = parseInt(process.env.THUMB_QUALITY, 10) || 80
 const thumbLimit = pLimit(parseInt(process.env.THUMB_CONCURRENCY, 10) || 8)
 const prewarmLimit = pLimit(parseInt(process.env.PREWARM_CONCURRENCY, 10) || 2)
 
+// ─── PREWARM STATUS (admin visibility) ───────────────────────────────────────
+// In-memory only, updated on EVERY item completion — not just every-Nth like
+// each pass's own console progress line — so lastProgressAt is trustworthy
+// as a "is this actually stuck" signal for the admin panel.
+//
+// That matters because the console lines can't be trusted for this: they're
+// process.stdout.write('\r...') with no trailing newline, and `docker logs
+// -t` only stamps a log line once a real '\n' flushes it — which, for a
+// bare progress counter, is whenever some UNRELATED later line (e.g. the
+// next "Tick: N changed model(s)") happens to be written. On 2026-09-15
+// that made a perfectly healthy gif-previews pass (real GIFs landing on
+// disk at ~700/hr the whole time, confirmed after the fact from file
+// mtimes) look frozen at "170/745 done" in `docker logs -t` for 46 straight
+// minutes. This object sidesteps that: done/lastProgressAt update in memory
+// the instant each item finishes, regardless of when anything gets logged.
+function makePrewarmStatus() {
+  return {
+    running: false,
+    total: 0, // items that needed generating when this pass started
+    cached: 0, // items that already existed when this pass started
+    done: 0, // completed so far *this pass*
+    startedAt: null,
+    lastProgressAt: null,
+    finishedAt: null,
+    lastDurationMs: null,
+  }
+}
+const prewarmStatus = {
+  covers: makePrewarmStatus(),
+  gridThumbs: makePrewarmStatus(),
+  gifPreviews: makePrewarmStatus(),
+  mobileVariants: makePrewarmStatus(),
+}
+function prewarmStart(key, total, cached) {
+  const s = prewarmStatus[key]
+  const now = new Date().toISOString()
+  Object.assign(s, {
+    running: true,
+    total,
+    cached,
+    done: 0,
+    startedAt: now,
+    lastProgressAt: now,
+    finishedAt: null,
+  })
+}
+function prewarmTick(key) {
+  const s = prewarmStatus[key]
+  s.done++
+  s.lastProgressAt = new Date().toISOString()
+}
+function prewarmEnd(key) {
+  const s = prewarmStatus[key]
+  s.running = false
+  s.finishedAt = new Date().toISOString()
+  s.lastDurationMs = s.startedAt
+    ? Date.parse(s.finishedAt) - Date.parse(s.startedAt)
+    : null
+}
+// coverage % = (already-cached + completed-this-pass) / (total known eligible)
+function prewarmCoverage(key) {
+  const s = prewarmStatus[key]
+  const eligible = s.cached + s.total
+  if (!eligible) return null
+  return ((s.cached + s.done) / eligible) * 100
+}
+
 // ─── MOBILE VARIANTS ─────────────────────────────────────────────────────────
 // H.264/AAC MP4s at ~720p, ~1.5 Mbps, faststart. Generated for every video AND
 // every GIF (GIFs → MP4 shrinks 5–10×, plays in <video> tag on iOS). Served
@@ -1899,6 +1994,7 @@ async function prewarmMobileVariants() {
       (e) => e.isDirectory() && !e.name.startsWith('.')
     )
     const tasks = []
+    let totalEligible = 0
     for (const d of modelDirs) {
       const username = d.name
       for (const folder of MEDIA_FOLDERS) {
@@ -1915,6 +2011,7 @@ async function prewarmMobileVariants() {
           const isVideo = VIDEO_EXTS_IN.has(ext)
           const isGif = ext === '.gif'
           if (!isVideo && !isGif) continue
+          totalEligible++
           const src = path.join(datasetDir, username, folder, file)
           const dst = mobileVariantPath(username, folder, file)
           if (fs.existsSync(dst)) continue
@@ -1931,8 +2028,11 @@ async function prewarmMobileVariants() {
         }
       }
     }
+    const cached = totalEligible - tasks.length
     if (!tasks.length) {
       console.log('  Mobile:    all mobile variants cached ✓')
+      prewarmStart('mobileVariants', 0, cached)
+      prewarmEnd('mobileVariants')
       return
     }
     // Newest first — biggest UX impact for the user's actual browsing
@@ -1941,6 +2041,7 @@ async function prewarmMobileVariants() {
     console.log(
       `  Mobile:    generating ${tasks.length} mobile variants, newest first (this can take a while)…`
     )
+    prewarmStart('mobileVariants', tasks.length, cached)
     const t0 = Date.now()
     let done = 0
     await Promise.all(
@@ -1948,12 +2049,14 @@ async function prewarmMobileVariants() {
         mobileEncodeLimit(async () => {
           await generateMobileVariant(t.src, t.dst, t.isGif).catch(() => {})
           done++
+          prewarmTick('mobileVariants')
           if (done % 25 === 0 || done === tasks.length) {
             process.stdout.write(`\r  Mobile:    ${done}/${tasks.length} done`)
           }
         })
       )
     )
+    prewarmEnd('mobileVariants')
     console.log(
       `\r  Mobile:    ${tasks.length} mobile variants generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `
     )
@@ -2185,6 +2288,7 @@ async function runMediaMaintenance({ trigger = 'manual' } = {}) {
     modelsDone: 0,
     webmTranscoded: 0,
     faststartRemuxed: 0,
+    corruptQuarantined: 0,
     errors: 0,
   })
   const t0 = Date.now()
@@ -2204,6 +2308,20 @@ async function runMediaMaintenance({ trigger = 'manual' } = {}) {
     try {
       const fr = await faststartInUserDir(userDir, { log: console })
       maintState.faststartRemuxed += fr.filter((r) => r.ok).length
+      // Files with no recoverable moov atom would just fail the same way
+      // forever — quarantine them instead of leaving them to keep costing
+      // a failed remux attempt (and showing up as a broken card) every
+      // single night. See quarantineCorruptFile().
+      const corrupt = fr.filter((r) => r.reason === 'corrupt-source')
+      for (const r of corrupt) {
+        const moved = await quarantineCorruptFile(r.srcPath)
+        if (moved) {
+          maintState.corruptQuarantined++
+          console.warn(
+            `  Maint: quarantined corrupt file (no moov atom) — ${path.relative(datasetDir, r.srcPath)}`
+          )
+        }
+      }
     } catch (err) {
       maintState.errors++
       console.warn(
@@ -2218,13 +2336,21 @@ async function runMediaMaintenance({ trigger = 'manual' } = {}) {
   maintState.inProgress = false
   const dur = ((Date.now() - t0) / 1000).toFixed(0)
   console.log(
-    `  Maint:     done in ${dur}s — webm:${maintState.webmTranscoded} faststart:${maintState.faststartRemuxed} errors:${maintState.errors}`
+    `  Maint:     done in ${dur}s — webm:${maintState.webmTranscoded} faststart:${maintState.faststartRemuxed} quarantined:${maintState.corruptQuarantined} errors:${maintState.errors}`
   )
   return { ok: true }
 }
 
 app.get('/api/maint-status', (_req, res) => {
   res.json({ ...maintState })
+})
+
+app.get('/api/prewarm-status', (_req, res) => {
+  const out = {}
+  for (const key of Object.keys(prewarmStatus)) {
+    out[key] = { ...prewarmStatus[key], coveragePct: prewarmCoverage(key) }
+  }
+  res.json(out)
 })
 
 app.post('/api/run-maint', (_req, res) => {
@@ -2473,78 +2599,100 @@ app.get('/media/:username/:folder/:filename', (req, res) => {
 // ─── PREVIEW PREWARM ──────────────────────────────────────────────────────────
 // Walks all model webm folders and pre-generates any missing animated GIF previews.
 // Runs in the background after the server starts — doesn't block requests.
+// Guards against the same overlap prewarmMobileVariants() had before its
+// fix: this is called from both the startup chain and the nightly's own
+// gif-previews step with no coordination between them. Doesn't just waste
+// work here — two concurrent passes that both decide the same video is
+// missing its preview would both encode to the identical `gifPath +
+// '.tmp.gif'` path, racing on the same file.
+let _gifPreviewInProgress = false
+
 async function prewarmThumbnails() {
-  await ensureFfTools()
-  if (!ffmpegPath) return
-
-  let dirs
+  if (_gifPreviewInProgress) {
+    console.log('  Previews:  prewarm already running — skipping overlapping pass')
+    return
+  }
+  _gifPreviewInProgress = true
   try {
-    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  const modelDirs = dirs.filter(
-    (e) => e.isDirectory() && !e.name.startsWith('.')
-  )
+    await ensureFfTools()
+    if (!ffmpegPath) return
 
-  const allVideos = []
-  for (const dir of modelDirs) {
-    const webmDir = path.join(datasetDir, dir.name, 'webm')
-    let files
+    let dirs
     try {
-      files = await fs.promises.readdir(webmDir)
+      dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
     } catch {
-      continue
+      return
     }
-    for (const file of files) {
-      if (!VIDEO_EXTS_IN.has(path.extname(file).toLowerCase())) continue
-      allVideos.push({
-        username: dir.name,
-        filename: file,
-        videoPath: path.join(webmDir, file),
-      })
+    const modelDirs = dirs.filter(
+      (e) => e.isDirectory() && !e.name.startsWith('.')
+    )
+
+    const allVideos = []
+    for (const dir of modelDirs) {
+      const webmDir = path.join(datasetDir, dir.name, 'webm')
+      let files
+      try {
+        files = await fs.promises.readdir(webmDir)
+      } catch {
+        continue
+      }
+      for (const file of files) {
+        if (!VIDEO_EXTS_IN.has(path.extname(file).toLowerCase())) continue
+        allVideos.push({
+          username: dir.name,
+          filename: file,
+          videoPath: path.join(webmDir, file),
+        })
+      }
     }
-  }
 
-  const missing = allVideos.filter(({ username, filename }) => {
-    const gifPath = path.join(
-      THUMB_DIR,
-      username,
-      path.basename(filename, path.extname(filename)) + '.gif'
+    const missing = allVideos.filter(({ username, filename }) => {
+      const gifPath = path.join(
+        THUMB_DIR,
+        username,
+        path.basename(filename, path.extname(filename)) + '.gif'
+      )
+      return !fs.existsSync(gifPath)
+    })
+
+    if (missing.length === 0) {
+      console.log(`  Previews:  all ${allVideos.length} cached ✓`)
+      prewarmStart('gifPreviews', 0, allVideos.length)
+      prewarmEnd('gifPreviews')
+      return
+    }
+
+    console.log(
+      `  Previews:  generating ${missing.length} GIFs (${allVideos.length - missing.length} cached)…`
     )
-    return !fs.existsSync(gifPath)
-  })
+    prewarmStart('gifPreviews', missing.length, allVideos.length - missing.length)
 
-  if (missing.length === 0) {
-    console.log(`  Previews:  all ${allVideos.length} cached ✓`)
-    return
-  }
-
-  console.log(
-    `  Previews:  generating ${missing.length} GIFs (${allVideos.length - missing.length} cached)…`
-  )
-
-  const concurrency = pLimit(2) // GIF encoding is CPU-heavy — keep concurrency low
-  let done = 0
-  await Promise.all(
-    missing.map(({ username, filename, videoPath }) =>
-      concurrency(async () => {
-        const userThumbDir = path.join(THUMB_DIR, username)
-        fs.mkdirSync(userThumbDir, { recursive: true })
-        const gifPath = path.join(
-          userThumbDir,
-          path.basename(filename, path.extname(filename)) + '.gif'
-        )
-        await generatePreviewGif(videoPath, gifPath)
-        done++
-        if (done % 10 === 0 || done === missing.length) {
-          process.stdout.write(`\r  Previews:  ${done}/${missing.length} done`)
-        }
-      })
+    const concurrency = pLimit(2) // GIF encoding is CPU-heavy — keep concurrency low
+    let done = 0
+    await Promise.all(
+      missing.map(({ username, filename, videoPath }) =>
+        concurrency(async () => {
+          const userThumbDir = path.join(THUMB_DIR, username)
+          fs.mkdirSync(userThumbDir, { recursive: true })
+          const gifPath = path.join(
+            userThumbDir,
+            path.basename(filename, path.extname(filename)) + '.gif'
+          )
+          await generatePreviewGif(videoPath, gifPath)
+          done++
+          prewarmTick('gifPreviews')
+          if (done % 10 === 0 || done === missing.length) {
+            process.stdout.write(`\r  Previews:  ${done}/${missing.length} done`)
+          }
+        })
+      )
     )
-  )
+    prewarmEnd('gifPreviews')
 
-  console.log(`\r  Previews:  ${missing.length} GIFs generated ✓          `)
+    console.log(`\r  Previews:  ${missing.length} GIFs generated ✓          `)
+  } finally {
+    _gifPreviewInProgress = false
+  }
 }
 
 // Walks the whole dataset and pre-generates any missing JPEG thumb for every
@@ -2552,6 +2700,13 @@ async function prewarmThumbnails() {
 // or responses. After the first nightly run, mobile visits to any model are
 // served entirely from cached thumbnails. Set DISABLE_GRID_THUMB_PREWARM=1
 // to skip if disk space is tight.
+// Guards this + prewarmCoverThumbs against the same overlap
+// prewarmMobileVariants() had before its fix (startup chain and the
+// nightly's own step both call these with no coordination) — generateThumb()
+// writes through a deterministic `dstPath + '.tmp.jpg'`, so two concurrent
+// passes that both pick up the same file would race on the same tmp path.
+let _gridThumbInProgress = false
+
 async function prewarmAllGridThumbs() {
   if (process.env.DISABLE_GRID_THUMB_PREWARM === '1') {
     console.log(
@@ -2559,104 +2714,143 @@ async function prewarmAllGridThumbs() {
     )
     return
   }
-  let dirs
-  try {
-    dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
-  } catch {
+  if (_gridThumbInProgress) {
+    console.log('  Thumbs:    grid prewarm already running — skipping overlapping pass')
     return
   }
-  const modelDirs = dirs.filter(
-    (e) => e.isDirectory() && !e.name.startsWith('.')
-  )
+  _gridThumbInProgress = true
+  try {
+    let dirs
+    try {
+      dirs = await fs.promises.readdir(datasetDir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    const modelDirs = dirs.filter(
+      (e) => e.isDirectory() && !e.name.startsWith('.')
+    )
 
-  // Collect all (src, dst) pairs first so the progress line is meaningful.
-  // Includes every media folder and every renderable extension — images,
-  // gifs, AND videos. Video thumbs are still JPEGs (a single ffmpeg-
-  // extracted frame, generated by generateThumb), so the grid card always
-  // shows a static image and never an auto-decoding GIF.
-  const tasks = []
-  for (const d of modelDirs) {
-    const username = d.name
-    for (const folder of MEDIA_FOLDERS) {
-      let files
-      try {
-        files = await fs.promises.readdir(
-          path.join(datasetDir, username, folder)
-        )
-      } catch {
-        continue
-      }
-      for (const file of files) {
-        const ext = path.extname(file).toLowerCase()
-        if (!IMAGE_EXTS_IN.has(ext) && !VIDEO_EXTS_IN.has(ext)) continue
-        const dst = thumbDiskPath(username, folder, file)
-        if (fs.existsSync(dst)) continue
-        tasks.push({ src: path.join(datasetDir, username, folder, file), dst })
+    // Collect all (src, dst) pairs first so the progress line is meaningful.
+    // Includes every media folder and every renderable extension — images,
+    // gifs, AND videos. Video thumbs are still JPEGs (a single ffmpeg-
+    // extracted frame, generated by generateThumb), so the grid card always
+    // shows a static image and never an auto-decoding GIF.
+    const tasks = []
+    let totalEligible = 0
+    for (const d of modelDirs) {
+      const username = d.name
+      for (const folder of MEDIA_FOLDERS) {
+        let files
+        try {
+          files = await fs.promises.readdir(
+            path.join(datasetDir, username, folder)
+          )
+        } catch {
+          continue
+        }
+        for (const file of files) {
+          const ext = path.extname(file).toLowerCase()
+          if (!IMAGE_EXTS_IN.has(ext) && !VIDEO_EXTS_IN.has(ext)) continue
+          totalEligible++
+          const dst = thumbDiskPath(username, folder, file)
+          if (fs.existsSync(dst)) continue
+          tasks.push({
+            src: path.join(datasetDir, username, folder, file),
+            dst,
+          })
+        }
       }
     }
-  }
+    const cached = totalEligible - tasks.length
 
-  if (!tasks.length) {
-    console.log('  Thumbs:    all grid thumbs cached ✓')
-    return
-  }
+    if (!tasks.length) {
+      console.log('  Thumbs:    all grid thumbs cached ✓')
+      prewarmStart('gridThumbs', 0, cached)
+      prewarmEnd('gridThumbs')
+      return
+    }
 
-  console.log(
-    `  Thumbs:    generating ${tasks.length} grid thumbs across ${modelDirs.length} models…`
-  )
-  const t0 = Date.now()
-  let done = 0
-  await Promise.all(
-    tasks.map((t) =>
-      // Bulk prewarm uses its OWN small concurrency pool so it can't
-      // starve user-facing on-demand thumb requests when someone visits
-      // a model that hasn't been warmed yet.
-      prewarmLimit(async () => {
-        await generateThumb(t.src, t.dst).catch(() => {})
-        done++
-        if (done % 100 === 0 || done === tasks.length) {
-          process.stdout.write(`\r  Thumbs:    ${done}/${tasks.length} done`)
-        }
-      })
+    console.log(
+      `  Thumbs:    generating ${tasks.length} grid thumbs across ${modelDirs.length} models…`
     )
-  )
-  console.log(
-    `\r  Thumbs:    ${tasks.length} grid thumbs generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `
-  )
+    prewarmStart('gridThumbs', tasks.length, cached)
+    const t0 = Date.now()
+    let done = 0
+    await Promise.all(
+      tasks.map((t) =>
+        // Bulk prewarm uses its OWN small concurrency pool so it can't
+        // starve user-facing on-demand thumb requests when someone visits
+        // a model that hasn't been warmed yet.
+        prewarmLimit(async () => {
+          await generateThumb(t.src, t.dst).catch(() => {})
+          done++
+          prewarmTick('gridThumbs')
+          if (done % 100 === 0 || done === tasks.length) {
+            process.stdout.write(`\r  Thumbs:    ${done}/${tasks.length} done`)
+          }
+        })
+      )
+    )
+    prewarmEnd('gridThumbs')
+    console.log(
+      `\r  Thumbs:    ${tasks.length} grid thumbs generated in ${((Date.now() - t0) / 1000).toFixed(0)}s ✓        `
+    )
+  } finally {
+    _gridThumbInProgress = false
+  }
 }
+
+let _coverThumbInProgress = false
 
 // Walks modelStatsCache and pre-generates any missing cover JPEG thumbs so
 // the first home-grid render hits cached files. Cheap — ~16 covers per model.
 async function prewarmCoverThumbs() {
-  const tasks = []
-  for (const [username, stats] of Object.entries(modelStatsCache)) {
-    for (const c of stats.coverPool || []) {
-      if (c.type === 'video') continue // video covers reuse the GIF preview
-      const dst = thumbDiskPath(username, c.folder, c.filename)
-      if (fs.existsSync(dst)) continue
-      const src = safeSubPath(datasetDir, username, c.folder, c.filename)
-      if (!src || !fs.existsSync(src)) continue
-      tasks.push({ src, dst, username })
-    }
-  }
-  if (!tasks.length) {
-    console.log('  Thumbs:    all cover thumbs cached ✓')
+  if (_coverThumbInProgress) {
+    console.log('  Thumbs:    cover prewarm already running — skipping overlapping pass')
     return
   }
-  console.log(`  Thumbs:    generating ${tasks.length} cover thumbs…`)
-  let done = 0
-  await Promise.all(
-    tasks.map((t) =>
-      thumbLimit(async () => {
-        await generateThumb(t.src, t.dst)
-        done++
-        if (done % 25 === 0 || done === tasks.length) {
-          process.stdout.write(`\r  Thumbs:    ${done}/${tasks.length} done`)
-        }
-      })
+  _coverThumbInProgress = true
+  try {
+    const tasks = []
+    let totalEligible = 0
+    for (const [username, stats] of Object.entries(modelStatsCache)) {
+      for (const c of stats.coverPool || []) {
+        if (c.type === 'video') continue // video covers reuse the GIF preview
+        totalEligible++
+        const dst = thumbDiskPath(username, c.folder, c.filename)
+        if (fs.existsSync(dst)) continue
+        const src = safeSubPath(datasetDir, username, c.folder, c.filename)
+        if (!src || !fs.existsSync(src)) continue
+        tasks.push({ src, dst, username })
+      }
+    }
+    const cached = totalEligible - tasks.length
+    if (!tasks.length) {
+      console.log('  Thumbs:    all cover thumbs cached ✓')
+      prewarmStart('covers', 0, cached)
+      prewarmEnd('covers')
+      return
+    }
+    console.log(`  Thumbs:    generating ${tasks.length} cover thumbs…`)
+    prewarmStart('covers', tasks.length, cached)
+    let done = 0
+    await Promise.all(
+      tasks.map((t) =>
+        thumbLimit(async () => {
+          await generateThumb(t.src, t.dst)
+          done++
+          prewarmTick('covers')
+          if (done % 25 === 0 || done === tasks.length) {
+            process.stdout.write(`\r  Thumbs:    ${done}/${tasks.length} done`)
+          }
+        })
+      )
     )
-  )
-  console.log(`\r  Thumbs:    ${tasks.length} cover thumbs generated ✓        `)
+    prewarmEnd('covers')
+    console.log(`\r  Thumbs:    ${tasks.length} cover thumbs generated ✓        `)
+  } finally {
+    _coverThumbInProgress = false
+  }
 }
 
 // ─── INFO ENDPOINT ───────────────────────────────────────────────────────────

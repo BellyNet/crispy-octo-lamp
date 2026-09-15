@@ -22,6 +22,7 @@
         --muted: #7070a0;
         --ok: #4caf82;
         --err: #e05d5d;
+        --warn: #d9a441;
       }
 
       body {
@@ -131,10 +132,60 @@
         background: rgba(224, 93, 93, 0.15);
         color: var(--err);
       }
+      .badge.warn {
+        background: rgba(217, 164, 65, 0.15);
+        color: var(--warn);
+      }
       .step-error {
         display: block;
         font-size: 11px;
         color: var(--err);
+      }
+
+      /* ─── Prewarm status rows ─── */
+      .prewarm-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .prewarm-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+      }
+      .prewarm-card .prewarm-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .prewarm-card .prewarm-label {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .prewarm-bar-track {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg);
+        overflow: hidden;
+        margin-bottom: 8px;
+      }
+      .prewarm-bar-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+      .prewarm-bar-fill.stuck {
+        background: var(--warn);
+      }
+      .prewarm-meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: var(--muted);
       }
 
       /* ─── Collapsible section ─── */
@@ -316,6 +367,12 @@
       </table>
     </section>
 
+    <section id="prewarm-section">
+      <h2>Prewarm &amp; maintenance</h2>
+      <div class="status-line" id="maint-live"></div>
+      <div class="prewarm-grid" id="prewarm-grid"></div>
+    </section>
+
     <section id="recent-media-section">
       <details class="collapsible" id="media-details">
         <summary><span class="chevron">&#9656;</span><h2>Recently added media</h2></summary>
@@ -395,6 +452,17 @@
         })
       }
 
+      function fmtAgo(ms) {
+        if (!ms) return 'never'
+        const s = Math.round((Date.now() - ms) / 1000)
+        if (s < 5) return 'just now'
+        if (s < 60) return `${s}s ago`
+        const m = Math.round(s / 60)
+        if (m < 60) return `${m}m ago`
+        const h = Math.round(m / 60)
+        return `${h}h ago`
+      }
+
       function fmtDuration(ms) {
         if (!ms || ms < 0) return '—'
         const s = Math.round(ms / 1000)
@@ -453,6 +521,98 @@
               `
             })
             .join('')
+        } catch {}
+      }
+
+      // Per-category "how long is too long since the last item finished"
+      // threshold. Not one-size-fits-all: mobileVariants covers ffmpeg
+      // encodes with a 90-minute timeout (see MOBILE_ENCODE_CONCURRENCY /
+      // generateMobileVariant in server.js) and 6-way concurrency, so a gap
+      // approaching that is still normal if the batch happens to be down to
+      // its last few long videos. The others bound each item at well under
+      // a minute, so a several-minute gap there is a much stronger signal.
+      const PREWARM_STUCK_MS = {
+        covers: 5 * 60 * 1000,
+        gridThumbs: 5 * 60 * 1000,
+        gifPreviews: 8 * 60 * 1000,
+        mobileVariants: 100 * 60 * 1000,
+      }
+      const PREWARM_LABELS = {
+        covers: 'Cover thumbs',
+        gridThumbs: 'Grid thumbs',
+        gifPreviews: 'GIF previews',
+        mobileVariants: 'Mobile variants',
+      }
+
+      // Reads in-memory progress counters, not `docker logs` — deliberately.
+      // Each pass's own console line is a \r-only write with no trailing
+      // newline, and `docker logs -t` doesn't stamp a line until some LATER
+      // line with a real newline flushes it. That made a perfectly healthy
+      // gif-previews pass (real files landing on disk at ~700/hr) look
+      // frozen at "170/745 done" for 46 straight minutes in the logs on
+      // 2026-09-15. lastProgressAt here updates the instant each item
+      // finishes, so it's a trustworthy stuck signal this panel is built on.
+      async function loadPrewarmStatus() {
+        try {
+          const r = await fetch('/api/prewarm-status')
+          const status = await r.json()
+          const grid = document.getElementById('prewarm-grid')
+          grid.innerHTML = Object.keys(PREWARM_LABELS)
+            .map((key) => {
+              const s = status[key] || {}
+              const pct = s.coveragePct == null ? null : Math.round(s.coveragePct * 10) / 10
+              const lastMs = s.lastProgressAt ? Date.parse(s.lastProgressAt) : null
+              const sinceMs = lastMs ? Date.now() - lastMs : null
+              const stuck = s.running && sinceMs != null && sinceMs > PREWARM_STUCK_MS[key]
+              let badge
+              if (stuck) badge = '<span class="badge warn">stuck?</span>'
+              else if (s.running) badge = '<span class="badge ok">running</span>'
+              else badge = '<span class="badge" style="background:rgba(112,112,160,0.15);color:var(--muted)">idle</span>'
+              const barPct = pct == null ? 0 : pct
+              return `
+                <div class="prewarm-card">
+                  <div class="prewarm-head">
+                    <span class="prewarm-label">${PREWARM_LABELS[key]}</span>
+                    ${badge}
+                  </div>
+                  <div class="prewarm-bar-track">
+                    <div class="prewarm-bar-fill${stuck ? ' stuck' : ''}" style="width:${barPct}%"></div>
+                  </div>
+                  <div class="prewarm-meta">
+                    <span>${pct == null ? 'no data yet' : `${pct}% coverage`}${s.running ? ` · ${s.done}/${s.total} this pass` : ''}</span>
+                    <span>${s.running ? `last item ${fmtAgo(lastMs)}` : s.finishedAt ? `done ${fmtAgo(Date.parse(s.finishedAt))}` : ''}</span>
+                  </div>
+                </div>
+              `
+            })
+            .join('')
+        } catch {}
+      }
+
+      async function loadMaintStatus() {
+        try {
+          const r = await fetch('/api/maint-status')
+          const m = await r.json()
+          const el = document.getElementById('maint-live')
+          if (!m.startedAt) {
+            el.innerHTML = ''
+            return
+          }
+          if (m.inProgress) {
+            el.innerHTML = `<span><b>Maint running</b> — model ${m.modelsDone}/${m.modelsTotal}</span>`
+            return
+          }
+          const parts = [
+            `<span>Last maint: <b>${fmtAgo(Date.parse(m.completedAt))}</b></span>`,
+            `<span>webm transcoded: <b>${m.webmTranscoded ?? 0}</b></span>`,
+            `<span>faststart remuxed: <b>${m.faststartRemuxed ?? 0}</b></span>`,
+          ]
+          if (m.corruptQuarantined) {
+            parts.push(
+              `<span class="badge warn">${m.corruptQuarantined} corrupt file${m.corruptQuarantined === 1 ? '' : 's'} quarantined</span>`
+            )
+          }
+          el.innerHTML = parts.join('')
         } catch {}
       }
 
@@ -752,6 +912,8 @@
 
       loadNightly()
       loadFfmpegStatus()
+      loadPrewarmStatus()
+      loadMaintStatus()
       loadRun(0)
       loadEmbeddings()
 
@@ -767,6 +929,14 @@
         loadEmbeddings()
         if (currentRunIndex === 0) loadRun(0)
       }, 5 * 60 * 1000)
+
+      // Prewarm/maint get their own much shorter cadence — this panel's
+      // whole point is "is a pass actually stuck right now," which a
+      // 5-minute-stale view can't answer.
+      setInterval(() => {
+        loadPrewarmStatus()
+        loadMaintStatus()
+      }, 20 * 1000)
     </script>
   </body>
 </html>

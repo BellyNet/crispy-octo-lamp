@@ -106,10 +106,18 @@ async function remuxFaststart(filePath, { log = console } = {}) {
     try {
       fs.unlinkSync(tmpPath)
     } catch {}
+    // "moov atom not found" means ffmpeg read the whole file and there's no
+    // index anywhere in it — not a transient failure (bad disk, ffmpeg
+    // missing) that's worth retrying, but permanent structural corruption,
+    // almost always a download or write that got interrupted before the
+    // trailing atom was flushed. -c copy can never produce a moov atom
+    // that isn't already in the source. Tagged separately so callers can
+    // stop retrying it forever and quarantine it instead.
+    const corrupt = /moov atom not found/i.test(err.message)
     return {
       ok: false,
       srcPath: filePath,
-      reason: 'ffmpeg-failed',
+      reason: corrupt ? 'corrupt-source' : 'ffmpeg-failed',
       err: err.message,
     }
   }
