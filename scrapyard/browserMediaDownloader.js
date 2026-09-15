@@ -317,26 +317,58 @@ async function createBrowserMediaDownloader(source, options = {}) {
   return {
     fetchHtml,
     async fetchText(targetUrl, fetchOptions = {}) {
-      const result = await warmupPage.evaluate(
-        async (url, headers) => {
-          const response = await fetch(url, {
-            credentials: 'include',
-            headers,
+      const headers = {
+        Accept: '*/*',
+        ...(fetchOptions.headers || {}),
+      }
+      let result
+      try {
+        result = await warmupPage.evaluate(
+          async (url, requestHeaders) => {
+            const response = await fetch(url, {
+              credentials: 'include',
+              headers: requestHeaders,
+            })
+            const text = await response.text()
+            return {
+              text,
+              byteLength: new TextEncoder().encode(text).length,
+              statusCode: response.status,
+              ok: response.ok,
+            }
+          },
+          targetUrl,
+          headers
+        )
+      } catch (err) {
+        appendRunEvent('browser_fetch_text_fallback', {
+          url: targetUrl,
+          error: err.message,
+        })
+        const page = await browser.newPage()
+        try {
+          await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            Referer: fetchOptions.referer || source.inputUrl,
+            ...headers,
           })
-          const text = await response.text()
-          return {
-            text,
-            byteLength: new TextEncoder().encode(text).length,
-            statusCode: response.status,
-            ok: response.ok,
+          const response = await page.goto(targetUrl, {
+            waitUntil: fetchOptions.waitUntil || 'domcontentloaded',
+            timeout: fetchOptions.timeoutMs || options.timeoutMs,
+          })
+          if (!response) throw new Error('Browser returned no response')
+          const statusCode = response.status()
+          const buffer = await response.buffer()
+          result = {
+            text: buffer.toString('utf8'),
+            byteLength: buffer.length,
+            statusCode,
+            ok: statusCode >= 200 && statusCode < 300,
           }
-        },
-        targetUrl,
-        {
-          Accept: '*/*',
-          ...(fetchOptions.headers || {}),
+        } finally {
+          await page.close().catch(() => {})
         }
-      )
+      }
       if (!result.ok) throw new Error(`Browser HTTP ${result.statusCode}`)
       return {
         text: result.text,
