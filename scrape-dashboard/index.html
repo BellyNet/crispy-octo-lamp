@@ -3130,6 +3130,7 @@
           }
           runMediaSource(model, url, {
             downloadOversized: true,
+            fullSourceRefresh: true,
             videoConcurrency: '1',
           })
             .then(() => {

@@ -2093,9 +2093,11 @@ function buildSeenSourceKeySet(history = readRunHistory()) {
   return seen
 }
 
-function getLatestNonDryRunStartedAt(history = readRunHistory()) {
+function getLatestFullSourceRunStartedAt(history = readRunHistory()) {
   const runs = [...(history.runs || [])].sort(compareRunsByRecency)
-  const latest = runs.find((run) => !run.options?.dryRun)
+  const latest = runs.find(
+    (run) => run.mode === 'all' && run.finishedAt && !run.options?.dryRun
+  )
   return latest?.startedAt || null
 }
 
@@ -2168,7 +2170,7 @@ function buildNewSourceQueue() {
   const history = readRunHistory()
   const registry = loadModelRegistry(registryPath)
   const seenSources = buildSeenSourceKeySet(history)
-  const latestRunStartedAt = getLatestNonDryRunStartedAt(history)
+  const latestRunStartedAt = getLatestFullSourceRunStartedAt(history)
   const latestRunStartedMs = Date.parse(latestRunStartedAt || '')
   const groups = []
 
@@ -3870,11 +3872,7 @@ function createQueuedSourceJob({ model, sources, options = {} }) {
     status: 'queued',
     model,
     sources,
-    options: {
-      ...(options || {}),
-      keepHistory: Boolean(options.keepHistory),
-      skipNasSync: Boolean(options.skipNasSync),
-    },
+    options: normalizeJobOptions(options),
     createdAt: new Date().toISOString(),
     startedAt: null,
     finishedAt: null,
@@ -3942,6 +3940,7 @@ function queueRecoveryJobs({ type, options = {} }) {
     ...(options || {}),
     keepHistory: true,
     downloadOversized: true,
+    fullSourceRefresh: type === 'oversized',
     videoConcurrency: '1',
     skipNasSync: Boolean(options.skipNasSync),
   }
