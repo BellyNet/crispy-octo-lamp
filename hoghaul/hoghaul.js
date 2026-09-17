@@ -53,6 +53,11 @@ const {
   recordRedditSourceCheck,
 } = require('../scrapyard/redditSourceState')
 const {
+  clearMatchingFullResolutionRetries,
+  evaluatePreviewQuality,
+  recordFullResolutionRetry,
+} = require('../scrapyard/redditFullResolutionRetry')
+const {
   backfillSeenSourcePostsFromRunEvents,
   loadConfirmedSourceFrontier,
   recordCompletedSourcePosts,
@@ -1680,6 +1685,56 @@ function recordDeadMediaSkip(
   logScrollingMessage(`Skipped dead media: ${entry.filename}`)
 }
 
+function needsFullResolutionRetry(entry) {
+  return (
+    entry?.sourceSite === 'reddit' &&
+    entry?.mediaQuality === 'reddit_preview' &&
+    entry?.needsFullResolution === true
+  )
+}
+
+function recordNeedsFullResolutionSkip(
+  modelName,
+  folders,
+  entry,
+  destination,
+  quality = null
+) {
+  recordFullResolutionRetry(folders.logDir, {
+    relativePath: destination.relativePath,
+    previewUrl: entry.mediaUrl || null,
+    fullResolutionUrl: entry.fullResolutionUrl || null,
+    mediaPageUrl: entry.mediaPageUrl || null,
+    postId: entry.sourcePostId || entry.postId || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    quality,
+  })
+  appendRunEvent(
+    'skip_needs_full_resolution',
+    hoghaulMediaSaver.buildErrorEvent({
+      modelName,
+      entry,
+      destination,
+      error: 'Reddit preview media is not full resolution; leaving for retry.',
+      extra: {
+        reason: 'reddit_preview_needs_full_resolution',
+        fullResolutionUrl: entry.fullResolutionUrl || null,
+        quality,
+      },
+    })
+  )
+  noteMediaOutcome(
+    'skipped',
+    `skip_needs_full_resolution: ${entry.filename}`,
+    'skipNeedsFullResolution'
+  )
+  logScrollingMessage(
+    `Skipped Reddit preview until full resolution is available: ${entry.filename}`
+  )
+}
+
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
   const destination = hoghaulSavePipeline.getDestination({
     modelName,
@@ -1726,13 +1781,46 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
+  let acceptedPreviewBuffer = null
+  if (needsFullResolutionRetry(entry)) {
+    acceptedPreviewBuffer = await downloadMediaBuffer(entry.mediaUrl, entry)
+    let quality
+    try {
+      quality = evaluatePreviewQuality(
+        await sharp(acceptedPreviewBuffer).metadata()
+      )
+    } catch (err) {
+      quality = {
+        acceptable: false,
+        error: err.message,
+      }
+    }
+    if (!quality.acceptable) {
+      recordNeedsFullResolutionSkip(
+        modelName,
+        folders,
+        entry,
+        destination,
+        quality
+      )
+      return
+    }
+    entry = {
+      ...entry,
+      needsFullResolution: false,
+      fullResolutionStatus: 'accepted_preview_quality',
+    }
+  }
+
   const result = await hoghaulSavePipeline.saveImageLikeMedia({
     modelName,
     folders,
     entry,
     destination,
     kind,
-    downloadBuffer: downloadMediaBuffer,
+    downloadBuffer: acceptedPreviewBuffer
+      ? async () => acceptedPreviewBuffer
+      : downloadMediaBuffer,
     getBitwiseDuplicationRecord,
     getVisualHashFromBuffer,
     getVisualDuplicationRecord,
@@ -1752,6 +1840,14 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
   })
   if (result.status === 'duplicate' && Number(result.sizeBytes || 0) > 0) {
     noteDuplicateDownloadBytes(result.sizeBytes)
+  }
+  if (result.status === 'saved' || result.status === 'duplicate') {
+    clearMatchingFullResolutionRetries(folders.logDir, {
+      relativePath: destination.relativePath,
+      mediaUrl: entry.mediaUrl,
+      mediaUrls: entry.mediaUrls,
+      fullResolutionUrl: entry.fullResolutionUrl,
+    })
   }
 }
 

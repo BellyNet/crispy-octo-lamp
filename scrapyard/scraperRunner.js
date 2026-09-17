@@ -562,6 +562,11 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-browser-media',
     isTruthy(getOption(argv, 'reddit-browser-media'))
   )
+  appendBoolean(
+    args,
+    '--reddit-full-refresh',
+    isTruthy(getOption(argv, 'reddit-full-refresh'))
+  )
 }
 
 function appendMilkmaidOptions(args, argv) {
@@ -848,11 +853,18 @@ function loadRegistry(registryFile = registryPath) {
   return JSON.parse(fs.readFileSync(registryFile, 'utf8'))
 }
 
-function collectSourceTargets(registry, sourceKey, modelFilter, hostContains) {
+function collectSourceTargets(
+  registry,
+  sourceKey,
+  modelFilter,
+  hostContains,
+  startFrom
+) {
   const targets = []
 
   for (const [modelName, entry] of Object.entries(registry || {})) {
     if (modelFilter && !modelFilter.has(modelName)) continue
+    if (startFrom && modelName.localeCompare(startFrom) < 0) continue
     const sources = Array.isArray(entry?.sources?.[sourceKey])
       ? entry.sources[sourceKey]
       : []
@@ -1251,6 +1263,8 @@ function buildSourceBatchOptions(argv) {
     options['download-oversized'] = true
   if (isTruthy(getOption(argv, 'full-source-refresh')))
     options['full-source-refresh'] = true
+  if (isTruthy(getOption(argv, 'reddit-full-refresh')))
+    options['reddit-full-refresh'] = true
   return options
 }
 
@@ -1260,6 +1274,7 @@ function printSourceBatchHelp() {
 Options:
   --source <name>             Registry source key to run (required).
   --only-models <a,b,c>       Limit to canonical model names.
+  --start-from <name>         Start from this canonical model name.
   --host-contains <text>      Optional URL host filter, e.g. coomerfans.com.
   --pages <n|a-b>             Limit pages.
   --max-posts <n>             Limit posts per source.
@@ -1269,6 +1284,7 @@ Options:
   --video-concurrency <n>     Video concurrency.
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
+  --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.
@@ -1309,6 +1325,9 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
 
   const registry = loadRegistry()
   const modelFilter = normalizeList(getOption(argv, 'only-models'))
+  const startFrom = getOption(argv, 'start-from')
+    ? String(getOption(argv, 'start-from')).trim()
+    : ''
   const hostContains = String(getOption(argv, 'host-contains') || '')
     .trim()
     .toLowerCase()
@@ -1316,7 +1335,8 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
     registry,
     sourceKey,
     modelFilter,
-    hostContains
+    hostContains,
+    startFrom
   )
 
   if (targets.length === 0) {

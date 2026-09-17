@@ -198,6 +198,7 @@ const reasonLabels = {
   skipExistingImage: 'existing image skips',
   skipExistingVideo: 'existing video skips',
   skipNuisanceMedia: 'nuisance skips',
+  skipNeedsFullResolution: 'full-resolution retry skips',
   skipOversizedVideo: 'oversized video skips',
   skipPermanent: 'permanent skips',
   skipSeenMedia: 'seen skips',
