@@ -2356,7 +2356,7 @@ async function run(argvInput = process.argv.slice(2)) {
         originalName: path.basename(pending.relativePath),
         mediaQuality: 'full',
         needsFullResolution: false,
-        fullResolutionStatus: 'pending_retry',
+        fullResolutionStatus: 'resolved_direct_original',
         fullResolutionUrl: pending.fullResolutionUrl,
         pendingFullResolutionRetryPath: pending.relativePath,
       })
