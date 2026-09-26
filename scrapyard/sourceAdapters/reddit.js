@@ -16,6 +16,7 @@ const REDDIT_DISCOVERY_PROGRESS_EVERY_MS = 5000
 const OLD_REDDIT_PAGE_SIZE = 25
 const DEFAULT_REDDIT_INCREMENTAL_OVERLAP_POSTS = 5
 let lastOldRedditHtmlFetchAt = 0
+let redditHtmlSlotTail = Promise.resolve()
 
 function parseResolvedDate(date) {
   return mediaFileRecords.parseResolvedDate(date)
@@ -638,24 +639,32 @@ function getRedditHtmlMaxRetries(deps = {}) {
 }
 
 async function waitForOldRedditHtmlSlot(deps = {}, details = {}) {
-  const delayMs = getRedditHtmlDelayMs(deps)
-  if (delayMs <= 0) return 0
-  const now = Date.now()
-  const waitMs = Math.max(lastOldRedditHtmlFetchAt + delayMs - now, 0)
-  if (waitMs > 0) {
-    const requestKind = details.requestKind || 'HTML'
-    deps.logger?.status?.(
-      `Reddit ${requestKind}: waiting ${(waitMs / 1000).toFixed(1)}s for the paced request slot`
-    )
-    deps.appendRunEvent?.('reddit_html_throttle_wait', {
-      requestKind,
-      waitMs,
-      url: details.url || null,
-    })
-    await sleep(waitMs)
+  const previousSlot = redditHtmlSlotTail
+  let releaseSlot
+  redditHtmlSlotTail = new Promise((resolve) => {
+    releaseSlot = resolve
+  })
+  await previousSlot
+  try {
+    const delayMs = getRedditHtmlDelayMs(deps)
+    const waitMs = Math.max(lastOldRedditHtmlFetchAt + delayMs - Date.now(), 0)
+    if (waitMs > 0) {
+      const requestKind = details.requestKind || 'HTML'
+      deps.logger?.status?.(
+        `Reddit ${requestKind}: waiting ${(waitMs / 1000).toFixed(1)}s for the paced request slot`
+      )
+      deps.appendRunEvent?.('reddit_html_throttle_wait', {
+        requestKind,
+        waitMs,
+        url: details.url || null,
+      })
+      await sleep(waitMs)
+    }
+    lastOldRedditHtmlFetchAt = Date.now()
+    return waitMs
+  } finally {
+    releaseSlot()
   }
-  lastOldRedditHtmlFetchAt = Date.now()
-  return waitMs
 }
 
 function isRedditRateLimitError(err) {

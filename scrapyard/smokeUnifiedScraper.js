@@ -1984,6 +1984,51 @@ async function main() {
     )
   )
 
+  const pacedGalleryFetchTimes = []
+  const pacedGalleryPosts = await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'paced_gallery_user',
+      username: 'paced_gallery_user',
+    },
+    { endPage: 0, postConcurrency: 2 },
+    {
+      fetchHtml: async (url) => ({
+        html: url.includes('.rss')
+          ? `<feed>${['pacedone', 'pacedtwo']
+              .map(
+                (id) =>
+                  `<entry><title>Gallery ${id}</title><updated>2026-09-01T00:00:00Z</updated><category label="r/test" /><content><a href="https://www.reddit.com/gallery/${id}">[link]</a><img src="https://preview.redd.it/${id}-first.jpg?width=640"></content></entry>`
+              )
+              .join('')}</feed>`
+          : '<html></html>',
+        statusCode: 200,
+        url,
+      }),
+      fetchPostHtml: async (url) => {
+        pacedGalleryFetchTimes.push(Date.now())
+        const id = url.includes('pacedone') ? 'pacedone' : 'pacedtwo'
+        return {
+          html: `<img src="https://preview.redd.it/${id}-second.jpg?width=1080">`,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 50,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(pacedGalleryPosts.length, 2)
+  assert.strictEqual(pacedGalleryFetchTimes.length, 2)
+  assert(
+    pacedGalleryFetchTimes[1] - pacedGalleryFetchTimes[0] >= 35,
+    'concurrent gallery workers must use separate paced request slots'
+  )
+
   const redditFullGalleryEntries = await getRedditMediaEntries(
     {
       origin: 'https://www.reddit.com',
