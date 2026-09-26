@@ -1823,10 +1823,24 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 
   let acceptedPreviewBuffer = null
   if (needsFullResolutionRetry(entry)) {
-    acceptedPreviewBuffer = await downloadMediaBuffer(entry.fullResolutionUrl, {
-      ...entry,
-      mediaUrl: entry.fullResolutionUrl,
-    })
+    let originalUnavailable = false
+    try {
+      acceptedPreviewBuffer = await downloadMediaBuffer(
+        entry.fullResolutionUrl,
+        {
+          ...entry,
+          mediaUrl: entry.fullResolutionUrl,
+        }
+      )
+    } catch (err) {
+      if (
+        !isPermanentDeadMediaError(err) ||
+        entry.pendingFullResolutionRetryPath
+      )
+        throw err
+      originalUnavailable = true
+      acceptedPreviewBuffer = await downloadMediaBuffer(entry.mediaUrl, entry)
+    }
     let quality
     try {
       quality = evaluatePreviewQuality(
@@ -1848,13 +1862,31 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
       )
       return
     }
-    entry = {
-      ...entry,
-      mediaUrl: entry.fullResolutionUrl,
-      mediaUrls: [entry.fullResolutionUrl, entry.mediaUrl, ...entry.mediaUrls],
-      mediaQuality: 'full',
-      needsFullResolution: false,
-      fullResolutionStatus: 'resolved_direct_original',
+    if (originalUnavailable) {
+      appendRunEvent('reddit_original_unavailable_preview_fallback', {
+        postId: entry.postId,
+        previewUrl: entry.mediaUrl,
+        fullResolutionUrl: entry.fullResolutionUrl,
+        quality,
+      })
+      entry = {
+        ...entry,
+        needsFullResolution: false,
+        fullResolutionStatus: 'original_unavailable_preview_fallback',
+      }
+    } else {
+      entry = {
+        ...entry,
+        mediaUrl: entry.fullResolutionUrl,
+        mediaUrls: [
+          entry.fullResolutionUrl,
+          entry.mediaUrl,
+          ...entry.mediaUrls,
+        ],
+        mediaQuality: 'full',
+        needsFullResolution: false,
+        fullResolutionStatus: 'resolved_direct_original',
+      }
     }
   } else if (entry.pendingFullResolutionRetryPath) {
     acceptedPreviewBuffer = await downloadMediaBuffer(entry.mediaUrl, entry)
