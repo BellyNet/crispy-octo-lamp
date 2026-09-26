@@ -426,11 +426,6 @@
       </table>
     </section>
 
-    <section id="embeddings-section">
-      <h2>Embeddings ("You might like")</h2>
-      <div class="status-line" id="embeddings-updated"></div>
-    </section>
-
     <script>
       function fmtDateTime(ms) {
         if (!ms) return '—'
@@ -875,17 +870,6 @@
         }
       })
 
-      async function loadEmbeddings() {
-        try {
-          const r = await fetch('/api/discover')
-          const d = await r.json()
-          const updatedEl = document.getElementById('embeddings-updated')
-          updatedEl.innerHTML = d.meta?.embeddingsUpdatedAt
-            ? `<span>Last updated: <b>${fmtDateTime(Date.parse(d.meta.embeddingsUpdatedAt))}</b></span>`
-            : `<span class="empty">No embeddings computed yet.</span>`
-        } catch {}
-      }
-
       // ffmpeg gates video thumbnails, animated previews, and mobile-variant
       // encoding — all silently, with no error a viewer would ever see on
       // the main dashboard. This is the one place that state is surfaced,
@@ -915,7 +899,6 @@
       loadPrewarmStatus()
       loadMaintStatus()
       loadRun(0)
-      loadEmbeddings()
 
       // Auto-refresh every 5 minutes (same cadence as the main dashboard's
       // refreshUsers) — without this, a tab left open for days looks frozen
@@ -926,7 +909,6 @@
       setInterval(() => {
         loadNightly()
         loadFfmpegStatus()
-        loadEmbeddings()
         if (currentRunIndex === 0) loadRun(0)
       }, 5 * 60 * 1000)
 

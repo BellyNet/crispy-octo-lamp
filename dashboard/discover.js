@@ -1,70 +1,41 @@
 'use strict'
 
-// Builds the payload for GET /api/discover — generated stats and
-// similarity-based "you might like" recommendations. No chat, no LLM calls:
-// everything here is arithmetic over local visit counts, model stats, and
-// CLIP embeddings computed by dashboard/embed/compute_embeddings.py.
+// Builds the payload for GET /api/discover — generated stats and a mixed
+// "discover" carousel. No chat, no LLM calls, no CLIP: everything here is
+// plain arithmetic over local visit counts and model stats.
 //
-// An earlier version of this replaced the recommendation row with CLIP
-// zero-shot body-type categories (thick/curvy, bbw, ssbbw, ...). That was
-// reverted — testing showed the category text prompts embed at 0.82-0.92
-// cosine similarity to each other regardless of wording, model size, or
-// classification method, so CLIP just can't separate them for this content.
-// Image-to-image similarity (this file) doesn't hit that problem.
-
-const fs = require('fs')
-const path = require('path')
+// This replaces an earlier CLIP-embedding image-similarity recommender
+// (dashboard/embed/compute_embeddings.py's output). Pulled 2026-09 after
+// checking the actual numbers on the live dataset: cosine similarity
+// between totally unrelated models already sat at 0.85-0.95 for the middle
+// 80% of all pairs — CLIP doesn't spread this content domain out much — and
+// on top of that, one single model won the "best match" slot for 158 of
+// 159 models (99.4%), a hubness collapse that meant nearly everyone got
+// funneled toward the same one or two "recommendations" regardless of what
+// they'd actually visited. (An even earlier version tried CLIP zero-shot
+// body-type categories and hit a related wall: category prompts embedded
+// at 0.82-0.92 similarity to each other regardless of wording.) The
+// categories below don't need an embedding space at all and can't collapse
+// the same way — each is a plain sort over a single field.
 
 const RECENT_WINDOW_DAYS = 14
 const ADDED_WINDOW_DAYS = 7
-const SEED_COUNT = 5
-const RECOMMEND_COUNT = 12
 const TOP_LIST_COUNT = 8
+const DISCOVER_CATEGORY_CAP = 5
+const DISCOVER_TOTAL_COUNT = 12
 
-function loadJsonSafe(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch {
-    return fallback
-  }
-}
-
-function cosineSim(a, b) {
-  let dot = 0
-  let na = 0
-  let nb = 0
-  const n = Math.min(a.length, b.length)
-  for (let i = 0; i < n; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  if (na === 0 || nb === 0) return 0
-  return dot / (Math.sqrt(na) * Math.sqrt(nb))
+function daysAgo(iso) {
+  if (!iso) return null
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 60 * 60 * 1000))
 }
 
 // modelNames: live model dir names (source of truth — a fresh datasetDir
-//   listing — so stale/removed models in visits.json or embeddings.json
-//   never leak into the output).
+//   listing — so stale/removed models in visits.json never leak into the
+//   output).
 // statsByName: modelStatsCache-shaped map { name: { latestAddedMs, fileCount,
 //   totalBytes, ... } }
 // visitsData: shape from VisitTracker#getVisits()
-// thumbDir: to locate embeddings.json
-function buildDiscoverPayload({ modelNames, statsByName, visitsData, thumbDir }) {
-  const modelNameSet = new Set(modelNames)
-  const rawEmbeddings = loadJsonSafe(path.join(thumbDir, 'embeddings.json'), {})
-  const embeddings = Object.fromEntries(
-    Object.entries(rawEmbeddings).filter(([name]) => modelNameSet.has(name))
-  )
-  const hasEmbeddings = Object.keys(embeddings).length > 0
-  const embeddingsUpdatedAt = hasEmbeddings
-    ? Object.values(embeddings)
-        .map((e) => e.computedAt)
-        .filter(Boolean)
-        .sort()
-        .pop() || null
-    : null
-
+function buildDiscoverPayload({ modelNames, statsByName, visitsData }) {
   const now = Date.now()
   const recentCutoff = now - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000
 
@@ -108,55 +79,70 @@ function buildDiscoverPayload({ modelNames, statsByName, visitsData, thumbDir })
     (n) => (statsByName[n]?.latestAddedMs || 0) >= addedCutoff
   ).length
 
-  const recentlyAdded = [...modelNames]
+  // ── Discover carousel ───────────────────────────────────────────────────
+  // Three plain categories, mixed together and deduped (`used`) so a model
+  // only ever shows up once, in whichever category is most specific about
+  // it. Order matters: more specific/informative categories claim a model
+  // before the generic "recently updated" catch-all gets a chance to.
+  const visitedSet = new Set(visitEntries.map((e) => e.name))
+  const used = new Set()
+
+  // 1) Active again: a model you've visited before that has picked up new
+  // files recently — "you know this one, and it's active again."
+  const activeAgain = modelNames
+    .filter(
+      (n) => visitedSet.has(n) && (statsByName[n]?.latestAddedMs || 0) >= recentCutoff
+    )
     .sort(
       (a, b) => (statsByName[b]?.latestAddedMs || 0) - (statsByName[a]?.latestAddedMs || 0)
     )
-    .slice(0, RECOMMEND_COUNT)
-    .map((name) => ({ name, reason: 'Recently added', score: 0 }))
+    .slice(0, DISCOVER_CATEGORY_CAP)
+    .map((name) => {
+      used.add(name)
+      return { name, reason: 'Active again — new content', score: 0 }
+    })
 
-  let recommended = recentlyAdded
-  let coldStart = true
+  // 2) Haven't visited in a while: needs actual visit history, just stale —
+  // a model you've never opened isn't "overdue," it's just unexplored
+  // (that's what the recently-updated catch-all below is for instead).
+  const dueForRevisit = [...visitEntries]
+    .filter((e) => !used.has(e.name))
+    .sort((a, b) => new Date(a.v.lastVisitedAt) - new Date(b.v.lastVisitedAt))
+    .slice(0, DISCOVER_CATEGORY_CAP)
+    .map((e) => {
+      used.add(e.name)
+      const days = daysAgo(e.v.lastVisitedAt)
+      return {
+        name: e.name,
+        reason: days == null ? "Haven't visited in a while" : `Last visited ${days}d ago`,
+        score: 0,
+      }
+    })
 
-  if (hasEmbeddings && mostVisited.length > 0) {
-    const seeds = mostVisited
-      .map((m) => m.name)
-      .slice(0, SEED_COUNT)
-      .filter((n) => embeddings[n])
-    if (seeds.length > 0) {
-      const excluded = new Set(mostVisited.map((m) => m.name))
-      const best = new Map() // candidateName -> { score, seed }
-      for (const seed of seeds) {
-        const seedVec = embeddings[seed].vector
-        for (const name of Object.keys(embeddings)) {
-          if (excluded.has(name) || name === seed) continue
-          const score = cosineSim(seedVec, embeddings[name].vector)
-          const prev = best.get(name)
-          if (!prev || score > prev.score) best.set(name, { score, seed })
-        }
-      }
-      const ranked = [...best.entries()]
-        .sort((a, b) => b[1].score - a[1].score)
-        .slice(0, RECOMMEND_COUNT)
-        .map(([name, { score, seed }]) => ({
-          name,
-          reason: `Similar to ${seed}`,
-          score,
-        }))
-      if (ranked.length > 0) {
-        recommended = ranked
-        coldStart = false
-      }
-    }
-  }
+  // 3) Recently updated: plain newest-content-first, filling whatever's
+  // left. The only category that works with zero visit history, so this
+  // is also the cold-start fallback (a brand-new install shows only this).
+  const remaining = Math.max(0, DISCOVER_TOTAL_COUNT - used.size)
+  const recentlyUpdated = [...modelNames]
+    .filter((n) => !used.has(n))
+    .sort(
+      (a, b) => (statsByName[b]?.latestAddedMs || 0) - (statsByName[a]?.latestAddedMs || 0)
+    )
+    .slice(0, remaining)
+    .map((name) => {
+      used.add(name)
+      return { name, reason: 'Recently updated', score: 0 }
+    })
+
+  const recommended = [...activeAgain, ...dueForRevisit, ...recentlyUpdated]
 
   return {
     stats: { totalModels, totalFiles, totalBytes, recentlyAddedCount },
     mostVisited,
     trending,
     recommended,
-    meta: { hasVisits, hasEmbeddings, coldStart, embeddingsUpdatedAt },
+    meta: { hasVisits },
   }
 }
 
-module.exports = { buildDiscoverPayload, cosineSim }
+module.exports = { buildDiscoverPayload }

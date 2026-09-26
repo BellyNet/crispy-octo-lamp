@@ -1115,9 +1115,9 @@ app.get('/api/users', async (_req, res) => {
   }
 })
 
-// Discover panel — generated stats + similarity-based "you might like"
-// recommendations. Pure computation over visits.json/embeddings.json/
-// modelStatsCache; see dashboard/discover.js for the actual logic.
+// Discover panel — generated stats + a mixed discovery carousel. Pure
+// computation over visits.json/modelStatsCache; see dashboard/discover.js
+// for the actual logic.
 app.get('/api/discover', async (_req, res) => {
   try {
     const entries = await fs.promises.readdir(datasetDir, {
@@ -1132,7 +1132,6 @@ app.get('/api/discover', async (_req, res) => {
         modelNames,
         statsByName: modelStatsCache,
         visitsData: visits.getVisits(),
-        thumbDir: THUMB_DIR,
       })
     )
   } catch (err) {
@@ -2456,84 +2455,6 @@ app.post('/api/rescan', async (_req, res) => {
     console.warn('  Manual scan error:', err.message)
   )
   res.json({ ok: true, state: scanState })
-})
-
-// ─── CLIP EMBEDDINGS ─────────────────────────────────────────────────────────
-// Computes one L2-normalized CLIP centroid vector per model from sampled
-// thumbnails (dashboard/embed/compute_embeddings.py), written to
-// THUMB_DIR/embeddings.json. Powers Discover's "you might like" list.
-// Runs entirely locally via a Python subprocess — no image or embedding
-// data ever leaves the machine.
-const PYTHON_BIN = process.env.PYTHON_BIN || 'python'
-const EMBED_SCRIPT = path.join(__dirname, 'embed', 'compute_embeddings.py')
-
-const embedState = {
-  inProgress: false,
-  trigger: null, // 'manual'
-  step: null, // 'running' | null
-  startedAt: null,
-  completedAt: null,
-  lastExitCode: null,
-  lastError: null,
-  log: '', // tail of combined stdout+stderr, for debugging from the UI
-}
-
-async function runEmbedJob({ trigger = 'manual' } = {}) {
-  if (embedState.inProgress) {
-    return { skipped: true, reason: 'already running' }
-  }
-  embedState.inProgress = true
-  embedState.trigger = trigger
-  embedState.step = 'running'
-  embedState.startedAt = new Date().toISOString()
-  embedState.completedAt = null
-  embedState.lastExitCode = null
-  embedState.lastError = null
-  embedState.log = ''
-  console.log(`  Embed:     ${trigger} — computing CLIP embeddings…`)
-  try {
-    const { stdout, stderr } = await execFileAsync(
-      PYTHON_BIN,
-      [EMBED_SCRIPT, '--dataset-dir', datasetDir, '--thumb-dir', THUMB_DIR],
-      { timeout: 10 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 }
-    )
-    embedState.lastExitCode = 0
-    embedState.log = `${stdout}\n${stderr}`.trim().slice(-8000)
-    console.log('  Embed:     done ✓')
-  } catch (err) {
-    // execFile rejects both on non-zero exit AND on spawn failure (ENOENT
-    // when python isn't on PATH) — either way, surface it into state instead
-    // of throwing into an unhandled rejection (this runs fire-and-forget).
-    // embeddings.json is only ever written by the script itself, so a
-    // failure here leaves the last good file in place for discover.js.
-    embedState.lastExitCode = typeof err.code === 'number' ? err.code : -1
-    embedState.lastError = err.message
-    embedState.log = `${err.stdout || ''}\n${err.stderr || ''}`
-      .trim()
-      .slice(-8000)
-    console.warn(`  Embed:     failed — ${err.message}`)
-  }
-  embedState.step = null
-  embedState.completedAt = new Date().toISOString()
-  embedState.inProgress = false
-  return { ok: embedState.lastExitCode === 0 }
-}
-
-app.get('/api/embed-status', (_req, res) => {
-  res.json({ ...embedState })
-})
-
-app.post('/api/run-embed', (_req, res) => {
-  if (embedState.inProgress) {
-    return res
-      .status(202)
-      .json({ skipped: true, reason: 'already running', state: embedState })
-  }
-  // Kick off without awaiting — client polls /api/embed-status for progress.
-  runEmbedJob({ trigger: 'manual' }).catch((err) =>
-    console.warn('  Manual embed error:', err.message)
-  )
-  res.json({ ok: true, state: embedState })
 })
 
 // Serve media files
