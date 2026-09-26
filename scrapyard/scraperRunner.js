@@ -573,6 +573,11 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-retry-only',
     isTruthy(getOption(argv, 'reddit-retry-only'))
   )
+  appendBoolean(
+    args,
+    '--reddit-known-galleries-only',
+    isTruthy(getOption(argv, 'reddit-known-galleries-only'))
+  )
 }
 
 function appendMilkmaidOptions(args, argv) {
@@ -1295,6 +1300,8 @@ function buildSourceBatchOptions(argv) {
     options['reddit-full-refresh'] = true
   if (isTruthy(getOption(argv, 'reddit-retry-only')))
     options['reddit-retry-only'] = true
+  if (isTruthy(getOption(argv, 'reddit-known-galleries-only')))
+    options['reddit-known-galleries-only'] = true
   return options
 }
 
@@ -1316,6 +1323,7 @@ Options:
   --full-source-refresh       Scan every source page, ignoring frontiers.
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-retry-only         Retry queued Reddit originals without scanning posts.
+  --reddit-known-galleries-only Recheck gallery posts recorded in Reddit source state.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.
@@ -1840,6 +1848,7 @@ Options:
   --full-source-refresh       Scan every source page, ignoring frontiers.
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-retry-only         Retry queued Reddit originals without scanning posts.
+  --reddit-known-galleries-only Recheck gallery posts recorded in Reddit source state.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between source runs.
   --dry-run                   Dry run Hoghaul sources.

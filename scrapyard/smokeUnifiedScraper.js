@@ -84,6 +84,7 @@ const {
 } = require('./sourceAdapters/coomerKemono')
 const {
   extractTitleFromOldRedditPostHtml,
+  fetchKnownRedditGalleryPosts,
   fetchRedditPosts,
   getRedditMediaEntries,
   getRedditPostTitle,
@@ -788,6 +789,20 @@ async function main() {
   assert(
     buildScraperArgs(reddit, redditRetryBatchOptions).includes(
       '--reddit-retry-only'
+    )
+  )
+  const redditGalleryBatchOptions = buildAllSourceRunOptions(
+    { 'reddit-known-galleries-only': true },
+    'test_model',
+    reddit
+  )
+  assert.strictEqual(
+    redditGalleryBatchOptions['reddit-known-galleries-only'],
+    true
+  )
+  assert(
+    buildScraperArgs(reddit, redditGalleryBatchOptions).includes(
+      '--reddit-known-galleries-only'
     )
   )
   let batchSourceRuns = 0
@@ -1914,6 +1929,64 @@ async function main() {
     )
   )
 
+  const knownGallerySource = {
+    origin: 'https://www.reddit.com',
+    site: 'reddit',
+    service: 'submitted',
+    userId: 'known_gallery_user',
+    username: 'known_gallery_user',
+  }
+  const knownGalleryRecords = [
+    {
+      postId: 'known1',
+      title: 'Known gallery',
+      createdUtc: 1710000000,
+      mediaPageUrls: ['https://www.reddit.com/gallery/known1'],
+    },
+  ]
+  const knownGalleryCache = new Map()
+  const knownGalleryFetches = []
+  const knownGalleryDeps = {
+    fetchHtml: async (url) => {
+      knownGalleryFetches.push(url)
+      return {
+        html: '<img src="https://preview.redd.it/first-v0-one.jpg?width=320"><img src="https://i.redd.it/two.jpg">',
+        statusCode: 200,
+        url,
+      }
+    },
+    galleryCache: knownGalleryCache,
+    onGalleryHydrated: (record) => knownGalleryCache.set(record.postId, record),
+    redditHtmlDelayMs: 0,
+    redditHtmlMaxRetries: 0,
+    redgifsClient: { parseRedgifsId: () => null },
+  }
+  const knownGalleryPosts = await fetchKnownRedditGalleryPosts(
+    knownGallerySource,
+    knownGalleryRecords,
+    {},
+    knownGalleryDeps
+  )
+  assert.strictEqual(knownGalleryFetches.length, 1)
+  assert.strictEqual(knownGalleryPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(knownGalleryPosts[0].mediaHydrationFailed, undefined)
+  assert.strictEqual(
+    knownGalleryPosts[0].mediaEntries[0].fullResolutionUrl,
+    'https://i.redd.it/one.jpg'
+  )
+  assert(
+    knownGalleryPosts[0].mediaEntries.some((entry) =>
+      entry.mediaUrl.startsWith('https://i.redd.it/')
+    )
+  )
+  await fetchKnownRedditGalleryPosts(
+    knownGallerySource,
+    knownGalleryRecords,
+    {},
+    knownGalleryDeps
+  )
+  assert.strictEqual(knownGalleryFetches.length, 1)
+
   const redditRssGalleryEvents = []
   const redditRssGalleryFetches = []
   const redditRssGalleryPostFetches = []
@@ -2410,6 +2483,13 @@ async function main() {
       'https://www.reddit.com/user/sample_model/submitted/',
       '--reddit-retry-only',
     ]).redditRetryOnly,
+    true
+  )
+  assert.strictEqual(
+    normalizeHoghaulRunOptions([
+      'https://www.reddit.com/user/sample_model/submitted/',
+      '--reddit-known-galleries-only',
+    ]).redditKnownGalleriesOnly,
     true
   )
   const coomerFansScraperArgs = buildScraperArgs(

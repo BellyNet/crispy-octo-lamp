@@ -45,6 +45,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'reddit-browser-media',
   'reddit-full-refresh',
   'reddit-retry-only',
+  'reddit-known-galleries-only',
   'download-oversized',
   'full-source-refresh',
 ]
@@ -292,6 +293,13 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       isTruthy(process.env.HOGHAUL_REDDIT_FULL_REFRESH),
     redditRetryOnly: Boolean(
       getRunOption(argv, 'redditRetryOnly', 'reddit-retry-only')
+    ),
+    redditKnownGalleriesOnly: Boolean(
+      getRunOption(
+        argv,
+        'redditKnownGalleriesOnly',
+        'reddit-known-galleries-only'
+      )
     ),
     browserOptions: {
       browserExecutable:

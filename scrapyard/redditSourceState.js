@@ -358,5 +358,6 @@ module.exports = {
   createIncrementalSourceState,
   getRedditSourceStatePath,
   getSourceKey,
+  loadRedditSourceState,
   recordRedditSourceCheck,
 }

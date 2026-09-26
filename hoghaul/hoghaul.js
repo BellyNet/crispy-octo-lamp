@@ -50,6 +50,8 @@ const redditOAuth = require('../scrapyard/redditOAuth')
 const { createRedgifsClient } = require('../scrapyard/redgifsClient')
 const {
   createIncrementalSourceState,
+  getSourceKey: getRedditSourceKey,
+  loadRedditSourceState,
   recordRedditSourceCheck,
 } = require('../scrapyard/redditSourceState')
 const {
@@ -76,6 +78,7 @@ const {
   resolveKemonoCreatorIdForJson: resolveSharedKemonoCreatorIdForJson,
 } = require('../scrapyard/sourceAdapters/coomerKemono')
 const {
+  fetchKnownRedditGalleryPosts,
   fetchRedditPosts: fetchRedditAdapterPosts,
   preflightRedditSource: preflightRedditAdapterSource,
 } = require('../scrapyard/sourceAdapters/reddit')
@@ -1382,7 +1385,7 @@ async function fetchPosts(source, options, deps = {}) {
     })
   }
   if (source.site === 'reddit') {
-    return fetchRedditAdapterPosts(source, options, {
+    const redditDeps = {
       fetchHtml,
       fetchJson,
       fetchPostHtml: deps.fetchPostHtml,
@@ -1390,6 +1393,8 @@ async function fetchPosts(source, options, deps = {}) {
       redditFullRefresh: deps.redditFullRefresh,
       redditIncrementalOverlapPosts: deps.redditIncrementalOverlapPosts,
       redditSourceState: deps.redditSourceState,
+      galleryCache: deps.galleryCache,
+      onGalleryHydrated: deps.onGalleryHydrated,
       onDiscoveryProgress: deps.onDiscoveryProgress,
       onListingPage: deps.onListingPage,
       appendRunEvent,
@@ -1398,7 +1403,15 @@ async function fetchPosts(source, options, deps = {}) {
       pageSize: REDDIT_PAGE_SIZE,
       redgifsClient,
       suppressIncrementalLog: true,
-    })
+    }
+    return Array.isArray(deps.knownGalleryPosts)
+      ? fetchKnownRedditGalleryPosts(
+          source,
+          deps.knownGalleryPosts,
+          options,
+          redditDeps
+        )
+      : fetchRedditAdapterPosts(source, options, redditDeps)
   }
   if (source.site === 'tumblr') {
     return fetchTumblrAdapterPosts(source, options, {
@@ -1421,6 +1434,53 @@ async function fetchPosts(source, options, deps = {}) {
     sourceFrontier: deps.sourceFrontier,
     sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
   })
+}
+
+function createKnownRedditGalleryContext(modelLogDir, source) {
+  const sourceKey = getRedditSourceKey(source)
+  const sourceState = loadRedditSourceState(modelLogDir).sources[sourceKey]
+  const knownGalleryPosts = Object.values(sourceState?.posts || {})
+    .filter((post) => {
+      const id = String(post?.postId || '').toLowerCase()
+      return (
+        id &&
+        (post.mediaPageUrls || []).some((url) =>
+          String(url).toLowerCase().includes(`/gallery/${id}`)
+        )
+      )
+    })
+    .sort(
+      (left, right) =>
+        Number(right.createdUtc || 0) - Number(left.createdUtc || 0)
+    )
+  const cachePath = path.join(modelLogDir, 'reddit-known-gallery-cache.jsonl')
+  const galleryCache = new Map()
+  if (fs.existsSync(cachePath)) {
+    for (const line of fs.readFileSync(cachePath, 'utf8').split(/\r?\n/)) {
+      if (!line.trim()) continue
+      try {
+        const cached = JSON.parse(line)
+        if (
+          cached.sourceKey === sourceKey &&
+          cached.postId &&
+          Array.isArray(cached.htmlMediaUrls) &&
+          cached.htmlMediaUrls.length >= 2
+        ) {
+          galleryCache.set(cached.postId, cached)
+        }
+      } catch {}
+    }
+  }
+  const onGalleryHydrated = (record) => {
+    const cached = {
+      sourceKey,
+      ...record,
+      hydratedAt: new Date().toISOString(),
+    }
+    fs.appendFileSync(cachePath, `${JSON.stringify(cached)}\n`)
+    galleryCache.set(record.postId, cached)
+  }
+  return { knownGalleryPosts, galleryCache, onGalleryHydrated }
 }
 
 function classifyMedia(filename) {
@@ -2154,8 +2214,14 @@ async function run(argvInput = process.argv.slice(2)) {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
-  if (runOptions.redditRetryOnly && source.site !== 'reddit') {
-    throw new Error('--reddit-retry-only requires a Reddit source URL')
+  if (
+    (runOptions.redditRetryOnly || runOptions.redditKnownGalleriesOnly) &&
+    source.site !== 'reddit'
+  ) {
+    throw new Error('Reddit recovery options require a Reddit source URL')
+  }
+  if (runOptions.redditRetryOnly && runOptions.redditKnownGalleriesOnly) {
+    throw new Error('Choose one Reddit recovery mode per run')
   }
   const browserOptionsForSource = getBrowserOptionsForSource(
     source,
@@ -2284,6 +2350,18 @@ async function run(argvInput = process.argv.slice(2)) {
     )
   }
 
+  const knownGalleryContext = runOptions.redditKnownGalleriesOnly
+    ? createKnownRedditGalleryContext(folders.logDir, source)
+    : null
+  if (knownGalleryContext) {
+    console.log(
+      `Reddit known gallery refresh: ${knownGalleryContext.knownGalleryPosts.length} post(s), ${knownGalleryContext.galleryCache.size} cached hydration(s)`
+    )
+    appendRunEvent('reddit_known_gallery_refresh_started', {
+      knownGalleryPosts: knownGalleryContext.knownGalleryPosts.length,
+      cachedHydrations: knownGalleryContext.galleryCache.size,
+    })
+  }
   const posts = runOptions.redditRetryOnly
     ? []
     : await fetchPosts(
@@ -2302,6 +2380,9 @@ async function run(argvInput = process.argv.slice(2)) {
           redditIncrementalOverlapPosts:
             runOptions.redditIncrementalOverlapPosts,
           redditSourceState: redditStateContext?.incrementalState || null,
+          knownGalleryPosts: knownGalleryContext?.knownGalleryPosts,
+          galleryCache: knownGalleryContext?.galleryCache,
+          onGalleryHydrated: knownGalleryContext?.onGalleryHydrated,
           fullSourceRefresh: runOptions.fullSourceRefresh,
           sourceFrontier,
           sourceIncrementalOverlapPages:
@@ -2368,7 +2449,12 @@ async function run(argvInput = process.argv.slice(2)) {
     ? Math.max(1000, configuredRetryDelayMs)
     : 1500
 
-  if (source.site === 'reddit' && !dryRun && !(maxFiles > 0)) {
+  if (
+    source.site === 'reddit' &&
+    !dryRun &&
+    !(maxFiles > 0) &&
+    !runOptions.redditKnownGalleriesOnly
+  ) {
     const activeMediaByUrl = new Map()
     for (const entry of selectedMedia) {
       for (const url of [entry.mediaUrl, entry.fullResolutionUrl].filter(
@@ -2578,9 +2664,10 @@ async function run(argvInput = process.argv.slice(2)) {
     return 0
   }
 
-  const trackedModelName = runOptions.redditRetryOnly
-    ? modelName
-    : registerSourceForRun(source, inputUrl, model)
+  const trackedModelName =
+    runOptions.redditRetryOnly || runOptions.redditKnownGalleriesOnly
+      ? modelName
+      : registerSourceForRun(source, inputUrl, model)
   if (trackedModelName !== modelName) {
     throw new Error(
       `Resolved model changed during source registration: ${modelName} -> ${trackedModelName}`

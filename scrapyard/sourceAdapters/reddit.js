@@ -1427,6 +1427,111 @@ async function fetchRedditPostHtmlForMedia(source, post, deps = {}) {
   return null
 }
 
+async function fetchKnownRedditGalleryPosts(
+  source,
+  knownGalleryPosts = [],
+  options = {},
+  deps = {}
+) {
+  if (typeof deps.fetchHtml !== 'function') {
+    throw new Error('fetchKnownRedditGalleryPosts requires fetchHtml')
+  }
+  const posts = []
+  const recordsToCheck =
+    Number.isFinite(options.maxPosts) && options.maxPosts > 0
+      ? knownGalleryPosts.slice(0, options.maxPosts)
+      : knownGalleryPosts
+  let mediaCount = 0
+  for (const record of recordsToCheck) {
+    const id = String(record?.postId || '').trim()
+    if (!id) continue
+    const pageUrls = Array.isArray(record.mediaPageUrls)
+      ? record.mediaPageUrls
+      : []
+    const galleryUrl =
+      pageUrls.find((url) =>
+        String(url).toLowerCase().includes(`/gallery/${id.toLowerCase()}`)
+      ) || `${source.origin}/gallery/${id}`
+    const permalink =
+      pageUrls.find((url) => /\/comments\//i.test(String(url))) || galleryUrl
+    const post = {
+      id,
+      title: record.title || null,
+      created_utc: record.createdUtc || null,
+      permalink,
+      url: galleryUrl,
+      url_overridden_by_dest: galleryUrl,
+      is_gallery: true,
+    }
+    const cached = deps.galleryCache?.get(id)
+    if (
+      Array.isArray(cached?.htmlMediaUrls) &&
+      cached.htmlMediaUrls.length >= 2
+    ) {
+      post.htmlMediaUrls = cached.htmlMediaUrls
+      post.title = cached.title || post.title
+    } else {
+      deps.appendRunEvent?.('reddit_gallery_hydration_post_started', {
+        postId: id,
+        current: posts.length + 1,
+        total: recordsToCheck.length,
+      })
+      const startedAt = Date.now()
+      try {
+        const response = await fetchRedditPostHtmlForMedia(source, post, deps)
+        post.htmlMediaUrls = extractRedditHtmlMediaUrls(response?.html || '')
+        post.title =
+          post.title ||
+          extractTitleFromOldRedditPostHtml(response?.html) ||
+          null
+        if (post.htmlMediaUrls.length < 2) {
+          post.mediaHydrationFailed = true
+          post.mediaHydrationError =
+            'Fewer than two gallery images were discovered.'
+        } else {
+          deps.onGalleryHydrated?.({
+            postId: id,
+            title: post.title,
+            htmlMediaUrls: post.htmlMediaUrls,
+          })
+        }
+      } catch (err) {
+        post.mediaHydrationFailed = true
+        post.mediaHydrationError = err.message
+        deps.logger?.warn?.(
+          `Reddit gallery page fetch failed for ${id}: ${err.message}`
+        )
+      }
+      deps.appendRunEvent?.('reddit_gallery_hydration_post_finished', {
+        postId: id,
+        current: posts.length + 1,
+        total: recordsToCheck.length,
+        mediaUrlCount: post.htmlMediaUrls?.length || 0,
+        durationMs: Date.now() - startedAt,
+        failed: Boolean(post.mediaHydrationFailed),
+      })
+    }
+    const mediaEntries = await getRedditMediaEntries(source, post, deps)
+    mediaCount += mediaEntries.length
+    posts.push({
+      ...post,
+      title: getRedditPostTitle(post),
+      text: getRedditPostText(post),
+      published: getRedditPostDate(post),
+      mediaEntries,
+    })
+    emitDiscoveryProgress(deps, {
+      mode: 'known reddit galleries',
+      pages: 0,
+      posts: posts.length,
+      media: mediaCount,
+      current: posts.length,
+      total: recordsToCheck.length,
+    })
+  }
+  return posts
+}
+
 async function enrichRedditRssPostMedia(source, post, deps = {}) {
   const rssMediaUrls = extractRedditHtmlMediaUrls(post.rssContentHtml)
   post.htmlMediaUrls = dedupeRedditHtmlMediaUrls([
@@ -1892,6 +1997,7 @@ module.exports = {
   buildRedditFilename,
   extractRedditHtmlMediaUrls,
   fetchRedditPosts,
+  fetchKnownRedditGalleryPosts,
   fetchOldRedditHtml,
   extractTitleFromOldRedditPostHtml,
   getOldRedditOrigin,
