@@ -1695,6 +1695,13 @@ function needsFullResolutionRetry(entry) {
   )
 }
 
+function needsPacedRedditOriginal(entry) {
+  return (
+    Boolean(entry?.pendingFullResolutionRetryPath) ||
+    needsFullResolutionRetry(entry)
+  )
+}
+
 function recordNeedsFullResolutionSkip(
   modelName,
   folders,
@@ -2330,16 +2337,24 @@ async function run(argvInput = process.argv.slice(2)) {
     : 1500
 
   if (source.site === 'reddit' && !dryRun && !(maxFiles > 0)) {
-    const activeMediaUrls = new Set(
-      selectedMedia.flatMap((entry) =>
-        [entry.mediaUrl, entry.fullResolutionUrl].filter(Boolean)
-      )
-    )
-    const pendingRetries = listDueFullResolutionRetries(
-      folders.logDir,
-      source
-    ).filter((pending) => !activeMediaUrls.has(pending.fullResolutionUrl))
+    const activeMediaByUrl = new Map()
+    for (const entry of selectedMedia) {
+      for (const url of [entry.mediaUrl, entry.fullResolutionUrl].filter(
+        Boolean
+      )) {
+        if (!activeMediaByUrl.has(url)) activeMediaByUrl.set(url, [])
+        activeMediaByUrl.get(url).push(entry)
+      }
+    }
+    const pendingRetries = listDueFullResolutionRetries(folders.logDir, source)
     for (const pending of pendingRetries) {
+      const activeEntry = (
+        activeMediaByUrl.get(pending.fullResolutionUrl) || []
+      ).find((entry) => !entry.pendingFullResolutionRetryPath)
+      if (activeEntry) {
+        activeEntry.pendingFullResolutionRetryPath = pending.relativePath
+        continue
+      }
       selectedMedia.push({
         sourceSite: 'reddit',
         sourceService: source.service || 'submitted',
@@ -2736,7 +2751,7 @@ async function run(argvInput = process.argv.slice(2)) {
       noteMediaOutcome('failed', `media_error: ${entry.filename}`, 'mediaError')
       console.log(`Failed media: ${entry.filename} - ${err.message}`)
       if (
-        entry.pendingFullResolutionRetryPath &&
+        needsPacedRedditOriginal(entry) &&
         /\b(?:HTTP|Browser HTTP)\s+429\b/i.test(err.message)
       ) {
         return 'rate_limited'
@@ -2745,23 +2760,45 @@ async function run(argvInput = process.argv.slice(2)) {
   }
   await Promise.all(
     imageLike
-      .filter((entry) => !entry.pendingFullResolutionRetryPath)
+      .filter((entry) => !needsPacedRedditOriginal(entry))
       .map((entry) => imageLimit(() => processImageEntry(entry)))
   )
-  const pendingImageRetries = imageLike.filter(
-    (entry) => entry.pendingFullResolutionRetryPath
-  )
-  for (const [index, entry] of pendingImageRetries.entries()) {
+  const pacedRedditOriginals = imageLike.filter(needsPacedRedditOriginal)
+  for (const [index, entry] of pacedRedditOriginals.entries()) {
     if (index > 0) await sleep(pendingRetryDelayMs)
-    markFullResolutionRetryAttempt(
-      folders.logDir,
-      entry.pendingFullResolutionRetryPath
-    )
+    if (entry.pendingFullResolutionRetryPath) {
+      markFullResolutionRetryAttempt(
+        folders.logDir,
+        entry.pendingFullResolutionRetryPath
+      )
+    }
     const outcome = await processImageEntry(entry)
     if (outcome === 'rate_limited') {
+      let queuedRemaining = 0
+      for (const remaining of pacedRedditOriginals.slice(index + 1)) {
+        if (remaining.pendingFullResolutionRetryPath) continue
+        const destination = hoghaulSavePipeline.getDestination({
+          modelName,
+          folders,
+          entry: remaining,
+          kind: remaining.kind,
+        })
+        recordFullResolutionRetry(folders.logDir, {
+          relativePath: destination.relativePath,
+          previewUrl: remaining.mediaUrl,
+          fullResolutionUrl: remaining.fullResolutionUrl,
+          mediaPageUrl: remaining.mediaPageUrl,
+          postId: remaining.postId,
+          sourceService: remaining.sourceService,
+          sourceUserId: remaining.sourceUserId,
+          sourceUsername: remaining.sourceUsername,
+        })
+        queuedRemaining += 1
+      }
       appendRunEvent('reddit_full_resolution_retries_paused', {
         reason: 'rate_limited',
-        remaining: pendingImageRetries.length - index - 1,
+        remaining: pacedRedditOriginals.length - index - 1,
+        queuedRemaining,
       })
       break
     }
