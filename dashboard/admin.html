@@ -315,12 +315,45 @@
       .media-card:hover {
         border-color: var(--accent);
       }
+      .media-card .thumb {
+        position: relative;
+      }
       .media-card img {
         width: 100%;
         aspect-ratio: 1;
         object-fit: cover;
         display: block;
         background: #0a0a10;
+      }
+      /* Post title/caption strip pinned to the bottom of the thumb — same
+         look as .card-post-title on the main dashboard's user grid. */
+      .media-card .post-title {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 12px 6px 4px;
+        font-size: 10px;
+        line-height: 1.25;
+        color: #f0f0f5;
+        background: linear-gradient(
+          to top,
+          rgba(0, 0, 0, 0.82) 0%,
+          rgba(0, 0, 0, 0.5) 60%,
+          transparent 100%
+        );
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      /* Too cramped to read at the smallest size. */
+      #media-grid.size-s .media-card .post-title {
+        display: none;
+      }
+      #media-grid.size-l .media-card .post-title {
+        -webkit-line-clamp: 6;
       }
       .media-card .meta {
         padding: 5px 7px;
@@ -666,23 +699,48 @@
         return `/#/u/${encodeURIComponent(item.username)}?since=${since}&until=${until}&open=${openParam}`
       }
 
+      function escapeHtml(value) {
+        return String(value ?? '').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        )
+      }
+
+      // Same cleanup as stripUsernamePrefix() on the main dashboard:
+      // coomerfans titles often arrive as "<screenname> / <real title>",
+      // and the model name is already shown on the card.
+      function cleanPostTitle(item) {
+        let t = typeof item.title === 'string' ? item.title.trim() : ''
+        const name = (item.username || '').trim()
+        if (!t || !name) return t
+        const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+        const re = new RegExp(`^${escaped}\\s*[\\/\\-\\|·:,]\\s*`, 'i')
+        t = t.replace(re, '').trim()
+        t = t.replace(re, '').trim()
+        return t
+      }
+
       function renderMediaGrid(items) {
         if (!items.length) {
           mediaGridEl.innerHTML = '<div class="empty">No media in this run.</div>'
           return
         }
         mediaGridEl.innerHTML = items
-          .map(
-            (item) => `
-              <a class="media-card" href="${mediaCardHref(item)}" title="${item.username} / ${item.filename}">
-                <img loading="lazy" src="${item.thumbUrl}" alt="${item.filename}" />
+          .map((item) => {
+            const title = cleanPostTitle(item)
+            return `
+              <a class="media-card" href="${escapeHtml(mediaCardHref(item))}" title="${escapeHtml(title || `${item.username} / ${item.filename}`)}">
+                <div class="thumb">
+                  <img loading="lazy" src="${escapeHtml(item.thumbUrl)}" alt="${escapeHtml(item.filename)}" />
+                  ${title ? `<div class="post-title">${escapeHtml(title)}</div>` : ''}
+                </div>
                 <div class="meta">
-                  <div class="name">${item.username}</div>
+                  <div class="name">${escapeHtml(item.username)}</div>
                   <div class="time">${fmtTime(item.addedMs)}</div>
                 </div>
               </a>
             `
-          )
+          })
           .join('')
       }
 

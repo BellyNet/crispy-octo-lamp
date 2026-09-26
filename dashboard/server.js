@@ -1214,6 +1214,9 @@ async function refreshRunIndex() {
             size: item.size,
             url: item.url,
             thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+            // Post title/caption, so the admin "recently added" grid can
+            // show the same caption strip as the user grid.
+            ...(item.post?.title && { title: item.post.title }),
             invocationKey: findInvocationKey(invocationWindows, item.addedMs),
           }))
         } catch {
