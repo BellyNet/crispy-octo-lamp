@@ -18,6 +18,16 @@ function decodeBody(buffer, headers = {}) {
   return buffer
 }
 
+function incompleteDownloadError(url, downloadedBytes, totalBytes) {
+  const err = new Error(
+    `Incomplete download from ${new URL(url).hostname}: got ${downloadedBytes} of ${totalBytes || '?'} bytes`
+  )
+  err.code = 'ERR_DOWNLOAD_INCOMPLETE'
+  err.downloadedBytes = downloadedBytes
+  err.totalBytes = totalBytes
+  return err
+}
+
 function createHttpClient(options = {}) {
   const defaultTimeoutMs =
     Number.parseInt(options.timeoutMs || '', 10) || DEFAULT_TIMEOUT_MS
@@ -123,7 +133,18 @@ function createHttpClient(options = {}) {
               })
             }
           })
+          // A dropped connection can end the stream short of the
+          // advertised length; without this check the truncated body was
+          // returned (and saved) as if it were the whole file.
+          res.on('aborted', () =>
+            reject(incompleteDownloadError(url, downloadedBytes, totalBytes))
+          )
+          res.on('error', (err) => reject(err))
           res.on('end', () => {
+            if (totalBytes > 0 && downloadedBytes < totalBytes) {
+              reject(incompleteDownloadError(url, downloadedBytes, totalBytes))
+              return
+            }
             const raw = Buffer.concat(chunks)
             resolve({
               buffer: decodeBody(raw, res.headers),
@@ -264,9 +285,16 @@ function createHttpClient(options = {}) {
             }
           })
           res.on('error', fail)
+          res.on('aborted', () =>
+            fail(incompleteDownloadError(url, downloadedBytes, totalBytes))
+          )
           output.on('error', fail)
           output.on('finish', () => {
             if (settled) return
+            if (totalBytes > 0 && downloadedBytes < totalBytes) {
+              fail(incompleteDownloadError(url, downloadedBytes, totalBytes))
+              return
+            }
             settled = true
             resolve({
               headers: res.headers,

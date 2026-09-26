@@ -42,7 +42,7 @@
     "audit:exact-media-dupes": "node audit/audit-exact-media-duplicates.js",
     "audit:scrape-dupes": "node audit/audit-scrape-duplicates.js",
     "audit:slopvault": "node audit/audit-slopvault.js",
-    "audit:static-gifs": "node audit/audit-static-gifs.js",
+    "audit:gifs": "node audit/audit-gifs.js",
     "repair": "node scrapyard/run-scrape.js repair",
     "repair:reddit-titles": "node scrapyard/repairRedditMetadataTitles.js",
     "repair:coomerfans-titles": "node scrapyard/repairCoomerFansMetadataTitles.js",
