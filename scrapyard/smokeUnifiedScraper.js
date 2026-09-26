@@ -29,6 +29,7 @@ const {
 } = require('./scraperRunner')
 const { probeUsername } = require('../hoghaul/backfill-sources-interactive')
 const { parseSourceUrl } = require('./sourceRouter')
+const { normalizeHoghaulRunOptions } = require('./scraperOptions')
 const {
   backfillSeenSourcePostsFromRunEvents,
   createBoundaryPageFilter,
@@ -2321,6 +2322,13 @@ async function main() {
   assert.strictEqual(redditOptions.sourceIncrementalOverlapPages, '2')
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
+  assert.strictEqual(
+    normalizeHoghaulRunOptions([
+      'https://www.reddit.com/user/sample_model/submitted/',
+      '--reddit-retry-only',
+    ]).redditRetryOnly,
+    true
+  )
   const coomerFansScraperArgs = buildScraperArgs(
     parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
     {

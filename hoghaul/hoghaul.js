@@ -2115,6 +2115,9 @@ async function run(argvInput = process.argv.slice(2)) {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
+  if (runOptions.redditRetryOnly && source.site !== 'reddit') {
+    throw new Error('--reddit-retry-only requires a Reddit source URL')
+  }
   const browserOptionsForSource = getBrowserOptionsForSource(
     source,
     browserOptions
@@ -2242,36 +2245,47 @@ async function run(argvInput = process.argv.slice(2)) {
     )
   }
 
-  const posts = await fetchPosts(
-    source,
-    {
-      startPage,
-      endPage,
-      maxPosts,
-      postConcurrency,
-    },
-    {
-      fetchHtml: coomerFansBrowserFetchHtml,
-      fetchPostHtml: redditBrowserFetchHtml,
-      fallbackDelayMs: runOptions.redditFallbackDelayMs,
-      redditFullRefresh: runOptions.redditFullRefresh,
-      redditIncrementalOverlapPosts: runOptions.redditIncrementalOverlapPosts,
-      redditSourceState: redditStateContext?.incrementalState || null,
-      fullSourceRefresh: runOptions.fullSourceRefresh,
-      sourceFrontier,
-      sourceIncrementalOverlapPages: runOptions.sourceIncrementalOverlapPages,
-      onDiscoveryProgress: ({ current, total, pages, posts, media, mode }) => {
-        const expected = Math.max(total || 1, 1)
-        const processed = Math.max(current || 0, 0)
-        logProgress(current, Math.max(total || 1, 1), {
-          bottomText: `processed ${processed}/${expected} | saved 0 | skipped 0 | dupes 0 | failed 0 | remaining ${Math.max(expected - processed, 0)} | discovery ${pages}p/${posts} posts/${media} media`,
-        })
-      },
-      onListingPage: (details) => {
-        appendRunEvent('reddit_discovery_page', details)
-      },
-    }
-  )
+  const posts = runOptions.redditRetryOnly
+    ? []
+    : await fetchPosts(
+        source,
+        {
+          startPage,
+          endPage,
+          maxPosts,
+          postConcurrency,
+        },
+        {
+          fetchHtml: coomerFansBrowserFetchHtml,
+          fetchPostHtml: redditBrowserFetchHtml,
+          fallbackDelayMs: runOptions.redditFallbackDelayMs,
+          redditFullRefresh: runOptions.redditFullRefresh,
+          redditIncrementalOverlapPosts:
+            runOptions.redditIncrementalOverlapPosts,
+          redditSourceState: redditStateContext?.incrementalState || null,
+          fullSourceRefresh: runOptions.fullSourceRefresh,
+          sourceFrontier,
+          sourceIncrementalOverlapPages:
+            runOptions.sourceIncrementalOverlapPages,
+          onDiscoveryProgress: ({
+            current,
+            total,
+            pages,
+            posts,
+            media,
+            mode,
+          }) => {
+            const expected = Math.max(total || 1, 1)
+            const processed = Math.max(current || 0, 0)
+            logProgress(current, Math.max(total || 1, 1), {
+              bottomText: `processed ${processed}/${expected} | saved 0 | skipped 0 | dupes 0 | failed 0 | remaining ${Math.max(expected - processed, 0)} | discovery ${pages}p/${posts} posts/${media} media`,
+            })
+          },
+          onListingPage: (details) => {
+            appendRunEvent('reddit_discovery_page', details)
+          },
+        }
+      )
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
   if (source.site === 'reddit' && !dryRun) {
@@ -2517,7 +2531,9 @@ async function run(argvInput = process.argv.slice(2)) {
     return 0
   }
 
-  const trackedModelName = registerSourceForRun(source, inputUrl, model)
+  const trackedModelName = runOptions.redditRetryOnly
+    ? modelName
+    : registerSourceForRun(source, inputUrl, model)
   if (trackedModelName !== modelName) {
     throw new Error(
       `Resolved model changed during source registration: ${modelName} -> ${trackedModelName}`
