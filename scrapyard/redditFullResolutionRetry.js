@@ -118,7 +118,7 @@ function listDueFullResolutionRetries(modelLogDir, source = {}, options = {}) {
   const sourceService = String(source.service || 'submitted').toLowerCase()
   if (!sourceUserId || limit === 0) return []
 
-  return Object.values(loadRetryState(modelLogDir).pending)
+  const due = Object.values(loadRetryState(modelLogDir).pending)
     .filter((item) => {
       if (!item?.relativePath || !item.fullResolutionUrl) return false
       const itemUserId = String(
@@ -136,6 +136,17 @@ function listDueFullResolutionRetries(modelLogDir, source = {}, options = {}) {
     .sort((a, b) =>
       String(a.queuedAt || '').localeCompare(String(b.queuedAt || ''))
     )
+  if (!options.uniqueOriginals) return due.slice(0, limit)
+  const queuedUrls = new Set()
+  return due
+    .filter((item) => {
+      const url =
+        getRedditOriginalMediaUrl(item.fullResolutionUrl) ||
+        String(item.fullResolutionUrl || '').trim()
+      if (!url || queuedUrls.has(url)) return false
+      queuedUrls.add(url)
+      return true
+    })
     .slice(0, limit)
 }
 

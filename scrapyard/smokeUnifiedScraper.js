@@ -246,6 +246,41 @@ async function main() {
   )
   assert.strictEqual(Object.keys(loadRetryState(retryLogDir).pending).length, 1)
   fs.rmSync(retryLogDir, { recursive: true, force: true })
+  const duplicateRetryDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'reddit-duplicate-original-retry-')
+  )
+  for (const relativePath of [
+    'sample/images/one.jpg',
+    'sample/images/two.jpg',
+  ]) {
+    recordFullResolutionRetry(duplicateRetryDir, {
+      relativePath,
+      fullResolutionUrl: 'https://i.redd.it/shared.jpg',
+      sourceUserId: 'Gallery_User',
+    })
+  }
+  assert.strictEqual(
+    listDueFullResolutionRetries(duplicateRetryDir, {
+      userId: 'gallery_user',
+      service: 'submitted',
+    }).length,
+    2
+  )
+  assert.strictEqual(
+    listDueFullResolutionRetries(
+      duplicateRetryDir,
+      { userId: 'gallery_user', service: 'submitted' },
+      { uniqueOriginals: true }
+    ).length,
+    1
+  )
+  assert.strictEqual(
+    clearMatchingFullResolutionRetries(duplicateRetryDir, {
+      fullResolutionUrl: 'https://i.redd.it/shared.jpg',
+    }),
+    2
+  )
+  fs.rmSync(duplicateRetryDir, { recursive: true, force: true })
   const titledRetryLogDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'reddit-titled-preview-retry-')
   )
@@ -2016,6 +2051,69 @@ async function main() {
     knownGalleryDeps
   )
   assert.strictEqual(knownGalleryFetches.length, 1)
+
+  const fallbackGalleryRecord = {
+    postId: 'fallback1',
+    mediaPageUrls: [
+      'https://www.reddit.com/gallery/fallback1',
+      'https://www.reddit.com/r/test/comments/fallback1/title/',
+    ],
+    mediaUrls: ['https://preview.redd.it/recorded-v0-one.jpg?width=320'],
+  }
+  const fallbackFetches = []
+  const fallbackPosts = await fetchKnownRedditGalleryPosts(
+    knownGallerySource,
+    [fallbackGalleryRecord],
+    {},
+    {
+      fetchHtml: async (url) => {
+        fallbackFetches.push(url)
+        if (url.includes('/gallery/')) throw new Error('HTTP 404')
+        return {
+          html: '<img src="https://i.redd.it/one.jpg"><img src="https://i.redd.it/two.jpg">',
+          statusCode: 200,
+          url,
+        }
+      },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      redgifsClient: { parseRedgifsId: () => null },
+      logger: { warn: () => {} },
+    }
+  )
+  assert.strictEqual(fallbackFetches.length, 2)
+  assert.strictEqual(fallbackPosts[0].mediaHydrationFailed, undefined)
+  assert.strictEqual(fallbackPosts[0].mediaEntries.length, 2)
+
+  const unavailablePosts = await fetchKnownRedditGalleryPosts(
+    knownGallerySource,
+    [
+      {
+        ...fallbackGalleryRecord,
+        mediaUrls: [
+          'https://preview.redd.it/recorded-v0-one.jpg?width=320',
+          'https://preview.redd.it/recorded-v0-two.jpg?width=320',
+        ],
+      },
+    ],
+    {},
+    {
+      fetchHtml: async () => {
+        throw new Error('HTTP 404')
+      },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      redgifsClient: { parseRedgifsId: () => null },
+      logger: { warn: () => {} },
+    }
+  )
+  assert.strictEqual(unavailablePosts[0].mediaHydrationFailed, true)
+  assert.strictEqual(unavailablePosts[0].mediaEntries.length, 2)
+  assert(
+    unavailablePosts[0].mediaEntries.every((entry) =>
+      entry.fullResolutionUrl?.startsWith('https://i.redd.it/')
+    )
+  )
 
   const redditRssGalleryEvents = []
   const redditRssGalleryFetches = []

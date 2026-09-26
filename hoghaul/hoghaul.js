@@ -1973,6 +1973,26 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     }
   }
 
+  if (
+    entry.pendingFullResolutionRetryPath &&
+    fs.existsSync(destination.finalPath)
+  ) {
+    const backupDir = path.join(
+      folders.logDir,
+      'reddit-preview-before-original'
+    )
+    fs.mkdirSync(backupDir, { recursive: true })
+    const backupPath = path.join(
+      backupDir,
+      `${entry.filename}.${Date.now()}-${process.pid}.bak`
+    )
+    fs.copyFileSync(destination.finalPath, backupPath)
+    appendRunEvent('reddit_preview_backup_before_original', {
+      relativePath: destination.relativePath,
+      backupPath,
+    })
+  }
+
   const result = await hoghaulSavePipeline.saveImageLikeMedia({
     modelName,
     folders,
@@ -1994,6 +2014,7 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     saveBitwiseHashCache,
     saveVisualHashCache,
     duplicateRecordSeen: true,
+    checkExistingBeforeDownload: !entry.pendingFullResolutionRetryPath,
     visualChecks: kind === 'image',
     fuzzyVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
     pendingVisualDistance: MAX_FUZZY_IMAGE_VISUAL_DISTANCE,
@@ -2464,7 +2485,18 @@ async function run(argvInput = process.argv.slice(2)) {
         activeMediaByUrl.get(url).push(entry)
       }
     }
-    const pendingRetries = listDueFullResolutionRetries(folders.logDir, source)
+    const configuredRetryCooldownMs =
+      process.env.HOGHAUL_REDDIT_PENDING_RETRY_COOLDOWN_MS
+    const pendingRetries = listDueFullResolutionRetries(
+      folders.logDir,
+      source,
+      {
+        uniqueOriginals: true,
+        ...(configuredRetryCooldownMs !== undefined
+          ? { cooldownMs: Number(configuredRetryCooldownMs) }
+          : {}),
+      }
+    )
     for (const pending of pendingRetries) {
       const activeEntry = (
         activeMediaByUrl.get(pending.fullResolutionUrl) || []
