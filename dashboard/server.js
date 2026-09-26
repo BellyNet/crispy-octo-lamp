@@ -64,7 +64,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 16
+const RESPONSE_CACHE_VERSION = 17
 
 // Bumped whenever the encoding recipe for /media-mobile/ variants changes in
 // a way that changes the bytes of an already-cached file (e.g. gifs going
@@ -237,11 +237,18 @@ async function generatePreviewGif(videoPath, gifPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer, kemono, stufferdb, bbwchan, tumblr }
+// Build a map of username → { coomer, kemono, stufferdb, bbwchan, tumblr, reddit }
 // from model_aliases.json so the /api/users route can include source links.
 // Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
 // each time, so changes to the bind-mounted file are picked up immediately.
-const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb', 'bbwchan', 'tumblr']
+const SOURCE_PLATFORMS = [
+  'coomer',
+  'kemono',
+  'stufferdb',
+  'bbwchan',
+  'tumblr',
+  'reddit',
+]
 
 // Cached source map — rebuilt only when model_aliases.json mtime changes.
 // loadModelRegistry was previously called on every /api/users request, doing a
@@ -699,7 +706,13 @@ async function processFileForResponse(username, userDir, item) {
   )
   if (postMeta) {
     const src = postMeta.source || {}
-    const title = typeof src.title === 'string' ? src.title.trim() : ''
+    let title = typeof src.title === 'string' ? src.title.trim() : ''
+    // Older scrapes stored Reddit's own page title ("Reddit - The heart of
+    // the internet") when a post fetch hit a login/block page. Never show
+    // that; the permalink slug is at least the start of the real title.
+    if (src.site === 'reddit' && mediaDates.isGenericRedditPageTitle(title)) {
+      title = mediaDates.getRedditTitleFromPermalink(src.mediaPageUrl) || ''
+    }
     const url = src.mediaPageUrl || src.mediaUrl || null
     // Comments come in as { author, posted, text }. Drop empties, cap the
     // list so a chatty thread doesn't add megabytes to the payload — the

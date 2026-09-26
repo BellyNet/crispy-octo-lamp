@@ -3,6 +3,7 @@
 const path = require('path')
 const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
+const { isGenericRedditPageTitle } = require('../mediaDates')
 
 const DEFAULT_REDDIT_PAGE_SIZE = 100
 const REDDIT_RSS_USER_AGENT =
@@ -114,12 +115,6 @@ function getRedditPostTitle(post = {}) {
 
 function getRedditPostText(post = {}) {
   return getRedditPostTitle(post)
-}
-
-function isGenericRedditPageTitle(title) {
-  return /^(?:welcome to reddit|reddit - dive into anything)$/i.test(
-    String(title || '').trim()
-  )
 }
 
 function looksLikePermalinkFallbackTitle(post = {}) {
@@ -1197,8 +1192,11 @@ function parseRssEntries(xml, source) {
       if (!id) return null
 
       const subreddit = extractRssSubreddit(block)
-      const updated = extractXmlTag(block, 'updated')
-      const published = parseResolvedDate(updated)
+      // <published> is the post's creation time; <updated> moves when the
+      // post is edited, so only fall back to it.
+      const published = parseResolvedDate(
+        extractXmlTag(block, 'published') || extractXmlTag(block, 'updated')
+      )
       const permalink = commentsUrl
         ? new URL(commentsUrl).pathname
         : `/comments/${id}`

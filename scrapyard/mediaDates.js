@@ -301,6 +301,17 @@ function cleanSourceTitle(value) {
     .trim()
 }
 
+// Titles of Reddit's own chrome pages — login walls, block/rate-limit
+// pages, the old-reddit NSFW interstitial. When a post fetch lands on one
+// of these, its <title>/og:title is the page's, not the post's, so it must
+// never be stored or shown as a post title.
+const GENERIC_REDDIT_PAGE_TITLE_RE =
+  /^(?:welcome to reddit|reddit|reddit\.com|blocked|whoa there,? pardner!?|reddit(?:\.com)?\s*[-–—:|]\s*(?:the heart of the internet|dive into anything|over 18\??|please wait for verification|page not found|log ?in|sign ?up)|reddit\.com:?\s*over 18\??|over 18\??|the heart of the internet|dive into anything)$/i
+
+function isGenericRedditPageTitle(title) {
+  return GENERIC_REDDIT_PAGE_TITLE_RE.test(String(title || '').trim())
+}
+
 function getRedditTitleFromPermalink(url) {
   const rawUrl = String(url || '').trim()
   if (!rawUrl) return null
@@ -344,8 +355,14 @@ function normalizeSourceMeta(sourceMeta) {
   const site = String(
     sourceMeta.site || sourceMeta.sourceSite || ''
   ).toLowerCase()
-  const sourceTitle = cleanSourceTitle(sourceMeta.title)
-  const sourceText = cleanSourceTitle(sourceMeta.text || sourceMeta.sourceText)
+  // Drop Reddit chrome-page titles so the permalink-slug fallback below
+  // kicks in instead of persisting "Reddit - The heart of the internet".
+  const dropGeneric = (value) =>
+    site === 'reddit' && isGenericRedditPageTitle(value) ? '' : value
+  const sourceTitle = dropGeneric(cleanSourceTitle(sourceMeta.title))
+  const sourceText = dropGeneric(
+    cleanSourceTitle(sourceMeta.text || sourceMeta.sourceText)
+  )
   const title =
     sourceTitle ||
     (site === 'reddit' ? sourceText || null : null) ||
@@ -403,6 +420,22 @@ function scheduleSidecarFlush(userDir) {
 function resolveBestDateRecord(record) {
   if (!record || typeof record !== 'object') {
     return { date: null, source: null }
+  }
+  // The source site's own post date wins when a file's embedded date
+  // can't be the real capture time:
+  //  - Reddit: v.redd.it video+audio is muxed locally at download time,
+  //    so mp4 creation_time is "the day we scraped it", not the post date.
+  //  - Any site: an embedded date AFTER the post was published is
+  //    impossible for the original — it's a re-encode/remux stamp.
+  const uploadedMs = record.uploaded ? Date.parse(record.uploaded) : NaN
+  if (Number.isFinite(uploadedMs)) {
+    const site = String(record.source?.site || '').toLowerCase()
+    if (site === 'reddit') return { date: record.uploaded, source: 'uploaded' }
+    const embedded = record.video || record.image
+    const embeddedMs = embedded ? Date.parse(embedded) : NaN
+    if (Number.isFinite(embeddedMs) && embeddedMs > uploadedMs + 86400000) {
+      return { date: record.uploaded, source: 'uploaded' }
+    }
   }
   if (record.video) return { date: record.video, source: 'mp4' }
   if (record.image) return { date: record.image, source: 'image' }
@@ -614,5 +647,6 @@ module.exports = {
   flushAllSidecars,
   findFfprobe,
   getRedditTitleFromPermalink,
+  isGenericRedditPageTitle,
   SIDECAR_FILENAME,
 }

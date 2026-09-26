@@ -2462,6 +2462,12 @@
           padding: 10px 12px;
           gap: 8px;
         }
+        /* Name + stats share row 1 with the home/menu buttons; the
+           filter/HD/rescan/delete/admin controls wrap onto row 2 instead
+           of squeezing the name block to one word per line. */
+        #header-left {
+          flex: 1 1 calc(100% - 100px);
+        }
         #current-user-name {
           font-size: 15px;
         }
@@ -3376,6 +3382,7 @@
             ['stufferdb', 'S'],
             ['bbwchan', 'B'],
             ['tumblr', 'T'],
+            ['reddit', 'R'],
           ]) {
             const dot = document.createElement('span')
             dot.className =
@@ -3696,6 +3703,7 @@
         stufferdb: '',
         bbwchan: '',
         tumblr: '',
+        reddit: '',
       }
 
       // The registry's `coomer` list mixes three sites with different URL
@@ -3746,6 +3754,19 @@
           a.target = '_blank'
           a.rel = 'noopener noreferrer'
           a.innerHTML = `${LINK_ICON} BBW-Chan`
+          sourceLinksEl.appendChild(a)
+        }
+
+        for (const url of sources.reddit || []) {
+          // www.reddit.com/user/<name>/submitted/ → "u/<name>"
+          const name = (url.match(/\/(?:user|u)\/([^/?#]+)/i) || [])[1]
+          const a = document.createElement('a')
+          a.className = 'src-link'
+          a.href = url
+          a.target = '_blank'
+          a.rel = 'noopener noreferrer'
+          a.innerHTML = `${LINK_ICON} Reddit`
+          if (name) a.append(` u/${decodeURIComponent(name)}`)
           sourceLinksEl.appendChild(a)
         }
 
