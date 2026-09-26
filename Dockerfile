@@ -38,6 +38,9 @@ COPY milkmaid/media-dates.js ./milkmaid/
 # which in turn has its own transitive helpers under scrapyard/. Copy the
 # whole dir so the dashboard always boots even as the refactor continues.
 COPY scrapyard/ ./scrapyard/
+# audit-gifs.js is run from the admin page's Repairs panel (needs
+# scrapyard/httpClient, copied above).
+COPY audit/audit-gifs.js ./audit/
 COPY model_aliases.json ./
 
 ENV DATASET_DIR=/data/dataset

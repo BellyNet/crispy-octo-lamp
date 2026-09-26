@@ -5,7 +5,7 @@ const compression = require('compression')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const { execFile } = require('child_process')
+const { execFile, spawn } = require('child_process')
 const { promisify } = require('util')
 const pLimit = require('p-limit')
 const sharp = require('sharp')
@@ -1300,6 +1300,169 @@ app.post('/api/rebuild-run-index', async (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// ─── DATA REPAIRS (admin page) ───────────────────────────────────────────────
+// Runs the one-off repair scripts inside this container, where the dataset
+// and THUMB_DIR are already mounted — so they can be kicked off from the
+// admin page (e.g. a phone) instead of needing a shell on the NAS. One job
+// at a time, as a child process; output is kept in memory for the live log
+// and the last run per job is persisted to THUMB_DIR so it survives
+// restarts. Every job is a dry run unless `apply` is set.
+const REPO_ROOT = path.join(__dirname, '..')
+const REPAIR_JOBS = {
+  'reddit-titles': {
+    label: 'Reddit titles & post dates',
+    description:
+      'Fetches full Reddit post titles (replacing "Reddit - The heart of the internet" and cut-off slug titles) and real post dates.',
+    script: 'scrapyard/repairRedditMetadataTitles.js',
+    args: ({ apply, model }) => [
+      `--dataset=${datasetDir}`,
+      '--fetch-missing',
+      ...(model ? [`--model=${model}`] : []),
+      ...(apply ? ['--apply'] : []),
+    ],
+  },
+  gifs: {
+    label: 'Cut-off GIFs',
+    description:
+      'Finds GIFs whose download was cut off (play a few frames then stop) and re-downloads them from the source; also lists stills saved as .gif.',
+    script: 'audit/audit-gifs.js',
+    args: ({ apply, model }) => [
+      `--dataset=${datasetDir}`,
+      `--thumb-dir=${THUMB_DIR}`,
+      '--redownload',
+      ...(model ? [`--model=${model}`] : []),
+      ...(apply ? ['--apply'] : []),
+    ],
+  },
+  'coomerfans-titles': {
+    label: 'CoomerFans titles',
+    description: 'Fills blank CoomerFans post titles from the post pages.',
+    script: 'scrapyard/repairCoomerFansMetadataTitles.js',
+    args: ({ apply, model }) => [
+      `--dataset=${datasetDir}`,
+      ...(model ? [`--model=${model}`] : []),
+      ...(apply ? ['--apply'] : []),
+    ],
+  },
+}
+const REPAIR_LOG_MAX_LINES = 500
+const REPAIR_STATE_FILE = path.join(THUMB_DIR, 'repair-runs.json')
+let repairLastRuns = {}
+try {
+  repairLastRuns = JSON.parse(fs.readFileSync(REPAIR_STATE_FILE, 'utf8'))
+} catch {}
+let repairCurrent = null // { job, apply, model, startedAt, lines, child }
+
+function saveRepairLastRuns() {
+  try {
+    const tmp = REPAIR_STATE_FILE + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(repairLastRuns))
+    fs.renameSync(tmp, REPAIR_STATE_FILE)
+  } catch (err) {
+    console.warn('  Repairs: could not save state:', err.message)
+  }
+}
+
+function repairRunView(run) {
+  if (!run) return null
+  const { child: _child, ...rest } = run
+  return rest
+}
+
+app.get('/api/repairs', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache')
+  res.json({
+    jobs: Object.entries(REPAIR_JOBS).map(([id, job]) => ({
+      id,
+      label: job.label,
+      description: job.description,
+      available: fs.existsSync(path.join(REPO_ROOT, job.script)),
+      lastRun: repairLastRuns[id] || null,
+    })),
+    current: repairRunView(repairCurrent),
+  })
+})
+
+app.post('/api/repairs/:job', (req, res) => {
+  const job = REPAIR_JOBS[req.params.job]
+  if (!job) return res.status(404).json({ error: 'Unknown repair job' })
+  const apply = req.body?.apply === true
+  const model = String(req.body?.model || '').trim()
+  if (model && !/^[\w.@-]+$/.test(model)) {
+    return res.status(400).json({ error: 'Invalid model name' })
+  }
+  if (repairCurrent) {
+    return res.status(409).json({
+      error: `${REPAIR_JOBS[repairCurrent.job].label} is already running`,
+    })
+  }
+  const scriptPath = path.join(REPO_ROOT, job.script)
+  if (!fs.existsSync(scriptPath)) {
+    return res
+      .status(500)
+      .json({ error: `${job.script} is not in this image — redeploy` })
+  }
+
+  const run = {
+    job: req.params.job,
+    apply,
+    model: model || null,
+    startedAt: new Date().toISOString(),
+    lines: [],
+    child: null,
+  }
+  // Scripts redraw progress lines with \r — treat those as line breaks
+  // and keep only the tail so a long run can't grow without bound.
+  let partial = ''
+  const onData = (chunk) => {
+    const parts = (partial + chunk.toString('utf8')).split(/\r\n|\r|\n/)
+    partial = parts.pop()
+    for (const line of parts) if (line.trim()) run.lines.push(line)
+    if (run.lines.length > REPAIR_LOG_MAX_LINES) {
+      run.lines.splice(0, run.lines.length - REPAIR_LOG_MAX_LINES)
+    }
+  }
+  const child = spawn(
+    process.execPath,
+    [scriptPath, ...job.args({ apply, model })],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, DATASET_DIR: datasetDir, THUMB_DIR },
+    }
+  )
+  run.child = child
+  repairCurrent = run
+  child.stdout.on('data', onData)
+  child.stderr.on('data', onData)
+  const finish = (exitCode, error) => {
+    if (repairCurrent !== run) return
+    if (partial.trim()) run.lines.push(partial)
+    if (error) run.lines.push(`Error: ${error}`)
+    run.finishedAt = new Date().toISOString()
+    run.exitCode = exitCode
+    run.stopped = Boolean(run.stopRequested)
+    repairLastRuns[run.job] = repairRunView(run)
+    repairCurrent = null
+    saveRepairLastRuns()
+    console.log(
+      `  Repairs: ${run.job} ${run.apply ? 'apply' : 'dry-run'} finished (exit ${exitCode})`
+    )
+  }
+  child.on('error', (err) => finish(null, err.message))
+  child.on('close', (code) => finish(code, null))
+  console.log(
+    `  Repairs: ${run.job} ${apply ? 'apply' : 'dry-run'} started${model ? ` for ${model}` : ''}`
+  )
+  res.json({ ok: true, current: repairRunView(run) })
+})
+
+app.post('/api/repairs-stop', (_req, res) => {
+  if (!repairCurrent) return res.json({ ok: true, running: false })
+  repairCurrent.stopRequested = true
+  repairCurrent.child?.kill('SIGTERM')
+  res.json({ ok: true, running: true })
 })
 
 async function getMediaFingerprint(userDir) {
