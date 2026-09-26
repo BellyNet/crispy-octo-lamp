@@ -1845,6 +1845,7 @@ async function main() {
   assert.strictEqual(redditGalleryPosts[0].title, 'title')
   assert.strictEqual(redditGalleryPosts[0].text, 'title')
   assert.strictEqual(redditGalleryPosts[0].mediaEntries.length, 1)
+  assert.strictEqual(redditGalleryPosts[0].mediaHydrationFailed, true)
   assert.strictEqual(redditGalleryPosts[0].mediaEntries[0].text, 'title')
   assert(
     redditGalleryEvents.some(
@@ -1940,6 +1941,10 @@ async function main() {
   )
   assert.strictEqual(redditRssGalleryPosts.length, 1)
   assert.strictEqual(redditRssGalleryPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(
+    Boolean(redditRssGalleryPosts[0].mediaHydrationFailed),
+    false
+  )
   assert.deepStrictEqual(
     redditRssGalleryPosts[0].mediaEntries.map((entry) => entry.mediaUrl),
     [

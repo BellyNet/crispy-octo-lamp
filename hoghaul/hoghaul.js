@@ -1752,7 +1752,11 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     getEntryMediaPageUrls(entry),
     getEntryRawDirectMediaUrls(entry)
   )
-  if (deadMediaMatch && !entry.pendingFullResolutionRetryPath) {
+  if (
+    deadMediaMatch &&
+    !entry.pendingFullResolutionRetryPath &&
+    !needsFullResolutionRetry(entry)
+  ) {
     recordDeadMediaSkip(
       modelName,
       folders,
@@ -1767,14 +1771,24 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
-  const seenEntry = entry.pendingFullResolutionRetryPath
-    ? {
-        ...entry,
-        mediaUrls: [entry.mediaUrl],
-        mediaPageUrl: null,
-        mediaPageUrls: [],
-      }
-    : entry
+  if (needsFullResolutionRetry(entry) && !entry.fullResolutionUrl) {
+    recordNeedsFullResolutionSkip(modelName, folders, entry, destination, {
+      acceptable: false,
+      error: 'No direct original URL was available.',
+    })
+    return
+  }
+
+  const seenEntry =
+    entry.pendingFullResolutionRetryPath || needsFullResolutionRetry(entry)
+      ? {
+          ...entry,
+          mediaUrl: entry.fullResolutionUrl || entry.mediaUrl,
+          mediaUrls: [entry.fullResolutionUrl || entry.mediaUrl],
+          mediaPageUrl: null,
+          mediaPageUrls: [],
+        }
+      : entry
   const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(
     folders,
     seenEntry
@@ -1802,7 +1816,10 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
 
   let acceptedPreviewBuffer = null
   if (needsFullResolutionRetry(entry)) {
-    acceptedPreviewBuffer = await downloadMediaBuffer(entry.mediaUrl, entry)
+    acceptedPreviewBuffer = await downloadMediaBuffer(entry.fullResolutionUrl, {
+      ...entry,
+      mediaUrl: entry.fullResolutionUrl,
+    })
     let quality
     try {
       quality = evaluatePreviewQuality(
@@ -1826,8 +1843,11 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     }
     entry = {
       ...entry,
+      mediaUrl: entry.fullResolutionUrl,
+      mediaUrls: [entry.fullResolutionUrl, entry.mediaUrl, ...entry.mediaUrls],
+      mediaQuality: 'full',
       needsFullResolution: false,
-      fullResolutionStatus: 'accepted_preview_quality',
+      fullResolutionStatus: 'resolved_direct_original',
     }
   } else if (entry.pendingFullResolutionRetryPath) {
     acceptedPreviewBuffer = await downloadMediaBuffer(entry.mediaUrl, entry)
@@ -2254,6 +2274,23 @@ async function run(argvInput = process.argv.slice(2)) {
   )
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
+  if (source.site === 'reddit' && !dryRun) {
+    for (const post of selectedPosts.filter(
+      (item) => item.mediaHydrationFailed
+    )) {
+      errorCount += 1
+      recordRunError('reddit_post_media_hydration_error', {
+        postId: post.id,
+        mediaPageUrl: post.permalink || post.url || null,
+        error: post.mediaHydrationError || 'Reddit post media hydration failed',
+      })
+      appendRunEvent('reddit_post_media_hydration_error', {
+        postId: post.id,
+        mediaPageUrl: post.permalink || post.url || null,
+        error: post.mediaHydrationError || 'Reddit post media hydration failed',
+      })
+    }
+  }
   const mediaEntries = normalizeMediaEntries(
     selectedPosts.flatMap((post) => getMediaEntriesFromPost(source, post)),
     {

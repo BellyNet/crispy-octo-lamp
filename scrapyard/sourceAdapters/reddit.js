@@ -1057,8 +1057,21 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
           deps.logger?.warn?.(
             `Reddit gallery page fetch failed for ${post.id}: ${err.message}`
           )
-          return post
+          return {
+            ...post,
+            mediaHydrationFailed: true,
+            mediaHydrationError: err.message,
+          }
         })
+        if (
+          post.is_gallery &&
+          !enrichedPost.mediaHydrationFailed &&
+          (enrichedPost.htmlMediaUrls || []).length < 2
+        ) {
+          enrichedPost.mediaHydrationFailed = true
+          enrichedPost.mediaHydrationError =
+            'Fewer than two gallery images were discovered.'
+        }
         if (post.is_gallery) {
           hydratedGalleryCount += 1
           deps.appendRunEvent?.('reddit_gallery_hydration_post_finished', {
@@ -1436,12 +1449,19 @@ async function enrichRedditRssPostMedia(source, post, deps = {}) {
   }
 
   const response = await fetchRedditPostHtmlForMedia(source, post, deps)
-  if (!response?.html) return post
+  if (!response?.html) {
+    if (post.is_gallery) throw new Error('Gallery page returned no HTML.')
+    return post
+  }
 
   post.htmlMediaUrls = dedupeRedditHtmlMediaUrls([
     post.htmlMediaUrls,
     extractRedditHtmlMediaUrls(response.html),
   ])
+
+  if (post.is_gallery && post.htmlMediaUrls.length < 2) {
+    throw new Error('Fewer than two gallery images were discovered.')
+  }
 
   return post
 }
@@ -1815,6 +1835,11 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
           if (fallbackDelayMs > 0) await sleep(fallbackDelayMs)
         } catch (err) {
           noteHtmlFallbackFailure(post, err)
+          enrichedPost = {
+            ...post,
+            mediaHydrationFailed: true,
+            mediaHydrationError: err.message,
+          }
         }
 
         return buildRedditPostWithMedia(source, enrichedPost, deps)
