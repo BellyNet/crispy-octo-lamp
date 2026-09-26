@@ -568,6 +568,11 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-full-refresh',
     isTruthy(getOption(argv, 'reddit-full-refresh'))
   )
+  appendBoolean(
+    args,
+    '--reddit-retry-only',
+    isTruthy(getOption(argv, 'reddit-retry-only'))
+  )
 }
 
 function appendMilkmaidOptions(args, argv) {
@@ -1288,6 +1293,8 @@ function buildSourceBatchOptions(argv) {
     options['full-source-refresh'] = true
   if (isTruthy(getOption(argv, 'reddit-full-refresh')))
     options['reddit-full-refresh'] = true
+  if (isTruthy(getOption(argv, 'reddit-retry-only')))
+    options['reddit-retry-only'] = true
   return options
 }
 
@@ -1308,6 +1315,7 @@ Options:
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
+  --reddit-retry-only         Retry queued Reddit originals without scanning posts.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.
@@ -1831,6 +1839,7 @@ Options:
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
+  --reddit-retry-only         Retry queued Reddit originals without scanning posts.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between source runs.
   --dry-run                   Dry run Hoghaul sources.

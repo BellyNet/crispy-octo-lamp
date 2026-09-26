@@ -779,6 +779,17 @@ async function main() {
   assert.strictEqual(isSuccessfulRunStatus('failed'), false)
   const redditBatchOptions = buildAllSourceRunOptions({}, 'test_model', reddit)
   assert.strictEqual(redditBatchOptions['skip-nas-sync'], true)
+  const redditRetryBatchOptions = buildAllSourceRunOptions(
+    { 'reddit-retry-only': true },
+    'test_model',
+    reddit
+  )
+  assert.strictEqual(redditRetryBatchOptions['reddit-retry-only'], true)
+  assert(
+    buildScraperArgs(reddit, redditRetryBatchOptions).includes(
+      '--reddit-retry-only'
+    )
+  )
   let batchSourceRuns = 0
   let batchSyncRuns = 0
   const batchResult = await withConsoleSilenced(() =>
