@@ -64,7 +64,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 15
+const RESPONSE_CACHE_VERSION = 16
 
 // Bumped whenever the encoding recipe for /media-mobile/ variants changes in
 // a way that changes the bytes of an already-cached file (e.g. gifs going
@@ -715,7 +715,8 @@ async function processFileForResponse(username, userDir, item) {
     if (title || url || comments.length || src.site) {
       post = {}
       if (title) post.title = title
-      if (src.site) post.site = src.site
+      const site = displaySiteForSource(src)
+      if (site) post.site = site
       if (url) post.url = url
       // postId groups sibling files from the same reddit post (carousels,
       // before/after pairs) — set for reddit entries directly and copied
@@ -788,6 +789,30 @@ async function processFileForResponse(username, userDir, item) {
     },
     metaUpdated,
   }
+}
+
+// The scrapers record OnlyHaven (cum.st) media as site 'coomerfans' —
+// it's routed through the coomerfans adapter, and the scrape-side
+// frontier/legacy bookkeeping keys off that. For display, tell them apart
+// by the post/media URL host so the badge and source filter show which
+// site each file actually came from (works for already-scraped files too).
+function isOnlyHavenUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase()
+    return host === 'cum.st' || host.endsWith('.cum.st')
+  } catch {
+    return false
+  }
+}
+function displaySiteForSource(src) {
+  const site = typeof src.site === 'string' ? src.site : null
+  if (
+    site === 'coomerfans' &&
+    [src.mediaPageUrl, src.mediaUrl].some(isOnlyHavenUrl)
+  ) {
+    return 'onlyhaven'
+  }
+  return site
 }
 
 // Returns { stats, response, source: 'memory' | 'disk' | 'scan' }.

@@ -886,7 +886,7 @@
         color: #e88a6a;
       }
       /* Origin-site badge — where the media was scraped from
-         (reddit / stufferdb / coomer / kemono / bbwchan / tumblr). Small text label
+         (reddit / stufferdb / coomer / onlyhaven / kemono / bbwchan / tumblr). Small text label
          with a site-tinted background. Replaces the ~useless
          "upload" date-source chip on cards. */
       .origin-badge {
@@ -913,6 +913,10 @@
       .origin-badge.coomerfans {
         background: #2a2013;
         color: #e0c265;
+      }
+      .origin-badge.onlyhaven {
+        background: #2a1320;
+        color: #f08cc0;
       }
       .origin-badge.kemono {
         background: #1a2a1e;
@@ -956,6 +960,10 @@
       .pswp-origin-badge.coomerfans {
         background: rgba(220, 180, 60, 0.18);
         color: #e7cc7c;
+      }
+      .pswp-origin-badge.onlyhaven {
+        background: rgba(230, 110, 170, 0.18);
+        color: #f5a8cf;
       }
       .pswp-origin-badge.kemono {
         background: rgba(90, 200, 130, 0.18);
@@ -3690,6 +3698,33 @@
         tumblr: '',
       }
 
+      // The registry's `coomer` list mixes three sites with different URL
+      // shapes — coomer.su (/onlyfans/user/x), coomerfans.com
+      // (/u/onlyfans/id/x) and OnlyHaven cum.st (/creators/onlyfans/id).
+      // Name the site so it's clear which link is which. Returns null for
+      // plain coomer URLs, which keep the bare service label.
+      function coomerSourceLabel(url) {
+        let host = ''
+        let parts = []
+        try {
+          const u = new URL(url)
+          host = u.hostname.toLowerCase()
+          parts = u.pathname.split('/').filter(Boolean)
+        } catch {
+          return null
+        }
+        const svc = (s) => SERVICE_LABELS[s] || s || ''
+        if (host === 'cum.st' || host.endsWith('.cum.st')) {
+          const service = parts[0] === 'creators' ? parts[1] : null
+          return `OnlyHaven${service ? '·' + svc(service) : ''}`
+        }
+        if (host.includes('coomerfans')) {
+          const service = parts[0] === 'u' ? parts[1] : null
+          return `CoomerFans${service ? '·' + svc(service) : ''}`
+        }
+        return null
+      }
+
       function renderSourceLinks(sources) {
         sourceLinksEl.innerHTML = ''
         if (!sources) return
@@ -3729,14 +3764,15 @@
           ['kemono', 'K·'],
         ]) {
           for (const url of sources[platform] || []) {
+            const label = platform === 'coomer' ? coomerSourceLabel(url) : null
             const service = url.split('/')[3] || platform
-            const label = SERVICE_LABELS[service] || service
+            const fallback = SERVICE_LABELS[service] || service
             const a = document.createElement('a')
             a.className = 'src-link'
             a.href = url
             a.target = '_blank'
             a.rel = 'noopener noreferrer'
-            a.innerHTML = `${LINK_ICON} ${prefix}${label}`
+            a.innerHTML = `${LINK_ICON} ${prefix}${label || fallback}`
             sourceLinksEl.appendChild(a)
           }
         }
@@ -4155,6 +4191,7 @@
         reddit: 'reddit',
         stufferdb: 'stufferdb',
         coomerfans: 'coomer',
+        onlyhaven: 'onlyhaven',
         kemono: 'kemono',
         bbwchan: 'bbwchan',
         tumblr: 'tumblr',
@@ -4163,6 +4200,7 @@
         reddit: 'Scraped from reddit',
         stufferdb: 'Scraped from stufferdb',
         coomerfans: 'Scraped from coomerfans',
+        onlyhaven: 'Scraped from onlyhaven (cum.st)',
         kemono: 'Scraped from kemono',
         bbwchan: 'Scraped from bbw-chan',
         tumblr: 'Scraped from tumblr',
