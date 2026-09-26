@@ -531,15 +531,22 @@ function syncReconciledStateToNas(context) {
   }
 
   const modelNames = new Set(models.keys())
-  for (const entry of fs.readdirSync(datasetRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const retryPath = path.join(
-      datasetRoot,
-      entry.name,
-      'log',
-      'reddit-full-resolution-retry.json'
-    )
-    if (fs.existsSync(retryPath)) modelNames.add(entry.name)
+  const selectedRefs = new Set(
+    [...models.values()]
+      .flat()
+      .map((record) => normalizePath(record.datasetRelativePath))
+  )
+  if (!report.pendingOnly) {
+    for (const entry of fs.readdirSync(datasetRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const retryPath = path.join(
+        datasetRoot,
+        entry.name,
+        'log',
+        'reddit-full-resolution-retry.json'
+      )
+      if (fs.existsSync(retryPath)) modelNames.add(entry.name)
+    }
   }
 
   for (const modelName of modelNames) {
@@ -554,6 +561,7 @@ function syncReconciledStateToNas(context) {
       for (const pending of Object.values(retry.pending || {})) {
         const relativePath = normalizePath(pending?.relativePath)
         if (!relativePath) continue
+        if (report.pendingOnly && !selectedRefs.has(relativePath)) continue
         const nasPath = resolveInside(nasRoot, relativePath)
         if (!isFile(nasPath)) continue
         const quarantinePath = resolveInside(
