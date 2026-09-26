@@ -152,6 +152,44 @@ function normalizeRedditImageUrl(mediaUrl) {
   }
 }
 
+function isRedditPreviewMediaUrl(mediaUrl) {
+  try {
+    return new URL(mediaUrl).hostname.toLowerCase() === 'preview.redd.it'
+  } catch {
+    return false
+  }
+}
+
+function getRedditPreviewFullResolutionUrl(mediaUrl) {
+  try {
+    const parsed = new URL(mediaUrl)
+    if (parsed.hostname.toLowerCase() !== 'preview.redd.it') return null
+    const extension = path.extname(parsed.pathname)
+    if (!extension) return null
+    return `https://i.redd.it${parsed.pathname}`
+  } catch {
+    return null
+  }
+}
+
+function getRedditMediaQualityMetadata(mediaUrl) {
+  if (isRedditPreviewMediaUrl(mediaUrl)) {
+    return {
+      mediaQuality: 'reddit_preview',
+      needsFullResolution: true,
+      fullResolutionStatus: 'pending',
+      fullResolutionUrl: getRedditPreviewFullResolutionUrl(mediaUrl),
+    }
+  }
+
+  return {
+    mediaQuality: 'full',
+    needsFullResolution: false,
+    fullResolutionStatus: 'source_full',
+    fullResolutionUrl: mediaUrl || null,
+  }
+}
+
 function getRedditPostDate(post) {
   const createdUtc = Number(post?.created_utc)
   if (Number.isFinite(createdUtc) && createdUtc > 0) {
@@ -282,8 +320,19 @@ function getRedditMediaPageUrls(source, post) {
   return uniqueUrls(pageUrls)
 }
 
-function getRedditMediaMetadataUrls(metadata) {
+function getRedditMediaMetadataFullUrl(mediaId, metadata) {
+  const normalizedMediaId = String(mediaId || '').trim()
+  if (!normalizedMediaId) return null
+  const ext =
+    extensionFromMime(metadata?.m) ||
+    path.extname(filenameFromMediaUrl(metadata?.s?.u) || '')
+  if (!ext) return null
+  return `https://i.redd.it/${normalizedMediaId}${ext}`
+}
+
+function getRedditMediaMetadataUrls(metadata, mediaId = '') {
   return uniqueUrls([
+    getRedditMediaMetadataFullUrl(mediaId, metadata),
     metadata?.s?.u,
     metadata?.s?.gif,
     metadata?.s?.mp4,
@@ -292,8 +341,8 @@ function getRedditMediaMetadataUrls(metadata) {
   ])
 }
 
-function getRedditMediaMetadataUrl(metadata) {
-  return getRedditMediaMetadataUrls(metadata)[0] || ''
+function getRedditMediaMetadataUrl(metadata, mediaId = '') {
+  return getRedditMediaMetadataUrls(metadata, mediaId)[0] || ''
 }
 
 function extensionFromMime(mime) {
@@ -345,6 +394,8 @@ function createRedditEntry(source, post, mediaUrl, uploadedDate, options = {}) {
     filename,
     originalName: options.originalName || filenameFromMediaUrl(mediaUrl),
     uploadedDate,
+    ...getRedditMediaQualityMetadata(mediaUrl),
+    ...options.qualityMetadata,
   }
 }
 
@@ -373,7 +424,7 @@ function getNativeRedditVideoUrls(post) {
 
 function getRedditGalleryEntries(source, post, uploadedDate) {
   const htmlMediaUrls = uniqueUrls(post?.htmlMediaUrls || [])
-    .map((url) => normalizeRedditImageUrl(url))
+    .map((url) => normalizeRedditHtmlMediaUrl(url))
     .filter(Boolean)
 
   if (htmlMediaUrls.length > 0) {
@@ -401,7 +452,7 @@ function getRedditGalleryEntries(source, post, uploadedDate) {
       const mediaId = item?.media_id
       const meta = mediaId ? metadata[mediaId] : null
       if (!meta || meta.status === 'failed') return null
-      const mediaUrl = getRedditMediaMetadataUrl(meta)
+      const mediaUrl = getRedditMediaMetadataUrl(meta, mediaId)
       if (!mediaUrl) return null
       return createRedditEntry(source, post, mediaUrl, uploadedDate, {
         filename: buildRedditFilename(
@@ -411,7 +462,7 @@ function getRedditGalleryEntries(source, post, uploadedDate) {
           extensionFromMime(meta.m),
           index
         ),
-        mediaUrls: getRedditMediaMetadataUrls(meta),
+        mediaUrls: getRedditMediaMetadataUrls(meta, mediaId),
         originalName: mediaId,
       })
     })
@@ -895,15 +946,7 @@ function parseOldRedditNextUrl(source, html) {
 }
 
 function extractOldRedditImageUrls(html) {
-  const urls = []
-  const raw = String(html || '')
-  for (const match of raw.matchAll(
-    /https?:\/\/(?:i|preview)\.redd\.it\/[^"'<>\\\s]+/gi
-  )) {
-    const normalized = normalizeRedditImageUrl(match[0])
-    if (normalized) urls.push(normalized)
-  }
-  return uniqueUrls(urls)
+  return extractRedditHtmlMediaUrls(html)
 }
 
 async function enrichOldRedditHtmlPostMedia(source, post, deps = {}) {
@@ -1014,8 +1057,21 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
           deps.logger?.warn?.(
             `Reddit gallery page fetch failed for ${post.id}: ${err.message}`
           )
-          return post
+          return {
+            ...post,
+            mediaHydrationFailed: true,
+            mediaHydrationError: err.message,
+          }
         })
+        if (
+          post.is_gallery &&
+          !enrichedPost.mediaHydrationFailed &&
+          (enrichedPost.htmlMediaUrls || []).length < 2
+        ) {
+          enrichedPost.mediaHydrationFailed = true
+          enrichedPost.mediaHydrationError =
+            'Fewer than two gallery images were discovered.'
+        }
         if (post.is_gallery) {
           hydratedGalleryCount += 1
           deps.appendRunEvent?.('reddit_gallery_hydration_post_finished', {
@@ -1233,13 +1289,24 @@ function scoreRedditHtmlMediaUrl(url) {
   return score
 }
 
+function isRedditHtmlContentImageUrl(url) {
+  try {
+    const parsed = new URL(url)
+    const pathname = parsed.pathname.toLowerCase()
+    return !/(?:\/snoovatar\/|\/avatars\/|\/emoji\/|\/award_images\/)/i.test(
+      pathname
+    )
+  } catch {
+    return false
+  }
+}
+
 function normalizeRedditHtmlMediaUrl(url) {
   try {
     const parsed = new URL(url)
     const host = parsed.hostname.toLowerCase()
     if (host === 'preview.redd.it') {
-      parsed.hostname = 'i.redd.it'
-      parsed.search = ''
+      if (parsed.searchParams.has('blur')) return ''
       return parsed.toString()
     }
     if (host === 'i.redd.it') {
@@ -1261,22 +1328,11 @@ function getRedditHtmlMediaKey(url) {
   }
 }
 
-function extractRedditHtmlMediaUrls(html) {
-  const decoded = htmlDecode(html)
-  const candidates = []
-  for (const match of decoded.matchAll(
-    /https:\/\/(?:i|preview)\.redd\.it\/[^\s"'<>]+/gi
-  )) {
-    const url = normalizeRedditHtmlMediaUrl(
-      htmlDecode(match[0]).replace(/,$/, '')
-    )
-    if (/blur=/i.test(url)) continue
-    if (/\/cms\//i.test(url)) continue
-    candidates.push(url)
-  }
-
+function dedupeRedditHtmlMediaUrls(urls) {
   const bestByKey = new Map()
-  for (const url of candidates) {
+  for (const rawUrl of uniqueUrls(urls)) {
+    const url = normalizeRedditHtmlMediaUrl(rawUrl)
+    if (!url || !isRedditHtmlContentImageUrl(url)) continue
     const key = getRedditHtmlMediaKey(url)
     const previous = bestByKey.get(key)
     if (
@@ -1287,6 +1343,127 @@ function extractRedditHtmlMediaUrls(html) {
     }
   }
   return [...bestByKey.values()]
+}
+
+function decodeRedditHtmlForMediaScan(html) {
+  return htmlDecode(html)
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\u003d/gi, '=')
+    .replace(/\\u002f/gi, '/')
+    .replace(/\\\//g, '/')
+}
+
+function extractRedditHtmlMediaUrls(html) {
+  const decoded = decodeRedditHtmlForMediaScan(html)
+  const candidates = []
+  for (const match of decoded.matchAll(
+    /https:\/\/(?:i|preview)\.redd\.it\/[^\s"'<>]+/gi
+  )) {
+    const url = normalizeRedditHtmlMediaUrl(
+      htmlDecode(match[0]).replace(/,$/, '')
+    )
+    if (!url) continue
+    if (/\/cms\//i.test(url)) continue
+    candidates.push(url)
+  }
+
+  return dedupeRedditHtmlMediaUrls(candidates)
+}
+
+function getRedditPostMediaHydrationUrl(source, post) {
+  let permalinkUrl = null
+  try {
+    permalinkUrl = post?.permalink
+      ? new URL(post.permalink, source.origin).toString()
+      : null
+  } catch {}
+
+  const candidates = uniqueUrls([
+    post?.url,
+    post?.url_overridden_by_dest,
+    permalinkUrl,
+    getPostPageUrl(source, post),
+  ])
+
+  return (
+    candidates.find((candidate) => {
+      try {
+        const parsed = new URL(candidate, source.origin)
+        if (!parsed.hostname.toLowerCase().endsWith('reddit.com')) return false
+        return /\/(?:gallery|r\/[^/]+\/comments|comments)\//i.test(
+          parsed.pathname
+        )
+      } catch {
+        return false
+      }
+    }) || null
+  )
+}
+
+async function fetchRedditPostHtmlForMedia(source, post, deps = {}) {
+  const url = getRedditPostMediaHydrationUrl(source, post)
+  if (!url) return null
+
+  const requestOptions = {
+    headers: {
+      Referer: source.origin,
+      'User-Agent': REDDIT_RSS_USER_AGENT,
+    },
+  }
+
+  if (typeof deps.fetchPostHtml === 'function') {
+    return fetchRedditHtmlWithRetry(url, requestOptions, {
+      ...deps,
+      fetchHtml: deps.fetchPostHtml,
+      redditHtmlRequestKind: 'gallery/post',
+    })
+  }
+
+  if (typeof deps.fetchHtml === 'function') {
+    return fetchRedditHtmlWithRetry(url, requestOptions, {
+      ...deps,
+      redditHtmlRequestKind: 'gallery/post',
+    })
+  }
+
+  return null
+}
+
+async function enrichRedditRssPostMedia(source, post, deps = {}) {
+  const rssMediaUrls = extractRedditHtmlMediaUrls(post.rssContentHtml)
+  post.htmlMediaUrls = dedupeRedditHtmlMediaUrls([
+    post.htmlMediaUrls,
+    rssMediaUrls,
+  ])
+
+  if (!post.is_gallery && rssMediaUrls.length > 0) {
+    return post
+  }
+
+  if (
+    !post.is_gallery &&
+    !isRedditContainerUrl(source, post, post.url) &&
+    !isRedditContainerUrl(source, post, post.url_overridden_by_dest)
+  ) {
+    return post
+  }
+
+  const response = await fetchRedditPostHtmlForMedia(source, post, deps)
+  if (!response?.html) {
+    if (post.is_gallery) throw new Error('Gallery page returned no HTML.')
+    return post
+  }
+
+  post.htmlMediaUrls = dedupeRedditHtmlMediaUrls([
+    post.htmlMediaUrls,
+    extractRedditHtmlMediaUrls(response.html),
+  ])
+
+  if (post.is_gallery && post.htmlMediaUrls.length < 2) {
+    throw new Error('Fewer than two gallery images were discovered.')
+  }
+
+  return post
 }
 
 async function preflightRedditRssSource(source, deps = {}) {
@@ -1652,32 +1829,20 @@ async function fetchRedditPostsFromRss(source, options = {}, deps = {}) {
       postsToProcess,
       postConcurrency,
       async (post) => {
-        const rssMediaUrls = extractRedditHtmlMediaUrls(post.rssContentHtml)
-        if (rssMediaUrls.length > 0) {
-          post.htmlMediaUrls = rssMediaUrls
-        }
-        if (
-          rssMediaUrls.length === 0 &&
-          typeof deps.fetchPostHtml === 'function' &&
-          post.url &&
-          (/reddit\.com\/gallery\//i.test(post.url) ||
-            /reddit\.com\/r\/[^/]+\/comments\//i.test(post.url))
-        ) {
-          try {
-            const { html: postHtml } = await deps.fetchPostHtml(post.url, {
-              headers: {
-                Referer: source.origin,
-                'User-Agent': REDDIT_RSS_USER_AGENT,
-              },
-            })
-            post.htmlMediaUrls = extractRedditHtmlMediaUrls(postHtml)
-            if (fallbackDelayMs > 0) await sleep(fallbackDelayMs)
-          } catch (err) {
-            noteHtmlFallbackFailure(post, err)
+        let enrichedPost = post
+        try {
+          enrichedPost = await enrichRedditRssPostMedia(source, post, deps)
+          if (fallbackDelayMs > 0) await sleep(fallbackDelayMs)
+        } catch (err) {
+          noteHtmlFallbackFailure(post, err)
+          enrichedPost = {
+            ...post,
+            mediaHydrationFailed: true,
+            mediaHydrationError: err.message,
           }
         }
 
-        return buildRedditPostWithMedia(source, post, deps)
+        return buildRedditPostWithMedia(source, enrichedPost, deps)
       }
     )
 
@@ -1727,6 +1892,7 @@ module.exports = {
   DEFAULT_REDDIT_PAGE_SIZE,
   OLD_REDDIT_PAGE_SIZE,
   buildRedditFilename,
+  extractRedditHtmlMediaUrls,
   fetchRedditPosts,
   fetchOldRedditHtml,
   extractTitleFromOldRedditPostHtml,

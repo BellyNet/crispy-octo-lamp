@@ -44,6 +44,7 @@ const HOGHAUL_BOOLEAN_OPTIONS = [
   'headless',
   'reddit-browser-media',
   'reddit-full-refresh',
+  'reddit-retry-only',
   'download-oversized',
   'full-source-refresh',
 ]
@@ -289,6 +290,9 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
       Boolean(getRunOption(argv, 'redditFullRefresh', 'reddit-full-refresh')) ||
       isTruthy(process.env.npm_config_reddit_full_refresh) ||
       isTruthy(process.env.HOGHAUL_REDDIT_FULL_REFRESH),
+    redditRetryOnly: Boolean(
+      getRunOption(argv, 'redditRetryOnly', 'reddit-retry-only')
+    ),
     browserOptions: {
       browserExecutable:
         getRunOption(argv, 'browserExecutable', 'browser-executable') ||

@@ -23,6 +23,7 @@ const {
 } = require('./scraperOptions')
 const { createDatasetPaths } = require('./datasetPaths')
 const { syncModelToNas } = require('./nasSync')
+const { loadRetryState } = require('./redditFullResolutionRetry')
 const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
@@ -562,6 +563,11 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-browser-media',
     isTruthy(getOption(argv, 'reddit-browser-media'))
   )
+  appendBoolean(
+    args,
+    '--reddit-full-refresh',
+    isTruthy(getOption(argv, 'reddit-full-refresh'))
+  )
 }
 
 function appendMilkmaidOptions(args, argv) {
@@ -848,11 +854,18 @@ function loadRegistry(registryFile = registryPath) {
   return JSON.parse(fs.readFileSync(registryFile, 'utf8'))
 }
 
-function collectSourceTargets(registry, sourceKey, modelFilter, hostContains) {
+function collectSourceTargets(
+  registry,
+  sourceKey,
+  modelFilter,
+  hostContains,
+  startFrom
+) {
   const targets = []
 
   for (const [modelName, entry] of Object.entries(registry || {})) {
     if (modelFilter && !modelFilter.has(modelName)) continue
+    if (startFrom && modelName.localeCompare(startFrom) < 0) continue
     const sources = Array.isArray(entry?.sources?.[sourceKey])
       ? entry.sources[sourceKey]
       : []
@@ -900,8 +913,7 @@ function normalizeRedditUsername(value) {
 
 function getRedditUsernameFromUrl(value) {
   return (
-    String(value || '').match(/reddit\.com\/(?:user|u)\/([^/?#]+)/i)?.[1] ||
-    ''
+    String(value || '').match(/reddit\.com\/(?:user|u)\/([^/?#]+)/i)?.[1] || ''
   )
 }
 
@@ -1076,8 +1088,12 @@ function isLegacyCoomerFansParsedSource(parsedSource) {
 
 function getSourceFrontierKey(parsedSource = {}) {
   return [
-    String(parsedSource.site || '').trim().toLowerCase(),
-    String(parsedSource.service || '').trim().toLowerCase(),
+    String(parsedSource.site || '')
+      .trim()
+      .toLowerCase(),
+    String(parsedSource.service || '')
+      .trim()
+      .toLowerCase(),
     String(
       parsedSource.userId || parsedSource.username || parsedSource.rawName || ''
     )
@@ -1147,6 +1163,19 @@ function buildAllSourceQueue(registry, options = {}) {
 
 function selectAllSourceQueue(queue, argv) {
   let next = queue
+  const selectedSource = String(getOption(argv, 'source') || '')
+    .trim()
+    .toLowerCase()
+  if (selectedSource) {
+    next = next
+      .map((item) => ({
+        ...item,
+        sources: item.sources.filter(
+          (source) => source.sourceKey.toLowerCase() === selectedSource
+        ),
+      }))
+      .filter((item) => item.sources.length > 0)
+  }
   const singleModel = getOption(argv, 'model')
     ? String(getOption(argv, 'model')).trim()
     : null
@@ -1182,7 +1211,12 @@ function isCompleteAllSourceResult(result) {
     Array.isArray(result?.sources) &&
     Array.isArray(result?.runs) &&
     result.runs.length === result.sources.length &&
-    result.runs.every((run) => run?.ok) &&
+    result.runs.every(
+      (run) =>
+        run?.ok &&
+        Number(run.summary?.errors || 0) === 0 &&
+        Number(run.summary?.pendingFullResolution || 0) === 0
+    ) &&
     result.nasSync?.ok !== false
   )
 }
@@ -1198,7 +1232,8 @@ function isIncompleteAllSourceReport(report) {
   const results = Array.isArray(report.results) ? report.results : []
   return (
     !report.finishedAt ||
-    (selectedModels > 0 && results.length < selectedModels)
+    (selectedModels > 0 && results.length < selectedModels) ||
+    results.some((result) => !isCompleteAllSourceResult(result))
   )
 }
 
@@ -1251,6 +1286,8 @@ function buildSourceBatchOptions(argv) {
     options['download-oversized'] = true
   if (isTruthy(getOption(argv, 'full-source-refresh')))
     options['full-source-refresh'] = true
+  if (isTruthy(getOption(argv, 'reddit-full-refresh')))
+    options['reddit-full-refresh'] = true
   return options
 }
 
@@ -1260,6 +1297,7 @@ function printSourceBatchHelp() {
 Options:
   --source <name>             Registry source key to run (required).
   --only-models <a,b,c>       Limit to canonical model names.
+  --start-from <name>         Start from this canonical model name.
   --host-contains <text>      Optional URL host filter, e.g. coomerfans.com.
   --pages <n|a-b>             Limit pages.
   --max-posts <n>             Limit posts per source.
@@ -1269,6 +1307,7 @@ Options:
   --video-concurrency <n>     Video concurrency.
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
+  --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.
@@ -1309,6 +1348,9 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
 
   const registry = loadRegistry()
   const modelFilter = normalizeList(getOption(argv, 'only-models'))
+  const startFrom = getOption(argv, 'start-from')
+    ? String(getOption(argv, 'start-from')).trim()
+    : ''
   const hostContains = String(getOption(argv, 'host-contains') || '')
     .trim()
     .toLowerCase()
@@ -1316,7 +1358,8 @@ async function runSourceBatch(sourceKeyOrArgv, argvInput = {}) {
     registry,
     sourceKey,
     modelFilter,
-    hostContains
+    hostContains,
+    startFrom
   )
 
   if (targets.length === 0) {
@@ -1774,6 +1817,7 @@ Runs every selected model source before moving to the next model.
 Registered Reddit, Pawchive, Coomer/CoomerFans, StufferDB, and Tumblr sources are included.
 
 Options:
+  --source <key>              Run only this registry source (for example, reddit).
   --model <name>              Update one model only.
   --only-models <a,b,c>       Limit to canonical model names.
   --start-from <name>         Start from this canonical model name.
@@ -1786,6 +1830,7 @@ Options:
   --video-concurrency <n>     Video concurrency.
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
+  --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between source runs.
   --dry-run                   Dry run Hoghaul sources.
@@ -1911,6 +1956,12 @@ async function runAllSourceModelUpdate(item, context = {}) {
       label: sourceLabel,
       url: source.url,
       summary: summarizeSourceRunSummary(summary),
+    }
+    if (parsedSource.sourceType === 'reddit') {
+      const modelLogDir = path.join(datasetPaths.datasetDir, item.model, 'log')
+      run.summary.pendingFullResolution = Object.keys(
+        loadRetryState(modelLogDir).pending
+      ).length
     }
     if (
       shouldAutoInactivateNeverSavedReddit(argv) &&
@@ -2305,6 +2356,8 @@ module.exports = {
   inferCanonicalModel,
   isSuccessfulRunStatus,
   buildAllSourceQueue,
+  selectAllSourceQueue,
+  resumeAllSourceQueueFromReport,
   buildAllSourceRunOptions,
   buildScraperArgs,
   buildScraperOptions,

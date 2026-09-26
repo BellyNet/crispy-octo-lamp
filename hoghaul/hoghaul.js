@@ -53,6 +53,13 @@ const {
   recordRedditSourceCheck,
 } = require('../scrapyard/redditSourceState')
 const {
+  clearMatchingFullResolutionRetries,
+  evaluatePreviewQuality,
+  listDueFullResolutionRetries,
+  markFullResolutionRetryAttempt,
+  recordFullResolutionRetry,
+} = require('../scrapyard/redditFullResolutionRetry')
+const {
   backfillSeenSourcePostsFromRunEvents,
   loadConfirmedSourceFrontier,
   recordCompletedSourcePosts,
@@ -1680,6 +1687,56 @@ function recordDeadMediaSkip(
   logScrollingMessage(`Skipped dead media: ${entry.filename}`)
 }
 
+function needsFullResolutionRetry(entry) {
+  return (
+    entry?.sourceSite === 'reddit' &&
+    entry?.mediaQuality === 'reddit_preview' &&
+    entry?.needsFullResolution === true
+  )
+}
+
+function recordNeedsFullResolutionSkip(
+  modelName,
+  folders,
+  entry,
+  destination,
+  quality = null
+) {
+  recordFullResolutionRetry(folders.logDir, {
+    relativePath: destination.relativePath,
+    previewUrl: entry.mediaUrl || null,
+    fullResolutionUrl: entry.fullResolutionUrl || null,
+    mediaPageUrl: entry.mediaPageUrl || null,
+    postId: entry.sourcePostId || entry.postId || null,
+    sourceService: entry.sourceService || null,
+    sourceUserId: entry.sourceUserId || null,
+    sourceUsername: entry.sourceUsername || null,
+    quality,
+  })
+  appendRunEvent(
+    'skip_needs_full_resolution',
+    hoghaulMediaSaver.buildErrorEvent({
+      modelName,
+      entry,
+      destination,
+      error: 'Reddit preview media is not full resolution; leaving for retry.',
+      extra: {
+        reason: 'reddit_preview_needs_full_resolution',
+        fullResolutionUrl: entry.fullResolutionUrl || null,
+        quality,
+      },
+    })
+  )
+  noteMediaOutcome(
+    'skipped',
+    `skip_needs_full_resolution: ${entry.filename}`,
+    'skipNeedsFullResolution'
+  )
+  logScrollingMessage(
+    `Skipped Reddit preview until full resolution is available: ${entry.filename}`
+  )
+}
+
 async function saveImageLikeMedia(modelName, folders, entry, kind) {
   const destination = hoghaulSavePipeline.getDestination({
     modelName,
@@ -1695,7 +1752,11 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     getEntryMediaPageUrls(entry),
     getEntryRawDirectMediaUrls(entry)
   )
-  if (deadMediaMatch) {
+  if (
+    deadMediaMatch &&
+    !entry.pendingFullResolutionRetryPath &&
+    !needsFullResolutionRetry(entry)
+  ) {
     recordDeadMediaSkip(
       modelName,
       folders,
@@ -1710,8 +1771,35 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
-  const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(folders, entry)
+  if (needsFullResolutionRetry(entry) && !entry.fullResolutionUrl) {
+    recordNeedsFullResolutionSkip(modelName, folders, entry, destination, {
+      acceptable: false,
+      error: 'No direct original URL was available.',
+    })
+    return
+  }
+
+  const seenEntry =
+    entry.pendingFullResolutionRetryPath || needsFullResolutionRetry(entry)
+      ? {
+          ...entry,
+          mediaUrl: entry.fullResolutionUrl || entry.mediaUrl,
+          mediaUrls: [entry.fullResolutionUrl || entry.mediaUrl],
+          mediaPageUrl: null,
+          mediaPageUrls: [],
+        }
+      : entry
+  const seenMediaMatch = hoghaulSavePipeline.getSeenMediaMatch(
+    folders,
+    seenEntry
+  )
   if (seenMediaMatch) {
+    if (entry.pendingFullResolutionRetryPath) {
+      clearMatchingFullResolutionRetries(folders.logDir, {
+        relativePath: entry.pendingFullResolutionRetryPath,
+        mediaUrl: entry.mediaUrl,
+      })
+    }
     recordDuplicate(
       modelName,
       entry,
@@ -1726,13 +1814,75 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
     return
   }
 
+  let acceptedPreviewBuffer = null
+  if (needsFullResolutionRetry(entry)) {
+    acceptedPreviewBuffer = await downloadMediaBuffer(entry.fullResolutionUrl, {
+      ...entry,
+      mediaUrl: entry.fullResolutionUrl,
+    })
+    let quality
+    try {
+      quality = evaluatePreviewQuality(
+        await sharp(acceptedPreviewBuffer).metadata()
+      )
+    } catch (err) {
+      quality = {
+        acceptable: false,
+        error: err.message,
+      }
+    }
+    if (!quality.acceptable) {
+      recordNeedsFullResolutionSkip(
+        modelName,
+        folders,
+        entry,
+        destination,
+        quality
+      )
+      return
+    }
+    entry = {
+      ...entry,
+      mediaUrl: entry.fullResolutionUrl,
+      mediaUrls: [entry.fullResolutionUrl, entry.mediaUrl, ...entry.mediaUrls],
+      mediaQuality: 'full',
+      needsFullResolution: false,
+      fullResolutionStatus: 'resolved_direct_original',
+    }
+  } else if (entry.pendingFullResolutionRetryPath) {
+    acceptedPreviewBuffer = await downloadMediaBuffer(entry.mediaUrl, entry)
+    let quality
+    try {
+      quality = evaluatePreviewQuality(
+        await sharp(acceptedPreviewBuffer).metadata()
+      )
+    } catch (err) {
+      quality = { acceptable: false, error: err.message }
+    }
+    if (!quality.acceptable) {
+      appendRunEvent('reddit_full_resolution_retry_low_quality', {
+        postId: entry.postId,
+        mediaUrl: entry.mediaUrl,
+        quality,
+      })
+      noteMediaOutcome(
+        'skipped',
+        `reddit_full_resolution_retry_low_quality: ${entry.filename}`,
+        'skipNeedsFullResolution'
+      )
+      return
+    }
+  }
+
   const result = await hoghaulSavePipeline.saveImageLikeMedia({
     modelName,
     folders,
     entry,
     destination,
     kind,
-    downloadBuffer: downloadMediaBuffer,
+    downloadBuffer: acceptedPreviewBuffer
+      ? async () => acceptedPreviewBuffer
+      : downloadMediaBuffer,
     getBitwiseDuplicationRecord,
     getVisualHashFromBuffer,
     getVisualDuplicationRecord,
@@ -1752,6 +1902,14 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
   })
   if (result.status === 'duplicate' && Number(result.sizeBytes || 0) > 0) {
     noteDuplicateDownloadBytes(result.sizeBytes)
+  }
+  if (result.status === 'saved' || result.status === 'duplicate') {
+    clearMatchingFullResolutionRetries(folders.logDir, {
+      relativePath: destination.relativePath,
+      mediaUrl: entry.mediaUrl,
+      mediaUrls: entry.mediaUrls,
+      fullResolutionUrl: entry.fullResolutionUrl,
+    })
   }
 }
 
@@ -1957,6 +2115,9 @@ async function run(argvInput = process.argv.slice(2)) {
   loadVisualHashCache()
 
   const source = parseSourceUrl(inputUrl)
+  if (runOptions.redditRetryOnly && source.site !== 'reddit') {
+    throw new Error('--reddit-retry-only requires a Reddit source URL')
+  }
   const browserOptionsForSource = getBrowserOptionsForSource(
     source,
     browserOptions
@@ -2084,38 +2245,66 @@ async function run(argvInput = process.argv.slice(2)) {
     )
   }
 
-  const posts = await fetchPosts(
-    source,
-    {
-      startPage,
-      endPage,
-      maxPosts,
-      postConcurrency,
-    },
-    {
-      fetchHtml: coomerFansBrowserFetchHtml,
-      fetchPostHtml: redditBrowserFetchHtml,
-      fallbackDelayMs: runOptions.redditFallbackDelayMs,
-      redditFullRefresh: runOptions.redditFullRefresh,
-      redditIncrementalOverlapPosts: runOptions.redditIncrementalOverlapPosts,
-      redditSourceState: redditStateContext?.incrementalState || null,
-      fullSourceRefresh: runOptions.fullSourceRefresh,
-      sourceFrontier,
-      sourceIncrementalOverlapPages: runOptions.sourceIncrementalOverlapPages,
-      onDiscoveryProgress: ({ current, total, pages, posts, media, mode }) => {
-        const expected = Math.max(total || 1, 1)
-        const processed = Math.max(current || 0, 0)
-        logProgress(current, Math.max(total || 1, 1), {
-          bottomText: `processed ${processed}/${expected} | saved 0 | skipped 0 | dupes 0 | failed 0 | remaining ${Math.max(expected - processed, 0)} | discovery ${pages}p/${posts} posts/${media} media`,
-        })
-      },
-      onListingPage: (details) => {
-        appendRunEvent('reddit_discovery_page', details)
-      },
-    }
-  )
+  const posts = runOptions.redditRetryOnly
+    ? []
+    : await fetchPosts(
+        source,
+        {
+          startPage,
+          endPage,
+          maxPosts,
+          postConcurrency,
+        },
+        {
+          fetchHtml: coomerFansBrowserFetchHtml,
+          fetchPostHtml: redditBrowserFetchHtml,
+          fallbackDelayMs: runOptions.redditFallbackDelayMs,
+          redditFullRefresh: runOptions.redditFullRefresh,
+          redditIncrementalOverlapPosts:
+            runOptions.redditIncrementalOverlapPosts,
+          redditSourceState: redditStateContext?.incrementalState || null,
+          fullSourceRefresh: runOptions.fullSourceRefresh,
+          sourceFrontier,
+          sourceIncrementalOverlapPages:
+            runOptions.sourceIncrementalOverlapPages,
+          onDiscoveryProgress: ({
+            current,
+            total,
+            pages,
+            posts,
+            media,
+            mode,
+          }) => {
+            const expected = Math.max(total || 1, 1)
+            const processed = Math.max(current || 0, 0)
+            logProgress(current, Math.max(total || 1, 1), {
+              bottomText: `processed ${processed}/${expected} | saved 0 | skipped 0 | dupes 0 | failed 0 | remaining ${Math.max(expected - processed, 0)} | discovery ${pages}p/${posts} posts/${media} media`,
+            })
+          },
+          onListingPage: (details) => {
+            appendRunEvent('reddit_discovery_page', details)
+          },
+        }
+      )
   const selectedPosts =
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
+  if (source.site === 'reddit' && !dryRun) {
+    for (const post of selectedPosts.filter(
+      (item) => item.mediaHydrationFailed
+    )) {
+      errorCount += 1
+      recordRunError('reddit_post_media_hydration_error', {
+        postId: post.id,
+        mediaPageUrl: post.permalink || post.url || null,
+        error: post.mediaHydrationError || 'Reddit post media hydration failed',
+      })
+      appendRunEvent('reddit_post_media_hydration_error', {
+        postId: post.id,
+        mediaPageUrl: post.permalink || post.url || null,
+        error: post.mediaHydrationError || 'Reddit post media hydration failed',
+      })
+    }
+  }
   const mediaEntries = normalizeMediaEntries(
     selectedPosts.flatMap((post) => getMediaEntriesFromPost(source, post)),
     {
@@ -2132,8 +2321,70 @@ async function run(argvInput = process.argv.slice(2)) {
     Number.isFinite(maxFiles) && maxFiles > 0
       ? sourceDeduped.entries.slice(0, maxFiles)
       : sourceDeduped.entries
+  const configuredRetryDelayMs = Number.parseInt(
+    process.env.HOGHAUL_REDDIT_PENDING_RETRY_DELAY_MS || '',
+    10
+  )
+  const pendingRetryDelayMs = Number.isFinite(configuredRetryDelayMs)
+    ? Math.max(1000, configuredRetryDelayMs)
+    : 1500
 
-  if (selectedPosts.length === 0) {
+  if (source.site === 'reddit' && !dryRun && !(maxFiles > 0)) {
+    const activeMediaUrls = new Set(
+      selectedMedia.flatMap((entry) =>
+        [entry.mediaUrl, entry.fullResolutionUrl].filter(Boolean)
+      )
+    )
+    const pendingRetries = listDueFullResolutionRetries(
+      folders.logDir,
+      source
+    ).filter((pending) => !activeMediaUrls.has(pending.fullResolutionUrl))
+    for (const pending of pendingRetries) {
+      selectedMedia.push({
+        sourceSite: 'reddit',
+        sourceService: source.service || 'submitted',
+        sourceUserId: source.userId || null,
+        sourceUsername: source.username || source.userId || null,
+        postId: pending.postId || null,
+        mediaPageUrl: pending.mediaPageUrl || null,
+        mediaUrl: pending.fullResolutionUrl,
+        mediaUrls: [pending.fullResolutionUrl, pending.previewUrl].filter(
+          Boolean
+        ),
+        sourceUrls: [pending.previewUrl].filter(Boolean),
+        filename: path.basename(pending.relativePath),
+        originalName: path.basename(pending.relativePath),
+        mediaQuality: 'full',
+        needsFullResolution: false,
+        fullResolutionStatus: 'pending_retry',
+        fullResolutionUrl: pending.fullResolutionUrl,
+        pendingFullResolutionRetryPath: pending.relativePath,
+      })
+    }
+    if (pendingRetries.length > 0) {
+      appendRunEvent('reddit_full_resolution_retries_queued', {
+        count: pendingRetries.length,
+        delayMs: pendingRetryDelayMs,
+      })
+      logScrollingMessage(
+        `Queued ${pendingRetries.length} pending Reddit originals for paced retry`
+      )
+    }
+  }
+
+  if (
+    selectedPosts.length === 0 &&
+    selectedMedia.length > 0 &&
+    source.site === 'reddit' &&
+    redditStateContext?.incrementalState?.hasFrontier
+  ) {
+    recordRedditSourceCheck(redditStateContext.modelLogDir, source, {
+      posts: [],
+      noNewPosts: true,
+    })
+  }
+
+  if (selectedPosts.length === 0 && selectedMedia.length === 0) {
     if (
       source.site === 'reddit' &&
       redditStateContext?.incrementalState?.hasFrontier
@@ -2280,7 +2531,9 @@ async function run(argvInput = process.argv.slice(2)) {
     return 0
   }
 
-  const trackedModelName = registerSourceForRun(source, inputUrl, model)
+  const trackedModelName = runOptions.redditRetryOnly
+    ? modelName
+    : registerSourceForRun(source, inputUrl, model)
   if (trackedModelName !== modelName) {
     throw new Error(
       `Resolved model changed during source registration: ${modelName} -> ${trackedModelName}`
@@ -2409,49 +2662,110 @@ async function run(argvInput = process.argv.slice(2)) {
     )
   )
 
-  await Promise.all(
-    imageLike.map((entry) =>
-      imageLimit(async () => {
-        try {
-          await saveImageLikeMedia(modelName, folders, entry, entry.kind)
-        } catch (err) {
-          if (isPermanentDeadMediaError(err)) {
-            const destination = hoghaulSavePipeline.getDestination({
-              modelName,
-              folders,
-              entry,
-              kind: entry.kind,
-            })
-            recordDeadMediaSkip(modelName, folders, entry, destination, err)
-            return
-          }
-          errorCount += 1
-          recordRunError('media_error', {
-            modelName,
-            filename: entry.filename,
+  const processImageEntry = async (entry) => {
+    try {
+      await saveImageLikeMedia(modelName, folders, entry, entry.kind)
+    } catch (err) {
+      if (isPermanentDeadMediaError(err)) {
+        if (entry.pendingFullResolutionRetryPath) {
+          appendRunEvent('reddit_full_resolution_retry_unavailable', {
+            postId: entry.postId,
             mediaUrl: entry.mediaUrl,
-            mediaPageUrl: entry.mediaPageUrl,
-            ...getEntrySourceDetails(entry),
-            error: err.message,
-          })
-          appendRunEvent('media_error', {
-            modelName,
-            filename: entry.filename,
-            mediaUrl: entry.mediaUrl,
-            mediaPageUrl: entry.mediaPageUrl,
-            ...getEntrySourceDetails(entry),
             error: err.message,
           })
           noteMediaOutcome(
-            'failed',
-            `media_error: ${entry.filename}`,
-            'mediaError'
+            'skipped',
+            `reddit_full_resolution_retry_unavailable: ${entry.filename}`,
+            'skipNeedsFullResolution'
           )
-          console.log(`Failed media: ${entry.filename} - ${err.message}`)
+          return
         }
+        const destination = hoghaulSavePipeline.getDestination({
+          modelName,
+          folders,
+          entry,
+          kind: entry.kind,
+        })
+        recordDeadMediaSkip(modelName, folders, entry, destination, err)
+        return
+      }
+      if (
+        entry.sourceSite === 'reddit' &&
+        !entry.pendingFullResolutionRetryPath
+      ) {
+        const destination = hoghaulSavePipeline.getDestination({
+          modelName,
+          folders,
+          entry,
+          kind: entry.kind,
+        })
+        recordFullResolutionRetry(folders.logDir, {
+          relativePath: destination.relativePath,
+          previewUrl:
+            entry.mediaQuality === 'reddit_preview' ? entry.mediaUrl : null,
+          fullResolutionUrl: entry.fullResolutionUrl || entry.mediaUrl,
+          mediaPageUrl: entry.mediaPageUrl,
+          postId: entry.postId,
+          sourceService: entry.sourceService,
+          sourceUserId: entry.sourceUserId,
+          sourceUsername: entry.sourceUsername,
+        })
+        appendRunEvent('reddit_media_retry_queued', {
+          postId: entry.postId,
+          mediaUrl: entry.mediaUrl,
+          fullResolutionUrl: entry.fullResolutionUrl || entry.mediaUrl,
+        })
+      }
+      errorCount += 1
+      recordRunError('media_error', {
+        modelName,
+        filename: entry.filename,
+        mediaUrl: entry.mediaUrl,
+        mediaPageUrl: entry.mediaPageUrl,
+        ...getEntrySourceDetails(entry),
+        error: err.message,
       })
-    )
+      appendRunEvent('media_error', {
+        modelName,
+        filename: entry.filename,
+        mediaUrl: entry.mediaUrl,
+        mediaPageUrl: entry.mediaPageUrl,
+        ...getEntrySourceDetails(entry),
+        error: err.message,
+      })
+      noteMediaOutcome('failed', `media_error: ${entry.filename}`, 'mediaError')
+      console.log(`Failed media: ${entry.filename} - ${err.message}`)
+      if (
+        entry.pendingFullResolutionRetryPath &&
+        /\b(?:HTTP|Browser HTTP)\s+429\b/i.test(err.message)
+      ) {
+        return 'rate_limited'
+      }
+    }
+  }
+  await Promise.all(
+    imageLike
+      .filter((entry) => !entry.pendingFullResolutionRetryPath)
+      .map((entry) => imageLimit(() => processImageEntry(entry)))
   )
+  const pendingImageRetries = imageLike.filter(
+    (entry) => entry.pendingFullResolutionRetryPath
+  )
+  for (const [index, entry] of pendingImageRetries.entries()) {
+    if (index > 0) await sleep(pendingRetryDelayMs)
+    markFullResolutionRetryAttempt(
+      folders.logDir,
+      entry.pendingFullResolutionRetryPath
+    )
+    const outcome = await processImageEntry(entry)
+    if (outcome === 'rate_limited') {
+      appendRunEvent('reddit_full_resolution_retries_paused', {
+        reason: 'rate_limited',
+        remaining: pendingImageRetries.length - index - 1,
+      })
+      break
+    }
+  }
 
   if (source.site !== 'reddit') {
     const completedPostIds = selectedPosts

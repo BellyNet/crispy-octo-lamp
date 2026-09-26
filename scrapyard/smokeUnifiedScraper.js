@@ -13,6 +13,8 @@ const {
 const {
   applyScrapePositionalFallback,
   buildAllSourceQueue,
+  selectAllSourceQueue,
+  resumeAllSourceQueueFromReport,
   buildAllSourceRunOptions,
   buildRepairArgs,
   buildScraperArgs,
@@ -27,6 +29,7 @@ const {
 } = require('./scraperRunner')
 const { probeUsername } = require('../hoghaul/backfill-sources-interactive')
 const { parseSourceUrl } = require('./sourceRouter')
+const { normalizeHoghaulRunOptions } = require('./scraperOptions')
 const {
   backfillSeenSourcePostsFromRunEvents,
   createBoundaryPageFilter,
@@ -49,6 +52,14 @@ const {
 } = require('./mediaEntries')
 const mediaDates = require('./mediaDates')
 const { createMediaSeenIndex } = require('./mediaSeenIndex')
+const {
+  clearMatchingFullResolutionRetries,
+  evaluatePreviewQuality,
+  listDueFullResolutionRetries,
+  loadRetryState,
+  markFullResolutionRetryAttempt,
+  recordFullResolutionRetry,
+} = require('./redditFullResolutionRetry')
 const { evictVerifiedLocalMp4s, syncModelMetadataToNas } = require('./nasSync')
 const {
   buildStufferDbMediaEntry,
@@ -73,6 +84,7 @@ const {
 const {
   extractTitleFromOldRedditPostHtml,
   fetchRedditPosts,
+  getRedditMediaEntries,
   getRedditPostTitle,
 } = require('./sourceAdapters/reddit')
 const {
@@ -142,6 +154,67 @@ async function assertRouted(url, expected) {
 }
 
 async function main() {
+  assert.deepStrictEqual(evaluatePreviewQuality({ width: 1080, height: 720 }), {
+    acceptable: true,
+    width: 1080,
+    height: 720,
+    pixels: 777600,
+    longEdge: 1080,
+    minimumPixels: 500000,
+    minimumLongEdge: 768,
+  })
+  assert.strictEqual(
+    evaluatePreviewQuality({ width: 320, height: 480 }).acceptable,
+    false
+  )
+  const retryLogDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'reddit-full-resolution-retry-')
+  )
+  recordFullResolutionRetry(retryLogDir, {
+    relativePath: 'sample/images/old-preview.jpg',
+    previewUrl: 'https://preview.redd.it/sample.jpg?width=320',
+    fullResolutionUrl: 'https://i.redd.it/sample.jpg',
+    sourceUserId: 'Gallery_User',
+  })
+  recordFullResolutionRetry(retryLogDir, {
+    relativePath: 'other/images/preview.jpg',
+    previewUrl: 'https://preview.redd.it/other.jpg?width=320',
+    fullResolutionUrl: 'https://i.redd.it/other.jpg',
+    sourceUserId: 'other_user',
+  })
+  assert.strictEqual(
+    listDueFullResolutionRetries(retryLogDir, {
+      userId: 'gallery_user',
+      service: 'submitted',
+    }).length,
+    1
+  )
+  const attemptAt = Date.now()
+  assert.strictEqual(
+    markFullResolutionRetryAttempt(
+      retryLogDir,
+      'sample/images/old-preview.jpg',
+      attemptAt
+    ),
+    true
+  )
+  assert.strictEqual(
+    listDueFullResolutionRetries(
+      retryLogDir,
+      { userId: 'gallery_user', service: 'submitted' },
+      { now: attemptAt + 1000 }
+    ).length,
+    0
+  )
+  assert.strictEqual(
+    clearMatchingFullResolutionRetries(retryLogDir, {
+      relativePath: 'sample/images/new-full-size.jpg',
+      mediaUrl: 'https://i.redd.it/sample.jpg',
+    }),
+    1
+  )
+  assert.strictEqual(Object.keys(loadRetryState(retryLogDir).pending).length, 1)
+  fs.rmSync(retryLogDir, { recursive: true, force: true })
   assert.deepStrictEqual(
     buildStufferSourceMeta('20230329200009-5564aa10-la.jpg'),
     {
@@ -994,6 +1067,40 @@ async function main() {
     allSourceQueue[0].sources.map((source) => source.label),
     ['reddit', 'pawchive', 'coomerfans', 'stufferdb']
   )
+  assert.deepStrictEqual(
+    selectAllSourceQueue(allSourceQueue, { source: 'reddit' }).map((item) => ({
+      model: item.model,
+      sources: item.sources.map((source) => source.sourceKey),
+    })),
+    [{ model: 'alpha_model', sources: ['reddit'] }]
+  )
+  assert.deepStrictEqual(
+    resumeAllSourceQueueFromReport(allSourceQueue, {
+      selectedModels: 3,
+      finishedAt: new Date().toISOString(),
+      results: [
+        {
+          model: 'alpha_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [
+            { ok: true, summary: { errors: 0, pendingFullResolution: 0 } },
+          ],
+          nasSync: { ok: true },
+        },
+        {
+          model: 'beta_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [
+            { ok: true, summary: { errors: 1, pendingFullResolution: 1 } },
+          ],
+          nasSync: { ok: true },
+        },
+      ],
+    }).queue.map((item) => item.model),
+    ['beta_model', 'dual_coomer_model']
+  )
   const completedLegacyDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'completed-legacy-coomerfans-')
   )
@@ -1739,6 +1846,7 @@ async function main() {
   assert.strictEqual(redditGalleryPosts[0].title, 'title')
   assert.strictEqual(redditGalleryPosts[0].text, 'title')
   assert.strictEqual(redditGalleryPosts[0].mediaEntries.length, 1)
+  assert.strictEqual(redditGalleryPosts[0].mediaHydrationFailed, true)
   assert.strictEqual(redditGalleryPosts[0].mediaEntries[0].text, 'title')
   assert(
     redditGalleryEvents.some(
@@ -1767,6 +1875,164 @@ async function main() {
       String(line).includes('Resolving Reddit gallery 1/1')
     )
   )
+
+  const redditRssGalleryEvents = []
+  const redditRssGalleryFetches = []
+  const redditRssGalleryPostFetches = []
+  const redditRssGalleryPosts = await fetchRedditPosts(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'rss_gallery_user',
+      username: 'rss_gallery_user',
+    },
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        redditRssGalleryFetches.push(url)
+        if (url.includes('.rss')) {
+          return {
+            html: [
+              '<feed><entry>',
+              '<title>RSS gallery title</title>',
+              '<updated>2026-09-01T00:00:00Z</updated>',
+              '<category label="r/test" />',
+              '<content>',
+              '<a href="https://www.reddit.com/gallery/rssgallery">[link]</a>',
+              '<a href="https://www.reddit.com/r/test/comments/rssgallery/gallery_title/">[comments]</a>',
+              '<img src="https://preview.redd.it/rss-first.jpg?width=640&amp;format=pjpg&amp;auto=webp">',
+              '</content>',
+              '</entry></feed>',
+            ].join(''),
+            byteLength: 420,
+            statusCode: 200,
+            url,
+          }
+        }
+        return {
+          html: '<html></html>',
+          byteLength: 13,
+          statusCode: 200,
+          url,
+        }
+      },
+      fetchPostHtml: async (url) => {
+        redditRssGalleryPostFetches.push(url)
+        return {
+          html: [
+            '<script>',
+            '"url":"https:\\/\\/preview.redd.it\\/rss-second.jpg?width=1080\\u0026format=pjpg\\u0026auto=webp"',
+            '</script>',
+          ].join(''),
+          byteLength: 160,
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: {
+        parseRedgifsId: () => null,
+      },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        redditRssGalleryEvents.push({ type, ...payload }),
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(redditRssGalleryPosts.length, 1)
+  assert.strictEqual(redditRssGalleryPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(
+    Boolean(redditRssGalleryPosts[0].mediaHydrationFailed),
+    false
+  )
+  assert.deepStrictEqual(
+    redditRssGalleryPosts[0].mediaEntries.map((entry) => entry.mediaUrl),
+    [
+      'https://preview.redd.it/rss-first.jpg?width=640&format=pjpg&auto=webp',
+      'https://preview.redd.it/rss-second.jpg?width=1080&format=pjpg&auto=webp',
+    ]
+  )
+  assert.deepStrictEqual(
+    redditRssGalleryPosts[0].mediaEntries.map((entry) => entry.mediaQuality),
+    ['reddit_preview', 'reddit_preview']
+  )
+  assert.deepStrictEqual(
+    redditRssGalleryPosts[0].mediaEntries.map(
+      (entry) => entry.needsFullResolution
+    ),
+    [true, true]
+  )
+  assert.deepStrictEqual(
+    redditRssGalleryPosts[0].mediaEntries.map(
+      (entry) => entry.fullResolutionStatus
+    ),
+    ['pending', 'pending']
+  )
+  assert(redditRssGalleryFetches.some((url) => url.includes('.rss')))
+  assert(
+    redditRssGalleryPostFetches.some((url) =>
+      /\/gallery\/rssgallery/i.test(url)
+    ),
+    'expected RSS gallery post page hydration fetch'
+  )
+  assert(
+    redditRssGalleryEvents.some(
+      (event) =>
+        event.type === 'reddit_html_request_started' &&
+        event.requestKind === 'gallery/post'
+    )
+  )
+
+  const redditFullGalleryEntries = await getRedditMediaEntries(
+    {
+      origin: 'https://www.reddit.com',
+      site: 'reddit',
+      service: 'submitted',
+      userId: 'full_gallery_user',
+      username: 'full_gallery_user',
+    },
+    {
+      id: 'fullgallery',
+      title: 'Full gallery title',
+      permalink: '/r/test/comments/fullgallery/full_gallery_title/',
+      is_gallery: true,
+      gallery_data: {
+        items: [{ media_id: 'fullmediaid' }],
+      },
+      media_metadata: {
+        fullmediaid: {
+          status: 'valid',
+          m: 'image/jpg',
+          s: {
+            u: 'https://preview.redd.it/fullmediaid.jpg?width=640&format=pjpg&auto=webp',
+          },
+          p: [
+            {
+              u: 'https://preview.redd.it/fullmediaid.jpg?width=320&format=pjpg&auto=webp',
+            },
+          ],
+        },
+      },
+    },
+    {
+      redgifsClient: {
+        parseRedgifsId: () => null,
+      },
+    }
+  )
+  assert.strictEqual(redditFullGalleryEntries.length, 1)
+  assert.strictEqual(
+    redditFullGalleryEntries[0].mediaUrl,
+    'https://i.redd.it/fullmediaid.jpg'
+  )
+  assert(
+    redditFullGalleryEntries[0].mediaUrls.includes(
+      'https://preview.redd.it/fullmediaid.jpg?width=640&format=pjpg&auto=webp'
+    )
+  )
+  assert.strictEqual(redditFullGalleryEntries[0].mediaQuality, 'full')
+  assert.strictEqual(redditFullGalleryEntries[0].needsFullResolution, false)
 
   const redditTitleHydrationEvents = []
   const redditHydratedTitlePosts = await fetchRedditPosts(
@@ -2056,6 +2322,13 @@ async function main() {
   assert.strictEqual(redditOptions.sourceIncrementalOverlapPages, '2')
   assert.strictEqual(redditOptions.pages, '1')
   assert.strictEqual(redditOptions.maxPosts, '2')
+  assert.strictEqual(
+    normalizeHoghaulRunOptions([
+      'https://www.reddit.com/user/sample_model/submitted/',
+      '--reddit-retry-only',
+    ]).redditRetryOnly,
+    true
+  )
   const coomerFansScraperArgs = buildScraperArgs(
     parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
     {
@@ -2064,7 +2337,10 @@ async function main() {
       'skip-nas-sync': true,
     }
   )
-  assert.strictEqual(coomerFansScraperArgs.includes('--no-browser-media'), false)
+  assert.strictEqual(
+    coomerFansScraperArgs.includes('--no-browser-media'),
+    false
+  )
   const coomerFansNoBrowserArgs = buildScraperArgs(
     parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
     {
@@ -2073,7 +2349,10 @@ async function main() {
       'browser-media': false,
     }
   )
-  assert.strictEqual(coomerFansNoBrowserArgs.includes('--no-browser-media'), true)
+  assert.strictEqual(
+    coomerFansNoBrowserArgs.includes('--no-browser-media'),
+    true
+  )
 
   const stufferOptions = buildScraperOptions(stufferdb, {
     model: 'sample_model',
