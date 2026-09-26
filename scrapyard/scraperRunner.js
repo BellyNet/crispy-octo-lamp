@@ -1288,7 +1288,6 @@ function printSourceBatchHelp() {
   console.log(`Usage: node scrapyard/run-source-batch.js --source=<coomer|pawchive> [options]
 
 Options:
-  --source <key>              Run only this registry source (for example, reddit).
   --source <name>             Registry source key to run (required).
   --only-models <a,b,c>       Limit to canonical model names.
   --start-from <name>         Start from this canonical model name.
@@ -1301,7 +1300,6 @@ Options:
   --video-concurrency <n>     Video concurrency.
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
-  --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
@@ -1812,6 +1810,7 @@ Runs every selected model source before moving to the next model.
 Registered Reddit, Pawchive, Coomer/CoomerFans, StufferDB, and Tumblr sources are included.
 
 Options:
+  --source <key>              Run only this registry source (for example, reddit).
   --model <name>              Update one model only.
   --only-models <a,b,c>       Limit to canonical model names.
   --start-from <name>         Start from this canonical model name.
@@ -1824,6 +1823,7 @@ Options:
   --video-concurrency <n>     Video concurrency.
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
+  --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between source runs.
   --dry-run                   Dry run Hoghaul sources.
