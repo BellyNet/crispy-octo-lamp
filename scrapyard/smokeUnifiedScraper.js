@@ -14,6 +14,7 @@ const {
   applyScrapePositionalFallback,
   buildAllSourceQueue,
   selectAllSourceQueue,
+  resumeAllSourceQueueFromReport,
   buildAllSourceRunOptions,
   buildRepairArgs,
   buildScraperArgs,
@@ -1071,6 +1072,33 @@ async function main() {
       sources: item.sources.map((source) => source.sourceKey),
     })),
     [{ model: 'alpha_model', sources: ['reddit'] }]
+  )
+  assert.deepStrictEqual(
+    resumeAllSourceQueueFromReport(allSourceQueue, {
+      selectedModels: 3,
+      finishedAt: new Date().toISOString(),
+      results: [
+        {
+          model: 'alpha_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [
+            { ok: true, summary: { errors: 0, pendingFullResolution: 0 } },
+          ],
+          nasSync: { ok: true },
+        },
+        {
+          model: 'beta_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [
+            { ok: true, summary: { errors: 1, pendingFullResolution: 1 } },
+          ],
+          nasSync: { ok: true },
+        },
+      ],
+    }).queue.map((item) => item.model),
+    ['beta_model', 'dual_coomer_model']
   )
   const completedLegacyDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'completed-legacy-coomerfans-')

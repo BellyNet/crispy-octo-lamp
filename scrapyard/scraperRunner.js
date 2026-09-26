@@ -23,6 +23,7 @@ const {
 } = require('./scraperOptions')
 const { createDatasetPaths } = require('./datasetPaths')
 const { syncModelToNas } = require('./nasSync')
+const { loadRetryState } = require('./redditFullResolutionRetry')
 const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
@@ -1210,7 +1211,12 @@ function isCompleteAllSourceResult(result) {
     Array.isArray(result?.sources) &&
     Array.isArray(result?.runs) &&
     result.runs.length === result.sources.length &&
-    result.runs.every((run) => run?.ok) &&
+    result.runs.every(
+      (run) =>
+        run?.ok &&
+        Number(run.summary?.errors || 0) === 0 &&
+        Number(run.summary?.pendingFullResolution || 0) === 0
+    ) &&
     result.nasSync?.ok !== false
   )
 }
@@ -1226,7 +1232,8 @@ function isIncompleteAllSourceReport(report) {
   const results = Array.isArray(report.results) ? report.results : []
   return (
     !report.finishedAt ||
-    (selectedModels > 0 && results.length < selectedModels)
+    (selectedModels > 0 && results.length < selectedModels) ||
+    results.some((result) => !isCompleteAllSourceResult(result))
   )
 }
 
@@ -1950,6 +1957,12 @@ async function runAllSourceModelUpdate(item, context = {}) {
       url: source.url,
       summary: summarizeSourceRunSummary(summary),
     }
+    if (parsedSource.sourceType === 'reddit') {
+      const modelLogDir = path.join(datasetPaths.datasetDir, item.model, 'log')
+      run.summary.pendingFullResolution = Object.keys(
+        loadRetryState(modelLogDir).pending
+      ).length
+    }
     if (
       shouldAutoInactivateNeverSavedReddit(argv) &&
       parsedSource.sourceType === 'reddit' &&
@@ -2344,6 +2357,7 @@ module.exports = {
   isSuccessfulRunStatus,
   buildAllSourceQueue,
   selectAllSourceQueue,
+  resumeAllSourceQueueFromReport,
   buildAllSourceRunOptions,
   buildScraperArgs,
   buildScraperOptions,
