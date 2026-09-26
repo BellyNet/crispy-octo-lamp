@@ -195,7 +195,7 @@ async function main() {
 function selectPendingRecords(records, datasetRoot, attemptedOnly) {
   const pendingByModel = new Map()
   return records.filter((record) => {
-    if (record.localExists || fs.existsSync(record.nasPath)) return false
+    if (record.localExists) return false
     if (!pendingByModel.has(record.modelName)) {
       const retryPath = path.join(
         datasetRoot,
@@ -209,7 +209,8 @@ function selectPendingRecords(records, datasetRoot, attemptedOnly) {
     const pending = pendingByModel.get(record.modelName)[
       record.datasetRelativePath
     ]
-    return Boolean(pending && (!attemptedOnly || pending.lastAttemptAt))
+    if (!pending || (attemptedOnly && !pending.lastAttemptAt)) return false
+    return !fs.existsSync(record.nasPath)
   })
 }
 
