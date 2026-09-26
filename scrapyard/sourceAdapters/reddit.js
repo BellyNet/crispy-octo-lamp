@@ -1436,6 +1436,16 @@ async function fetchKnownRedditGalleryPosts(
   if (typeof deps.fetchHtml !== 'function') {
     throw new Error('fetchKnownRedditGalleryPosts requires fetchHtml')
   }
+  const htmlDelayMs = getRedditHtmlDelayMs(deps)
+  deps.logger?.log?.(
+    `Reddit gallery HTML pacing: one request every ${(
+      htmlDelayMs / 1000
+    ).toFixed(1)}s`
+  )
+  deps.appendRunEvent?.('reddit_html_throttle_configured', {
+    delayMs: htmlDelayMs,
+    scope: 'known_galleries',
+  })
   const posts = []
   const recordsToCheck =
     Number.isFinite(options.maxPosts) && options.maxPosts > 0

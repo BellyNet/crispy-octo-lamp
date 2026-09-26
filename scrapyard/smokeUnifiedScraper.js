@@ -1946,6 +1946,7 @@ async function main() {
   ]
   const knownGalleryCache = new Map()
   const knownGalleryFetches = []
+  const knownGalleryEvents = []
   const knownGalleryDeps = {
     fetchHtml: async (url) => {
       knownGalleryFetches.push(url)
@@ -1959,6 +1960,8 @@ async function main() {
     onGalleryHydrated: (record) => knownGalleryCache.set(record.postId, record),
     redditHtmlDelayMs: 0,
     redditHtmlMaxRetries: 0,
+    appendRunEvent: (type, payload) =>
+      knownGalleryEvents.push({ type, ...payload }),
     redgifsClient: { parseRedgifsId: () => null },
   }
   const knownGalleryPosts = await fetchKnownRedditGalleryPosts(
@@ -1968,6 +1971,14 @@ async function main() {
     knownGalleryDeps
   )
   assert.strictEqual(knownGalleryFetches.length, 1)
+  assert(
+    knownGalleryEvents.some(
+      (event) =>
+        event.type === 'reddit_html_throttle_configured' &&
+        event.scope === 'known_galleries' &&
+        event.delayMs === 0
+    )
+  )
   assert.strictEqual(knownGalleryPosts[0].mediaEntries.length, 2)
   assert.strictEqual(knownGalleryPosts[0].mediaHydrationFailed, undefined)
   assert.strictEqual(
