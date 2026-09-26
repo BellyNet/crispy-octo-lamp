@@ -56,7 +56,18 @@ function saveRetryState(modelLogDir, state) {
   state.updatedAt = new Date().toISOString()
   const tempPath = `${retryPath}.tmp-${process.pid}-${Date.now()}`
   fs.writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`)
-  fs.renameSync(tempPath, retryPath)
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      fs.renameSync(tempPath, retryPath)
+      return
+    } catch (err) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(err.code) || attempt === 7) {
+        throw err
+      }
+      const delayMs = Math.min(50 * 2 ** attempt, 500)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs)
+    }
+  }
 }
 
 function recordFullResolutionRetry(modelLogDir, details = {}) {

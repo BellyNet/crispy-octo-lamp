@@ -182,12 +182,31 @@ async function main() {
   const retryLogDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'reddit-full-resolution-retry-')
   )
-  recordFullResolutionRetry(retryLogDir, {
-    relativePath: 'sample/images/old-preview.jpg',
-    previewUrl: 'https://preview.redd.it/sample.jpg?width=320',
-    fullResolutionUrl: 'https://i.redd.it/sample.jpg',
-    sourceUserId: 'Gallery_User',
-  })
+  const originalRename = fs.renameSync
+  let renameAttempts = 0
+  fs.renameSync = (from, to) => {
+    if (
+      to === path.join(retryLogDir, 'reddit-full-resolution-retry.json') &&
+      renameAttempts < 2
+    ) {
+      renameAttempts += 1
+      const error = new Error('Temporary Windows file lock')
+      error.code = 'EPERM'
+      throw error
+    }
+    return originalRename(from, to)
+  }
+  try {
+    recordFullResolutionRetry(retryLogDir, {
+      relativePath: 'sample/images/old-preview.jpg',
+      previewUrl: 'https://preview.redd.it/sample.jpg?width=320',
+      fullResolutionUrl: 'https://i.redd.it/sample.jpg',
+      sourceUserId: 'Gallery_User',
+    })
+  } finally {
+    fs.renameSync = originalRename
+  }
+  assert.strictEqual(renameAttempts, 2)
   recordFullResolutionRetry(retryLogDir, {
     relativePath: 'other/images/preview.jpg',
     previewUrl: 'https://preview.redd.it/other.jpg?width=320',
