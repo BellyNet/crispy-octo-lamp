@@ -9,6 +9,23 @@ const DEFAULT_MINIMUM_LONG_EDGE = 768
 const DEFAULT_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000
 const DEFAULT_RETRY_LIMIT = 32
 
+function getRedditOriginalMediaUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    if (
+      !['preview.redd.it', 'i.redd.it'].includes(parsed.hostname.toLowerCase())
+    )
+      return null
+    const filename = path.posix
+      .basename(parsed.pathname)
+      .replace(/^.*-v\d+-/i, '')
+    if (!path.extname(filename)) return null
+    return `https://i.redd.it/${filename}`
+  } catch {
+    return null
+  }
+}
+
 function getRetryPath(modelLogDir) {
   return path.join(modelLogDir, RETRY_FILENAME)
 }
@@ -47,14 +64,22 @@ function recordFullResolutionRetry(modelLogDir, details = {}) {
   if (!relativePath) return false
   const state = loadRetryState(modelLogDir)
   const previous = state.pending[relativePath] || {}
+  const fullResolutionUrl =
+    getRedditOriginalMediaUrl(details.fullResolutionUrl) ||
+    details.fullResolutionUrl ||
+    null
+  const originalUrlChanged = Boolean(
+    previous.fullResolutionUrl &&
+      previous.fullResolutionUrl !== fullResolutionUrl
+  )
   state.pending[relativePath] = {
     status: 'pending_full_resolution',
     queuedAt: previous.queuedAt || new Date().toISOString(),
-    lastAttemptAt: previous.lastAttemptAt || null,
-    attemptCount: previous.attemptCount || 0,
+    lastAttemptAt: originalUrlChanged ? null : previous.lastAttemptAt || null,
+    attemptCount: originalUrlChanged ? 0 : previous.attemptCount || 0,
     relativePath,
     previewUrl: details.previewUrl || details.mediaUrl || null,
-    fullResolutionUrl: details.fullResolutionUrl || null,
+    fullResolutionUrl,
     mediaPageUrl: details.mediaPageUrl || null,
     postId: details.postId || null,
     sourceService: details.sourceService || null,
@@ -133,7 +158,7 @@ function clearMatchingFullResolutionRetries(modelLogDir, details = {}) {
   const mediaUrls = new Set(
     [details.mediaUrl, details.mediaUrls, details.fullResolutionUrl]
       .flat(Infinity)
-      .map(normalizeUrl)
+      .flatMap((url) => [normalizeUrl(url), getRedditOriginalMediaUrl(url)])
       .filter(Boolean)
   )
   if (!relativePath && mediaUrls.size === 0) return 0
@@ -143,7 +168,7 @@ function clearMatchingFullResolutionRetries(modelLogDir, details = {}) {
   for (const [key, pending] of Object.entries(state.pending)) {
     const pendingPath = String(pending?.relativePath || '').replace(/\\/g, '/')
     const pendingUrls = [pending?.fullResolutionUrl, pending?.previewUrl]
-      .map(normalizeUrl)
+      .flatMap((url) => [normalizeUrl(url), getRedditOriginalMediaUrl(url)])
       .filter(Boolean)
     const pathMatches = relativePath && pendingPath === relativePath
     const urlMatches = pendingUrls.some((url) => mediaUrls.has(url))
@@ -200,6 +225,7 @@ module.exports = {
   clearFullResolutionRetry,
   clearMatchingFullResolutionRetries,
   evaluatePreviewQuality,
+  getRedditOriginalMediaUrl,
   getRetryPath,
   listDueFullResolutionRetries,
   loadRetryState,

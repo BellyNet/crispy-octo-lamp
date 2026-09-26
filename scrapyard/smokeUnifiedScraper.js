@@ -55,6 +55,7 @@ const { createMediaSeenIndex } = require('./mediaSeenIndex')
 const {
   clearMatchingFullResolutionRetries,
   evaluatePreviewQuality,
+  getRedditOriginalMediaUrl,
   listDueFullResolutionRetries,
   loadRetryState,
   markFullResolutionRetryAttempt,
@@ -167,6 +168,16 @@ async function main() {
     evaluatePreviewQuality({ width: 320, height: 480 }).acceptable,
     false
   )
+  const titledPreviewUrl =
+    'https://preview.redd.it/a-post-title-v0-bvdrw1kajrfh1.jpg?width=720'
+  assert.strictEqual(
+    getRedditOriginalMediaUrl(titledPreviewUrl),
+    'https://i.redd.it/bvdrw1kajrfh1.jpg'
+  )
+  assert.strictEqual(
+    getRedditOriginalMediaUrl('https://preview.redd.it/plain.jpg?width=320'),
+    'https://i.redd.it/plain.jpg'
+  )
   const retryLogDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'reddit-full-resolution-retry-')
   )
@@ -215,6 +226,22 @@ async function main() {
   )
   assert.strictEqual(Object.keys(loadRetryState(retryLogDir).pending).length, 1)
   fs.rmSync(retryLogDir, { recursive: true, force: true })
+  const titledRetryLogDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'reddit-titled-preview-retry-')
+  )
+  recordFullResolutionRetry(titledRetryLogDir, {
+    relativePath: 'sample/images/titled-preview.jpg',
+    previewUrl: titledPreviewUrl,
+    fullResolutionUrl: 'https://i.redd.it/a-post-title-v0-bvdrw1kajrfh1.jpg',
+    sourceUserId: 'Gallery_User',
+  })
+  assert.strictEqual(
+    loadRetryState(titledRetryLogDir).pending[
+      'sample/images/titled-preview.jpg'
+    ].fullResolutionUrl,
+    'https://i.redd.it/bvdrw1kajrfh1.jpg'
+  )
+  fs.rmSync(titledRetryLogDir, { recursive: true, force: true })
   assert.deepStrictEqual(
     buildStufferSourceMeta('20230329200009-5564aa10-la.jpg'),
     {

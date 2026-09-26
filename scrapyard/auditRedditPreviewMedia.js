@@ -7,6 +7,7 @@ const minimist = require('minimist')
 const sharp = require('sharp')
 
 const { createHashStore } = require('./hashStore')
+const { getRedditOriginalMediaUrl } = require('./redditFullResolutionRetry')
 
 const SIDECAR_FILENAME = '.media-dates.json'
 const SEEN_INDEX_FILENAME = 'milkmaid-seen-media-index.json'
@@ -674,14 +675,8 @@ function isDirectRedditUrl(value) {
 
 function getFullResolutionUrl(row = {}) {
   const explicit = String(row?.source?.fullResolutionUrl || '').trim()
-  if (explicit) return explicit
-  try {
-    const parsed = new URL(String(row?.source?.mediaUrl || ''))
-    if (parsed.hostname.toLowerCase() !== 'preview.redd.it') return null
-    return `https://i.redd.it${parsed.pathname}`
-  } catch {
-    return null
-  }
+  if (explicit) return getRedditOriginalMediaUrl(explicit) || explicit
+  return getRedditOriginalMediaUrl(row?.source?.mediaUrl)
 }
 
 function getPreviewWidth(value) {

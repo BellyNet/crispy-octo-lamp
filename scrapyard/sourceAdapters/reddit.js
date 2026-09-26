@@ -3,6 +3,7 @@
 const path = require('path')
 const { normalizeMediaEntries, sanitizeToken } = require('../mediaEntries')
 const mediaFileRecords = require('../mediaFileRecords')
+const { getRedditOriginalMediaUrl } = require('../redditFullResolutionRetry')
 
 const DEFAULT_REDDIT_PAGE_SIZE = 100
 const REDDIT_RSS_USER_AGENT =
@@ -144,8 +145,8 @@ function normalizeRedditImageUrl(mediaUrl) {
   try {
     const parsed = new URL(decoded)
     const host = parsed.hostname.toLowerCase()
-    if (host === 'preview.redd.it') {
-      return `https://i.redd.it${parsed.pathname}`
+    if (host === 'preview.redd.it' || host === 'i.redd.it') {
+      return getRedditOriginalMediaUrl(decoded) || parsed.toString()
     }
     return parsed.toString()
   } catch {
@@ -161,25 +162,13 @@ function isRedditPreviewMediaUrl(mediaUrl) {
   }
 }
 
-function getRedditPreviewFullResolutionUrl(mediaUrl) {
-  try {
-    const parsed = new URL(mediaUrl)
-    if (parsed.hostname.toLowerCase() !== 'preview.redd.it') return null
-    const extension = path.extname(parsed.pathname)
-    if (!extension) return null
-    return `https://i.redd.it${parsed.pathname}`
-  } catch {
-    return null
-  }
-}
-
 function getRedditMediaQualityMetadata(mediaUrl) {
   if (isRedditPreviewMediaUrl(mediaUrl)) {
     return {
       mediaQuality: 'reddit_preview',
       needsFullResolution: true,
       fullResolutionStatus: 'pending',
-      fullResolutionUrl: getRedditPreviewFullResolutionUrl(mediaUrl),
+      fullResolutionUrl: getRedditOriginalMediaUrl(mediaUrl),
     }
   }
 
