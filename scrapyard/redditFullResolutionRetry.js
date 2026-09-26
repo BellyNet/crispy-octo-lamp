@@ -6,6 +6,8 @@ const path = require('path')
 const RETRY_FILENAME = 'reddit-full-resolution-retry.json'
 const DEFAULT_MINIMUM_PIXELS = 500000
 const DEFAULT_MINIMUM_LONG_EDGE = 768
+const DEFAULT_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000
+const DEFAULT_RETRY_LIMIT = 32
 
 function getRetryPath(modelLogDir) {
   return path.join(modelLogDir, RETRY_FILENAME)
@@ -44,9 +46,12 @@ function recordFullResolutionRetry(modelLogDir, details = {}) {
   const relativePath = String(details.relativePath || '').replace(/\\/g, '/')
   if (!relativePath) return false
   const state = loadRetryState(modelLogDir)
+  const previous = state.pending[relativePath] || {}
   state.pending[relativePath] = {
     status: 'pending_full_resolution',
-    queuedAt: new Date().toISOString(),
+    queuedAt: previous.queuedAt || new Date().toISOString(),
+    lastAttemptAt: previous.lastAttemptAt || null,
+    attemptCount: previous.attemptCount || 0,
     relativePath,
     previewUrl: details.previewUrl || details.mediaUrl || null,
     fullResolutionUrl: details.fullResolutionUrl || null,
@@ -57,6 +62,58 @@ function recordFullResolutionRetry(modelLogDir, details = {}) {
     sourceUsername: details.sourceUsername || null,
     quality: details.quality || null,
   }
+  saveRetryState(modelLogDir, state)
+  return true
+}
+
+function listDueFullResolutionRetries(modelLogDir, source = {}, options = {}) {
+  const now = Number(options.now) || Date.now()
+  const cooldownMs = Number.isFinite(Number(options.cooldownMs))
+    ? Math.max(0, Number(options.cooldownMs))
+    : DEFAULT_RETRY_COOLDOWN_MS
+  const requestedLimit =
+    options.limit ?? process.env.HOGHAUL_REDDIT_PENDING_RETRY_LIMIT
+  const limit = Number.isFinite(Number(requestedLimit))
+    ? Math.max(0, Math.floor(Number(requestedLimit)))
+    : DEFAULT_RETRY_LIMIT
+  const sourceUserId = String(
+    source.userId || source.username || ''
+  ).toLowerCase()
+  const sourceService = String(source.service || 'submitted').toLowerCase()
+  if (!sourceUserId || limit === 0) return []
+
+  return Object.values(loadRetryState(modelLogDir).pending)
+    .filter((item) => {
+      if (!item?.relativePath || !item.fullResolutionUrl) return false
+      const itemUserId = String(
+        item.sourceUserId || item.sourceUsername || ''
+      ).toLowerCase()
+      if (itemUserId !== sourceUserId) return false
+      if (
+        String(item.sourceService || 'submitted').toLowerCase() !==
+        sourceService
+      )
+        return false
+      const lastAttempt = Date.parse(item.lastAttemptAt || '')
+      return !Number.isFinite(lastAttempt) || now - lastAttempt >= cooldownMs
+    })
+    .sort((a, b) =>
+      String(a.queuedAt || '').localeCompare(String(b.queuedAt || ''))
+    )
+    .slice(0, limit)
+}
+
+function markFullResolutionRetryAttempt(
+  modelLogDir,
+  relativePath,
+  now = Date.now()
+) {
+  const key = String(relativePath || '').replace(/\\/g, '/')
+  const state = loadRetryState(modelLogDir)
+  const pending = state.pending[key]
+  if (!pending) return false
+  pending.lastAttemptAt = new Date(now).toISOString()
+  pending.attemptCount = Number(pending.attemptCount || 0) + 1
   saveRetryState(modelLogDir, state)
   return true
 }
@@ -144,6 +201,8 @@ module.exports = {
   clearMatchingFullResolutionRetries,
   evaluatePreviewQuality,
   getRetryPath,
+  listDueFullResolutionRetries,
   loadRetryState,
+  markFullResolutionRetryAttempt,
   recordFullResolutionRetry,
 }

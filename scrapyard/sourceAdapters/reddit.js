@@ -1399,7 +1399,11 @@ async function fetchRedditPostHtmlForMedia(source, post, deps = {}) {
   }
 
   if (typeof deps.fetchPostHtml === 'function') {
-    return deps.fetchPostHtml(url, requestOptions)
+    return fetchRedditHtmlWithRetry(url, requestOptions, {
+      ...deps,
+      fetchHtml: deps.fetchPostHtml,
+      redditHtmlRequestKind: 'gallery/post',
+    })
   }
 
   if (typeof deps.fetchHtml === 'function') {

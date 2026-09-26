@@ -912,8 +912,7 @@ function normalizeRedditUsername(value) {
 
 function getRedditUsernameFromUrl(value) {
   return (
-    String(value || '').match(/reddit\.com\/(?:user|u)\/([^/?#]+)/i)?.[1] ||
-    ''
+    String(value || '').match(/reddit\.com\/(?:user|u)\/([^/?#]+)/i)?.[1] || ''
   )
 }
 
@@ -1088,8 +1087,12 @@ function isLegacyCoomerFansParsedSource(parsedSource) {
 
 function getSourceFrontierKey(parsedSource = {}) {
   return [
-    String(parsedSource.site || '').trim().toLowerCase(),
-    String(parsedSource.service || '').trim().toLowerCase(),
+    String(parsedSource.site || '')
+      .trim()
+      .toLowerCase(),
+    String(parsedSource.service || '')
+      .trim()
+      .toLowerCase(),
     String(
       parsedSource.userId || parsedSource.username || parsedSource.rawName || ''
     )
@@ -1159,6 +1162,19 @@ function buildAllSourceQueue(registry, options = {}) {
 
 function selectAllSourceQueue(queue, argv) {
   let next = queue
+  const selectedSource = String(getOption(argv, 'source') || '')
+    .trim()
+    .toLowerCase()
+  if (selectedSource) {
+    next = next
+      .map((item) => ({
+        ...item,
+        sources: item.sources.filter(
+          (source) => source.sourceKey.toLowerCase() === selectedSource
+        ),
+      }))
+      .filter((item) => item.sources.length > 0)
+  }
   const singleModel = getOption(argv, 'model')
     ? String(getOption(argv, 'model')).trim()
     : null
@@ -1272,6 +1288,7 @@ function printSourceBatchHelp() {
   console.log(`Usage: node scrapyard/run-source-batch.js --source=<coomer|pawchive> [options]
 
 Options:
+  --source <key>              Run only this registry source (for example, reddit).
   --source <name>             Registry source key to run (required).
   --only-models <a,b,c>       Limit to canonical model names.
   --start-from <name>         Start from this canonical model name.
@@ -1284,6 +1301,7 @@ Options:
   --video-concurrency <n>     Video concurrency.
   --source-incremental-overlap-pages <n> Archive pages checked past the first known page.
   --full-source-refresh       Scan every source page, ignoring frontiers.
+  --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
@@ -2325,6 +2343,7 @@ module.exports = {
   inferCanonicalModel,
   isSuccessfulRunStatus,
   buildAllSourceQueue,
+  selectAllSourceQueue,
   buildAllSourceRunOptions,
   buildScraperArgs,
   buildScraperOptions,

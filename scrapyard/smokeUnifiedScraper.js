@@ -13,6 +13,7 @@ const {
 const {
   applyScrapePositionalFallback,
   buildAllSourceQueue,
+  selectAllSourceQueue,
   buildAllSourceRunOptions,
   buildRepairArgs,
   buildScraperArgs,
@@ -52,7 +53,9 @@ const { createMediaSeenIndex } = require('./mediaSeenIndex')
 const {
   clearMatchingFullResolutionRetries,
   evaluatePreviewQuality,
+  listDueFullResolutionRetries,
   loadRetryState,
+  markFullResolutionRetryAttempt,
   recordFullResolutionRetry,
 } = require('./redditFullResolutionRetry')
 const { evictVerifiedLocalMp4s, syncModelMetadataToNas } = require('./nasSync')
@@ -169,7 +172,38 @@ async function main() {
     relativePath: 'sample/images/old-preview.jpg',
     previewUrl: 'https://preview.redd.it/sample.jpg?width=320',
     fullResolutionUrl: 'https://i.redd.it/sample.jpg',
+    sourceUserId: 'Gallery_User',
   })
+  recordFullResolutionRetry(retryLogDir, {
+    relativePath: 'other/images/preview.jpg',
+    previewUrl: 'https://preview.redd.it/other.jpg?width=320',
+    fullResolutionUrl: 'https://i.redd.it/other.jpg',
+    sourceUserId: 'other_user',
+  })
+  assert.strictEqual(
+    listDueFullResolutionRetries(retryLogDir, {
+      userId: 'gallery_user',
+      service: 'submitted',
+    }).length,
+    1
+  )
+  const attemptAt = Date.now()
+  assert.strictEqual(
+    markFullResolutionRetryAttempt(
+      retryLogDir,
+      'sample/images/old-preview.jpg',
+      attemptAt
+    ),
+    true
+  )
+  assert.strictEqual(
+    listDueFullResolutionRetries(
+      retryLogDir,
+      { userId: 'gallery_user', service: 'submitted' },
+      { now: attemptAt + 1000 }
+    ).length,
+    0
+  )
   assert.strictEqual(
     clearMatchingFullResolutionRetries(retryLogDir, {
       relativePath: 'sample/images/new-full-size.jpg',
@@ -177,10 +211,7 @@ async function main() {
     }),
     1
   )
-  assert.strictEqual(
-    Object.keys(loadRetryState(retryLogDir).pending).length,
-    0
-  )
+  assert.strictEqual(Object.keys(loadRetryState(retryLogDir).pending).length, 1)
   fs.rmSync(retryLogDir, { recursive: true, force: true })
   assert.deepStrictEqual(
     buildStufferSourceMeta('20230329200009-5564aa10-la.jpg'),
@@ -1034,6 +1065,13 @@ async function main() {
     allSourceQueue[0].sources.map((source) => source.label),
     ['reddit', 'pawchive', 'coomerfans', 'stufferdb']
   )
+  assert.deepStrictEqual(
+    selectAllSourceQueue(allSourceQueue, { source: 'reddit' }).map((item) => ({
+      model: item.model,
+      sources: item.sources.map((source) => source.sourceKey),
+    })),
+    [{ model: 'alpha_model', sources: ['reddit'] }]
+  )
   const completedLegacyDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'completed-legacy-coomerfans-')
   )
@@ -1810,6 +1848,7 @@ async function main() {
 
   const redditRssGalleryEvents = []
   const redditRssGalleryFetches = []
+  const redditRssGalleryPostFetches = []
   const redditRssGalleryPosts = await fetchRedditPosts(
     {
       origin: 'https://www.reddit.com',
@@ -1822,18 +1861,6 @@ async function main() {
     {
       fetchHtml: async (url) => {
         redditRssGalleryFetches.push(url)
-        if (/\/gallery\/rssgallery/i.test(url)) {
-          return {
-            html: [
-              '<script>',
-              '"url":"https:\\/\\/preview.redd.it\\/rss-second.jpg?width=1080\\u0026format=pjpg\\u0026auto=webp"',
-              '</script>',
-            ].join(''),
-            byteLength: 160,
-            statusCode: 200,
-            url,
-          }
-        }
         if (url.includes('.rss')) {
           return {
             html: [
@@ -1856,6 +1883,19 @@ async function main() {
         return {
           html: '<html></html>',
           byteLength: 13,
+          statusCode: 200,
+          url,
+        }
+      },
+      fetchPostHtml: async (url) => {
+        redditRssGalleryPostFetches.push(url)
+        return {
+          html: [
+            '<script>',
+            '"url":"https:\\/\\/preview.redd.it\\/rss-second.jpg?width=1080\\u0026format=pjpg\\u0026auto=webp"',
+            '</script>',
+          ].join(''),
+          byteLength: 160,
           statusCode: 200,
           url,
         }
@@ -1895,8 +1935,9 @@ async function main() {
     ),
     ['pending', 'pending']
   )
+  assert(redditRssGalleryFetches.some((url) => url.includes('.rss')))
   assert(
-    redditRssGalleryFetches.some((url) =>
+    redditRssGalleryPostFetches.some((url) =>
       /\/gallery\/rssgallery/i.test(url)
     ),
     'expected RSS gallery post page hydration fetch'
@@ -2255,7 +2296,10 @@ async function main() {
       'skip-nas-sync': true,
     }
   )
-  assert.strictEqual(coomerFansScraperArgs.includes('--no-browser-media'), false)
+  assert.strictEqual(
+    coomerFansScraperArgs.includes('--no-browser-media'),
+    false
+  )
   const coomerFansNoBrowserArgs = buildScraperArgs(
     parseSourceUrl('https://coomerfans.com/u/onlyfans/123/name_here'),
     {
@@ -2264,7 +2308,10 @@ async function main() {
       'browser-media': false,
     }
   )
-  assert.strictEqual(coomerFansNoBrowserArgs.includes('--no-browser-media'), true)
+  assert.strictEqual(
+    coomerFansNoBrowserArgs.includes('--no-browser-media'),
+    true
+  )
 
   const stufferOptions = buildScraperOptions(stufferdb, {
     model: 'sample_model',
