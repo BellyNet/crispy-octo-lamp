@@ -15,7 +15,7 @@ const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 
 const argv = minimist(process.argv.slice(2), {
   alias: { h: 'help', m: 'model' },
-  boolean: ['help', 'apply', 'remote-verify'],
+  boolean: ['help', 'apply', 'remote-verify', 'include-carousel-previews'],
   string: [
     'model',
     'dataset-root',
@@ -29,6 +29,7 @@ const argv = minimist(process.argv.slice(2), {
   default: {
     apply: false,
     'remote-verify': true,
+    'include-carousel-previews': false,
     'verify-direct-max-bytes': String(64 * 1024),
     'remote-concurrency': '8',
     'minimum-pixels': '500000',
@@ -48,7 +49,9 @@ if (require.main === module) {
         process.exitCode = 1
       })
     } catch (err) {
-      console.error(`Fatal Reddit preview audit error: ${err.stack || err.message}`)
+      console.error(
+        `Fatal Reddit preview audit error: ${err.stack || err.message}`
+      )
       process.exitCode = 1
     }
   }
@@ -72,6 +75,8 @@ Options:
                               size. Default: 65536.
   --remote-concurrency <n>   Concurrent i.redd.it HEAD checks. Default: 8.
   --no-remote-verify         Skip direct-URL size verification.
+  --include-carousel-previews
+                             Upgrade saved preview images from multi-image Reddit posts.
   --minimum-pixels <n>       Minimum acceptable preview pixel count. Default: 500000.
   --minimum-long-edge <n>    Minimum acceptable preview long edge. Default: 768.
   -h, --help                 Show help.
@@ -102,6 +107,7 @@ async function main() {
   const apply = Boolean(argv.apply)
   const modelFilter = normalizeKey(argv.model)
   const remoteVerify = Boolean(argv['remote-verify'])
+  const includeCarouselPreviews = Boolean(argv['include-carousel-previews'])
   const verifyDirectMaxBytes = getPositiveInteger(
     argv['verify-direct-max-bytes'],
     64 * 1024
@@ -123,12 +129,14 @@ async function main() {
     remoteConcurrency,
     minimumPixels,
     minimumLongEdge,
+    includeCarouselPreviews,
   })
   const report = {
     generatedAt: new Date().toISOString(),
     apply,
     datasetRoot,
     modelFilter: modelFilter || null,
+    includeCarouselPreviews,
     remoteVerification: {
       enabled: remoteVerify,
       verifyDirectMaxBytes,
@@ -187,6 +195,21 @@ async function collectAudit(datasetRoot, modelFilter = '', options = {}) {
     if (!fs.existsSync(sidecarPath)) continue
 
     const sidecar = readJson(sidecarPath)
+    const redditPostImageCounts = new Map()
+    if (options.includeCarouselPreviews) {
+      for (const [relativePath, row] of Object.entries(sidecar)) {
+        if (normalizeKey(row?.source?.site) !== 'reddit') continue
+        if (!IMAGE_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) {
+          continue
+        }
+        const postId = String(row?.source?.postId || '')
+        if (!postId) continue
+        redditPostImageCounts.set(
+          postId,
+          (redditPostImageCounts.get(postId) || 0) + 1
+        )
+      }
+    }
     const modelTargets = []
     for (const [relativePath, row] of Object.entries(sidecar)) {
       if (relativePath.startsWith('__')) continue
@@ -238,6 +261,14 @@ async function collectAudit(datasetRoot, modelFilter = '', options = {}) {
         localStat,
         reason: getPreviewReason(row),
       })
+      if (
+        options.includeCarouselPreviews &&
+        (redditPostImageCounts.get(String(row?.source?.postId || '')) || 0) > 1
+      ) {
+        previewTarget.reason.push('carousel_preview_upgrade')
+        modelTargets.push(previewTarget)
+        continue
+      }
       if (!localStat || isExplicitlyBlurredPreview(row?.source?.mediaUrl)) {
         if (!localStat) previewTarget.reason.push('missing_local_file')
         if (isExplicitlyBlurredPreview(row?.source?.mediaUrl)) {
@@ -295,6 +326,9 @@ function summarizeAudit(audit) {
       .length,
     localBytes: sum(audit.targets.map((target) => target.localBytes)),
     previewWidths: widths,
+    carouselPreviewRowsTargeted: audit.targets.filter((target) =>
+      target.reason.includes('carousel_preview_upgrade')
+    ).length,
     tinyNonPreviewRows: audit.tinyNonPreviewRows,
     tinyNonPreviewSamples: audit.tinyNonPreviewSamples,
     directFilesVerified: audit.remoteVerification.checked,
@@ -614,7 +648,9 @@ function getPreviewReason(row = {}) {
 
 function isPreviewUrl(value) {
   try {
-    return new URL(String(value || '')).hostname.toLowerCase() === 'preview.redd.it'
+    return (
+      new URL(String(value || '')).hostname.toLowerCase() === 'preview.redd.it'
+    )
   } catch {
     return false
   }
@@ -765,8 +801,17 @@ function formatBytes(value) {
 function printSummary(report, reportPath) {
   console.log(`Mode: ${report.apply ? 'apply' : 'audit'}`)
   console.log(`Models with targets: ${report.summary.modelsScannedWithTargets}`)
-  console.log(`Reddit image rows scanned: ${report.summary.redditImageRowsScanned}`)
-  console.log(`Full-resolution cleanup rows targeted: ${report.summary.targetRows}`)
+  console.log(
+    `Reddit image rows scanned: ${report.summary.redditImageRowsScanned}`
+  )
+  console.log(
+    `Full-resolution cleanup rows targeted: ${report.summary.targetRows}`
+  )
+  if (report.includeCarouselPreviews) {
+    console.log(
+      `Carousel preview rows targeted: ${report.summary.carouselPreviewRowsTargeted}`
+    )
+  }
   console.log(
     `Local files targeted: ${report.summary.localFiles} (${formatBytes(report.summary.localBytes)})`
   )
