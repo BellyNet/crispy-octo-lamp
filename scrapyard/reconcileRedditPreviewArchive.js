@@ -11,7 +11,7 @@ const { syncModelMetadataToNas } = require('./nasSync')
 
 const argv = minimist(process.argv.slice(2), {
   alias: { h: 'help' },
-  boolean: ['help', 'apply', 'sync-nas'],
+  boolean: ['help', 'apply', 'sync-nas', 'pending-only', 'attempted-only'],
   string: [
     'archive',
     'dataset-root',
@@ -36,7 +36,9 @@ if (argv.help || !argv.archive) {
 }
 
 main().catch((err) => {
-  console.error(`Fatal Reddit preview reconciliation error: ${err.stack || err.message}`)
+  console.error(
+    `Fatal Reddit preview reconciliation error: ${err.stack || err.message}`
+  )
   process.exitCode = 1
 })
 
@@ -52,6 +54,8 @@ Options:
   --archive <path>           Recovery archive to reconcile. Required.
   --apply                    Apply local reconciliation.
   --sync-nas                 Sync corrected state and quarantine pending NAS copies.
+  --pending-only             Restore only rows that remain in the retry queue.
+  --attempted-only           With --pending-only, restore only attempted originals.
   --dataset-root <path>      Override local dataset root.
   --nas-root <path>          Override NAS dataset root. Default: Z:\\dataset.
   --minimum-pixels <n>       Minimum acceptable pixel count. Default: 500000.
@@ -81,6 +85,11 @@ async function main() {
   )
   const apply = Boolean(argv.apply)
   const syncNas = Boolean(argv['sync-nas'])
+  const pendingOnly = Boolean(argv['pending-only'])
+  const attemptedOnly = Boolean(argv['attempted-only'])
+  if (attemptedOnly && !pendingOnly) {
+    throw new Error('--attempted-only requires --pending-only')
+  }
   const minimumPixels = positiveInt(argv['minimum-pixels'], 500000)
   const minimumLongEdge = positiveInt(argv['minimum-long-edge'], 768)
   const concurrency = positiveInt(argv.concurrency, 16)
@@ -98,7 +107,15 @@ async function main() {
   if (syncNas) validateRoot(nasRoot, 'NAS dataset')
   fs.mkdirSync(reportDir, { recursive: true })
 
-  const records = collectArchiveRecords(archiveRoot, datasetRoot, nasRoot, syncNas)
+  const archivedRecords = collectArchiveRecords(
+    archiveRoot,
+    datasetRoot,
+    nasRoot,
+    syncNas
+  )
+  const records = pendingOnly
+    ? selectPendingRecords(archivedRecords, datasetRoot, attemptedOnly)
+    : archivedRecords
   const quality = await inspectRecords(records, concurrency, {
     minimumPixels,
     minimumLongEdge,
@@ -107,6 +124,8 @@ async function main() {
     generatedAt: new Date().toISOString(),
     apply,
     syncNas,
+    pendingOnly,
+    attemptedOnly,
     archiveRoot,
     datasetRoot,
     nasRoot: syncNas ? nasRoot : null,
@@ -118,8 +137,11 @@ async function main() {
       lowQuality: quality.lowQuality.length,
       missingEverywhere: quality.missing.length,
       unreadable: quality.unreadable.length,
-      sourceArchive: quality.decent.filter((item) => item.qualitySource === 'archive').length,
-      sourceNas: quality.decent.filter((item) => item.qualitySource === 'nas').length,
+      sourceArchive: quality.decent.filter(
+        (item) => item.qualitySource === 'archive'
+      ).length,
+      sourceNas: quality.decent.filter((item) => item.qualitySource === 'nas')
+        .length,
     },
     changes: {
       localFilesRestored: 0,
@@ -156,12 +178,39 @@ async function main() {
     })
   }
 
-  const historyPath = path.join(reportDir, `reddit-preview-reconcile-${runTag}.json`)
-  const latestPath = path.join(reportDir, 'reddit-preview-reconcile-latest.json')
+  const historyPath = path.join(
+    reportDir,
+    `reddit-preview-reconcile-${runTag}.json`
+  )
+  const latestPath = path.join(
+    reportDir,
+    'reddit-preview-reconcile-latest.json'
+  )
   report.historyReportPath = historyPath
   writeJsonAtomic(historyPath, report)
   writeJsonAtomic(latestPath, report)
   printReport(report, latestPath)
+}
+
+function selectPendingRecords(records, datasetRoot, attemptedOnly) {
+  const pendingByModel = new Map()
+  return records.filter((record) => {
+    if (record.localExists || fs.existsSync(record.nasPath)) return false
+    if (!pendingByModel.has(record.modelName)) {
+      const retryPath = path.join(
+        datasetRoot,
+        record.modelName,
+        'log',
+        'reddit-full-resolution-retry.json'
+      )
+      const state = fs.existsSync(retryPath) ? readJson(retryPath) : {}
+      pendingByModel.set(record.modelName, state.pending || {})
+    }
+    const pending = pendingByModel.get(record.modelName)[
+      record.datasetRelativePath
+    ]
+    return Boolean(pending && (!attemptedOnly || pending.lastAttemptAt))
+  })
 }
 
 function collectArchiveRecords(archiveRoot, datasetRoot, nasRoot, inspectNas) {
@@ -195,7 +244,9 @@ function collectArchiveRecords(archiveRoot, datasetRoot, nasRoot, inspectNas) {
         localExists,
         nasPath,
         nasExists:
-          inspectNas && !archiveExists && !localExists ? isFile(nasPath) : false,
+          inspectNas && !archiveExists && !localExists
+            ? isFile(nasPath)
+            : false,
       })
     }
   }
@@ -244,7 +295,11 @@ async function inspectRecords(records, concurrency, thresholds) {
         lowQuality.push(classified)
       }
     } catch (err) {
-      unreadable.push({ ...record, qualitySource: source[0], error: err.message })
+      unreadable.push({
+        ...record,
+        qualitySource: source[0],
+        error: err.message,
+      })
     }
   })
 
@@ -338,7 +393,11 @@ function reconcileModel(context) {
     modelName,
     '.media-dates.json'
   )
-  const currentSeenPath = path.join(modelRoot, 'log', 'milkmaid-seen-media-index.json')
+  const currentSeenPath = path.join(
+    modelRoot,
+    'log',
+    'milkmaid-seen-media-index.json'
+  )
   const backupSeenPath = path.join(
     archiveRoot,
     'backups',
@@ -346,7 +405,11 @@ function reconcileModel(context) {
     'log',
     'milkmaid-seen-media-index.json'
   )
-  const retryPath = path.join(modelRoot, 'log', 'reddit-full-resolution-retry.json')
+  const retryPath = path.join(
+    modelRoot,
+    'log',
+    'reddit-full-resolution-retry.json'
+  )
 
   for (const filePath of [currentSidecarPath, currentSeenPath, retryPath]) {
     backupCurrent(filePath, datasetRoot, reconcileRoot, report)
@@ -354,7 +417,9 @@ function reconcileModel(context) {
 
   const currentSidecar = readJson(currentSidecarPath)
   const backupSidecar = readJson(backupSidecarPath)
-  const modelGood = quality.decent.filter((item) => item.modelName === modelName)
+  const modelGood = quality.decent.filter(
+    (item) => item.modelName === modelName
+  )
   for (const item of modelGood) {
     if (!isFile(item.localPath)) {
       fs.mkdirSync(path.dirname(item.localPath), { recursive: true })
@@ -400,7 +465,10 @@ function reconcileModel(context) {
   if (fs.existsSync(retryPath)) {
     const retry = readJson(retryPath)
     for (const item of modelGood) {
-      if (retry.pending && Object.hasOwn(retry.pending, item.datasetRelativePath)) {
+      if (
+        retry.pending &&
+        Object.hasOwn(retry.pending, item.datasetRelativePath)
+      ) {
         delete retry.pending[item.datasetRelativePath]
         report.changes.retryEntriesCleared += 1
       }
@@ -412,7 +480,13 @@ function reconcileModel(context) {
   void modelRecords
 }
 
-function restoreHashRefs({ currentPath, backupPath, kind, algorithm, goodRefs }) {
+function restoreHashRefs({
+  currentPath,
+  backupPath,
+  kind,
+  algorithm,
+  goodRefs,
+}) {
   if (!fs.existsSync(backupPath)) return 0
   const current = createHashStore({ storePath: currentPath, kind, algorithm })
   const backup = createHashStore({ storePath: backupPath, kind, algorithm })
@@ -487,14 +561,20 @@ function syncReconciledStateToNas(context) {
         )
         fs.mkdirSync(path.dirname(quarantinePath), { recursive: true })
         if (fs.existsSync(quarantinePath)) {
-          throw new Error(`NAS quarantine target already exists: ${quarantinePath}`)
+          throw new Error(
+            `NAS quarantine target already exists: ${quarantinePath}`
+          )
         }
         fs.renameSync(nasPath, quarantinePath)
         report.changes.nasFilesQuarantined += 1
       }
     }
 
-    const localSidecarPath = path.join(datasetRoot, modelName, '.media-dates.json')
+    const localSidecarPath = path.join(
+      datasetRoot,
+      modelName,
+      '.media-dates.json'
+    )
     const nasSidecarPath = path.join(nasRoot, modelName, '.media-dates.json')
     backupNasFile(nasSidecarPath, nasRoot, nasQuarantineRoot, report)
     const metadataResult = syncModelMetadataToNas({
@@ -589,12 +669,16 @@ function summarizeModels(records, quality) {
   return names.map((modelName) => ({
     modelName,
     archivedRows: records.filter((item) => item.modelName === modelName).length,
-    decent: quality.decent.filter((item) => item.modelName === modelName).length,
-    lowQuality: quality.lowQuality.filter((item) => item.modelName === modelName)
+    decent: quality.decent.filter((item) => item.modelName === modelName)
       .length,
-    missing: quality.missing.filter((item) => item.modelName === modelName).length,
-    unreadable: quality.unreadable.filter((item) => item.modelName === modelName)
+    lowQuality: quality.lowQuality.filter(
+      (item) => item.modelName === modelName
+    ).length,
+    missing: quality.missing.filter((item) => item.modelName === modelName)
       .length,
+    unreadable: quality.unreadable.filter(
+      (item) => item.modelName === modelName
+    ).length,
   }))
 }
 
@@ -645,7 +729,8 @@ async function runWithConcurrency(items, concurrency, worker) {
 }
 
 function validateRoot(root, label) {
-  if (!fs.existsSync(root)) throw new Error(`${label} root does not exist: ${root}`)
+  if (!fs.existsSync(root))
+    throw new Error(`${label} root does not exist: ${root}`)
 }
 
 function isFile(filePath) {
@@ -712,7 +797,9 @@ function printReport(report, reportPath) {
     console.log(
       `NAS media already current: ${report.changes.nasFilesAlreadyCurrent}`
     )
-    console.log(`NAS pending media quarantined: ${report.changes.nasFilesQuarantined}`)
+    console.log(
+      `NAS pending media quarantined: ${report.changes.nasFilesQuarantined}`
+    )
     console.log(`NAS state files copied: ${report.changes.nasStateFilesCopied}`)
     console.log(`NAS quarantine: ${report.nasQuarantineRoot}`)
   }
