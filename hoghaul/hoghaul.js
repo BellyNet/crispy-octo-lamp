@@ -2317,7 +2317,9 @@ async function run(argvInput = process.argv.slice(2)) {
 
   if (source.site === 'reddit' && !dryRun && !(maxFiles > 0)) {
     const activeMediaUrls = new Set(
-      selectedMedia.map((entry) => entry.mediaUrl)
+      selectedMedia.flatMap((entry) =>
+        [entry.mediaUrl, entry.fullResolutionUrl].filter(Boolean)
+      )
     )
     const pendingRetries = listDueFullResolutionRetries(
       folders.logDir,
