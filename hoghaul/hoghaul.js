@@ -2550,6 +2550,21 @@ async function run(argvInput = process.argv.slice(2)) {
   }
 
   if (selectedPosts.length === 0 && selectedMedia.length === 0) {
+    if (source.site === 'reddit' && runOptions.redditKnownGalleriesOnly) {
+      console.log(
+        `No recorded Reddit gallery posts for ${source.username || source.userId}`
+      )
+      finalizeEmptyRun({
+        status: 'no_new_posts',
+        source,
+        modelName,
+        reason: 'noKnownGalleryPosts',
+        details: {
+          knownGalleryCount: knownGalleryContext?.knownGalleryPosts.length || 0,
+        },
+      })
+      return 0
+    }
     if (
       source.site === 'reddit' &&
       redditStateContext?.incrementalState?.hasFrontier
