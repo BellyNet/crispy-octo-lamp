@@ -59,6 +59,7 @@ const {
   evaluatePreviewQuality,
   listDueFullResolutionRetries,
   markFullResolutionRetryAttempt,
+  markFullResolutionRetryResult,
   recordFullResolutionRetry,
 } = require('../scrapyard/redditFullResolutionRetry')
 const {
@@ -1920,6 +1921,12 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
         destination,
         quality
       )
+      markFullResolutionRetryResult(
+        folders.logDir,
+        destination.relativePath,
+        originalUnavailable ? 'unavailable' : 'low_quality',
+        originalUnavailable ? {} : { quality }
+      )
       return
     }
     if (originalUnavailable) {
@@ -1959,6 +1966,12 @@ async function saveImageLikeMedia(modelName, folders, entry, kind) {
       quality = { acceptable: false, error: err.message }
     }
     if (!quality.acceptable) {
+      markFullResolutionRetryResult(
+        folders.logDir,
+        entry.pendingFullResolutionRetryPath,
+        'low_quality',
+        { quality }
+      )
       appendRunEvent('reddit_full_resolution_retry_low_quality', {
         postId: entry.postId,
         mediaUrl: entry.mediaUrl,
@@ -2492,6 +2505,7 @@ async function run(argvInput = process.argv.slice(2)) {
       source,
       {
         uniqueOriginals: true,
+        includeDeferred: runOptions.redditRetryOnly,
         ...(configuredRetryCooldownMs !== undefined
           ? { cooldownMs: Number(configuredRetryCooldownMs) }
           : {}),
@@ -2849,6 +2863,11 @@ async function run(argvInput = process.argv.slice(2)) {
     } catch (err) {
       if (isPermanentDeadMediaError(err)) {
         if (entry.pendingFullResolutionRetryPath) {
+          markFullResolutionRetryResult(
+            folders.logDir,
+            entry.pendingFullResolutionRetryPath,
+            'unavailable'
+          )
           appendRunEvent('reddit_full_resolution_retry_unavailable', {
             postId: entry.postId,
             mediaUrl: entry.mediaUrl,
@@ -2869,6 +2888,13 @@ async function run(argvInput = process.argv.slice(2)) {
         })
         recordDeadMediaSkip(modelName, folders, entry, destination, err)
         return
+      }
+      if (entry.pendingFullResolutionRetryPath) {
+        markFullResolutionRetryResult(
+          folders.logDir,
+          entry.pendingFullResolutionRetryPath,
+          'transient_error'
+        )
       }
       if (
         entry.sourceSite === 'reddit' &&

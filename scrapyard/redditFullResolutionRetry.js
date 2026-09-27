@@ -88,6 +88,10 @@ function recordFullResolutionRetry(modelLogDir, details = {}) {
     queuedAt: previous.queuedAt || new Date().toISOString(),
     lastAttemptAt: originalUrlChanged ? null : previous.lastAttemptAt || null,
     attemptCount: originalUrlChanged ? 0 : previous.attemptCount || 0,
+    deferredOutcome: originalUrlChanged
+      ? null
+      : previous.deferredOutcome || null,
+    deferredAt: originalUrlChanged ? null : previous.deferredAt || null,
     relativePath,
     previewUrl: details.previewUrl || details.mediaUrl || null,
     fullResolutionUrl,
@@ -125,6 +129,7 @@ function listDueFullResolutionRetries(modelLogDir, source = {}, options = {}) {
         item.sourceUserId || item.sourceUsername || ''
       ).toLowerCase()
       if (itemUserId !== sourceUserId) return false
+      if (item.deferredOutcome && !options.includeDeferred) return false
       if (
         String(item.sourceService || 'submitted').toLowerCase() !==
         sourceService
@@ -148,6 +153,28 @@ function listDueFullResolutionRetries(modelLogDir, source = {}, options = {}) {
       return true
     })
     .slice(0, limit)
+}
+
+function markFullResolutionRetryResult(
+  modelLogDir,
+  relativePath,
+  outcome,
+  details = {}
+) {
+  const key = String(relativePath || '').replace(/\\/g, '/')
+  const state = loadRetryState(modelLogDir)
+  const pending = state.pending[key]
+  if (!pending) return false
+  pending.deferredOutcome =
+    outcome === 'low_quality' ||
+    outcome === 'unavailable' ||
+    outcome === 'quality_limited_or_unavailable'
+      ? outcome
+      : null
+  pending.deferredAt = pending.deferredOutcome ? new Date().toISOString() : null
+  if (details.quality) pending.originalQuality = details.quality
+  saveRetryState(modelLogDir, state)
+  return true
 }
 
 function markFullResolutionRetryAttempt(
@@ -252,5 +279,6 @@ module.exports = {
   listDueFullResolutionRetries,
   loadRetryState,
   markFullResolutionRetryAttempt,
+  markFullResolutionRetryResult,
   recordFullResolutionRetry,
 }

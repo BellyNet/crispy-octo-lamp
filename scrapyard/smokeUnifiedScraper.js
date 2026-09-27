@@ -60,6 +60,7 @@ const {
   listDueFullResolutionRetries,
   loadRetryState,
   markFullResolutionRetryAttempt,
+  markFullResolutionRetryResult,
   recordFullResolutionRetry,
 } = require('./redditFullResolutionRetry')
 const { evictVerifiedLocalMp4s, syncModelMetadataToNas } = require('./nasSync')
@@ -280,6 +281,50 @@ async function main() {
       fullResolutionUrl: 'https://i.redd.it/shared.jpg',
     }),
     2
+  )
+  const deferredPath = 'sample/images/deferred.jpg'
+  const deferredSource = { userId: 'gallery_user', service: 'submitted' }
+  recordFullResolutionRetry(duplicateRetryDir, {
+    relativePath: deferredPath,
+    fullResolutionUrl: 'https://i.redd.it/deferred.jpg',
+    sourceUserId: 'gallery_user',
+  })
+  assert.strictEqual(
+    markFullResolutionRetryResult(
+      duplicateRetryDir,
+      deferredPath,
+      'low_quality',
+      { quality: { width: 320, height: 568, acceptable: false } }
+    ),
+    true
+  )
+  assert.strictEqual(
+    listDueFullResolutionRetries(duplicateRetryDir, deferredSource).length,
+    0
+  )
+  assert.strictEqual(
+    listDueFullResolutionRetries(duplicateRetryDir, deferredSource, {
+      includeDeferred: true,
+    }).length,
+    1
+  )
+  recordFullResolutionRetry(duplicateRetryDir, {
+    relativePath: deferredPath,
+    fullResolutionUrl: 'https://i.redd.it/deferred.jpg',
+    sourceUserId: 'gallery_user',
+  })
+  assert.strictEqual(
+    loadRetryState(duplicateRetryDir).pending[deferredPath].deferredOutcome,
+    'low_quality'
+  )
+  recordFullResolutionRetry(duplicateRetryDir, {
+    relativePath: deferredPath,
+    fullResolutionUrl: 'https://i.redd.it/replaced.jpg',
+    sourceUserId: 'gallery_user',
+  })
+  assert.strictEqual(
+    listDueFullResolutionRetries(duplicateRetryDir, deferredSource).length,
+    1
   )
   fs.rmSync(duplicateRetryDir, { recursive: true, force: true })
   const titledRetryLogDir = fs.mkdtempSync(
