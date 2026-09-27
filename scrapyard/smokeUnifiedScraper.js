@@ -2102,7 +2102,7 @@ async function main() {
     postId: 'fallback1',
     mediaPageUrls: [
       'https://www.reddit.com/gallery/fallback1',
-      'https://www.reddit.com/r/test/comments/fallback1/title/',
+      '/r/test/comments/fallback1/title/',
     ],
     mediaUrls: ['https://preview.redd.it/recorded-v0-one.jpg?width=320'],
   }
@@ -2128,6 +2128,10 @@ async function main() {
     }
   )
   assert.strictEqual(fallbackFetches.length, 2)
+  assert.strictEqual(
+    fallbackFetches[1],
+    'https://www.reddit.com/r/test/comments/fallback1/title/'
+  )
   assert.strictEqual(fallbackPosts[0].mediaHydrationFailed, undefined)
   assert.strictEqual(fallbackPosts[0].mediaEntries.length, 2)
 

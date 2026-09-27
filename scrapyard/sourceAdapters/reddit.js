@@ -1460,8 +1460,10 @@ async function fetchKnownRedditGalleryPosts(
       pageUrls.find((url) =>
         String(url).toLowerCase().includes(`/gallery/${id.toLowerCase()}`)
       ) || `${source.origin}/gallery/${id}`
-    const permalink =
-      pageUrls.find((url) => /\/comments\//i.test(String(url))) || galleryUrl
+    const permalink = new URL(
+      pageUrls.find((url) => /\/comments\//i.test(String(url))) || galleryUrl,
+      source.origin
+    ).toString()
     const post = {
       id,
       title: record.title || null,
