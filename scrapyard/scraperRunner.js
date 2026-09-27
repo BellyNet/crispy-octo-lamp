@@ -125,7 +125,10 @@ function formatScrapeSummaryLine(summary) {
   const saved = getSummaryCounter(summary, 'saved', ['successCount'])
   const skipped = getSummaryCounter(summary, 'skipped')
   const dupes = getSummaryCounter(summary, 'duplicates', ['duplicateCount'])
-  const failed = getSummaryCounter(summary, 'failures', ['errorCount'])
+  const failed = Math.max(
+    getSummaryCounter(summary, 'failures', ['errorCount']),
+    Number(summary?.errorCount || 0)
+  )
   const savedBytes = Number(summary?.transfer?.savedBytes || 0)
   const modelName = summary?.modelName ? ` | model ${summary.modelName}` : ''
   const source = summary?.source ? ` | source ${summary.source}` : ''
@@ -714,7 +717,7 @@ function readFreshModelRunSummary(
 
 function getStatsFromRunSummary(summary) {
   if (!summary || summary.parseError) return null
-  return runLifecycle.getRunProgressStats(
+  const stats = runLifecycle.getRunProgressStats(
     {
       counters: summary.counters || {},
       transfer: summary.transfer || {},
@@ -728,6 +731,8 @@ function getStatsFromRunSummary(summary) {
       transfer: summary.transfer || {},
     }
   )
+  stats.failures = Math.max(stats.failures, Number(summary.errorCount || 0))
+  return stats
 }
 
 function printRecoveredRunSummary(summary, { log = console.log } = {}) {

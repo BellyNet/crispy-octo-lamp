@@ -2571,7 +2571,7 @@ async function main() {
   })
   assert.strictEqual(allSourceSummary.saved, 0)
   assert.strictEqual(allSourceSummary.duplicates, 0)
-  assert.strictEqual(allSourceSummary.errors, 0)
+  assert.strictEqual(allSourceSummary.errors, 2)
   assert.strictEqual(allSourceSummary.expectedMedia, 0)
 
   const capturedStatusLines = []
