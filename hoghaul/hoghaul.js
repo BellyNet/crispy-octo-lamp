@@ -2508,7 +2508,9 @@ async function run(argvInput = process.argv.slice(2)) {
         includeDeferred: runOptions.redditRetryOnly,
         ...(configuredRetryCooldownMs !== undefined
           ? { cooldownMs: Number(configuredRetryCooldownMs) }
-          : {}),
+          : runOptions.redditRetryOnly
+            ? { cooldownMs: 0 }
+            : {}),
       }
     )
     for (const pending of pendingRetries) {
