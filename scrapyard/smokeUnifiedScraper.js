@@ -2984,13 +2984,19 @@ async function main() {
         { mediaUrl: 'https://i.redd.it/second.jpg' },
       ],
     },
+    {
+      id: 'emptygallery',
+      is_gallery: true,
+      permalink: '/r/test/comments/emptygallery/title/',
+      mediaEntries: [],
+    },
   ]
   const freshStateResult = recordRedditSourceCheck(
     freshRedditLogDir,
     freshRedditSource,
     { posts: freshRedditPosts, noNewPosts: false }
   )
-  assert.strictEqual(freshStateResult.knownPostCount, 1)
+  assert.strictEqual(freshStateResult.knownPostCount, 2)
   const freshState = JSON.parse(
     fs.readFileSync(getRedditSourceStatePath(freshRedditLogDir), 'utf8')
   )
@@ -3001,6 +3007,13 @@ async function main() {
   assert.strictEqual(
     freshState.sources['submitted/fresh_user'].posts.gallerypost.mediaCount,
     2
+  )
+  assert(
+    freshState.sources[
+      'submitted/fresh_user'
+    ].posts.emptygallery.mediaPageUrls.includes(
+      'https://www.reddit.com/gallery/emptygallery'
+    )
   )
 
   const checkpointSource = {

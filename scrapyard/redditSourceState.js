@@ -334,9 +334,16 @@ function recordRedditSourceCheck(modelLogDir, source, details = {}) {
       title: post.title,
       createdUtc: getPostCreatedUtc(post),
       mediaUrls: mediaEntries.map((entry) => entry.mediaUrls || entry.mediaUrl),
-      mediaPageUrls: mediaEntries.map(
-        (entry) => entry.mediaPageUrls || entry.mediaPageUrl
-      ),
+      mediaPageUrls: [
+        mediaEntries.map((entry) => entry.mediaPageUrls || entry.mediaPageUrl),
+        post.is_gallery ? post.permalink : null,
+        post.is_gallery
+          ? new URL(
+              `/gallery/${encodeURIComponent(post.id)}`,
+              source.origin || 'https://www.reddit.com'
+            ).toString()
+          : null,
+      ],
       mediaCount: mediaEntries.length,
     })
     if (merged) mergedPosts += 1
