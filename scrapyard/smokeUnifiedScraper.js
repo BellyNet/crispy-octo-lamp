@@ -42,6 +42,7 @@ const {
 const {
   createIncrementalSourceState,
   getRedditSourceStatePath,
+  recordRedditSourceCheck,
 } = require('./redditSourceState')
 const {
   getMediaEntrySeenDetails,
@@ -2919,6 +2920,42 @@ async function main() {
   assert(
     redditStateContext.incrementalState.knownPostIds.has('newpost'),
     'expected Reddit incremental state to refresh from seen-media index'
+  )
+
+  const freshRedditLogDir = path.join(redditStateDataset, 'fresh_model', 'log')
+  const freshRedditSource = {
+    site: 'reddit',
+    service: 'submitted',
+    userId: 'fresh_user',
+    username: 'fresh_user',
+  }
+  const freshRedditPosts = [
+    {
+      id: 'gallerypost',
+      title: 'Gallery',
+      published: new Date('2026-06-21T00:00:00.000Z'),
+      mediaEntries: [
+        { mediaUrl: 'https://i.redd.it/first.jpg' },
+        { mediaUrl: 'https://i.redd.it/second.jpg' },
+      ],
+    },
+  ]
+  const freshStateResult = recordRedditSourceCheck(
+    freshRedditLogDir,
+    freshRedditSource,
+    { posts: freshRedditPosts, noNewPosts: false }
+  )
+  assert.strictEqual(freshStateResult.knownPostCount, 1)
+  const freshState = JSON.parse(
+    fs.readFileSync(getRedditSourceStatePath(freshRedditLogDir), 'utf8')
+  )
+  assert.deepStrictEqual(
+    freshState.sources['submitted/fresh_user'].posts.gallerypost.mediaUrls,
+    ['https://i.redd.it/first.jpg', 'https://i.redd.it/second.jpg']
+  )
+  assert.strictEqual(
+    freshState.sources['submitted/fresh_user'].posts.gallerypost.mediaCount,
+    2
   )
 
   const checkpointSource = {

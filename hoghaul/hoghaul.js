@@ -2970,6 +2970,23 @@ async function run(argvInput = process.argv.slice(2)) {
     }
   }
 
+  if (
+    source.site === 'reddit' &&
+    redditStateContext &&
+    selectedPosts.length > 0 &&
+    !(maxPosts > 0) &&
+    !(maxFiles > 0) &&
+    !runOptions.redditRetryOnly &&
+    !runOptions.redditKnownGalleriesOnly
+  ) {
+    const stateSummary = recordRedditSourceCheck(
+      redditStateContext.modelLogDir,
+      source,
+      { posts: selectedPosts, noNewPosts: false }
+    )
+    appendRunEvent('reddit_source_state_updated', stateSummary)
+  }
+
   if (source.site !== 'reddit') {
     const completedPostIds = selectedPosts
       .filter((post) => {
