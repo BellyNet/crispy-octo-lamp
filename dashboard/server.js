@@ -5,7 +5,7 @@ const compression = require('compression')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const { execFile } = require('child_process')
+const { execFile, spawn } = require('child_process')
 const { promisify } = require('util')
 const pLimit = require('p-limit')
 const sharp = require('sharp')
@@ -64,7 +64,7 @@ fs.mkdirSync(RESPONSE_CACHE_DIR, { recursive: true })
 // Bump when the response shape changes meaningfully (new fields, changed date
 // resolution rules, etc.). On-disk caches with an older version are ignored,
 // forcing a rebuild — used by mismatched-cache callers below.
-const RESPONSE_CACHE_VERSION = 15
+const RESPONSE_CACHE_VERSION = 17
 
 // Bumped whenever the encoding recipe for /media-mobile/ variants changes in
 // a way that changes the bytes of an already-cached file (e.g. gifs going
@@ -237,11 +237,18 @@ async function generatePreviewGif(videoPath, gifPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer, kemono, stufferdb, bbwchan, tumblr }
+// Build a map of username → { coomer, kemono, stufferdb, bbwchan, tumblr, reddit }
 // from model_aliases.json so the /api/users route can include source links.
 // Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
 // each time, so changes to the bind-mounted file are picked up immediately.
-const SOURCE_PLATFORMS = ['coomer', 'kemono', 'stufferdb', 'bbwchan', 'tumblr']
+const SOURCE_PLATFORMS = [
+  'coomer',
+  'kemono',
+  'stufferdb',
+  'bbwchan',
+  'tumblr',
+  'reddit',
+]
 
 // Cached source map — rebuilt only when model_aliases.json mtime changes.
 // loadModelRegistry was previously called on every /api/users request, doing a
@@ -699,7 +706,13 @@ async function processFileForResponse(username, userDir, item) {
   )
   if (postMeta) {
     const src = postMeta.source || {}
-    const title = typeof src.title === 'string' ? src.title.trim() : ''
+    let title = typeof src.title === 'string' ? src.title.trim() : ''
+    // Older scrapes stored Reddit's own page title ("Reddit - The heart of
+    // the internet") when a post fetch hit a login/block page. Never show
+    // that; the permalink slug is at least the start of the real title.
+    if (src.site === 'reddit' && mediaDates.isGenericRedditPageTitle(title)) {
+      title = mediaDates.getRedditTitleFromPermalink(src.mediaPageUrl) || ''
+    }
     const url = src.mediaPageUrl || src.mediaUrl || null
     // Comments come in as { author, posted, text }. Drop empties, cap the
     // list so a chatty thread doesn't add megabytes to the payload — the
@@ -715,7 +728,8 @@ async function processFileForResponse(username, userDir, item) {
     if (title || url || comments.length || src.site) {
       post = {}
       if (title) post.title = title
-      if (src.site) post.site = src.site
+      const site = displaySiteForSource(src)
+      if (site) post.site = site
       if (url) post.url = url
       // postId groups sibling files from the same reddit post (carousels,
       // before/after pairs) — set for reddit entries directly and copied
@@ -788,6 +802,30 @@ async function processFileForResponse(username, userDir, item) {
     },
     metaUpdated,
   }
+}
+
+// The scrapers record OnlyHaven (cum.st) media as site 'coomerfans' —
+// it's routed through the coomerfans adapter, and the scrape-side
+// frontier/legacy bookkeeping keys off that. For display, tell them apart
+// by the post/media URL host so the badge and source filter show which
+// site each file actually came from (works for already-scraped files too).
+function isOnlyHavenUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase()
+    return host === 'cum.st' || host.endsWith('.cum.st')
+  } catch {
+    return false
+  }
+}
+function displaySiteForSource(src) {
+  const site = typeof src.site === 'string' ? src.site : null
+  if (
+    site === 'coomerfans' &&
+    [src.mediaPageUrl, src.mediaUrl].some(isOnlyHavenUrl)
+  ) {
+    return 'onlyhaven'
+  }
+  return site
 }
 
 // Returns { stats, response, source: 'memory' | 'disk' | 'scan' }.
@@ -1167,6 +1205,9 @@ async function refreshRunIndex() {
             size: item.size,
             url: item.url,
             thumbUrl: `/thumb/${encodeURIComponent(username)}/${item.folder}/${encodeURIComponent(item.filename)}`,
+            // Post title/caption, so the admin "recently added" grid can
+            // show the same caption strip as the user grid.
+            ...(item.post?.title && { title: item.post.title }),
           }))
         } catch {
           return []
@@ -1211,6 +1252,169 @@ app.post('/api/rebuild-run-index', async (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// ─── DATA REPAIRS (admin page) ───────────────────────────────────────────────
+// Runs the one-off repair scripts inside this container, where the dataset
+// and THUMB_DIR are already mounted — so they can be kicked off from the
+// admin page (e.g. a phone) instead of needing a shell on the NAS. One job
+// at a time, as a child process; output is kept in memory for the live log
+// and the last run per job is persisted to THUMB_DIR so it survives
+// restarts. Every job is a dry run unless `apply` is set.
+const REPO_ROOT = path.join(__dirname, '..')
+const REPAIR_JOBS = {
+  'reddit-titles': {
+    label: 'Reddit titles & post dates',
+    description:
+      'Fetches full Reddit post titles (replacing "Reddit - The heart of the internet" and cut-off slug titles) and real post dates.',
+    script: 'scrapyard/repairRedditMetadataTitles.js',
+    args: ({ apply, model }) => [
+      `--dataset=${datasetDir}`,
+      '--fetch-missing',
+      ...(model ? [`--model=${model}`] : []),
+      ...(apply ? ['--apply'] : []),
+    ],
+  },
+  gifs: {
+    label: 'Cut-off GIFs',
+    description:
+      'Finds GIFs whose download was cut off (play a few frames then stop) and re-downloads them from the source; also lists stills saved as .gif.',
+    script: 'audit/audit-gifs.js',
+    args: ({ apply, model }) => [
+      `--dataset=${datasetDir}`,
+      `--thumb-dir=${THUMB_DIR}`,
+      '--redownload',
+      ...(model ? [`--model=${model}`] : []),
+      ...(apply ? ['--apply'] : []),
+    ],
+  },
+  'coomerfans-titles': {
+    label: 'CoomerFans titles',
+    description: 'Fills blank CoomerFans post titles from the post pages.',
+    script: 'scrapyard/repairCoomerFansMetadataTitles.js',
+    args: ({ apply, model }) => [
+      `--dataset=${datasetDir}`,
+      ...(model ? [`--model=${model}`] : []),
+      ...(apply ? ['--apply'] : []),
+    ],
+  },
+}
+const REPAIR_LOG_MAX_LINES = 500
+const REPAIR_STATE_FILE = path.join(THUMB_DIR, 'repair-runs.json')
+let repairLastRuns = {}
+try {
+  repairLastRuns = JSON.parse(fs.readFileSync(REPAIR_STATE_FILE, 'utf8'))
+} catch {}
+let repairCurrent = null // { job, apply, model, startedAt, lines, child }
+
+function saveRepairLastRuns() {
+  try {
+    const tmp = REPAIR_STATE_FILE + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(repairLastRuns))
+    fs.renameSync(tmp, REPAIR_STATE_FILE)
+  } catch (err) {
+    console.warn('  Repairs: could not save state:', err.message)
+  }
+}
+
+function repairRunView(run) {
+  if (!run) return null
+  const { child: _child, ...rest } = run
+  return rest
+}
+
+app.get('/api/repairs', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache')
+  res.json({
+    jobs: Object.entries(REPAIR_JOBS).map(([id, job]) => ({
+      id,
+      label: job.label,
+      description: job.description,
+      available: fs.existsSync(path.join(REPO_ROOT, job.script)),
+      lastRun: repairLastRuns[id] || null,
+    })),
+    current: repairRunView(repairCurrent),
+  })
+})
+
+app.post('/api/repairs/:job', (req, res) => {
+  const job = REPAIR_JOBS[req.params.job]
+  if (!job) return res.status(404).json({ error: 'Unknown repair job' })
+  const apply = req.body?.apply === true
+  const model = String(req.body?.model || '').trim()
+  if (model && !/^[\w.@-]+$/.test(model)) {
+    return res.status(400).json({ error: 'Invalid model name' })
+  }
+  if (repairCurrent) {
+    return res.status(409).json({
+      error: `${REPAIR_JOBS[repairCurrent.job].label} is already running`,
+    })
+  }
+  const scriptPath = path.join(REPO_ROOT, job.script)
+  if (!fs.existsSync(scriptPath)) {
+    return res
+      .status(500)
+      .json({ error: `${job.script} is not in this image — redeploy` })
+  }
+
+  const run = {
+    job: req.params.job,
+    apply,
+    model: model || null,
+    startedAt: new Date().toISOString(),
+    lines: [],
+    child: null,
+  }
+  // Scripts redraw progress lines with \r — treat those as line breaks
+  // and keep only the tail so a long run can't grow without bound.
+  let partial = ''
+  const onData = (chunk) => {
+    const parts = (partial + chunk.toString('utf8')).split(/\r\n|\r|\n/)
+    partial = parts.pop()
+    for (const line of parts) if (line.trim()) run.lines.push(line)
+    if (run.lines.length > REPAIR_LOG_MAX_LINES) {
+      run.lines.splice(0, run.lines.length - REPAIR_LOG_MAX_LINES)
+    }
+  }
+  const child = spawn(
+    process.execPath,
+    [scriptPath, ...job.args({ apply, model })],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, DATASET_DIR: datasetDir, THUMB_DIR },
+    }
+  )
+  run.child = child
+  repairCurrent = run
+  child.stdout.on('data', onData)
+  child.stderr.on('data', onData)
+  const finish = (exitCode, error) => {
+    if (repairCurrent !== run) return
+    if (partial.trim()) run.lines.push(partial)
+    if (error) run.lines.push(`Error: ${error}`)
+    run.finishedAt = new Date().toISOString()
+    run.exitCode = exitCode
+    run.stopped = Boolean(run.stopRequested)
+    repairLastRuns[run.job] = repairRunView(run)
+    repairCurrent = null
+    saveRepairLastRuns()
+    console.log(
+      `  Repairs: ${run.job} ${run.apply ? 'apply' : 'dry-run'} finished (exit ${exitCode})`
+    )
+  }
+  child.on('error', (err) => finish(null, err.message))
+  child.on('close', (code) => finish(code, null))
+  console.log(
+    `  Repairs: ${run.job} ${apply ? 'apply' : 'dry-run'} started${model ? ` for ${model}` : ''}`
+  )
+  res.json({ ok: true, current: repairRunView(run) })
+})
+
+app.post('/api/repairs-stop', (_req, res) => {
+  if (!repairCurrent) return res.json({ ok: true, running: false })
+  repairCurrent.stopRequested = true
+  repairCurrent.child?.kill('SIGTERM')
+  res.json({ ok: true, running: true })
 })
 
 async function getMediaFingerprint(userDir) {

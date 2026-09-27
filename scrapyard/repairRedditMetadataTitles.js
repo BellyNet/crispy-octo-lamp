@@ -7,6 +7,8 @@ const minimist = require('minimist')
 const {
   SIDECAR_FILENAME,
   getRedditTitleFromPermalink,
+  isGenericRedditPageTitle,
+  resolveBestDateRecord,
 } = require('./mediaDates')
 
 const argv = minimist(process.argv.slice(2), {
@@ -86,12 +88,6 @@ function cleanText(value) {
     .trim()
 }
 
-function isGenericRedditPageTitle(title) {
-  return /^(?:welcome to reddit|reddit - dive into anything)$/i.test(
-    String(title || '').trim()
-  )
-}
-
 function extractPostId(source) {
   if (source?.postId) return String(source.postId)
   for (const candidate of getTitleCandidates(source)) {
@@ -156,8 +152,65 @@ async function waitForFetchSlot() {
   lastFetchAt = Date.now()
 }
 
+// Reddit's /api/info.json returns full post objects (untruncated title,
+// created_utc) for up to 100 ids per request — one call instead of 100
+// HTML page fetches, and JSON isn't served the login/verification wall
+// that HTML post pages increasingly are. Results land in redditInfoCache;
+// ids it can't resolve fall through to the per-post HTML path.
+const redditInfoCache = new Map() // postId → { title, createdUtc } | null
+const REDDIT_INFO_BATCH = 100
+
+async function prefetchRedditInfo(postIds) {
+  const pending = [...new Set(postIds.filter(Boolean))].filter(
+    (id) => !redditInfoCache.has(id)
+  )
+  for (let i = 0; i < pending.length; i += REDDIT_INFO_BATCH) {
+    const batch = pending.slice(i, i + REDDIT_INFO_BATCH)
+    await waitForFetchSlot()
+    try {
+      const response = await fetch(
+        `https://www.reddit.com/api/info.json?raw_json=1&id=${batch
+          .map((id) => `t3_${encodeURIComponent(id)}`)
+          .join(',')}`,
+        {
+          headers: {
+            Accept: 'application/json',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+          },
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        }
+      )
+      if (!response.ok) {
+        console.log(
+          `  api/info batch ${i / REDDIT_INFO_BATCH + 1}: HTTP ${response.status} — falling back to per-post HTML`
+        )
+        continue
+      }
+      const body = await response.json()
+      for (const child of body?.data?.children || []) {
+        const post = child?.data
+        if (!post?.id) continue
+        const title = cleanText(post.title)
+        const createdUtc = Number(post.created_utc)
+        redditInfoCache.set(String(post.id), {
+          title: title && !isGenericRedditPageTitle(title) ? title : null,
+          createdUtc:
+            Number.isFinite(createdUtc) && createdUtc > 0 ? createdUtc : null,
+        })
+      }
+    } catch (err) {
+      console.log(
+        `  api/info batch ${i / REDDIT_INFO_BATCH + 1} failed: ${err.message} — falling back to per-post HTML`
+      )
+    }
+  }
+}
+
 async function fetchRedditTitle(postId) {
   if (!postId) return null
+  const info = redditInfoCache.get(postId)
+  if (info?.title) return info.title
   if (redditTitleCache.has(postId)) return redditTitleCache.get(postId)
 
   let title = null
@@ -212,11 +265,34 @@ async function fetchRedditTitle(postId) {
   return title
 }
 
+function needsTitleFetch(source, title) {
+  return (
+    !title ||
+    isGenericRedditPageTitle(title) ||
+    looksLikeTruncatedRedditTitle(title) ||
+    looksLikePermalinkFallbackTitle(source, title)
+  )
+}
+
 async function repairSidecar(modelName, sidecar) {
   let scanned = 0
   let repaired = 0
   let fetched = 0
+  let datesFixed = 0
   const examples = []
+
+  if (FETCH_MISSING) {
+    // Batch-resolve every Reddit post in this sidecar up front: titles
+    // that need repair, plus created_utc for the posted-date check below.
+    const ids = []
+    for (const [relativePath, record] of Object.entries(sidecar.data)) {
+      if (relativePath.startsWith('__')) continue
+      const source = record?.source
+      if (String(source?.site || '').toLowerCase() !== 'reddit') continue
+      ids.push(extractPostId(source))
+    }
+    await prefetchRedditInfo(ids)
+  }
 
   for (const [relativePath, record] of Object.entries(sidecar.data)) {
     if (relativePath.startsWith('__')) continue
@@ -230,13 +306,28 @@ async function repairSidecar(modelName, sidecar) {
     let title = existingTitle || getPermalinkFallbackTitle(source)
     let fetchedTitle = null
 
-    if (
-      FETCH_MISSING &&
-      (!title ||
-        isGenericRedditPageTitle(title) ||
-        looksLikeTruncatedRedditTitle(title) ||
-        looksLikePermalinkFallbackTitle(source, title))
-    ) {
+    // A stored chrome-page title is never usable, not even as a fallback.
+    if (isGenericRedditPageTitle(title)) {
+      title = getPermalinkFallbackTitle(source) || null
+    }
+
+    let changed = false
+    // Posted date: Reddit's created_utc is authoritative. Older scrapes
+    // (RSS <updated>, remux timestamps) can carry a later date.
+    const info = FETCH_MISSING
+      ? redditInfoCache.get(extractPostId(source))
+      : null
+    if (info?.createdUtc) {
+      const createdIso = new Date(info.createdUtc * 1000).toISOString()
+      if (record.uploaded !== createdIso) {
+        record.uploaded = createdIso
+        record.resolved = resolveBestDateRecord(record)
+        changed = true
+        datesFixed += 1
+      }
+    }
+
+    if (FETCH_MISSING && needsTitleFetch(source, title)) {
       const postId = extractPostId(source)
       const beforeSize = redditTitleCache.size
       fetchedTitle = await fetchRedditTitle(postId)
@@ -248,14 +339,16 @@ async function repairSidecar(modelName, sidecar) {
         )
       }
     }
-    if (!title) continue
+    if (!title) {
+      if (changed) repaired += 1
+      continue
+    }
 
-    let changed = false
     const shouldReplaceTitle =
       !String(source.title || '').trim() ||
+      isGenericRedditPageTitle(source.title) ||
       (fetchedTitle &&
-        (isGenericRedditPageTitle(source.title) ||
-          looksLikeTruncatedRedditTitle(source.title) ||
+        (looksLikeTruncatedRedditTitle(source.title) ||
           looksLikePermalinkFallbackTitle(source, source.title)))
     if (shouldReplaceTitle && cleanText(source.title) !== title) {
       source.title = title
@@ -263,9 +356,9 @@ async function repairSidecar(modelName, sidecar) {
     }
     const shouldReplaceText =
       !String(source.text || '').trim() ||
+      isGenericRedditPageTitle(source.text) ||
       (fetchedTitle &&
-        (isGenericRedditPageTitle(source.text) ||
-          looksLikeTruncatedRedditTitle(source.text) ||
+        (looksLikeTruncatedRedditTitle(source.text) ||
           looksLikePermalinkFallbackTitle(source, source.text)))
     if (shouldReplaceText && cleanText(source.text) !== title) {
       source.text = title
@@ -279,7 +372,7 @@ async function repairSidecar(modelName, sidecar) {
     }
   }
 
-  return { scanned, repaired, fetched, examples }
+  return { scanned, repaired, fetched, datesFixed, examples }
 }
 
 async function run() {
@@ -292,6 +385,7 @@ async function run() {
     scanned: 0,
     repaired: 0,
     fetched: 0,
+    datesFixed: 0,
     examples: [],
   }
 
@@ -307,20 +401,25 @@ async function run() {
     totals.scanned += result.scanned
     totals.repaired += result.repaired
     totals.fetched += result.fetched
+    totals.datesFixed += result.datesFixed
     totals.examples.push(...result.examples)
 
     if (APPLY && result.repaired > 0) {
-      fs.writeFileSync(sidecar.path, JSON.stringify(sidecar.data, null, 2))
-      fs.appendFileSync(sidecar.path, '\n')
+      const tmp = `${sidecar.path}.tmp-reddit-title-repair`
+      fs.writeFileSync(tmp, `${JSON.stringify(sidecar.data, null, 2)}\n`)
+      fs.renameSync(tmp, sidecar.path)
     }
   }
 
   console.log(
-    `${APPLY ? 'Repaired' : 'Would repair'} ${totals.repaired} missing Reddit title/text record(s) across ${totals.models} model(s); scanned ${totals.scanned} Reddit metadata record(s).`
+    `${APPLY ? 'Repaired' : 'Would repair'} ${totals.repaired} Reddit title/text/date record(s) across ${totals.models} model(s); scanned ${totals.scanned} Reddit metadata record(s).`
   )
   if (FETCH_MISSING) {
     console.log(
-      `Fetched ${totals.fetched} unique Reddit post page(s) for title lookup.`
+      `Resolved ${redditInfoCache.size} Reddit post(s) via api/info; fetched ${totals.fetched} post page(s) via HTML fallback.`
+    )
+    console.log(
+      `${APPLY ? 'Corrected' : 'Would correct'} ${totals.datesFixed} Reddit posted date(s) from created_utc.`
     )
   }
   if (!APPLY) console.log('Dry run only. Re-run with --apply to write changes.')
