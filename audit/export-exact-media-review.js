@@ -33,15 +33,17 @@ function toFile(record) {
 const sameModelGroups = []
 const crossModelGroups = []
 let excludedTrashRecords = 0
+let removedSinceAuditRecords = 0
 let sameModelHashGroups = 0
 for (const group of audit.duplicateGroups) {
   // The raw audit also walks .dashboard-trash, which is a recovery archive,
   // not a model. Never offer archived files as live cleanup candidates.
   const liveRecords = group.records.filter((record) => {
-    const live = !record.modelName.startsWith('.') &&
-      ['images', 'gif', 'webm'].includes(record.bucket) &&
-      (!liveOnly || record.locations.some((location) => fs.existsSync(location.absolutePath)))
-    if (!live) excludedTrashRecords++
+    const validModelPath = !record.modelName.startsWith('.') &&
+      ['images', 'gif', 'webm'].includes(record.bucket)
+    if (!validModelPath) { excludedTrashRecords++; return false }
+    const live = !liveOnly || record.locations.some((location) => fs.existsSync(location.absolutePath))
+    if (!live) removedSinceAuditRecords++
     return live
   })
   if (liveRecords.length < 2) continue
@@ -90,6 +92,7 @@ const summary = {
   conservativeReclaimableBytes: sameModelGroups.reduce((sum, group) => sum + group.redundantBytes, 0),
   crossModelGroups: crossModelGroups.length,
   excludedTrashRecords,
+  removedSinceAuditRecords,
   sameModelReviewGroups: sameModelGroups.length,
 }
 if (summary.sameModelRedundantCopies > audit.summary.sameModelRedundantCopies ||
