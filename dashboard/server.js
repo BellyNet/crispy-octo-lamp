@@ -37,6 +37,9 @@ const datasetDir =
   process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
 const THUMB_DIR =
   process.env.THUMB_DIR || path.join(slopvaultRoot, '.dashboard-thumbs')
+const EXACT_DUPLICATE_REPORT_PATH =
+  process.env.EXACT_DUPLICATE_REPORT_PATH ||
+  path.join(THUMB_DIR, 'exact-media-review-latest.json')
 
 const MEDIA_FOLDERS = ['images', 'gif', 'webm']
 // `.m4v` is Apple's MP4 variant (H.264/AAC) — fully iOS-friendly. Without it
@@ -1090,6 +1093,16 @@ app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 app.get('/admin', (_req, res) =>
   res.sendFile('admin.html', { root: __dirname })
 )
+app.get('/admin/duplicates', (_req, res) =>
+  res.sendFile('exact-duplicates.html', { root: __dirname })
+)
+app.get('/api/exact-duplicates', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  if (!fs.existsSync(EXACT_DUPLICATE_REPORT_PATH)) {
+    return res.status(404).json({ error: 'Exact duplicate review report is unavailable.' })
+  }
+  res.sendFile(EXACT_DUPLICATE_REPORT_PATH)
+})
 
 // Users list — returns [{ name, sources, featured }, ...]
 // Sets Cache-Control: no-cache so the browser revalidates on every fetch; the

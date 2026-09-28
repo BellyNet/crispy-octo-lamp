@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exact duplicate review</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0d0d12; color: #e8e8f2; }
+      * { box-sizing: border-box; }
+      body { margin: 0 auto; max-width: 1440px; padding: 20px; }
+      a { color: #a99cff; }
+      header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+      h1 { margin: 0; font-size: 24px; }
+      h2 { margin: 0; font-size: 18px; }
+      .muted { color: #a1a1b8; }
+      .summary, .toolbar, .group { background: #1a1a24; border: 1px solid #303044; border-radius: 12px; padding: 16px; margin-top: 16px; }
+      .summary { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+      .summary strong { display: block; font-size: 20px; }
+      .notice { color: #e8cf9d; margin: 14px 0 0; }
+      .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+      input, select, button { font: inherit; color: inherit; background: #252538; border: 1px solid #44445e; border-radius: 7px; padding: 8px 10px; }
+      input[type="search"] { min-width: min(360px, 100%); flex: 1; }
+      button { cursor: pointer; }
+      button:hover:not(:disabled) { border-color: #a99cff; }
+      button.active { background: #6556bc; border-color: #a99cff; }
+      button:disabled { opacity: .45; cursor: default; }
+      .pager { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+      .pager .spacer { flex: 1; }
+      .group-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+      .hash { font: 12px ui-monospace, monospace; color: #a1a1b8; overflow-wrap: anywhere; }
+      .files { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; margin-top: 16px; }
+      .file { border: 1px solid #39394d; background: #12121a; border-radius: 10px; padding: 10px; min-width: 0; }
+      .preview { aspect-ratio: 16 / 10; display: grid; place-items: center; background: #070709; border-radius: 7px; overflow: hidden; }
+      .preview img, .preview video { width: 100%; height: 100%; object-fit: contain; }
+      .file-path { margin: 10px 0 5px; font: 12px/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
+      .file a { display: inline-block; margin-top: 6px; }
+      .review { display: inline-flex; gap: 8px; align-items: center; }
+      .review input { width: 18px; height: 18px; }
+      .empty { padding: 36px 16px; text-align: center; color: #a1a1b8; }
+      @media (max-width: 640px) { body { padding: 14px; } .toolbar > * { max-width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Exact duplicate review</h1>
+      <a href="/admin">&larr; Dashboard admin</a>
+    </header>
+    <p class="notice">Read-only review. This page cannot delete files. The audit is a snapshot; paths and hashes must be checked again before cleanup.</p>
+    <div id="summary" class="summary"><span>Loading audit&hellip;</span></div>
+    <div class="toolbar">
+      <button id="sameMode" class="active" type="button">Same model</button>
+      <button id="crossMode" type="button">Cross model</button>
+      <input id="search" type="search" placeholder="Search model or filename" aria-label="Search model or filename" />
+      <select id="type" aria-label="Media type"><option value="">All media</option><option value="video">Videos</option><option value="gif">GIFs</option><option value="image">Images</option></select>
+      <button id="random" type="button">Random example</button>
+    </div>
+    <div class="pager">
+      <button id="previous" type="button">&larr; Previous</button>
+      <span id="position">&mdash;</span>
+      <button id="next" type="button">Next &rarr;</button>
+      <span class="spacer"></span>
+      <label class="review"><input id="reviewed" type="checkbox" /> I checked this group</label>
+      <span id="reviewCount" class="muted"></span>
+    </div>
+    <main id="group" class="group"><div class="empty">Loading&hellip;</div></main>
+    <script>
+      'use strict'
+      const nodes = Object.fromEntries(
+        ['summary', 'sameMode', 'crossMode', 'search', 'type', 'random', 'previous', 'position', 'next', 'reviewed', 'reviewCount', 'group']
+          .map((id) => [id, document.getElementById(id)])
+      )
+      let report = null
+      let mode = 'same'
+      let filtered = []
+      let index = 0
+      const reviewed = new Set(JSON.parse(localStorage.getItem('exactDuplicateReviewed') || '[]'))
+
+      function formatBytes(value) {
+        if (!Number.isFinite(value)) return '0 B'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let size = value
+        let unit = 0
+        while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++ }
+        return `${size.toFixed(unit ? 2 : 0)} ${units[unit]}`
+      }
+
+      function mediaUrl(file, kind) {
+        const parts = file.relativePath.split('/')
+        if (parts.length !== 3 || !['images', 'gif', 'webm'].includes(parts[1])) return null
+        return `/${kind}/${parts.map(encodeURIComponent).join('/')}`
+      }
+
+      function addText(parent, tag, value, className) {
+        const child = document.createElement(tag)
+        child.textContent = value
+        if (className) child.className = className
+        parent.appendChild(child)
+        return child
+      }
+
+      function renderSummary() {
+        const s = report.summary
+        nodes.summary.replaceChildren()
+        for (const [label, value] of [
+          ['Audited', new Date(report.auditedAt).toLocaleString()],
+          ['Physical files checked', s.physicalFilesIndexed.toLocaleString()],
+          ['Same-model groups', s.sameModelDuplicateGroups.toLocaleString()],
+          ['Redundant same-model paths', s.sameModelRedundantCopies.toLocaleString()],
+          ['Potential space', formatBytes(s.conservativeReclaimableBytes)],
+          ['Cross-model groups', s.crossModelGroups.toLocaleString()],
+          ['Scan/hash errors', `${s.scanErrors} / ${s.hashErrors}`],
+        ]) {
+          const item = document.createElement('div')
+          addText(item, 'strong', value)
+          addText(item, 'span', label, 'muted')
+          nodes.summary.appendChild(item)
+        }
+      }
+
+      function applyFilters() {
+        const query = nodes.search.value.trim().toLowerCase()
+        const type = nodes.type.value
+        const groups = mode === 'same' ? report.sameModelGroups : report.crossModelGroups
+        filtered = groups.filter((group) =>
+          (!type || group.mediaType === type) &&
+          (!query || group.files.some((file) => file.relativePath.toLowerCase().includes(query)))
+        )
+        index = 0
+        renderGroup()
+      }
+
+      function renderGroup() {
+        const current = filtered[index]
+        nodes.previous.disabled = index <= 0
+        nodes.next.disabled = index >= filtered.length - 1
+        nodes.random.disabled = filtered.length === 0
+        nodes.position.textContent = filtered.length ? `${index + 1} of ${filtered.length}` : '0 results'
+        nodes.reviewed.disabled = !current
+        nodes.reviewed.checked = Boolean(current && reviewed.has(current.id))
+        nodes.reviewCount.textContent = `${reviewed.size} marked reviewed in this browser`
+        nodes.group.replaceChildren()
+        if (!current) {
+          addText(nodes.group, 'div', 'No duplicate groups match these filters.', 'empty')
+          return
+        }
+
+        const heading = document.createElement('div')
+        heading.className = 'group-heading'
+        const title = document.createElement('div')
+        addText(title, 'h2', mode === 'same' ? current.modelName : current.models.join(' / '))
+        addText(title, 'div', `${current.mediaType} · ${current.files.length} distinct paths · ${formatBytes(current.sizeBytes)} each${mode === 'same' ? ` · ${formatBytes(current.redundantBytes)} redundant` : ''}`, 'muted')
+        heading.appendChild(title)
+        addText(heading, 'div', `MD5 ${current.id.split(':')[0]}`, 'hash')
+        nodes.group.appendChild(heading)
+        if (mode === 'cross') {
+          addText(nodes.group, 'p', 'These paths belong to different models. Cross-model copies are outside the same-model cleanup estimate.', 'notice')
+        }
+
+        const files = document.createElement('div')
+        files.className = 'files'
+        for (const file of current.files) {
+          const card = document.createElement('article')
+          card.className = 'file'
+          const frame = document.createElement('div')
+          frame.className = 'preview'
+          const raw = mediaUrl(file, 'media')
+          const thumb = mediaUrl(file, 'thumb')
+          if (file.availableOnNas && raw) {
+            if (current.mediaType === 'video') {
+              const video = document.createElement('video')
+              video.controls = true
+              video.preload = 'metadata'
+              video.src = raw
+              if (thumb) video.poster = thumb
+              frame.appendChild(video)
+            } else {
+              const image = document.createElement('img')
+              image.loading = 'lazy'
+              image.src = raw
+              image.alt = file.filename
+              frame.appendChild(image)
+            }
+          } else {
+            addText(frame, 'span', 'This copy is not available on the NAS dashboard.', 'muted')
+          }
+          card.appendChild(frame)
+          addText(card, 'div', file.relativePath, 'file-path')
+          if (file.availableOnNas && raw) {
+            const link = addText(card, 'a', 'Open original')
+            link.href = raw
+            link.target = '_blank'
+            link.rel = 'noopener'
+          }
+          files.appendChild(card)
+        }
+        nodes.group.appendChild(files)
+      }
+
+      nodes.sameMode.addEventListener('click', () => {
+        mode = 'same'; nodes.sameMode.classList.add('active'); nodes.crossMode.classList.remove('active'); applyFilters()
+      })
+      nodes.crossMode.addEventListener('click', () => {
+        mode = 'cross'; nodes.crossMode.classList.add('active'); nodes.sameMode.classList.remove('active'); applyFilters()
+      })
+      nodes.search.addEventListener('input', applyFilters)
+      nodes.type.addEventListener('change', applyFilters)
+      nodes.previous.addEventListener('click', () => { if (index > 0) { index--; renderGroup() } })
+      nodes.next.addEventListener('click', () => { if (index < filtered.length - 1) { index++; renderGroup() } })
+      nodes.random.addEventListener('click', () => { if (filtered.length) { index = Math.floor(Math.random() * filtered.length); renderGroup() } })
+      nodes.reviewed.addEventListener('change', () => {
+        const current = filtered[index]
+        if (!current) return
+        if (nodes.reviewed.checked) reviewed.add(current.id)
+        else reviewed.delete(current.id)
+        localStorage.setItem('exactDuplicateReviewed', JSON.stringify([...reviewed]))
+        renderGroup()
+      })
+
+      fetch('/api/exact-duplicates', { cache: 'no-store' })
+        .then((response) => { if (!response.ok) throw new Error(`Report request failed (${response.status})`); return response.json() })
+        .then((data) => {
+          if (!data.readOnly || !Array.isArray(data.sameModelGroups) || !Array.isArray(data.crossModelGroups)) throw new Error('Invalid review report')
+          report = data
+          renderSummary()
+          applyFilters()
+        })
+        .catch((error) => { nodes.group.replaceChildren(); addText(nodes.group, 'div', error.message, 'empty') })
+    </script>
+  </body>
+</html>
