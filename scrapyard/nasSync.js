@@ -27,7 +27,7 @@ function hasAcceptableNasSize(localSize, nasSize) {
 
 function runRobocopy(command) {
   return new Promise((resolve) => {
-    exec(command, (error, stdout, stderr) => {
+    exec(command, { maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
       const code = error?.code ?? 0
       resolve({
         ok: code <= 3,
@@ -365,7 +365,7 @@ async function syncModelToNas({
   // maintenance script (nightly-maintenance.ps1) or by invoking the
   // CLIs directly (scrapyard/transcodeWebm.js, scrapyard/faststartMp4.js).
   const excludedMetadataFiles = MUTABLE_MODEL_METADATA_FILES.join(' ')
-  const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /XO /R:2 /W:5 /XF ${excludedMetadataFiles}`
+  const command = `robocopy "${localModelDir}" "${nasModelDir}" /E /XO /R:2 /W:5 /NFL /NDL /NP /NJH /XF ${excludedMetadataFiles}`
   const result = await runRobocopy(command)
 
   if (!result.ok) {
