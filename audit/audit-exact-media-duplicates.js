@@ -13,7 +13,7 @@ const argv = minimist(process.argv.slice(2), {
     h: 'help',
     m: 'model',
   },
-  boolean: ['help', 'no-cache'],
+  boolean: ['help', 'no-cache', 'nas-all-media'],
   default: {
     concurrency: 2,
   },
@@ -82,11 +82,11 @@ async function main() {
 
   console.log('EXACT MEDIA DUPLICATE AUDIT')
   console.log(`Local media: ${localRoot}`)
-  console.log(`NAS videos: ${nasRoot}`)
+  console.log(`NAS ${argv['nas-all-media'] ? 'media' : 'videos'}: ${nasRoot}`)
   console.log('Phase 1/3: indexing file sizes...')
 
   collectMediaFiles(localRoot, 'local', false, records, scanErrors)
-  collectMediaFiles(nasRoot, 'nas', true, records, scanErrors)
+  collectMediaFiles(nasRoot, 'nas', !argv['nas-all-media'], records, scanErrors)
 
   const sizeGroups = groupBy(records, (record) => String(record.sizeBytes))
   const candidates = []
@@ -107,6 +107,7 @@ async function main() {
   let completed = 0
   let hashedBytes = 0
   let cacheWrites = 0
+  let lastCacheWriteAt = Date.now()
   const hashErrors = []
   const limit = pLimit(concurrency)
 
@@ -132,9 +133,14 @@ async function main() {
           })
         } finally {
           completed += 1
-          if (!argv['no-cache'] && completed % 25 === 0) {
+          if (
+            !argv['no-cache'] &&
+            completed % 250 === 0 &&
+            Date.now() - lastCacheWriteAt >= 30000
+          ) {
             saveCache(cachePath, nextCache)
             cacheWrites += 1
+            lastCacheWriteAt = Date.now()
           }
           if (completed === candidates.length || completed % 25 === 0) {
             process.stdout.write(
@@ -176,13 +182,15 @@ function printHelp() {
   console.log(`Usage: npm run audit:exact-media-dupes -- [options]
 
 Read-only, zero-false-positive duplicate audit. It indexes local images, GIFs,
-and videos plus NAS videos, then computes MD5 only for files sharing a size.
+and videos plus NAS videos by default, then computes MD5 only for files
+sharing a size. --nas-all-media also indexes NAS images and GIFs.
 
 Options:
   -m, --model <names>    Comma-separated canonical model filter.
   --local-root <path>    Local dataset root.
   --nas-root <path>      NAS dataset root. Default: NAS_DATASET_DIR or Z:\\dataset.
   --concurrency <n>      Concurrent hash streams. Default: 2.
+  --nas-all-media        Include NAS images and GIFs as well as videos.
   --cache <path>         Hash cache path.
   --no-cache             Ignore and do not write the hash cache.
   --output <path>        JSON report path.
