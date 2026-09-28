@@ -26,7 +26,8 @@ for (const group of report.duplicateGroups) {
     if (record.modelName.startsWith('.') || !['images', 'gif', 'webm'].includes(record.bucket)) continue
     const entry = byHash.get(group.md5)
     if (entry?.refs?.includes(record.relativePath)) continue
-    const location = record.locations.find((item) => item.rootType === 'local') || record.locations[0]
+    const location = record.locations.find((item) => item.rootType === 'local' && fs.existsSync(item.absolutePath)) ||
+      record.locations.find((item) => fs.existsSync(item.absolutePath))
     if (!location) continue
     candidates.push({ hash: group.md5, path: record.relativePath, absolutePath: location.absolutePath, size: group.sizeBytes })
   }
