@@ -220,6 +220,8 @@ function collectMediaFiles(root, rootType, videosOnly, records, errors) {
     for (const entry of entries) {
       const absolutePath = path.join(current, entry.name)
       if (entry.isDirectory()) {
+        // Recovery archives such as .dashboard-trash are not live models.
+        if (current === root && entry.name.startsWith('.')) continue
         if (rootType === 'local' && entry.name.toLowerCase() === 'log') continue
         stack.push(absolutePath)
         continue

@@ -36,6 +36,13 @@
       .file a { display: inline-block; margin-top: 6px; }
       .review { display: inline-flex; gap: 8px; align-items: center; }
       .review input { width: 18px; height: 18px; }
+      .choice { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+      .choice select { min-width: 230px; }
+      .file.keep { border-color: #4b9b74; }
+      .file.remove { border-color: #a66b60; }
+      .file-decision { margin-top: 8px; font-weight: 600; }
+      .keep .file-decision { color: #83d6a6; }
+      .remove .file-decision { color: #e7a49a; }
       .empty { padding: 36px 16px; text-align: center; color: #a1a1b8; }
       @media (max-width: 640px) { body { padding: 14px; } .toolbar > * { max-width: 100%; } }
     </style>
@@ -45,11 +52,12 @@
       <h1>Exact duplicate review</h1>
       <a href="/admin">&larr; Dashboard admin</a>
     </header>
-    <p class="notice">Read-only review. This page cannot delete files. The audit is a snapshot; paths and hashes must be checked again before cleanup.</p>
+    <p class="notice">Choose the model that should retain cross-model copies. Choices are saved for cleanup; this page does not delete files. Paths and hashes will be checked again before cleanup.</p>
     <div id="summary" class="summary"><span>Loading audit&hellip;</span></div>
     <div class="toolbar">
       <button id="sameMode" class="active" type="button">Same model</button>
       <button id="crossMode" type="button">Cross model</button>
+      <select id="pair" aria-label="Model pair" hidden></select>
       <input id="search" type="search" placeholder="Search model or filename" aria-label="Search model or filename" />
       <select id="type" aria-label="Media type"><option value="">All media</option><option value="video">Videos</option><option value="gif">GIFs</option><option value="image">Images</option></select>
       <button id="random" type="button">Random example</button>
@@ -66,13 +74,15 @@
     <script>
       'use strict'
       const nodes = Object.fromEntries(
-        ['summary', 'sameMode', 'crossMode', 'search', 'type', 'random', 'previous', 'position', 'next', 'reviewed', 'reviewCount', 'group']
+        ['summary', 'sameMode', 'crossMode', 'pair', 'search', 'type', 'random', 'previous', 'position', 'next', 'reviewed', 'reviewCount', 'group']
           .map((id) => [id, document.getElementById(id)])
       )
       let report = null
       let mode = 'same'
       let filtered = []
       let index = 0
+      let decisions = { pairs: {}, groups: {} }
+      let pairCounts = new Map()
       const reviewed = new Set(JSON.parse(localStorage.getItem('exactDuplicateReviewed') || '[]'))
 
       function formatBytes(value) {
@@ -123,6 +133,8 @@
         const groups = mode === 'same' ? report.sameModelGroups : report.crossModelGroups
         filtered = groups.filter((group) =>
           (!type || group.mediaType === type) &&
+          (mode !== 'cross' || nodes.pair.value === 'all' ||
+            (nodes.pair.value === 'multi' ? group.models.length > 2 : group.models.join('|') === nodes.pair.value)) &&
           (!query || group.files.some((file) => file.relativePath.toLowerCase().includes(query)))
         )
         index = 0
@@ -153,7 +165,47 @@
         addText(heading, 'div', `MD5 ${current.id.split(':')[0]}`, 'hash')
         nodes.group.appendChild(heading)
         if (mode === 'cross') {
-          addText(nodes.group, 'p', 'These paths belong to different models. Cross-model copies are outside the same-model cleanup estimate.', 'notice')
+          const choice = document.createElement('div')
+          choice.className = 'choice'
+          const pairKey = current.models.join('|')
+          const isPair = current.models.length === 2
+          const saved = (isPair ? decisions.pairs[pairKey] : decisions.groups[current.id])?.keepModel || ''
+          addText(choice, 'label', isPair
+            ? `Keep all ${pairCounts.get(pairKey)} exact-match groups for this model pair under:`
+            : 'Keep this exact-match group under:')
+          const select = document.createElement('select')
+          select.setAttribute('aria-label', 'Model to keep')
+          for (const value of ['', ...current.models]) {
+            const option = document.createElement('option')
+            option.value = value
+            option.textContent = value || 'Undecided'
+            select.appendChild(option)
+          }
+          select.value = saved
+          select.addEventListener('change', async () => {
+            select.disabled = true
+            const status = choice.querySelector('.muted')
+            status.textContent = 'Saving choice…'
+            try {
+              const response = await fetch('/api/exact-duplicate-decisions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ auditedAt: report.auditedAt, scope: isPair ? 'pair' : 'group',
+                  key: isPair ? pairKey : current.id, keepModel: select.value }),
+              })
+              const result = await response.json()
+              if (!response.ok) throw new Error(result.error || `Save failed (${response.status})`)
+              decisions = result
+              renderGroup()
+            } catch (error) {
+              select.value = saved
+              status.textContent = error.message
+              select.disabled = false
+            }
+          })
+          choice.appendChild(select)
+          addText(choice, 'span', saved ? 'Saved' : 'No choice saved', 'muted')
+          nodes.group.appendChild(choice)
         }
 
         const files = document.createElement('div')
@@ -161,6 +213,11 @@
         for (const file of current.files) {
           const card = document.createElement('article')
           card.className = 'file'
+          if (mode === 'cross') {
+            const pairKey = current.models.join('|')
+            const keeper = (current.models.length === 2 ? decisions.pairs[pairKey] : decisions.groups[current.id])?.keepModel
+            if (keeper) card.classList.add(file.modelName === keeper ? 'keep' : 'remove')
+          }
           const frame = document.createElement('div')
           frame.className = 'preview'
           const raw = mediaUrl(file, 'media')
@@ -185,6 +242,8 @@
           }
           card.appendChild(frame)
           addText(card, 'div', file.relativePath, 'file-path')
+          if (card.classList.contains('keep')) addText(card, 'div', 'Keep under this model', 'file-decision')
+          if (card.classList.contains('remove')) addText(card, 'div', 'Remove from this model after validation', 'file-decision')
           if (file.availableOnNas && raw) {
             const link = addText(card, 'a', 'Open original')
             link.href = raw
@@ -197,11 +256,12 @@
       }
 
       nodes.sameMode.addEventListener('click', () => {
-        mode = 'same'; nodes.sameMode.classList.add('active'); nodes.crossMode.classList.remove('active'); applyFilters()
+        mode = 'same'; nodes.pair.hidden = true; nodes.sameMode.classList.add('active'); nodes.crossMode.classList.remove('active'); applyFilters()
       })
       nodes.crossMode.addEventListener('click', () => {
-        mode = 'cross'; nodes.crossMode.classList.add('active'); nodes.sameMode.classList.remove('active'); applyFilters()
+        mode = 'cross'; nodes.pair.hidden = false; nodes.crossMode.classList.add('active'); nodes.sameMode.classList.remove('active'); applyFilters()
       })
+      nodes.pair.addEventListener('change', applyFilters)
       nodes.search.addEventListener('input', applyFilters)
       nodes.type.addEventListener('change', applyFilters)
       nodes.previous.addEventListener('click', () => { if (index > 0) { index--; renderGroup() } })
@@ -216,11 +276,32 @@
         renderGroup()
       })
 
-      fetch('/api/exact-duplicates', { cache: 'no-store' })
-        .then((response) => { if (!response.ok) throw new Error(`Report request failed (${response.status})`); return response.json() })
-        .then((data) => {
+      Promise.all([
+        fetch('/api/exact-duplicates', { cache: 'no-store' }).then((response) => {
+          if (!response.ok) throw new Error(`Report request failed (${response.status})`)
+          return response.json()
+        }),
+        fetch('/api/exact-duplicate-decisions', { cache: 'no-store' }).then((response) => {
+          if (!response.ok) throw new Error(`Decisions request failed (${response.status})`)
+          return response.json()
+        }),
+      ])
+        .then(([data, saved]) => {
           if (!data.readOnly || !Array.isArray(data.sameModelGroups) || !Array.isArray(data.crossModelGroups)) throw new Error('Invalid review report')
+          if (saved.auditedAt !== data.auditedAt) throw new Error('Decisions do not match this audit')
           report = data
+          decisions = saved
+          for (const group of data.crossModelGroups) {
+            if (group.models.length !== 2) continue
+            const key = group.models.join('|')
+            pairCounts.set(key, (pairCounts.get(key) || 0) + 1)
+          }
+          nodes.pair.add(new Option('All cross-model groups', 'all'))
+          for (const [key, count] of [...pairCounts].sort((a, b) => b[1] - a[1])) {
+            nodes.pair.add(new Option(`${key.replace('|', ' / ')} (${count})`, key))
+          }
+          nodes.pair.add(new Option(`3+ models (${data.crossModelGroups.filter((group) => group.models.length > 2).length})`, 'multi'))
+          nodes.pair.value = [...pairCounts].sort((a, b) => b[1] - a[1])[0]?.[0] || 'all'
           renderSummary()
           applyFilters()
         })

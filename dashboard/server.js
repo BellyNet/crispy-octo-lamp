@@ -40,6 +40,7 @@ const THUMB_DIR =
 const EXACT_DUPLICATE_REPORT_PATH =
   process.env.EXACT_DUPLICATE_REPORT_PATH ||
   path.join(THUMB_DIR, 'exact-media-review-latest.json')
+const EXACT_DUPLICATE_DECISIONS_PATH = path.join(THUMB_DIR, 'exact-duplicate-decisions.json')
 
 const MEDIA_FOLDERS = ['images', 'gif', 'webm']
 // `.m4v` is Apple's MP4 variant (H.264/AAC) — fully iOS-friendly. Without it
@@ -1102,6 +1103,60 @@ app.get('/api/exact-duplicates', (_req, res) => {
     return res.status(404).json({ error: 'Exact duplicate review report is unavailable.' })
   }
   res.sendFile(EXACT_DUPLICATE_REPORT_PATH)
+})
+function readExactDuplicateReport() {
+  const report = JSON.parse(fs.readFileSync(EXACT_DUPLICATE_REPORT_PATH, 'utf8'))
+  if (!report.readOnly || !Array.isArray(report.crossModelGroups)) {
+    throw new Error('Invalid exact duplicate report')
+  }
+  return report
+}
+function readExactDuplicateDecisions(report) {
+  let saved = null
+  try { saved = JSON.parse(fs.readFileSync(EXACT_DUPLICATE_DECISIONS_PATH, 'utf8')) } catch {}
+  return saved?.auditedAt === report.auditedAt
+    ? saved
+    : { version: 1, auditedAt: report.auditedAt, pairs: {}, groups: {} }
+}
+app.get('/api/exact-duplicate-decisions', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const report = readExactDuplicateReport()
+    res.json(readExactDuplicateDecisions(report))
+  } catch (error) {
+    res.status(503).json({ error: error.message })
+  }
+})
+app.post('/api/exact-duplicate-decisions', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const report = readExactDuplicateReport()
+    const { auditedAt, scope, key, keepModel } = req.body || {}
+    if (auditedAt !== report.auditedAt) return res.status(409).json({ error: 'Audit changed; reload the page.' })
+    if (!['pair', 'group'].includes(scope) || typeof key !== 'string' || key.length > 256 ||
+        typeof keepModel !== 'string') return res.status(400).json({ error: 'Invalid decision.' })
+    let models
+    if (scope === 'group') {
+      const group = report.crossModelGroups.find((item) => item.id === key && item.models.length > 2)
+      models = group?.models
+    } else {
+      const pair = report.crossModelGroups.find((item) => item.models.length === 2 && item.models.join('|') === key)
+      models = pair?.models
+    }
+    if (!models || (keepModel && !models.includes(keepModel))) {
+      return res.status(400).json({ error: 'Decision does not match this audit.' })
+    }
+    const decisions = readExactDuplicateDecisions(report)
+    const target = scope === 'pair' ? decisions.pairs : decisions.groups
+    if (keepModel) target[key] = { keepModel, updatedAt: new Date().toISOString() }
+    else delete target[key]
+    const temp = `${EXACT_DUPLICATE_DECISIONS_PATH}.${process.pid}.tmp`
+    fs.writeFileSync(temp, JSON.stringify(decisions, null, 2))
+    fs.renameSync(temp, EXACT_DUPLICATE_DECISIONS_PATH)
+    res.json(decisions)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 })
 
 // Users list — returns [{ name, sources, featured }, ...]

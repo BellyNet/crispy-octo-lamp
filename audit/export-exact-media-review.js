@@ -31,13 +31,25 @@ function toFile(record) {
 
 const sameModelGroups = []
 const crossModelGroups = []
+let excludedTrashRecords = 0
+let sameModelHashGroups = 0
 for (const group of audit.duplicateGroups) {
+  // The raw audit also walks .dashboard-trash, which is a recovery archive,
+  // not a model. Never offer archived files as live cleanup candidates.
+  const liveRecords = group.records.filter((record) => {
+    const live = !record.modelName.startsWith('.') &&
+      ['images', 'gif', 'webm'].includes(record.bucket)
+    if (!live) excludedTrashRecords++
+    return live
+  })
+  if (liveRecords.length < 2) continue
   const byModel = new Map()
-  for (const record of group.records) {
+  for (const record of liveRecords) {
     const key = record.modelName.toLowerCase()
     if (!byModel.has(key)) byModel.set(key, [])
     byModel.get(key).push(record)
   }
+  if ([...byModel.values()].some((records) => records.length > 1)) sameModelHashGroups++
   for (const records of byModel.values()) {
     if (records.length < 2) continue
     sameModelGroups.push({
@@ -49,14 +61,15 @@ for (const group of audit.duplicateGroups) {
       files: records.map(toFile),
     })
   }
-  if (group.crossModel) {
+  if (byModel.size > 1) {
+    const models = [...byModel.values()].map((records) => records[0].modelName).sort()
     crossModelGroups.push({
       id: group.md5,
       mediaType: group.mediaType,
       sizeBytes: group.sizeBytes,
-      models: group.models,
-      crossModelOnly: !group.hasSameModelDuplicates,
-      files: group.records.map(toFile),
+      models,
+      crossModelOnly: ![...byModel.values()].some((records) => records.length > 1),
+      files: liveRecords.map(toFile),
     })
   }
 }
@@ -70,20 +83,21 @@ crossModelGroups.sort(
 
 const summary = {
   ...audit.summary,
+  sameModelDuplicateGroups: sameModelHashGroups,
+  sameModelRedundantCopies: sameModelGroups.reduce((sum, group) => sum + group.files.length - 1, 0),
+  conservativeReclaimableBytes: sameModelGroups.reduce((sum, group) => sum + group.redundantBytes, 0),
+  crossModelGroups: crossModelGroups.length,
+  excludedTrashRecords,
   sameModelReviewGroups: sameModelGroups.length,
 }
-if (
-  sameModelGroups.reduce((sum, group) => sum + group.redundantBytes, 0) !==
-    summary.conservativeReclaimableBytes ||
-  sameModelGroups.reduce((sum, group) => sum + group.files.length - 1, 0) !==
-    summary.sameModelRedundantCopies ||
-  crossModelGroups.length !== summary.crossModelGroups
-) {
-  throw new Error('Review export totals do not match the exact-media audit.')
+if (summary.sameModelRedundantCopies > audit.summary.sameModelRedundantCopies ||
+    summary.conservativeReclaimableBytes > audit.summary.conservativeReclaimableBytes ||
+    summary.crossModelGroups > audit.summary.crossModelGroups) {
+  throw new Error('Filtered review totals exceed the exact-media audit.')
 }
 
 const review = {
-  version: 1,
+  version: 2,
   generatedAt: new Date().toISOString(),
   auditedAt: audit.generatedAt,
   readOnly: true,
