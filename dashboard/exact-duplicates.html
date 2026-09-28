@@ -52,7 +52,7 @@
       <h1>Exact duplicate review</h1>
       <a href="/admin">&larr; Dashboard admin</a>
     </header>
-    <p class="notice">Choose the model that should retain cross-model copies. Choices are saved for cleanup; this page does not delete files. Paths and hashes will be checked again before cleanup.</p>
+    <p class="notice">Choose the model that should retain cross-model copies. Undecided groups stay in both models. Choices are saved for cleanup; this page does not delete files. Paths and hashes will be checked again before cleanup.</p>
     <div id="summary" class="summary"><span>Loading audit&hellip;</span></div>
     <div class="toolbar">
       <button id="sameMode" class="active" type="button">Same model</button>
@@ -114,10 +114,13 @@
         for (const [label, value] of [
           ['Audited', new Date(report.auditedAt).toLocaleString()],
           ['Physical files checked', s.physicalFilesIndexed.toLocaleString()],
+          ['Archive records excluded', s.excludedTrashRecords.toLocaleString()],
           ['Same-model groups', s.sameModelDuplicateGroups.toLocaleString()],
           ['Redundant same-model paths', s.sameModelRedundantCopies.toLocaleString()],
           ['Potential space', formatBytes(s.conservativeReclaimableBytes)],
           ['Cross-model groups', s.crossModelGroups.toLocaleString()],
+          ['Model-pair choices', `${Object.keys(decisions.pairs).length} / ${pairCounts.size}`],
+          ['3+ model choices', `${Object.keys(decisions.groups).length} / ${report.crossModelGroups.filter((group) => group.models.length > 2).length}`],
           ['Scan/hash errors', `${s.scanErrors} / ${s.hashErrors}`],
         ]) {
           const item = document.createElement('div')
@@ -196,6 +199,7 @@
               const result = await response.json()
               if (!response.ok) throw new Error(result.error || `Save failed (${response.status})`)
               decisions = result
+              renderSummary()
               renderGroup()
             } catch (error) {
               select.value = saved
