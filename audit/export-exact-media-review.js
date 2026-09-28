@@ -9,6 +9,7 @@ const inputPath = path.resolve(
 const outputPath = path.resolve(
   process.argv[3] || path.join(__dirname, '..', 'tmp', 'exact-media-review-latest.json')
 )
+const liveOnly = process.argv.includes('--live')
 
 const audit = JSON.parse(fs.readFileSync(inputPath, 'utf8'))
 if (
@@ -38,7 +39,8 @@ for (const group of audit.duplicateGroups) {
   // not a model. Never offer archived files as live cleanup candidates.
   const liveRecords = group.records.filter((record) => {
     const live = !record.modelName.startsWith('.') &&
-      ['images', 'gif', 'webm'].includes(record.bucket)
+      ['images', 'gif', 'webm'].includes(record.bucket) &&
+      (!liveOnly || record.locations.some((location) => fs.existsSync(location.absolutePath)))
     if (!live) excludedTrashRecords++
     return live
   })
@@ -100,6 +102,7 @@ const review = {
   version: 2,
   generatedAt: new Date().toISOString(),
   auditedAt: audit.generatedAt,
+  liveOnly,
   readOnly: true,
   summary,
   sameModelGroups,

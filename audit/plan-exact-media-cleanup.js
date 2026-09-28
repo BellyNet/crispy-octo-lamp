@@ -1,10 +1,10 @@
 'use strict'
 
 // Read-only plan for the live duplicate review. Cross-model files are only
-// selected when the dashboard has an explicit keeper decision for that pair
-// (or for a group containing three or more models).
+// selected when the dashboard has an explicit keeper decision for that hash.
 const fs = require('fs')
 const path = require('path')
+const { chooseKeeper, rank } = require('./exact-media-keeper')
 
 const reportPath = path.resolve(process.argv[2] || path.join(__dirname, '..', 'tmp', 'exact-media-review-latest.json'))
 const decisionsPath = path.resolve(process.argv[3] || 'Z:\\dashboard-cache\\exact-duplicate-decisions.json')
@@ -13,7 +13,7 @@ const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'))
 if (report.version !== 2 || !report.readOnly || report.summary.scanErrors !== 0 || report.summary.hashErrors !== 0) {
   throw new Error('A clean, filtered exact-media review report is required')
 }
-let decisions = { auditedAt: report.auditedAt, pairs: {}, groups: {} }
+let decisions = { auditedAt: report.auditedAt, groups: {} }
 if (fs.existsSync(decisionsPath)) decisions = JSON.parse(fs.readFileSync(decisionsPath, 'utf8'))
 if (decisions.auditedAt !== report.auditedAt) throw new Error('Dashboard choices belong to a different audit')
 
@@ -31,10 +31,7 @@ for (const hash of hashes) {
   const cross = crossByHash.get(hash)
   const same = sameByHash.get(hash) || []
   const models = cross?.models || same.map((group) => group.modelName)
-  const key = models.join('|')
-  const keepModel = cross
-    ? (models.length === 2 ? decisions.pairs?.[key] : decisions.groups?.[hash])?.keepModel
-    : null
+  const keepModel = cross ? decisions.groups?.[hash]?.keepModel : null
   const validCrossDecision = cross && models.includes(keepModel)
   if (cross && !validCrossDecision) undecidedCrossGroups++
   const files = cross?.files || same.flatMap((group) => group.files)
@@ -43,11 +40,8 @@ for (const hash of hashes) {
     if (!byModel.has(file.modelName)) byModel.set(file.modelName, [])
     byModel.get(file.modelName).push(file)
   }
-  // Prefer an available NAS copy and then a stable path. Metadata and every
-  // alternate post reference must be archived/remapped before apply.
-  const preferred = (list) => [...list].sort((a, b) =>
-    Number(b.availableOnNas) - Number(a.availableOnNas) ||
-    a.relativePath.localeCompare(b.relativePath))[0]
+  // Prefer the path with the richest sidecar and seen-URL history.
+  const preferred = (list) => chooseKeeper(list).file
   const keepers = validCrossDecision
     ? [preferred(byModel.get(keepModel))]
     : [...byModel.values()].map(preferred)
@@ -58,6 +52,7 @@ for (const hash of hashes) {
     const keeper = validCrossDecision ? keepers[0] : keepers.find((item) => item.modelName === file.modelName)
     operations.push({ hash, sizeBytes: cross?.sizeBytes || same[0].sizeBytes,
       from: file.relativePath, to: keeper.relativePath,
+      fromHistory: rank(file), keeperHistory: rank(keeper),
       crossModel: file.modelName !== keeper.modelName })
   }
 }

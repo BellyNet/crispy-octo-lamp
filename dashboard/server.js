@@ -1115,8 +1115,8 @@ function readExactDuplicateDecisions(report) {
   let saved = null
   try { saved = JSON.parse(fs.readFileSync(EXACT_DUPLICATE_DECISIONS_PATH, 'utf8')) } catch {}
   return saved?.auditedAt === report.auditedAt
-    ? saved
-    : { version: 1, auditedAt: report.auditedAt, pairs: {}, groups: {} }
+    ? { version: 2, auditedAt: report.auditedAt, groups: saved.groups || {} }
+    : { version: 2, auditedAt: report.auditedAt, groups: {} }
 }
 app.get('/api/exact-duplicate-decisions', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store')
@@ -1133,23 +1133,16 @@ app.post('/api/exact-duplicate-decisions', (req, res) => {
     const report = readExactDuplicateReport()
     const { auditedAt, scope, key, keepModel } = req.body || {}
     if (auditedAt !== report.auditedAt) return res.status(409).json({ error: 'Audit changed; reload the page.' })
-    if (!['pair', 'group'].includes(scope) || typeof key !== 'string' || key.length > 256 ||
+    if (scope !== 'group' || typeof key !== 'string' || key.length > 256 ||
         typeof keepModel !== 'string') return res.status(400).json({ error: 'Invalid decision.' })
-    let models
-    if (scope === 'group') {
-      const group = report.crossModelGroups.find((item) => item.id === key && item.models.length > 2)
-      models = group?.models
-    } else {
-      const pair = report.crossModelGroups.find((item) => item.models.length === 2 && item.models.join('|') === key)
-      models = pair?.models
-    }
+    const group = report.crossModelGroups.find((item) => item.id === key)
+    const models = group?.models
     if (!models || (keepModel && !models.includes(keepModel))) {
       return res.status(400).json({ error: 'Decision does not match this audit.' })
     }
     const decisions = readExactDuplicateDecisions(report)
-    const target = scope === 'pair' ? decisions.pairs : decisions.groups
-    if (keepModel) target[key] = { keepModel, updatedAt: new Date().toISOString() }
-    else delete target[key]
+    if (keepModel) decisions.groups[key] = { keepModel, updatedAt: new Date().toISOString() }
+    else delete decisions.groups[key]
     const temp = `${EXACT_DUPLICATE_DECISIONS_PATH}.${process.pid}.tmp`
     fs.writeFileSync(temp, JSON.stringify(decisions, null, 2))
     fs.renameSync(temp, EXACT_DUPLICATE_DECISIONS_PATH)

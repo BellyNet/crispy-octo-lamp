@@ -29,6 +29,13 @@
       .group-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
       .hash { font: 12px ui-monospace, monospace; color: #a1a1b8; overflow-wrap: anywhere; }
       .files { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; margin-top: 16px; }
+      .model-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); gap: 14px; margin-top: 16px; }
+      .model-side { border: 1px solid #39394d; border-radius: 10px; padding: 12px; min-width: 0; }
+      .model-side.keep { border-color: #4b9b74; }
+      .model-side.remove { border-color: #a66b60; }
+      .model-side h3 { margin: 0 0 10px; font-size: 16px; }
+      .model-side .file { margin-top: 12px; }
+      .model-side button { width: 100%; }
       .file { border: 1px solid #39394d; background: #12121a; border-radius: 10px; padding: 10px; min-width: 0; }
       .preview { aspect-ratio: 16 / 10; display: grid; place-items: center; background: #070709; border-radius: 7px; overflow: hidden; }
       .preview img, .preview video { width: 100%; height: 100%; object-fit: contain; }
@@ -36,8 +43,6 @@
       .file a { display: inline-block; margin-top: 6px; }
       .review { display: inline-flex; gap: 8px; align-items: center; }
       .review input { width: 18px; height: 18px; }
-      .choice { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
-      .choice select { min-width: 230px; }
       .file.keep { border-color: #4b9b74; }
       .file.remove { border-color: #a66b60; }
       .file-decision { margin-top: 8px; font-weight: 600; }
@@ -52,7 +57,7 @@
       <h1>Exact duplicate review</h1>
       <a href="/admin">&larr; Dashboard admin</a>
     </header>
-    <p class="notice">Choose the model that should retain cross-model copies. Undecided groups stay in both models. Choices are saved for cleanup; this page does not delete files. Paths and hashes will be checked again before cleanup.</p>
+    <p class="notice">For each cross-model group, click the model to keep. The other model's copies are marked for deletion. Undecided groups stay in both models. This page saves choices; cleanup runs after file and metadata validation.</p>
     <div id="summary" class="summary"><span>Loading audit&hellip;</span></div>
     <div class="toolbar">
       <button id="sameMode" class="active" type="button">Same model</button>
@@ -81,7 +86,7 @@
       let mode = 'same'
       let filtered = []
       let index = 0
-      let decisions = { pairs: {}, groups: {} }
+      let decisions = { groups: {} }
       let pairCounts = new Map()
       const reviewed = new Set(JSON.parse(localStorage.getItem('exactDuplicateReviewed') || '[]'))
 
@@ -119,8 +124,7 @@
           ['Redundant same-model paths', s.sameModelRedundantCopies.toLocaleString()],
           ['Potential space', formatBytes(s.conservativeReclaimableBytes)],
           ['Cross-model groups', s.crossModelGroups.toLocaleString()],
-          ['Model-pair choices', `${Object.keys(decisions.pairs).length} / ${pairCounts.size}`],
-          ['3+ model choices', `${Object.keys(decisions.groups).length} / ${report.crossModelGroups.filter((group) => group.models.length > 2).length}`],
+          ['Cross-model choices', `${Object.keys(decisions.groups).length} / ${report.crossModelGroups.length}`],
           ['Scan/hash errors', `${s.scanErrors} / ${s.hashErrors}`],
         ]) {
           const item = document.createElement('div')
@@ -167,59 +171,50 @@
         heading.appendChild(title)
         addText(heading, 'div', `MD5 ${current.id.split(':')[0]}`, 'hash')
         nodes.group.appendChild(heading)
-        if (mode === 'cross') {
-          const choice = document.createElement('div')
-          choice.className = 'choice'
-          const pairKey = current.models.join('|')
-          const isPair = current.models.length === 2
-          const saved = (isPair ? decisions.pairs[pairKey] : decisions.groups[current.id])?.keepModel || ''
-          addText(choice, 'label', isPair
-            ? `Keep all ${pairCounts.get(pairKey)} exact-match groups for this model pair under:`
-            : 'Keep this exact-match group under:')
-          const select = document.createElement('select')
-          select.setAttribute('aria-label', 'Model to keep')
-          for (const value of ['', ...current.models]) {
-            const option = document.createElement('option')
-            option.value = value
-            option.textContent = value || 'Undecided'
-            select.appendChild(option)
-          }
-          select.value = saved
-          select.addEventListener('change', async () => {
-            select.disabled = true
-            const status = choice.querySelector('.muted')
-            status.textContent = 'Saving choice…'
-            try {
-              const response = await fetch('/api/exact-duplicate-decisions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ auditedAt: report.auditedAt, scope: isPair ? 'pair' : 'group',
-                  key: isPair ? pairKey : current.id, keepModel: select.value }),
-              })
-              const result = await response.json()
-              if (!response.ok) throw new Error(result.error || `Save failed (${response.status})`)
-              decisions = result
-              renderSummary()
-              renderGroup()
-            } catch (error) {
-              select.value = saved
-              status.textContent = error.message
-              select.disabled = false
-            }
-          })
-          choice.appendChild(select)
-          addText(choice, 'span', saved ? 'Saved' : 'No choice saved', 'muted')
-          nodes.group.appendChild(choice)
-        }
+        if (mode === 'cross') addText(nodes.group, 'p', 'Select one model for this exact-match group. You can change or clear the choice.', 'muted')
 
         const files = document.createElement('div')
-        files.className = 'files'
+        files.className = mode === 'cross' ? 'model-sides' : 'files'
+        const sideByModel = new Map()
+        if (mode === 'cross') {
+          const keeper = decisions.groups[current.id]?.keepModel
+          for (const modelName of current.models) {
+            const side = document.createElement('section')
+            side.className = 'model-side'
+            if (keeper) side.classList.add(modelName === keeper ? 'keep' : 'remove')
+            addText(side, 'h3', modelName)
+            const button = addText(side, 'button', modelName === keeper ? 'Keep this model ✓ — click to clear' : `Keep ${modelName}; mark others for deletion`)
+            button.type = 'button'
+            button.setAttribute('aria-pressed', String(modelName === keeper))
+            const status = addText(side, 'div', keeper ? (modelName === keeper ? 'Keeper selected' : 'Marked for deletion') : 'Undecided', 'file-decision')
+            button.addEventListener('click', async () => {
+              button.disabled = true
+              status.textContent = 'Saving choice…'
+              try {
+                const response = await fetch('/api/exact-duplicate-decisions', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ auditedAt: report.auditedAt, scope: 'group', key: current.id,
+                    keepModel: modelName === keeper ? '' : modelName }),
+                })
+                const result = await response.json()
+                if (!response.ok) throw new Error(result.error || `Save failed (${response.status})`)
+                decisions = result
+                renderSummary()
+                renderGroup()
+              } catch (error) {
+                status.textContent = error.message
+                button.disabled = false
+              }
+            })
+            files.appendChild(side)
+            sideByModel.set(modelName, side)
+          }
+        }
         for (const file of current.files) {
           const card = document.createElement('article')
           card.className = 'file'
           if (mode === 'cross') {
-            const pairKey = current.models.join('|')
-            const keeper = (current.models.length === 2 ? decisions.pairs[pairKey] : decisions.groups[current.id])?.keepModel
+            const keeper = decisions.groups[current.id]?.keepModel
             if (keeper) card.classList.add(file.modelName === keeper ? 'keep' : 'remove')
           }
           const frame = document.createElement('div')
@@ -254,7 +249,8 @@
             link.target = '_blank'
             link.rel = 'noopener'
           }
-          files.appendChild(card)
+          if (mode === 'cross') sideByModel.get(file.modelName).appendChild(card)
+          else files.appendChild(card)
         }
         nodes.group.appendChild(files)
       }
