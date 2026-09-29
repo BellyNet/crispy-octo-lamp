@@ -1229,8 +1229,7 @@ function isCompleteAllSourceResult(result) {
     result.runs.every(
       (run) =>
         run?.ok &&
-        Number(run.summary?.errors || 0) === 0 &&
-        Number(run.summary?.pendingFullResolution || 0) === 0
+        Number(run.summary?.errors || 0) === 0
     ) &&
     result.nasSync?.ok !== false
   )

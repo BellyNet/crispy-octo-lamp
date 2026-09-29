@@ -1257,6 +1257,21 @@ async function main() {
   assert.deepStrictEqual(
     resumeAllSourceQueueFromReport(allSourceQueue, {
       selectedModels: 3,
+      results: [
+        {
+          model: 'alpha_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: true, summary: { errors: 0, pendingFullResolution: 7 } }],
+          nasSync: { ok: true },
+        },
+      ],
+    }).queue.map((item) => item.model),
+    ['beta_model', 'dual_coomer_model']
+  )
+  assert.deepStrictEqual(
+    resumeAllSourceQueueFromReport(allSourceQueue, {
+      selectedModels: 3,
       finishedAt: new Date().toISOString(),
       results: [
         {
