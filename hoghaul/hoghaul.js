@@ -2444,6 +2444,15 @@ async function run(argvInput = process.argv.slice(2)) {
     Number.isFinite(maxPosts) && maxPosts > 0 ? posts.slice(0, maxPosts) : posts
   if (source.site === 'reddit' && !dryRun) {
     for (const post of selectedPosts.filter(
+      (item) => item.mediaHydrationUnavailable
+    )) {
+      appendRunEvent('reddit_gallery_unavailable', {
+        postId: post.id,
+        mediaPageUrl: post.permalink || post.url || null,
+        reason: post.mediaHydrationUnavailableReason || 'removed',
+      })
+    }
+    for (const post of selectedPosts.filter(
       (item) => item.mediaHydrationFailed
     )) {
       errorCount += 1
