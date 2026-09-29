@@ -948,10 +948,16 @@ async function enrichOldRedditHtmlPostMedia(source, post, deps = {}) {
   if (!post.is_gallery) return post
   const postUrl = new URL(post.permalink, getOldRedditOrigin(source))
   postUrl.searchParams.set('over18', '1')
-  const { html } = await fetchOldRedditHtml(postUrl.toString(), {
-    ...deps,
-    redditHtmlRequestKind: 'gallery/post',
-  })
+  let html = ''
+  let htmlError = null
+  try {
+    ;({ html } = await fetchOldRedditHtml(postUrl.toString(), {
+      ...deps,
+      redditHtmlRequestKind: 'gallery/post',
+    }))
+  } catch (err) {
+    htmlError = err
+  }
   const enriched = {
     ...post,
     htmlMediaUrls: extractOldRedditImageUrls(html),
@@ -961,7 +967,9 @@ async function enrichOldRedditHtmlPostMedia(source, post, deps = {}) {
       await hydrateRedditGalleryFromJson(source, enriched, deps)
     } catch (err) {
       enriched.mediaHydrationFailed = true
-      enriched.mediaHydrationError = err.message
+      enriched.mediaHydrationError = htmlError
+        ? `${htmlError.message} | ${err.message}`
+        : err.message
     }
   }
   return enriched
@@ -1675,7 +1683,15 @@ async function enrichRedditRssPostMedia(source, post, deps = {}) {
     return post
   }
 
-  const response = await fetchRedditPostHtmlForMedia(source, post, deps)
+  let response
+  try {
+    response = await fetchRedditPostHtmlForMedia(source, post, deps)
+  } catch (err) {
+    if (!post.is_gallery) throw err
+    const jsonResult = await hydrateRedditGalleryFromJson(source, post, deps)
+    if (jsonResult.mediaCount >= 2 || jsonResult.unavailable) return post
+    throw err
+  }
   if (!response?.html) {
     if (post.is_gallery) throw new Error('Gallery page returned no HTML.')
     return post

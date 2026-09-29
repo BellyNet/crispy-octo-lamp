@@ -2239,6 +2239,31 @@ async function main() {
   assert.strictEqual(rssJsonPosts[0].mediaEntries.length, 2)
   assert.strictEqual(rssJsonPosts[0].mediaHydrationFailed, undefined)
 
+  const jsonAfterHtmlError = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/after429.json')) {
+          return galleryJsonResponse('after429', url)
+        }
+        if (url.includes('/comments/after429/')) throw new Error('HTTP 429')
+        return {
+          html: '<div class="thing" data-fullname="t3_after429" data-permalink="/r/test/comments/after429/title/" data-url="https://www.reddit.com/gallery/after429" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlRateLimitDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(jsonAfterHtmlError[0].mediaEntries.length, 2)
+  assert.strictEqual(jsonAfterHtmlError[0].mediaHydrationFailed, undefined)
+
   const knownGallerySource = {
     origin: 'https://www.reddit.com',
     site: 'reddit',
