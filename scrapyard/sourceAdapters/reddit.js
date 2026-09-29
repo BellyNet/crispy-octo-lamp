@@ -2048,5 +2048,6 @@ module.exports = {
   getRedditSubreddit,
   hydrateMissingRedditTitle,
   looksLikeTruncatedRedditTitle,
+  parseRssEntries,
   preflightRedditSource,
 }

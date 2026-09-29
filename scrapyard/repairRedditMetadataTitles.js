@@ -10,10 +10,11 @@ const {
   isGenericRedditPageTitle,
   resolveBestDateRecord,
 } = require('./mediaDates')
+const { parseRssEntries } = require('./sourceAdapters/reddit')
 
 const argv = minimist(process.argv.slice(2), {
-  boolean: ['apply', 'fetch-missing'],
-  string: ['dataset', 'delay-ms', 'fetch-timeout-ms', 'model'],
+  boolean: ['apply', 'fetch-missing', 'broken-only'],
+  string: ['dataset', 'delay-ms', 'fetch-timeout-ms', 'model', 'rss-max-pages'],
 })
 
 const datasetDir =
@@ -22,6 +23,15 @@ const datasetDir =
   path.join(process.env.APPDATA || process.cwd(), '.slopvault', 'dataset')
 const APPLY = Boolean(argv.apply)
 const FETCH_MISSING = Boolean(argv['fetch-missing'])
+// --broken-only: fix just the records whose caption is missing or is a
+// Reddit chrome-page title ("Reddit - The heart of the internet"), resolving
+// real titles from each user's submitted RSS (100 posts per request) instead
+// of one lookup per post. Leaves dates and slug/truncated titles alone.
+const BROKEN_ONLY = Boolean(argv['broken-only'])
+const RSS_MAX_PAGES = Math.max(
+  Number.parseInt(String(argv['rss-max-pages'] || ''), 10) || 10,
+  1
+)
 const FETCH_DELAY_MS = Math.max(
   Number.parseInt(String(argv['delay-ms'] || ''), 10) || 650,
   0
@@ -375,6 +385,223 @@ async function repairSidecar(modelName, sidecar) {
   return { scanned, repaired, fetched, datesFixed, examples }
 }
 
+// ─── --broken-only: titles from each user's submitted RSS ─────────────────────
+// Reddit serves post HTML a "Welcome to Reddit" login wall and 403s the JSON
+// APIs for unauthenticated clients, but the per-user submitted RSS still
+// carries real titles, 100 posts per request. Its rate limit is tight
+// (often one request per window), so pacing follows x-ratelimit-* headers.
+const REDDIT_RSS_USER_AGENT =
+  'Mozilla/5.0 (compatible; LoRATraining/1.0; +https://localhost)'
+const REDDIT_RSS_PAGE_SIZE = 100
+const userFeedCache = new Map() // lowercased username → feed state
+let rssNextRequestAt = 0
+
+async function fetchRedditRss(url) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const waitMs = Math.max(rssNextRequestAt - Date.now(), 0)
+    if (waitMs > 0) await sleep(waitMs)
+    let response
+    try {
+      response = await fetch(url, {
+        headers: {
+          Accept: 'application/atom+xml,text/xml,application/xml',
+          'User-Agent': REDDIT_RSS_USER_AGENT,
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      })
+    } catch (err) {
+      console.log(`    RSS fetch failed (${err.message}); retrying in 30s`)
+      rssNextRequestAt = Date.now() + 30000
+      continue
+    }
+    const remaining = Number.parseFloat(
+      response.headers.get('x-ratelimit-remaining') || ''
+    )
+    const resetSeconds = Number.parseInt(
+      response.headers.get('x-ratelimit-reset') || '',
+      10
+    )
+    const resetMs =
+      ((Number.isFinite(resetSeconds) && resetSeconds > 0 ? resetSeconds : 60) +
+        1) *
+      1000
+    const exhausted =
+      response.status === 429 || (Number.isFinite(remaining) && remaining < 1)
+    rssNextRequestAt = Date.now() + (exhausted ? resetMs : FETCH_DELAY_MS)
+    if (response.status === 429) {
+      console.log(`    rate-limited; waiting ${Math.round(resetMs / 1000)}s`)
+      continue
+    }
+    return {
+      status: response.status,
+      xml: response.ok ? await response.text() : '',
+    }
+  }
+  return { status: 429, xml: '' }
+}
+
+// Pages through u/<username>/submitted/.rss until every needed post id is
+// seen and the feed reaches back past the oldest needed timestamp, or the
+// feed ends, or RSS_MAX_PAGES is hit. Reddit listings stop at ~1000 posts.
+async function loadUserFeed(username, neededIds, neededTimes) {
+  const key = username.toLowerCase()
+  let feed = userFeedCache.get(key)
+  if (!feed) {
+    feed = {
+      byId: new Map(), // post id → title | null
+      byTime: new Map(), // created second → [post id]
+      oldest: Infinity,
+      after: null,
+      pages: 0,
+      done: false,
+      status: null,
+    }
+    userFeedCache.set(key, feed)
+  }
+  const minTime = neededTimes.length ? Math.min(...neededTimes) : Infinity
+  const isSatisfied = () =>
+    neededIds.every((id) => feed.byId.has(id)) &&
+    (minTime === Infinity || feed.oldest <= minTime)
+
+  while (!feed.done && feed.pages < RSS_MAX_PAGES && !isSatisfied()) {
+    const url = new URL(
+      `https://www.reddit.com/user/${encodeURIComponent(username)}/submitted/.rss`
+    )
+    url.searchParams.set('limit', String(REDDIT_RSS_PAGE_SIZE))
+    if (feed.after) url.searchParams.set('after', feed.after)
+    const { status, xml } = await fetchRedditRss(url.toString())
+    feed.pages += 1
+    feed.status = status
+    const entries = parseRssEntries(xml)
+    const fresh = entries.filter((entry) => !feed.byId.has(entry.id))
+    if (fresh.length === 0) {
+      feed.done = true
+      break
+    }
+    for (const entry of fresh) {
+      const title = cleanText(entry.title)
+      feed.byId.set(
+        entry.id,
+        title && !isGenericRedditPageTitle(title) ? title : null
+      )
+      if (Number.isFinite(entry.created_utc)) {
+        const second = Math.round(entry.created_utc)
+        feed.byTime.set(second, [...(feed.byTime.get(second) || []), entry.id])
+        feed.oldest = Math.min(feed.oldest, second)
+      }
+    }
+    feed.after = `t3_${entries[entries.length - 1].id}`
+    // A short page means the listing ended; skip the empty-page round trip.
+    if (entries.length < REDDIT_RSS_PAGE_SIZE * 0.9) feed.done = true
+  }
+  return feed
+}
+
+function getExistingTitle(source) {
+  return [source.title, source.text, source.sourceText]
+    .map((value) => String(value || '').trim())
+    .find(Boolean)
+}
+
+function isBrokenCaption(value) {
+  return !String(value || '').trim() || isGenericRedditPageTitle(value)
+}
+
+async function repairBrokenSidecar(modelName, sidecar) {
+  let scanned = 0
+  const broken = []
+  for (const [relativePath, record] of Object.entries(sidecar.data)) {
+    if (relativePath.startsWith('__')) continue
+    const source = record?.source
+    if (!source || typeof source !== 'object') continue
+    if (String(source.site || '').toLowerCase() !== 'reddit') continue
+    scanned += 1
+    if (!isBrokenCaption(getExistingTitle(source))) continue
+    broken.push({ relativePath, record, source })
+  }
+
+  const via = { rss: 0, rssTime: 0, slug: 0, unresolved: 0 }
+  const result = { scanned, repaired: 0, fetched: 0, datesFixed: 0, via }
+  result.examples = []
+  if (broken.length === 0) return result
+
+  // Records with a post id match by id; the rest (hash-named files that
+  // only kept a username + upload time) match only when their upload time
+  // equals exactly one feed post's creation second.
+  const needsByUser = new Map()
+  for (const item of broken) {
+    const username = item.source.username || item.source.userId
+    if (!username || !FETCH_MISSING) continue
+    const needs = needsByUser.get(username) || { ids: [], times: [] }
+    const postId = extractPostId(item.source)
+    const uploadedMs = Date.parse(item.record.uploaded || '')
+    if (postId) needs.ids.push(postId)
+    else if (Number.isFinite(uploadedMs)) {
+      needs.times.push(Math.round(uploadedMs / 1000))
+    }
+    needsByUser.set(username, needs)
+  }
+  for (const [username, needs] of needsByUser) {
+    const feed = await loadUserFeed(username, needs.ids, needs.times)
+    const found = needs.ids.filter((id) => feed.byId.get(id)).length
+    console.log(
+      `  ${modelName} (u/${username}): ${found}/${needs.ids.length} post id(s) found in ${feed.pages} RSS page(s)` +
+        (needs.times.length
+          ? `, ${needs.times.length} id-less record(s)`
+          : '') +
+        (feed.status && feed.status !== 200 ? ` [HTTP ${feed.status}]` : '')
+    )
+  }
+
+  for (const { relativePath, record, source } of broken) {
+    const username = source.username || source.userId
+    const feed = username ? userFeedCache.get(username.toLowerCase()) : null
+    const postId = extractPostId(source)
+    let title = null
+    let method = null
+    if (feed && postId) {
+      title = feed.byId.get(postId) || null
+      method = 'rss'
+    } else if (feed) {
+      const uploadedMs = Date.parse(record.uploaded || '')
+      const ids = Number.isFinite(uploadedMs)
+        ? feed.byTime.get(Math.round(uploadedMs / 1000))
+        : null
+      if (ids?.length === 1) title = feed.byId.get(ids[0]) || null
+      method = 'rssTime'
+    }
+    if (!title) {
+      title = getPermalinkFallbackTitle(source) || null
+      method = 'slug'
+    }
+    if (!title) {
+      via.unresolved += 1
+      continue
+    }
+
+    let changed = false
+    if (isBrokenCaption(source.title) && cleanText(source.title) !== title) {
+      source.title = title
+      changed = true
+    }
+    if (isBrokenCaption(source.text) && cleanText(source.text) !== title) {
+      source.text = title
+      changed = true
+    }
+    if (!changed) continue
+    via[method] += 1
+    result.repaired += 1
+    if (result.examples.length < 5) {
+      result.examples.push({
+        modelName,
+        relativePath,
+        title: `[${method}] ${title}`,
+      })
+    }
+  }
+  return result
+}
+
 async function run() {
   if (!fs.existsSync(datasetDir)) {
     throw new Error(`Dataset directory not found: ${datasetDir}`)
@@ -386,6 +613,7 @@ async function run() {
     repaired: 0,
     fetched: 0,
     datesFixed: 0,
+    via: { rss: 0, rssTime: 0, slug: 0, unresolved: 0 },
     examples: [],
   }
 
@@ -395,7 +623,9 @@ async function run() {
     const sidecar = loadSidecar(modelDir)
     if (!sidecar) continue
 
-    const result = await repairSidecar(dirent.name, sidecar)
+    const result = BROKEN_ONLY
+      ? await repairBrokenSidecar(dirent.name, sidecar)
+      : await repairSidecar(dirent.name, sidecar)
     if (result.scanned === 0) continue
     totals.models += 1
     totals.scanned += result.scanned
@@ -403,6 +633,9 @@ async function run() {
     totals.fetched += result.fetched
     totals.datesFixed += result.datesFixed
     totals.examples.push(...result.examples)
+    for (const [method, count] of Object.entries(result.via || {})) {
+      totals.via[method] += count
+    }
 
     if (APPLY && result.repaired > 0) {
       const tmp = `${sidecar.path}.tmp-reddit-title-repair`
@@ -414,7 +647,12 @@ async function run() {
   console.log(
     `${APPLY ? 'Repaired' : 'Would repair'} ${totals.repaired} Reddit title/text/date record(s) across ${totals.models} model(s); scanned ${totals.scanned} Reddit metadata record(s).`
   )
-  if (FETCH_MISSING) {
+  if (BROKEN_ONLY) {
+    const { rss, rssTime, slug, unresolved } = totals.via
+    console.log(
+      `Broken captions: ${rss} from RSS by post id, ${rssTime} from RSS by exact upload time, ${slug} from permalink slug, ${unresolved} left blank (no post id/slug match).`
+    )
+  } else if (FETCH_MISSING) {
     console.log(
       `Resolved ${redditInfoCache.size} Reddit post(s) via api/info; fetched ${totals.fetched} post page(s) via HTML fallback.`
     )
