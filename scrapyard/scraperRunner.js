@@ -1247,8 +1247,7 @@ function isIncompleteAllSourceReport(report) {
   const results = Array.isArray(report.results) ? report.results : []
   return (
     !report.finishedAt ||
-    (selectedModels > 0 && results.length < selectedModels) ||
-    results.some((result) => !isCompleteAllSourceResult(result))
+    (selectedModels > 0 && results.length < selectedModels)
   )
 }
 

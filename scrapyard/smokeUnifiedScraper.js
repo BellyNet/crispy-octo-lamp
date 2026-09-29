@@ -1254,6 +1254,36 @@ async function main() {
     }).queue.map((item) => item.model),
     ['beta_model', 'dual_coomer_model']
   )
+  assert.deepStrictEqual(
+    resumeAllSourceQueueFromReport(allSourceQueue, {
+      selectedModels: 3,
+      finishedAt: new Date().toISOString(),
+      results: [
+        {
+          model: 'alpha_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: true, summary: { errors: 0 } }],
+          nasSync: { ok: true },
+        },
+        {
+          model: 'beta_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: true, summary: { errors: 1 } }],
+          nasSync: { ok: true },
+        },
+        {
+          model: 'dual_coomer_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: false, summary: { errors: 1 } }],
+          nasSync: { ok: true },
+        },
+      ],
+    }).queue.map((item) => item.model),
+    ['alpha_model', 'beta_model', 'dual_coomer_model']
+  )
   const completedLegacyDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'completed-legacy-coomerfans-')
   )
