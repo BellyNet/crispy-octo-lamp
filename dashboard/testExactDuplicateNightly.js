@@ -23,8 +23,13 @@ async function main() {
     let review = JSON.parse(fs.readFileSync(reviewPath, 'utf8'))
     assert.strictEqual(review.crossModelGroups.length, 1)
     const id = review.crossModelGroups[0].id
-    fs.writeFileSync(decisionsPath, JSON.stringify({ auditedAt: review.auditedAt,
-      groups: { [id]: { keepModel: 'alpha' } } }))
+    fs.writeFileSync(
+      decisionsPath,
+      JSON.stringify({
+        auditedAt: review.auditedAt,
+        groups: { [id]: { keepModel: 'alpha' } },
+      })
+    )
     await refreshExactDuplicateReview({ datasetDir, thumbDir })
     let decisions = JSON.parse(fs.readFileSync(decisionsPath, 'utf8'))
     review = JSON.parse(fs.readFileSync(reviewPath, 'utf8'))
@@ -39,11 +44,16 @@ async function main() {
     console.log('Nightly exact duplicate audit fixture passed.')
   } finally {
     const resolved = path.resolve(fixture)
-    if (resolved.startsWith(path.resolve(os.tmpdir()) + path.sep) &&
-        path.basename(resolved).startsWith('exact-nightly-test-')) {
+    if (
+      resolved.startsWith(path.resolve(os.tmpdir()) + path.sep) &&
+      path.basename(resolved).startsWith('exact-nightly-test-')
+    ) {
       fs.rmSync(resolved, { recursive: true, force: true })
     }
   }
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1 })
+main().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
