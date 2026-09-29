@@ -41,6 +41,7 @@ COPY scrapyard/ ./scrapyard/
 # audit-gifs.js is run from the admin page's Repairs panel (needs
 # scrapyard/httpClient, copied above).
 COPY audit/audit-gifs.js ./audit/
+COPY audit/audit-exact-media-duplicates.js audit/export-exact-media-review.js ./audit/
 COPY model_aliases.json ./
 
 ENV DATASET_DIR=/data/dataset

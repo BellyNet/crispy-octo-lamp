@@ -4,6 +4,7 @@
 // selected when the dashboard has an explicit keeper decision for that hash.
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 const { chooseKeeper, rank } = require('./exact-media-keeper')
 
 const reportPath = path.resolve(process.argv[2] || path.join(__dirname, '..', 'tmp', 'exact-media-review-latest.json'))
@@ -14,7 +15,8 @@ if (report.version !== 2 || !report.readOnly || report.summary.scanErrors !== 0 
   throw new Error('A clean, filtered exact-media review report is required')
 }
 let decisions = { auditedAt: report.auditedAt, groups: {} }
-if (fs.existsSync(decisionsPath)) decisions = JSON.parse(fs.readFileSync(decisionsPath, 'utf8'))
+const decisionsRaw = fs.existsSync(decisionsPath) ? fs.readFileSync(decisionsPath) : null
+if (decisionsRaw) decisions = JSON.parse(decisionsRaw)
 if (decisions.auditedAt !== report.auditedAt) throw new Error('Dashboard choices belong to a different audit')
 
 const crossByHash = new Map(report.crossModelGroups.map((group) => [group.id, group]))
@@ -60,6 +62,7 @@ const plan = {
   version: 1,
   generatedAt: new Date().toISOString(),
   auditedAt: report.auditedAt,
+  decisionsDigest: decisionsRaw ? crypto.createHash('sha256').update(decisionsRaw).digest('hex') : null,
   readOnly: true,
   summary: {
     logicalCopiesToRemove: operations.length,

@@ -19,6 +19,7 @@ const MetaCache = require('./meta-cache.js')
 const VisitTracker = require('./visits.js')
 const { buildDiscoverPayload } = require('./discover.js')
 const NightlyHistory = require('./nightlyHistory.js')
+const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
 
 const registryPath = path.join(__dirname, '..', 'model_aliases.json')
@@ -2588,7 +2589,7 @@ app.post('/api/run-maint', (_req, res) => {
 const nightlyState = {
   inProgress: false,
   trigger: null, // 'nightly' | 'manual' | 'startup'
-  step: null, // 'maint' | 'scan' | 'run-index' | 'covers' | 'grid-thumbs' | 'gif-previews'
+  step: null, // maintenance, scan, derived media, then exact duplicate audit
   startedAt: null,
   completedAt: null,
 }
@@ -2660,6 +2661,14 @@ async function runNightlyPass({ trigger = 'manual' } = {}) {
   } catch (err) {
     console.warn('  Mobile variant prewarm error:', err.message)
     stepErrors.push({ step: 'mobile-variants', error: err.message })
+  }
+  nightlyState.step = 'exact-duplicates'
+  try {
+    const result = await refreshExactDuplicateReview({ datasetDir, thumbDir: THUMB_DIR })
+    console.log(`  Exact duplicates: ${result.sameModelGroups} same-model, ${result.crossModelGroups} cross-model groups`)
+  } catch (err) {
+    console.warn('  Exact duplicate audit error:', err.message)
+    stepErrors.push({ step: 'exact-duplicates', error: err.message })
   }
 
   nightlyState.step = null

@@ -13,7 +13,7 @@ const argv = minimist(process.argv.slice(2), {
     h: 'help',
     m: 'model',
   },
-  boolean: ['help', 'no-cache', 'nas-all-media'],
+  boolean: ['help', 'no-cache', 'nas-all-media', 'nas-only'],
   default: {
     concurrency: 2,
   },
@@ -85,7 +85,7 @@ async function main() {
   console.log(`NAS ${argv['nas-all-media'] ? 'media' : 'videos'}: ${nasRoot}`)
   console.log('Phase 1/3: indexing file sizes...')
 
-  collectMediaFiles(localRoot, 'local', false, records, scanErrors)
+  if (!argv['nas-only']) collectMediaFiles(localRoot, 'local', false, records, scanErrors)
   collectMediaFiles(nasRoot, 'nas', !argv['nas-all-media'], records, scanErrors)
 
   const sizeGroups = groupBy(records, (record) => String(record.sizeBytes))
@@ -191,6 +191,7 @@ Options:
   --nas-root <path>      NAS dataset root. Default: NAS_DATASET_DIR or Z:\\dataset.
   --concurrency <n>      Concurrent hash streams. Default: 2.
   --nas-all-media        Include NAS images and GIFs as well as videos.
+  --nas-only             Scan the NAS dataset only (for the NAS dashboard worker).
   --cache <path>         Hash cache path.
   --no-cache             Ignore and do not write the hash cache.
   --output <path>        JSON report path.
