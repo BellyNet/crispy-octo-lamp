@@ -523,6 +523,7 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-fallback-delay-ms',
     getOption(argv, 'reddit-fallback-delay-ms')
   )
+  appendOption(args, '--reddit-gallery-ids', getOption(argv, 'reddit-gallery-ids'))
   appendOption(args, '--cookie', getOption(argv, 'cookie'))
   appendOption(args, '--cookie-file', getOption(argv, 'cookie-file'))
   appendOption(
@@ -1279,6 +1280,7 @@ function buildSourceBatchOptions(argv) {
     'max-posts',
     'max-files',
     'reddit-fallback-delay-ms',
+    'reddit-gallery-ids',
     'source-incremental-overlap-pages',
   ]) {
     const value = getOption(argv, name)
@@ -1327,6 +1329,7 @@ Options:
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-retry-only         Retry queued Reddit originals without scanning posts.
   --reddit-known-galleries-only Recheck gallery posts recorded in Reddit source state.
+  --reddit-gallery-ids <ids>   With known galleries, check only these comma-separated post IDs.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.

@@ -905,6 +905,29 @@ async function main() {
       '--reddit-known-galleries-only'
     )
   )
+  const targetedGalleryOptions = buildAllSourceRunOptions(
+    {
+      'reddit-known-galleries-only': true,
+      'reddit-gallery-ids': 'known1,known2',
+    },
+    'test_model',
+    reddit
+  )
+  assert.strictEqual(
+    targetedGalleryOptions['reddit-gallery-ids'],
+    'known1,known2'
+  )
+  assert(
+    buildScraperArgs(reddit, targetedGalleryOptions).includes(
+      'known1,known2'
+    )
+  )
+  assert.strictEqual(
+    normalizeHoghaulRunOptions({
+      'reddit-gallery-ids': 'known1,known2',
+    }).redditGalleryIds,
+    'known1,known2'
+  )
   let batchSourceRuns = 0
   let batchSyncRuns = 0
   const batchResult = await withConsoleSilenced(() =>
@@ -2331,6 +2354,17 @@ async function main() {
     {},
     knownGalleryDeps
   )
+  assert.strictEqual(knownGalleryFetches.length, 1)
+  const targetedKnownPosts = await fetchKnownRedditGalleryPosts(
+    knownGallerySource,
+    [
+      ...knownGalleryRecords,
+      { postId: 'notrequested', mediaPageUrls: ['https://www.reddit.com/gallery/notrequested'] },
+    ],
+    { galleryIds: 'known1' },
+    knownGalleryDeps
+  )
+  assert.deepStrictEqual(targetedKnownPosts.map((post) => post.id), ['known1'])
   assert.strictEqual(knownGalleryFetches.length, 1)
 
   const fallbackGalleryRecord = {

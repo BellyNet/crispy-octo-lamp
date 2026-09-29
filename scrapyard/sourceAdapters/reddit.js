@@ -1522,10 +1522,32 @@ async function fetchKnownRedditGalleryPosts(
     scope: 'known_galleries',
   })
   const posts = []
+  const requestedIds = new Set(
+    String(options.galleryIds || '')
+      .split(',')
+      .map((id) => id.trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const selectedRecords = requestedIds.size > 0
+    ? knownGalleryPosts.filter((record) =>
+        requestedIds.has(String(record?.postId || '').toLowerCase())
+      )
+    : knownGalleryPosts
   const recordsToCheck =
     Number.isFinite(options.maxPosts) && options.maxPosts > 0
-      ? knownGalleryPosts.slice(0, options.maxPosts)
-      : knownGalleryPosts
+      ? selectedRecords.slice(0, options.maxPosts)
+      : selectedRecords
+  if (requestedIds.size > 0) {
+    deps.appendRunEvent?.('reddit_gallery_target_filter', {
+      requested: requestedIds.size,
+      selected: recordsToCheck.length,
+      missingIds: [...requestedIds].filter(
+        (id) => !selectedRecords.some(
+          (record) => String(record?.postId || '').toLowerCase() === id
+        )
+      ),
+    })
+  }
   let mediaCount = 0
   for (const record of recordsToCheck) {
     const id = String(record?.postId || '').trim()

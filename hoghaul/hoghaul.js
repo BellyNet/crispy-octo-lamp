@@ -2405,6 +2405,7 @@ async function run(argvInput = process.argv.slice(2)) {
           endPage,
           maxPosts,
           postConcurrency,
+          galleryIds: runOptions.redditGalleryIds,
         },
         {
           fetchHtml: coomerFansBrowserFetchHtml,

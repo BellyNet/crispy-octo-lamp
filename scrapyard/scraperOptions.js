@@ -27,6 +27,7 @@ const HOGHAUL_STRING_OPTIONS = [
   'image-concurrency',
   'video-concurrency',
   'reddit-fallback-delay-ms',
+  'reddit-gallery-ids',
   'reddit-incremental-overlap-posts',
   'source-incremental-overlap-pages',
 ]
@@ -301,6 +302,7 @@ function normalizeHoghaulRunOptions(input = process.argv.slice(2), opts = {}) {
         'reddit-known-galleries-only'
       )
     ),
+    redditGalleryIds: getRunOption(argv, 'redditGalleryIds', 'reddit-gallery-ids'),
     browserOptions: {
       browserExecutable:
         getRunOption(argv, 'browserExecutable', 'browser-executable') ||
