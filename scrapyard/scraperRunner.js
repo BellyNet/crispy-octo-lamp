@@ -1307,6 +1307,8 @@ function buildSourceBatchOptions(argv) {
     options['reddit-retry-only'] = true
   if (isTruthy(getOption(argv, 'reddit-known-galleries-only')))
     options['reddit-known-galleries-only'] = true
+  if (isTruthy(getOption(argv, 'reddit-browser-media')))
+    options['reddit-browser-media'] = true
   return options
 }
 

@@ -1390,6 +1390,7 @@ async function fetchPosts(source, options, deps = {}) {
       fetchHtml,
       fetchJson,
       fetchPostHtml: deps.fetchPostHtml,
+      fetchPostText: deps.fetchPostText,
       fallbackDelayMs: deps.fallbackDelayMs,
       redditFullRefresh: deps.redditFullRefresh,
       redditIncrementalOverlapPosts: deps.redditIncrementalOverlapPosts,
@@ -2355,6 +2356,7 @@ async function run(argvInput = process.argv.slice(2)) {
   }
 
   let redditBrowserFetchHtml = null
+  let redditBrowserFetchText = null
   let coomerFansBrowserFetchHtml = null
   if (source.site === 'reddit' && useBrowserMedia) {
     let redditBrowserFetchLogged = false
@@ -2375,6 +2377,13 @@ async function run(argvInput = process.argv.slice(2)) {
         })
       }
       return browser.fetchHtml(...args)
+    }
+    redditBrowserFetchText = async (...args) => {
+      const browser = await ensureBrowserMediaDownloader(
+        source,
+        browserOptionsForSource
+      )
+      return browser.fetchText(...args)
     }
   }
   if (source.site === 'coomerfans' && useBrowserMedia) {
@@ -2410,6 +2419,7 @@ async function run(argvInput = process.argv.slice(2)) {
         {
           fetchHtml: coomerFansBrowserFetchHtml,
           fetchPostHtml: redditBrowserFetchHtml,
+          fetchPostText: redditBrowserFetchText,
           fallbackDelayMs: runOptions.redditFallbackDelayMs,
           redditFullRefresh: runOptions.redditFullRefresh,
           redditIncrementalOverlapPosts:

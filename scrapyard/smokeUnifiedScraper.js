@@ -909,6 +909,7 @@ async function main() {
     {
       'reddit-known-galleries-only': true,
       'reddit-gallery-ids': 'known1,known2',
+      'reddit-browser-media': true,
     },
     'test_model',
     reddit
@@ -917,6 +918,7 @@ async function main() {
     targetedGalleryOptions['reddit-gallery-ids'],
     'known1,known2'
   )
+  assert.strictEqual(targetedGalleryOptions['reddit-browser-media'], true)
   assert(
     buildScraperArgs(reddit, targetedGalleryOptions).includes(
       'known1,known2'
@@ -2200,6 +2202,82 @@ async function main() {
   assert.strictEqual(removedGalleryPosts[0].mediaHydrationUnavailable, true)
   assert.strictEqual(removedGalleryPosts[0].mediaHydrationFailed, undefined)
 
+  const unprocessedGalleryPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/unprocessedgallery.json')) {
+          return {
+            html: JSON.stringify([{ data: { children: [{ data: {
+              id: 'unprocessedgallery',
+              gallery_data: { items: [
+                { media_id: 'first' },
+                { media_id: 'second' },
+              ] },
+              media_metadata: {
+                first: { status: 'unprocessed' },
+                second: { status: 'unprocessed' },
+              },
+            } }] } }]),
+            statusCode: 200,
+            url,
+          }
+        }
+        if (url.includes('/comments/unprocessedgallery/')) {
+          return { html: '<html></html>', statusCode: 200, url }
+        }
+        return {
+          html: '<div class="thing" data-fullname="t3_unprocessedgallery" data-permalink="/r/test/comments/unprocessedgallery/title/" data-url="https://www.reddit.com/gallery/unprocessedgallery" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(unprocessedGalleryPosts[0].mediaHydrationUnavailable, true)
+  assert.strictEqual(unprocessedGalleryPosts[0].mediaHydrationUnavailableReason, 'reddit_media_unprocessed')
+  assert.strictEqual(unprocessedGalleryPosts[0].mediaHydrationFailed, undefined)
+
+  const missingMetadataPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/missingmetadata.json')) {
+          return {
+            html: JSON.stringify([{ data: { children: [{ data: {
+              id: 'missingmetadata',
+              is_gallery: false,
+              gallery_data: null,
+              media_metadata: null,
+            } }] } }]),
+            statusCode: 200,
+            url,
+          }
+        }
+        if (url.includes('/comments/missingmetadata/')) {
+          return { html: '<html></html>', statusCode: 200, url }
+        }
+        return {
+          html: '<div class="thing" data-fullname="t3_missingmetadata" data-permalink="/r/test/comments/missingmetadata/title/" data-url="https://www.reddit.com/gallery/missingmetadata" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(missingMetadataPosts[0].mediaHydrationUnavailableReason, 'reddit_gallery_metadata_missing')
+  assert.strictEqual(missingMetadataPosts[0].mediaHydrationFailed, undefined)
+
   const galleryJsonResponse = (id, url) => ({
     html: JSON.stringify([{ data: { children: [{ data: {
       id,
@@ -2328,7 +2406,7 @@ async function main() {
     {},
     knownGalleryDeps
   )
-  assert.strictEqual(knownGalleryFetches.length, 1)
+  assert.strictEqual(knownGalleryFetches.length, 2)
   assert(
     knownGalleryEvents.some(
       (event) =>
@@ -2354,7 +2432,7 @@ async function main() {
     {},
     knownGalleryDeps
   )
-  assert.strictEqual(knownGalleryFetches.length, 1)
+  assert.strictEqual(knownGalleryFetches.length, 2)
   const targetedKnownPosts = await fetchKnownRedditGalleryPosts(
     knownGallerySource,
     [
@@ -2365,7 +2443,7 @@ async function main() {
     knownGalleryDeps
   )
   assert.deepStrictEqual(targetedKnownPosts.map((post) => post.id), ['known1'])
-  assert.strictEqual(knownGalleryFetches.length, 1)
+  assert.strictEqual(knownGalleryFetches.length, 2)
 
   const fallbackGalleryRecord = {
     postId: 'fallback1',
@@ -2396,9 +2474,9 @@ async function main() {
       logger: { warn: () => {} },
     }
   )
-  assert.strictEqual(fallbackFetches.length, 2)
+  assert.strictEqual(fallbackFetches.length, 3)
   assert.strictEqual(
-    fallbackFetches[1],
+    fallbackFetches[2],
     'https://www.reddit.com/r/test/comments/fallback1/title/'
   )
   assert.strictEqual(fallbackPosts[0].mediaHydrationFailed, undefined)
