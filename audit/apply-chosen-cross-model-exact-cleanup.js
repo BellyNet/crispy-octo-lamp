@@ -47,6 +47,13 @@ for (const operation of operations) {
   for (const record of group.records) fileByPath.set(`${operation.hash}:${record.relativePath}`, record)
   if (!fileByPath.has(`${operation.hash}:${operation.from}`) ||
       !fileByPath.has(`${operation.hash}:${operation.to}`)) throw new Error(`Path absent from audit: ${operation.from}`)
+  for (const relativePath of [operation.from, operation.to]) {
+    const segments = relativePath.split('/')
+    if (segments.length !== 3 || segments.some((part) => !part || part === '.' || part === '..' || /[\\:]/.test(part)) ||
+        !['images', 'gif', 'webm'].includes(segments[1])) {
+      throw new Error(`Unsafe media path: ${relativePath}`)
+    }
+  }
   if (operation.from === operation.to || operation.from.split('/')[0] === operation.to.split('/')[0] ||
       operation.from.startsWith('.') || operation.to.startsWith('.')) throw new Error(`Unsafe operation: ${operation.from}`)
 }
@@ -75,7 +82,8 @@ const uniqueKeep = [...new Map(keepPhysical.map((item) => [item.absolutePath.toL
 for (const item of [...physical, ...uniqueKeep]) {
   const root = item.rootType === 'nas' ? nasRoot : localRoot
   const expected = path.resolve(root, ...item.relativePath.split('/'))
-  if (path.resolve(item.absolutePath).toLowerCase() !== expected.toLowerCase()) {
+  if (!expected.toLowerCase().startsWith(path.resolve(root).toLowerCase() + path.sep) ||
+      path.resolve(item.absolutePath).toLowerCase() !== expected.toLowerCase()) {
     throw new Error(`Audit location escaped its dataset root: ${item.absolutePath}`)
   }
 }
