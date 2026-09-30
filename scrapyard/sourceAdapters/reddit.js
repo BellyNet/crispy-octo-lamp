@@ -543,10 +543,12 @@ async function getRedditMediaEntries(source, post, deps = {}) {
     entries.push(createRedditEntry(source, post, directUrl, uploadedDate))
   }
 
-  const htmlMediaUrls = uniqueUrls([
-    post.rssContentHtml ? extractRedditHtmlMediaUrls(post.rssContentHtml) : [],
-    post.htmlMediaUrls,
-  ])
+  const htmlMediaUrls = post.jsonGalleryMediaCount >= 2
+    ? []
+    : uniqueUrls([
+        post.rssContentHtml ? extractRedditHtmlMediaUrls(post.rssContentHtml) : [],
+        post.htmlMediaUrls,
+      ])
   if (htmlMediaUrls.length > 0) {
     htmlMediaUrls.forEach((mediaUrl, index) => {
       entries.push(
@@ -946,14 +948,31 @@ async function enrichOldRedditHtmlPostMedia(source, post, deps = {}) {
   if (!post.is_gallery) return post
   const postUrl = new URL(post.permalink, getOldRedditOrigin(source))
   postUrl.searchParams.set('over18', '1')
-  const { html } = await fetchOldRedditHtml(postUrl.toString(), {
-    ...deps,
-    redditHtmlRequestKind: 'gallery/post',
-  })
-  return {
+  let html = ''
+  let htmlError = null
+  try {
+    ;({ html } = await fetchOldRedditHtml(postUrl.toString(), {
+      ...deps,
+      redditHtmlRequestKind: 'gallery/post',
+    }))
+  } catch (err) {
+    htmlError = err
+  }
+  const enriched = {
     ...post,
     htmlMediaUrls: extractOldRedditImageUrls(html),
   }
+  if (enriched.htmlMediaUrls.length < 2) {
+    try {
+      await hydrateRedditGalleryFromJson(source, enriched, deps)
+    } catch (err) {
+      enriched.mediaHydrationFailed = true
+      enriched.mediaHydrationError = htmlError
+        ? `${htmlError.message} | ${err.message}`
+        : err.message
+    }
+  }
+  return enriched
 }
 
 async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
@@ -1059,7 +1078,9 @@ async function fetchRedditPostsFromOldHtml(source, options = {}, deps = {}) {
         if (
           post.is_gallery &&
           !enrichedPost.mediaHydrationFailed &&
-          (enrichedPost.htmlMediaUrls || []).length < 2
+          !enrichedPost.mediaHydrationUnavailable &&
+          (enrichedPost.htmlMediaUrls || []).length < 2 &&
+          !(enrichedPost.jsonGalleryMediaCount >= 2)
         ) {
           enrichedPost.mediaHydrationFailed = true
           enrichedPost.mediaHydrationError =
@@ -1425,6 +1446,88 @@ async function fetchRedditPostHtmlForMedia(source, post, deps = {}) {
   return null
 }
 
+async function hydrateRedditGalleryFromJson(source, post, deps = {}) {
+  if (!post?.id) return { mediaCount: 0, unavailable: false }
+  const url = new URL(
+    `/comments/${encodeURIComponent(post.id)}.json`,
+    source.origin
+  )
+  url.searchParams.set('raw_json', '1')
+  const response = await fetchRedditHtmlWithRetry(
+    url.toString(),
+    {
+      headers: {
+        Accept: 'application/json',
+        Referer: source.origin,
+        'User-Agent': REDDIT_RSS_USER_AGENT,
+      },
+    },
+    {
+      ...deps,
+      fetchHtml: deps.fetchPostText
+        ? async (requestUrl, requestOptions) => {
+            const result = await deps.fetchPostText(requestUrl, requestOptions)
+            return { ...result, html: result.text }
+          }
+        : deps.fetchPostHtml || deps.fetchHtml,
+      redditHtmlRequestKind: 'gallery/post JSON',
+    }
+  )
+  const payload = JSON.parse(response?.html || 'null')
+  const data = payload?.[0]?.data?.children?.find(
+    (child) => String(child?.data?.id || '') === String(post.id)
+  )?.data
+  if (!data) throw new Error(`Reddit gallery JSON omitted post ${post.id}.`)
+
+  const items = Array.isArray(data.gallery_data?.items)
+    ? data.gallery_data.items
+    : []
+  const originalUrls = items.map((item) => {
+    const metadata = data.media_metadata?.[item?.media_id]
+    return metadata?.status === 'failed'
+      ? ''
+      : getRedditMediaMetadataUrl(metadata, item?.media_id)
+  }).filter(Boolean)
+  const mediaCount = originalUrls.length
+  if (mediaCount >= 2) {
+    post.gallery_data = data.gallery_data
+    post.media_metadata = data.media_metadata
+    post.htmlMediaUrls = dedupeRedditHtmlMediaUrls(originalUrls)
+    post.jsonGalleryMediaCount = mediaCount
+  } else if (data.removed_by_category) {
+    post.htmlMediaUrls = []
+    post.mediaHydrationUnavailable = true
+    post.mediaHydrationUnavailableReason = String(data.removed_by_category)
+  } else if (
+    items.length >= 2 &&
+    items.every(
+      (item) => data.media_metadata?.[item?.media_id]?.status === 'unprocessed'
+    )
+  ) {
+    post.mediaHydrationUnavailable = true
+    post.mediaHydrationUnavailableReason = 'reddit_media_unprocessed'
+  } else if (
+    post.is_gallery &&
+    !data.gallery_data &&
+    !data.media_metadata
+  ) {
+    post.mediaHydrationUnavailable = true
+    post.mediaHydrationUnavailableReason = 'reddit_gallery_metadata_missing'
+  }
+  deps.appendRunEvent?.('reddit_gallery_json_fallback', {
+    postId: String(post.id),
+    mediaCount,
+    unavailableReason: post.mediaHydrationUnavailableReason || null,
+    galleryItemCount: items.length,
+    isGallery: Boolean(data.is_gallery),
+    hasMediaMetadata: Boolean(data.media_metadata),
+    removedByCategory: data.removed_by_category || null,
+    authorDeleted: data.author === '[deleted]',
+    selftextRemoved: ['[removed]', '[deleted]'].includes(data.selftext),
+  })
+  return { mediaCount, unavailable: Boolean(post.mediaHydrationUnavailable) }
+}
+
 async function fetchKnownRedditGalleryPosts(
   source,
   knownGalleryPosts = [],
@@ -1445,10 +1548,32 @@ async function fetchKnownRedditGalleryPosts(
     scope: 'known_galleries',
   })
   const posts = []
+  const requestedIds = new Set(
+    String(options.galleryIds || '')
+      .split(',')
+      .map((id) => id.trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const selectedRecords = requestedIds.size > 0
+    ? knownGalleryPosts.filter((record) =>
+        requestedIds.has(String(record?.postId || '').toLowerCase())
+      )
+    : knownGalleryPosts
   const recordsToCheck =
     Number.isFinite(options.maxPosts) && options.maxPosts > 0
-      ? knownGalleryPosts.slice(0, options.maxPosts)
-      : knownGalleryPosts
+      ? selectedRecords.slice(0, options.maxPosts)
+      : selectedRecords
+  if (requestedIds.size > 0) {
+    deps.appendRunEvent?.('reddit_gallery_target_filter', {
+      requested: requestedIds.size,
+      selected: recordsToCheck.length,
+      missingIds: [...requestedIds].filter(
+        (id) => !selectedRecords.some(
+          (record) => String(record?.postId || '').toLowerCase() === id
+        )
+      ),
+    })
+  }
   let mediaCount = 0
   for (const record of recordsToCheck) {
     const id = String(record?.postId || '').trim()
@@ -1493,7 +1618,15 @@ async function fetchKnownRedditGalleryPosts(
       const startedAt = Date.now()
       let liveMediaUrls = []
       const fetchErrors = []
-      for (const pageUrl of new Set([galleryUrl, permalink])) {
+      try {
+        const jsonResult = await hydrateRedditGalleryFromJson(source, post, deps)
+        if (jsonResult.mediaCount >= 2) liveMediaUrls = post.htmlMediaUrls
+      } catch (err) {
+        fetchErrors.push(String(err.message || err).split('\n')[0].slice(0, 160))
+      }
+      for (const pageUrl of liveMediaUrls.length >= 2 || post.mediaHydrationUnavailable
+        ? []
+        : new Set([galleryUrl, permalink])) {
         try {
           const response = await fetchRedditPostHtmlForMedia(
             source,
@@ -1524,7 +1657,7 @@ async function fetchKnownRedditGalleryPosts(
         liveMediaUrls,
         recordedMediaUrls,
       ])
-      if (liveMediaUrls.length < 2) {
+      if (liveMediaUrls.length < 2 && !post.mediaHydrationUnavailable) {
         post.mediaHydrationFailed = true
         post.mediaHydrationError =
           fetchErrors.join(' | ') ||
@@ -1535,7 +1668,7 @@ async function fetchKnownRedditGalleryPosts(
             mediaUrlCount: recordedMediaUrls.length,
           })
         }
-      } else {
+      } else if (!post.mediaHydrationUnavailable) {
         deps.onGalleryHydrated?.({
           postId: id,
           title: post.title,
@@ -1546,7 +1679,8 @@ async function fetchKnownRedditGalleryPosts(
         postId: id,
         current: posts.length + 1,
         total: recordsToCheck.length,
-        mediaUrlCount: post.htmlMediaUrls?.length || 0,
+        mediaUrlCount:
+          post.jsonGalleryMediaCount || post.htmlMediaUrls?.length || 0,
         durationMs: Date.now() - startedAt,
         failed: Boolean(post.mediaHydrationFailed),
       })
@@ -1591,7 +1725,15 @@ async function enrichRedditRssPostMedia(source, post, deps = {}) {
     return post
   }
 
-  const response = await fetchRedditPostHtmlForMedia(source, post, deps)
+  let response
+  try {
+    response = await fetchRedditPostHtmlForMedia(source, post, deps)
+  } catch (err) {
+    if (!post.is_gallery) throw err
+    const jsonResult = await hydrateRedditGalleryFromJson(source, post, deps)
+    if (jsonResult.mediaCount >= 2 || jsonResult.unavailable) return post
+    throw err
+  }
   if (!response?.html) {
     if (post.is_gallery) throw new Error('Gallery page returned no HTML.')
     return post
@@ -1603,7 +1745,13 @@ async function enrichRedditRssPostMedia(source, post, deps = {}) {
   ])
 
   if (post.is_gallery && post.htmlMediaUrls.length < 2) {
-    throw new Error('Fewer than two gallery images were discovered.')
+    await hydrateRedditGalleryFromJson(source, post, deps)
+    if (
+      post.htmlMediaUrls.length < 2 &&
+      !post.mediaHydrationUnavailable
+    ) {
+      throw new Error('Fewer than two gallery images were discovered.')
+    }
   }
 
   return post

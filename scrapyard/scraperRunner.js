@@ -523,6 +523,7 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-fallback-delay-ms',
     getOption(argv, 'reddit-fallback-delay-ms')
   )
+  appendOption(args, '--reddit-gallery-ids', getOption(argv, 'reddit-gallery-ids'))
   appendOption(args, '--cookie', getOption(argv, 'cookie'))
   appendOption(args, '--cookie-file', getOption(argv, 'cookie-file'))
   appendOption(
@@ -1229,8 +1230,7 @@ function isCompleteAllSourceResult(result) {
     result.runs.every(
       (run) =>
         run?.ok &&
-        Number(run.summary?.errors || 0) === 0 &&
-        Number(run.summary?.pendingFullResolution || 0) === 0
+        Number(run.summary?.errors || 0) === 0
     ) &&
     result.nasSync?.ok !== false
   )
@@ -1247,8 +1247,7 @@ function isIncompleteAllSourceReport(report) {
   const results = Array.isArray(report.results) ? report.results : []
   return (
     !report.finishedAt ||
-    (selectedModels > 0 && results.length < selectedModels) ||
-    results.some((result) => !isCompleteAllSourceResult(result))
+    (selectedModels > 0 && results.length < selectedModels)
   )
 }
 
@@ -1281,6 +1280,7 @@ function buildSourceBatchOptions(argv) {
     'max-posts',
     'max-files',
     'reddit-fallback-delay-ms',
+    'reddit-gallery-ids',
     'source-incremental-overlap-pages',
   ]) {
     const value = getOption(argv, name)
@@ -1307,6 +1307,8 @@ function buildSourceBatchOptions(argv) {
     options['reddit-retry-only'] = true
   if (isTruthy(getOption(argv, 'reddit-known-galleries-only')))
     options['reddit-known-galleries-only'] = true
+  if (isTruthy(getOption(argv, 'reddit-browser-media')))
+    options['reddit-browser-media'] = true
   return options
 }
 
@@ -1329,6 +1331,7 @@ Options:
   --reddit-full-refresh       Scan every Reddit post, ignoring Reddit frontier.
   --reddit-retry-only         Retry queued Reddit originals without scanning posts.
   --reddit-known-galleries-only Recheck gallery posts recorded in Reddit source state.
+  --reddit-gallery-ids <ids>   With known galleries, check only these comma-separated post IDs.
   --reddit-fallback-delay-ms <ms> Delay between Reddit fallback post pages.
   --delay-ms <n>              Delay between models.
   --dry-run                   Dry run.

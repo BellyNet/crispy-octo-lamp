@@ -905,6 +905,31 @@ async function main() {
       '--reddit-known-galleries-only'
     )
   )
+  const targetedGalleryOptions = buildAllSourceRunOptions(
+    {
+      'reddit-known-galleries-only': true,
+      'reddit-gallery-ids': 'known1,known2',
+      'reddit-browser-media': true,
+    },
+    'test_model',
+    reddit
+  )
+  assert.strictEqual(
+    targetedGalleryOptions['reddit-gallery-ids'],
+    'known1,known2'
+  )
+  assert.strictEqual(targetedGalleryOptions['reddit-browser-media'], true)
+  assert(
+    buildScraperArgs(reddit, targetedGalleryOptions).includes(
+      'known1,known2'
+    )
+  )
+  assert.strictEqual(
+    normalizeHoghaulRunOptions({
+      'reddit-gallery-ids': 'known1,known2',
+    }).redditGalleryIds,
+    'known1,known2'
+  )
   let batchSourceRuns = 0
   let batchSyncRuns = 0
   const batchResult = await withConsoleSilenced(() =>
@@ -1253,6 +1278,51 @@ async function main() {
       ],
     }).queue.map((item) => item.model),
     ['beta_model', 'dual_coomer_model']
+  )
+  assert.deepStrictEqual(
+    resumeAllSourceQueueFromReport(allSourceQueue, {
+      selectedModels: 3,
+      results: [
+        {
+          model: 'alpha_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: true, summary: { errors: 0, pendingFullResolution: 7 } }],
+          nasSync: { ok: true },
+        },
+      ],
+    }).queue.map((item) => item.model),
+    ['beta_model', 'dual_coomer_model']
+  )
+  assert.deepStrictEqual(
+    resumeAllSourceQueueFromReport(allSourceQueue, {
+      selectedModels: 3,
+      finishedAt: new Date().toISOString(),
+      results: [
+        {
+          model: 'alpha_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: true, summary: { errors: 0 } }],
+          nasSync: { ok: true },
+        },
+        {
+          model: 'beta_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: true, summary: { errors: 1 } }],
+          nasSync: { ok: true },
+        },
+        {
+          model: 'dual_coomer_model',
+          finishedAt: new Date().toISOString(),
+          sources: [{}],
+          runs: [{ ok: false, summary: { errors: 1 } }],
+          nasSync: { ok: true },
+        },
+      ],
+    }).queue.map((item) => item.model),
+    ['alpha_model', 'beta_model', 'dual_coomer_model']
   )
   const completedLegacyDataset = fs.mkdtempSync(
     path.join(os.tmpdir(), 'completed-legacy-coomerfans-')
@@ -2029,6 +2099,272 @@ async function main() {
     )
   )
 
+  const jsonGallerySource = {
+    origin: 'https://www.reddit.com',
+    site: 'reddit',
+    service: 'submitted',
+    userId: 'json_gallery_user',
+    username: 'json_gallery_user',
+  }
+  const jsonGalleryEvents = []
+  const jsonGalleryPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/jsongallery.json')) {
+          return {
+            html: JSON.stringify([
+              {
+                data: {
+                  children: [{ data: {
+                    id: 'jsongallery',
+                    gallery_data: { items: [
+                      { media_id: 'first' },
+                      { media_id: 'second' },
+                    ] },
+                    media_metadata: {
+                      first: { m: 'image/jpg', s: { u: 'https://preview.redd.it/first.jpg' } },
+                      second: { m: 'image/png', s: { u: 'https://preview.redd.it/second.png' } },
+                    },
+                  } }],
+                },
+              },
+            ]),
+            statusCode: 200,
+            url,
+          }
+        }
+        if (url.includes('/comments/jsongallery/')) {
+          return { html: '<img src="https://preview.redd.it/first.jpg">', statusCode: 200, url }
+        }
+        return {
+          html: '<div class="thing" data-fullname="t3_jsongallery" data-permalink="/r/test/comments/jsongallery/title/" data-url="https://www.reddit.com/gallery/jsongallery" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      appendRunEvent: (type, payload) =>
+        jsonGalleryEvents.push({ type, ...payload }),
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(jsonGalleryPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(jsonGalleryPosts[0].mediaHydrationFailed, undefined)
+  assert.deepStrictEqual(
+    jsonGalleryPosts[0].mediaEntries.map((entry) => entry.mediaUrl),
+    ['https://i.redd.it/first.jpg', 'https://i.redd.it/second.png']
+  )
+  assert(
+    jsonGalleryEvents.some(
+      (event) =>
+        event.type === 'reddit_gallery_json_fallback' &&
+        event.mediaCount === 2
+    )
+  )
+
+  const removedGalleryPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/removedgallery.json')) {
+          return {
+            html: JSON.stringify([{ data: { children: [{ data: {
+              id: 'removedgallery',
+              gallery_data: null,
+              media_metadata: null,
+              removed_by_category: 'reddit',
+            } }] } }]),
+            statusCode: 200,
+            url,
+          }
+        }
+        if (url.includes('/comments/removedgallery/')) {
+          return { html: '<img src="https://i.redd.it/unrelated.jpg">', statusCode: 200, url }
+        }
+        return {
+          html: '<div class="thing" data-fullname="t3_removedgallery" data-permalink="/r/test/comments/removedgallery/title/" data-url="https://www.reddit.com/gallery/removedgallery" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(removedGalleryPosts[0].mediaEntries.length, 0)
+  assert.strictEqual(removedGalleryPosts[0].mediaHydrationUnavailable, true)
+  assert.strictEqual(removedGalleryPosts[0].mediaHydrationFailed, undefined)
+
+  const unprocessedGalleryPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/unprocessedgallery.json')) {
+          return {
+            html: JSON.stringify([{ data: { children: [{ data: {
+              id: 'unprocessedgallery',
+              gallery_data: { items: [
+                { media_id: 'first' },
+                { media_id: 'second' },
+              ] },
+              media_metadata: {
+                first: { status: 'unprocessed' },
+                second: { status: 'unprocessed' },
+              },
+            } }] } }]),
+            statusCode: 200,
+            url,
+          }
+        }
+        if (url.includes('/comments/unprocessedgallery/')) {
+          return { html: '<html></html>', statusCode: 200, url }
+        }
+        return {
+          html: '<div class="thing" data-fullname="t3_unprocessedgallery" data-permalink="/r/test/comments/unprocessedgallery/title/" data-url="https://www.reddit.com/gallery/unprocessedgallery" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(unprocessedGalleryPosts[0].mediaHydrationUnavailable, true)
+  assert.strictEqual(unprocessedGalleryPosts[0].mediaHydrationUnavailableReason, 'reddit_media_unprocessed')
+  assert.strictEqual(unprocessedGalleryPosts[0].mediaHydrationFailed, undefined)
+
+  const missingMetadataPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/missingmetadata.json')) {
+          return {
+            html: JSON.stringify([{ data: { children: [{ data: {
+              id: 'missingmetadata',
+              is_gallery: false,
+              gallery_data: null,
+              media_metadata: null,
+            } }] } }]),
+            statusCode: 200,
+            url,
+          }
+        }
+        if (url.includes('/comments/missingmetadata/')) {
+          return { html: '<html></html>', statusCode: 200, url }
+        }
+        return {
+          html: '<div class="thing" data-fullname="t3_missingmetadata" data-permalink="/r/test/comments/missingmetadata/title/" data-url="https://www.reddit.com/gallery/missingmetadata" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(missingMetadataPosts[0].mediaHydrationUnavailableReason, 'reddit_gallery_metadata_missing')
+  assert.strictEqual(missingMetadataPosts[0].mediaHydrationFailed, undefined)
+
+  const galleryJsonResponse = (id, url) => ({
+    html: JSON.stringify([{ data: { children: [{ data: {
+      id,
+      gallery_data: { items: [
+        { media_id: `${id}first` },
+        { media_id: `${id}second` },
+      ] },
+      media_metadata: {
+        [`${id}first`]: { m: 'image/jpeg', s: { u: `https://preview.redd.it/${id}first.jpg` } },
+        [`${id}second`]: { m: 'image/jpeg', s: { u: `https://preview.redd.it/${id}second.jpg` } },
+      },
+    } }] } }]),
+    statusCode: 200,
+    url,
+  })
+  const knownJsonPosts = await fetchKnownRedditGalleryPosts(
+    jsonGallerySource,
+    [{ postId: 'knownjson', mediaPageUrls: ['https://www.reddit.com/gallery/knownjson'] }],
+    {},
+    {
+      fetchHtml: async (url) =>
+        url.includes('/comments/knownjson.json')
+          ? galleryJsonResponse('knownjson', url)
+          : { html: '<img src="https://preview.redd.it/knownjsonfirst.jpg">', statusCode: 200, url },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      redgifsClient: { parseRedgifsId: () => null },
+    }
+  )
+  assert.deepStrictEqual(
+    knownJsonPosts[0].mediaEntries.map((entry) => entry.mediaUrl),
+    [
+      'https://i.redd.it/knownjsonfirst.jpg',
+      'https://i.redd.it/knownjsonsecond.jpg',
+    ]
+  )
+  assert.strictEqual(knownJsonPosts[0].mediaHydrationFailed, undefined)
+
+  const rssJsonPosts = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => ({
+        html: url.includes('.rss')
+          ? '<feed><entry><title>RSS JSON gallery</title><updated>2026-09-01T00:00:00Z</updated><category label="r/test" /><content><a href="https://www.reddit.com/gallery/rssjson">[link]</a><a href="https://www.reddit.com/r/test/comments/rssjson/title/">[comments]</a><img src="https://preview.redd.it/rssjsonfirst.jpg"></content></entry></feed>'
+          : '<html></html>',
+        statusCode: 200,
+        url,
+      }),
+      fetchPostHtml: async (url) =>
+        url.includes('/comments/rssjson.json')
+          ? galleryJsonResponse('rssjson', url)
+          : { html: '<img src="https://preview.redd.it/rssjsonfirst.jpg">', statusCode: 200, url },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(rssJsonPosts[0].mediaEntries.length, 2)
+  assert.strictEqual(rssJsonPosts[0].mediaHydrationFailed, undefined)
+
+  const jsonAfterHtmlError = await fetchRedditPosts(
+    jsonGallerySource,
+    { endPage: 0 },
+    {
+      fetchHtml: async (url) => {
+        if (url.includes('/comments/after429.json')) {
+          return galleryJsonResponse('after429', url)
+        }
+        if (url.includes('/comments/after429/')) throw new Error('HTTP 429')
+        return {
+          html: '<div class="thing" data-fullname="t3_after429" data-permalink="/r/test/comments/after429/title/" data-url="https://www.reddit.com/gallery/after429" data-is-gallery="true" data-timestamp="1710000000000" data-subreddit="test"></div>',
+          statusCode: 200,
+          url,
+        }
+      },
+      redgifsClient: { parseRedgifsId: () => null },
+      redditHtmlDelayMs: 0,
+      redditHtmlRateLimitDelayMs: 0,
+      redditHtmlMaxRetries: 0,
+      logger: { log: () => {}, warn: () => {}, status: () => {} },
+    }
+  )
+  assert.strictEqual(jsonAfterHtmlError[0].mediaEntries.length, 2)
+  assert.strictEqual(jsonAfterHtmlError[0].mediaHydrationFailed, undefined)
+
   const knownGallerySource = {
     origin: 'https://www.reddit.com',
     site: 'reddit',
@@ -2070,7 +2406,7 @@ async function main() {
     {},
     knownGalleryDeps
   )
-  assert.strictEqual(knownGalleryFetches.length, 1)
+  assert.strictEqual(knownGalleryFetches.length, 2)
   assert(
     knownGalleryEvents.some(
       (event) =>
@@ -2096,7 +2432,18 @@ async function main() {
     {},
     knownGalleryDeps
   )
-  assert.strictEqual(knownGalleryFetches.length, 1)
+  assert.strictEqual(knownGalleryFetches.length, 2)
+  const targetedKnownPosts = await fetchKnownRedditGalleryPosts(
+    knownGallerySource,
+    [
+      ...knownGalleryRecords,
+      { postId: 'notrequested', mediaPageUrls: ['https://www.reddit.com/gallery/notrequested'] },
+    ],
+    { galleryIds: 'known1' },
+    knownGalleryDeps
+  )
+  assert.deepStrictEqual(targetedKnownPosts.map((post) => post.id), ['known1'])
+  assert.strictEqual(knownGalleryFetches.length, 2)
 
   const fallbackGalleryRecord = {
     postId: 'fallback1',
@@ -2127,9 +2474,9 @@ async function main() {
       logger: { warn: () => {} },
     }
   )
-  assert.strictEqual(fallbackFetches.length, 2)
+  assert.strictEqual(fallbackFetches.length, 3)
   assert.strictEqual(
-    fallbackFetches[1],
+    fallbackFetches[2],
     'https://www.reddit.com/r/test/comments/fallback1/title/'
   )
   assert.strictEqual(fallbackPosts[0].mediaHydrationFailed, undefined)
