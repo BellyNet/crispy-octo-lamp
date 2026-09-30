@@ -6,11 +6,6 @@
 (`192.168.50.13`) or run the PowerShell deploy. Everything below needs LAN
 access to the NAS.
 
-> **Update:** after deploying, steps 2 and 3 can instead be run from the
-> dashboard's **Admin → Repairs** panel (Preview / Apply buttons, live log),
-> which runs the same scripts inside the NAS container. The commands below
-> are the manual fallback.
-
 ## Context
 
 Branch `claude/confident-davinci-arlq2d` has fixes that are pushed but

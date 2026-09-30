@@ -370,86 +370,6 @@
         opacity: 0.7;
       }
 
-      /* ─── Repairs panel ─── */
-      .repair-list {
-        display: grid;
-        gap: 12px;
-      }
-      .repair-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 12px 14px;
-      }
-      .repair-card h3 {
-        font-size: 14px;
-        margin-bottom: 4px;
-      }
-      .repair-card p {
-        font-size: 12px;
-        color: var(--muted);
-        margin-bottom: 10px;
-      }
-      .repair-controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        align-items: center;
-      }
-      .repair-controls input {
-        flex: 1 1 140px;
-        min-width: 0;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text);
-        padding: 8px 10px;
-        font-size: 14px;
-      }
-      .repair-controls button {
-        background: none;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text);
-        padding: 8px 14px;
-        font-size: 13px;
-        cursor: pointer;
-      }
-      .repair-controls button.apply {
-        border-color: var(--warn);
-        color: var(--warn);
-      }
-      .repair-controls button.stop {
-        border-color: var(--err);
-        color: var(--err);
-      }
-      .repair-controls button:disabled {
-        opacity: 0.4;
-        cursor: default;
-      }
-      .repair-status {
-        font-size: 12px;
-        color: var(--muted);
-        margin-top: 8px;
-      }
-      .repair-log {
-        margin-top: 8px;
-        max-height: 320px;
-        overflow: auto;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 8px;
-        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      @media (max-width: 640px) {
-        body {
-          padding: 16px 16px 48px;
-        }
-      }
-
       .empty {
         color: var(--muted);
         font-size: 13px;
@@ -489,17 +409,6 @@
       <h2>Prewarm &amp; maintenance</h2>
       <div class="status-line" id="maint-live"></div>
       <div class="prewarm-grid" id="prewarm-grid"></div>
-    </section>
-
-    <section id="repairs-section">
-      <h2>Repairs</h2>
-      <div class="status-line">
-        <span>
-          Preview is a dry run. Apply writes changes. Don't apply while a
-          scrape is running, since both write the same metadata files.
-        </span>
-      </div>
-      <div class="repair-list" id="repair-list"></div>
     </section>
 
     <section id="recent-media-section">
@@ -1048,130 +957,11 @@
         } catch {}
       }
 
-      // ─── Repairs panel ──────────────────────────────────────────────────
-      // Runs the repair scripts inside the dashboard container (see
-      // /api/repairs in server.js). Polls every 2s while a job runs.
-      const repairListEl = document.getElementById('repair-list')
-      let repairPollTimer = null
-      let repairCardsBuilt = false
-
-      function escapeRepairText(value) {
-        return String(value ?? '').replace(
-          /[&<>"']/g,
-          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
-        )
-      }
-
-      function describeRun(run, running) {
-        if (!run) return 'Never run.'
-        const mode = run.apply ? 'Apply' : 'Preview'
-        const scope = run.model ? ` for ${run.model}` : ' for all models'
-        if (running) {
-          return `${mode}${scope} running since ${fmtDateTime(Date.parse(run.startedAt))}…`
-        }
-        const outcome = run.stopped
-          ? 'stopped'
-          : run.exitCode === 0
-            ? 'finished'
-            : `failed (exit ${run.exitCode ?? '?'})`
-        return `Last: ${mode}${scope} ${outcome} ${fmtDateTime(Date.parse(run.finishedAt || run.startedAt))}`
-      }
-
-      function buildRepairCards(jobs) {
-        repairListEl.innerHTML = jobs
-          .map(
-            (job) => `
-              <div class="repair-card" data-job="${escapeRepairText(job.id)}">
-                <h3>${escapeRepairText(job.label)}</h3>
-                <p>${escapeRepairText(job.description)}</p>
-                <div class="repair-controls">
-                  <input type="text" placeholder="Model (blank = all)" autocapitalize="off" autocorrect="off" spellcheck="false" />
-                  <button type="button" class="preview">Preview</button>
-                  <button type="button" class="apply">Apply</button>
-                  <button type="button" class="stop" hidden>Stop</button>
-                </div>
-                <div class="repair-status"></div>
-                <div class="repair-log" hidden></div>
-              </div>
-            `
-          )
-          .join('')
-        repairListEl.querySelectorAll('.repair-card').forEach((card) => {
-          const job = card.dataset.job
-          const model = () => card.querySelector('input').value.trim()
-          card.querySelector('.preview').addEventListener('click', () =>
-            startRepair(job, false, model())
-          )
-          card.querySelector('.apply').addEventListener('click', () => {
-            const scope = model() || 'ALL models'
-            if (!confirm(`Apply ${job} to ${scope}? This writes changes to the dataset.`)) return
-            startRepair(job, true, model())
-          })
-          card.querySelector('.stop').addEventListener('click', async () => {
-            await fetch('/api/repairs-stop', { method: 'POST' })
-            loadRepairs()
-          })
-        })
-        repairCardsBuilt = true
-      }
-
-      function renderRepairs(data) {
-        if (!repairCardsBuilt) buildRepairCards(data.jobs)
-        const running = data.current
-        for (const job of data.jobs) {
-          const card = repairListEl.querySelector(`.repair-card[data-job="${CSS.escape(job.id)}"]`)
-          if (!card) continue
-          const isThis = running && running.job === job.id
-          const run = isThis ? running : job.lastRun
-          card.querySelector('.preview').disabled = Boolean(running) || !job.available
-          card.querySelector('.apply').disabled = Boolean(running) || !job.available
-          card.querySelector('.stop').hidden = !isThis
-          card.querySelector('.repair-status').textContent = job.available
-            ? describeRun(run, isThis)
-            : 'Script missing from this image. Redeploy the dashboard.'
-          const logEl = card.querySelector('.repair-log')
-          const lines = run?.lines || []
-          logEl.hidden = !lines.length
-          if (lines.length) {
-            const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8
-            logEl.textContent = lines.join('\n')
-            if (atBottom || isThis) logEl.scrollTop = logEl.scrollHeight
-          }
-        }
-        clearTimeout(repairPollTimer)
-        if (running) repairPollTimer = setTimeout(loadRepairs, 2000)
-      }
-
-      async function loadRepairs() {
-        try {
-          const r = await fetch('/api/repairs')
-          renderRepairs(await r.json())
-        } catch {}
-      }
-
-      async function startRepair(job, apply, model) {
-        try {
-          const r = await fetch(`/api/repairs/${encodeURIComponent(job)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ apply, model }),
-          })
-          if (!r.ok) {
-            const d = await r.json().catch(() => ({}))
-            alert(d.error || `Failed to start (${r.status})`)
-          }
-        } catch (err) {
-          alert(err.message)
-        }
-        loadRepairs()
-      }
-
       loadNightly()
       loadFfmpegStatus()
       loadPrewarmStatus()
       loadMaintStatus()
       loadRun(0)
-      loadRepairs()
 
       // Auto-refresh every 5 minutes (same cadence as the main dashboard's
       // refreshUsers) — without this, a tab left open for days looks frozen
