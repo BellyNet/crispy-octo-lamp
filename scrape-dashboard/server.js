@@ -75,7 +75,6 @@ const SOURCE_KEYS = [
   'kemono',
   'coomer',
   'stufferdb',
-  'bbwchan',
   'tumblr',
 ]
 const HISTORY_VERSION = 2
@@ -192,7 +191,6 @@ function getPlatformLabel(platform) {
   if (platform === 'coomerfans') return 'CoomerFans'
   if (platform === 'reddit') return 'Reddit'
   if (platform === 'stufferdb') return 'StufferDB'
-  if (platform === 'bbwchan') return 'BBW-Chan'
   if (platform === 'tumblr') return 'Tumblr'
   return platform || 'Unknown'
 }

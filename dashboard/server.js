@@ -11,7 +11,7 @@ const pLimit = require('p-limit')
 const sharp = require('sharp')
 
 const execFileAsync = promisify(execFile)
-const mediaDates = require('../milkmaid/media-dates.js')
+const mediaDates = require('../scrapyard/mediaDates.js')
 const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
 const { transcodeWebmInUserDir } = require('../scrapyard/transcodeWebm.js')
 const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
@@ -242,7 +242,7 @@ async function generatePreviewGif(videoPath, gifPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer, kemono, stufferdb, bbwchan, tumblr, reddit }
+// Build a map of username → { coomer, kemono, stufferdb, tumblr, reddit }
 // from model_aliases.json so the /api/users route can include source links.
 // Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
 // each time, so changes to the bind-mounted file are picked up immediately.
@@ -250,7 +250,6 @@ const SOURCE_PLATFORMS = [
   'coomer',
   'kemono',
   'stufferdb',
-  'bbwchan',
   'tumblr',
   'reddit',
 ]

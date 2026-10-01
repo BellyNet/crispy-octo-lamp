@@ -886,7 +886,7 @@
         color: #e88a6a;
       }
       /* Origin-site badge — where the media was scraped from
-         (reddit / stufferdb / coomer / onlyhaven / kemono / bbwchan / tumblr). Small text label
+         (reddit / stufferdb / coomer / onlyhaven / kemono / tumblr). Small text label
          with a site-tinted background. Replaces the ~useless
          "upload" date-source chip on cards. */
       .origin-badge {
@@ -921,10 +921,6 @@
       .origin-badge.kemono {
         background: #1a2a1e;
         color: #7fd39c;
-      }
-      .origin-badge.bbwchan {
-        background: #2b1b2f;
-        color: #d894f0;
       }
       .origin-badge.tumblr {
         background: #142034;
@@ -968,10 +964,6 @@
       .pswp-origin-badge.kemono {
         background: rgba(90, 200, 130, 0.18);
         color: #9bdcae;
-      }
-      .pswp-origin-badge.bbwchan {
-        background: rgba(190, 105, 220, 0.18);
-        color: #e0a6f5;
       }
       .pswp-origin-badge.tumblr {
         background: rgba(100, 145, 220, 0.18);
@@ -3318,7 +3310,6 @@
             ['coomer', 'OF'],
             ['kemono', 'K'],
             ['stufferdb', 'S'],
-            ['bbwchan', 'B'],
             ['tumblr', 'T'],
             ['reddit', 'R'],
           ]) {
@@ -3574,7 +3565,6 @@
         coomer: '', // coomer URLs already carry the service name
         kemono: 'K·',
         stufferdb: '',
-        bbwchan: '',
         tumblr: '',
         reddit: '',
       }
@@ -3620,15 +3610,6 @@
           sourceLinksEl.appendChild(a)
         }
 
-        for (const url of sources.bbwchan || []) {
-          const a = document.createElement('a')
-          a.className = 'src-link'
-          a.href = url
-          a.target = '_blank'
-          a.rel = 'noopener noreferrer'
-          a.innerHTML = `${LINK_ICON} BBW-Chan`
-          sourceLinksEl.appendChild(a)
-        }
 
         for (const url of sources.reddit || []) {
           // www.reddit.com/user/<name>/submitted/ → "u/<name>"
@@ -4087,7 +4068,6 @@
         coomerfans: 'coomer',
         onlyhaven: 'onlyhaven',
         kemono: 'kemono',
-        bbwchan: 'bbwchan',
         tumblr: 'tumblr',
       }
       const ORIGIN_TIPS = {
@@ -4096,7 +4076,6 @@
         coomerfans: 'Scraped from coomerfans',
         onlyhaven: 'Scraped from onlyhaven (cum.st)',
         kemono: 'Scraped from kemono',
-        bbwchan: 'Scraped from bbw-chan',
         tumblr: 'Scraped from tumblr',
       }
       // Pull the origin site off an item — the scrapers write it into

@@ -14,8 +14,8 @@ This repo is the local control center for collecting, repairing, reviewing, hash
 ### 1. Scrape a new StufferDB model
 
 ```powershell
-npm run milkmaid -- "https://stufferdb.com/index?/category/1234"
-npm run milkmaid -- "https://stufferdb.com/index?/category/1234" --media-concurrency=10 --video-concurrency=6 --page-concurrency=5
+npm run scrape -- "https://stufferdb.com/index?/category/1234"
+npm run scrape -- "https://stufferdb.com/index?/category/1234" --media-concurrency=10 --video-concurrency=6 --page-concurrency=5
 ```
 
 Notes:
@@ -26,7 +26,7 @@ Notes:
 - To force a StufferDB scrape into a specific existing model bucket, use:
 
 ```powershell
-npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyadriana
+npm run scrape -- "https://stufferdb.com/index?/category/22889" --model=heyyadriana
 ```
 
   That keeps the detected page alias for registry tracking, but saves the scrape into the `heyyadriana` dataset bucket.
@@ -38,7 +38,7 @@ npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyad
 Single model, direct URL:
 
 ```powershell
-npm run hoghaul -- "https://coomerfans.com/u/onlyfans/333819/cakedupkayyla" --model=cakedupkayyla
+npm run scrape -- "https://coomerfans.com/u/onlyfans/333819/cakedupkayyla" --model=cakedupkayyla
 ```
 
 Single model, rerun through the registry batch path:
@@ -88,7 +88,7 @@ Use these when you want to revisit a model even if it already exists in the data
 Force rerun a StufferDB URL into a specific canonical model:
 
 ```powershell
-npm run milkmaid -- "https://stufferdb.com/index?/category/22889" --model=heyyadriana
+npm run scrape -- "https://stufferdb.com/index?/category/22889" --model=heyyadriana
 ```
 
 Rerun one StufferDB model from registry sources:
@@ -329,10 +329,8 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
 
 ### Scraping
 
-- `npm run milkmaid`
-  - scrape a StufferDB gallery/category into the local dataset
-- `npm run hoghaul`
-  - scrape Coomer-backed sources
+- `npm run scrape -- "<url>"`
+  - scrape any supported source URL (StufferDB, Reddit, CoomerFans/OnlyHaven, Pawchive, Tumblr); the source is detected from the URL
 - `npm run hoghaul:all-coomerfans`
   - batch scrape all `coomerfans.com` URLs stored under `sources.coomer`
 - `npm run hoghaul:all-coomer`
@@ -411,8 +409,8 @@ If you are unsure what to run:
 1. Pull from NAS if you think local is behind:
    - `.\update-local.ps1`
 2. Run the scrape or repair you need:
-   - `npm run milkmaid -- "<url>"`
-   - `npm run hoghaul -- "<url>" --model=model_name`
+   - `npm run scrape -- "<url>"`
+   - `npm run scrape -- "<url>" --model=model_name`
    - or `npm run repair`
 3. Review anything suspicious:
    - `npm run review:slopvault`

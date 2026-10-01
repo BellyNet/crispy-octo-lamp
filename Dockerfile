@@ -1,15 +1,16 @@
-# ── Build stage: compile native modules (canvas, sharp) ──────────────────────
+# ── Build stage: install production node_modules ─────────────────────────────
 FROM node:20-slim AS deps
 
+# sharp ships prebuilt linux-x64 binaries; the toolchain is only a fallback
+# in case npm ever has to build it from source. Builder-only, so it never
+# reaches the runtime image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
-    libcairo2-dev \
-    libpango1.0-dev \
-    libjpeg-dev \
-    libgif-dev \
-    librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# puppeteer's postinstall downloads Chrome; the dashboard never launches it.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 WORKDIR /app
 COPY package*.json ./
@@ -20,12 +21,6 @@ FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    libcairo2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libjpeg62-turbo \
-    libgif7 \
-    librsvg2-2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -33,10 +28,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY dashboard/ ./dashboard/
-COPY milkmaid/media-dates.js ./milkmaid/
-# milkmaid/media-dates.js is now a thin re-export of scrapyard/mediaDates,
-# which in turn has its own transitive helpers under scrapyard/. Copy the
-# whole dir so the dashboard always boots even as the refactor continues.
+# The dashboard reuses scrapyard/ helpers (mediaDates, registry, transcoders).
 COPY scrapyard/ ./scrapyard/
 COPY audit/audit-exact-media-duplicates.js audit/export-exact-media-review.js ./audit/
 COPY model_aliases.json ./

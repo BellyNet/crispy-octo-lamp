@@ -13,7 +13,7 @@ const fs = require('fs')
 const path = require('path')
 const pLimit = require('p-limit')
 const sharp = require('sharp')
-const mediaDates = require('../milkmaid/media-dates.js')
+const mediaDates = require('../scrapyard/mediaDates.js')
 const MetaCache = require('./meta-cache.js')
 
 const APPDATA =
