@@ -2,11 +2,11 @@
 
 const crypto = require('crypto')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
 const pLimit = require('p-limit')
 const { formatBytes } = require('../scrapyard/runLifecycle')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -27,15 +27,11 @@ if (argv.help) {
 const localRoot = path.resolve(
   String(
     argv['local-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
+      config.datasetDir
   )
 )
 const nasRoot = path.resolve(
-  String(argv['nas-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+  String(argv['nas-root'] || config.nasDatasetDir)
 )
 const outputPath = path.resolve(
   String(

@@ -1,7 +1,7 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -17,14 +17,7 @@ if (argv.help) {
 }
 
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const bitwisePath = path.join(datasetRoot, 'bitwiseHashes.v2.json')
 const visualPath = path.join(datasetRoot, 'visualHashes.v2.json')

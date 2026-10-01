@@ -33,10 +33,10 @@ const {
   PLATFORMS,
   probeUsername,
 } = require('../hoghaul/backfill-sources-interactive')
+const config = require('../scrapyard/config')
 
 const rootDir = path.join(__dirname, '..')
-const registryPath =
-  process.env.MODEL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
+const registryPath = config.registryPath
 const runScrapeScript = path.join(rootDir, 'scrapyard', 'run-scrape.js')
 const sessionRepairScript = path.join(rootDir, 'audit', 'run-session-repair.js')
 const app = express()
@@ -49,24 +49,15 @@ const AUTH_TOKEN = PASSWORD
   ? crypto.createHash('sha256').update(PASSWORD).digest('hex')
   : ''
 
-const APPDATA =
-  process.env.APPDATA ||
-  path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
-const datasetDir =
-  process.env.DATASET_DIR || path.join(APPDATA, '.slopvault', 'dataset')
-const nasDatasetDir = path.resolve(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+const datasetDir = config.datasetDir
+const nasDatasetDir = config.nasDatasetDir
 const allSourceReportPath = path.join(
   rootDir,
   'tmp',
   'update-all-sources',
   'update-all-sources-latest.json'
 )
-const quarantineManifestPath = path.join(
-  APPDATA,
-  '.slopvault',
-  'quarantine',
-  'quarantine-manifest.json'
-)
+const quarantineManifestPath = config.quarantineManifestPath
 const historyDir = path.join(__dirname, 'data')
 const runHistoryPath = path.join(historyDir, 'run-history.json')
 const ONLYHAVEN_ORIGIN = 'https://cum.st'

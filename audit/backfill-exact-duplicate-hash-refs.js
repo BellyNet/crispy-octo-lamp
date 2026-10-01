@@ -6,7 +6,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
-const os = require('os')
+const config = require('../scrapyard/config')
 
 const apply = process.argv.includes('--apply')
 const reportPath = path.resolve(__dirname, '..', 'tmp', 'exact-media-duplicates-full-20260928.json')
@@ -15,7 +15,7 @@ if (report.mode !== 'exact_bytes_md5_size_prefilter' ||
     report.summary.scanErrors !== 0 || report.summary.hashErrors !== 0 ||
     report.summary.mirrorConflicts !== 0) throw new Error('Audit is not safe for hash backfill')
 
-const datasetRoot = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '.slopvault', 'dataset')
+const datasetRoot = config.datasetDir
 const storePath = path.join(datasetRoot, 'bitwiseHashes.v2.json')
 const store = JSON.parse(fs.readFileSync(storePath, 'utf8'))
 if (store.version !== 2 || !Array.isArray(store.entries)) throw new Error('Unexpected hash index format')

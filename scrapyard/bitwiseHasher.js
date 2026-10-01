@@ -1,13 +1,9 @@
 const path = require('path')
 const fs = require('fs')
-const os = require('os')
 const { createHashStore } = require('./hashStore')
+const config = require('./config')
 
-const datasetDir = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault',
-  'dataset'
-)
+const datasetDir = config.datasetDir
 
 const bitwiseHashPath = path.join(datasetDir, 'bitwiseHashes.v2.json')
 const bitwiseHashStore = createHashStore({

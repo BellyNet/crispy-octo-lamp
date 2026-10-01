@@ -1,6 +1,6 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
+const config = require('./config')
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/')
@@ -21,11 +21,7 @@ function isIndexedVideoPath(filePath) {
 }
 
 function getDefaultDatasetRoot() {
-  return path.join(
-    process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-    '.slopvault',
-    'dataset'
-  )
+  return config.datasetDir
 }
 
 function getNasMp4IndexPath(datasetRoot = getDefaultDatasetRoot()) {

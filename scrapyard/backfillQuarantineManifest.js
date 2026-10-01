@@ -1,6 +1,5 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const crypto = require('crypto')
 const {
   loadBitwiseHashCache,
@@ -11,11 +10,9 @@ const {
   getVisualHashFromBuffer,
   getVisualHashRecord,
 } = require('./visualHasher')
+const config = require('./config')
 
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
+const slopvaultRoot = config.slopvaultRoot
 const datasetRoot = path.join(slopvaultRoot, 'dataset')
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')

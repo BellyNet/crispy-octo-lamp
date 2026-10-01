@@ -1,11 +1,11 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
 const { formatBytes } = require('../scrapyard/runLifecycle')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -24,14 +24,7 @@ if (argv.help) {
 }
 
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const modelFilter = String(argv.model || '')
   .split(',')

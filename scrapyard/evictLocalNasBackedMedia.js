@@ -2,22 +2,17 @@
 
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
 const { mergeNasMp4Entries, normalizePath } = require('./nasMp4Index')
 const {
   MAX_VERIFIED_SIZE_DELTA_BYTES,
   hasAcceptableNasSize,
 } = require('./nasSync')
+const config = require('./config')
 
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
+const slopvaultRoot = config.slopvaultRoot
 const datasetDir = path.join(slopvaultRoot, 'dataset')
-const nasDatasetDir = path.resolve(
-  String(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
-)
+const nasDatasetDir = path.resolve(config.nasDatasetDir)
 
 function normalizeModelList(value) {
   if (!value) return []

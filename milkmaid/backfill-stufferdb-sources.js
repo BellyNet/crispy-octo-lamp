@@ -1,12 +1,12 @@
 const fs = require('fs')
-const path = require('path')
 const https = require('https')
 const readline = require('readline')
 const { exec, execFile } = require('child_process')
 const puppeteer = require('puppeteer')
 const { writeRepoJsonFileSync } = require('../scrapyard/repoFileWriter')
+const config = require('../scrapyard/config')
 
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const registryPath = config.registryPath
 
 function sanitize(name) {
   return String(name || '')

@@ -35,19 +35,13 @@ const fs = require('fs')
 const path = require('path')
 
 const { getRedditTitleFromPermalink } = require('./mediaDates.js')
+const config = require('./config')
 
 const args = process.argv.slice(2)
 const APPLY = args.includes('--apply')
 const userIdx = args.indexOf('--user')
 const SCOPE_USER = userIdx !== -1 ? args[userIdx + 1] : null
-const DATASET_DIR =
-  process.env.DATASET_DIR ||
-  path.join(
-    process.env.APPDATA ||
-      path.join(process.env.HOME || process.env.USERPROFILE, 'AppData/Roaming'),
-    '.slopvault',
-    'dataset'
-  )
+const DATASET_DIR = process.env.DATASET_DIR || config.datasetDir
 
 function loadSidecar(userDir) {
   const p = path.join(userDir, '.media-dates.json')

@@ -10,8 +10,7 @@ const {
   syncAllModelMetadataToNas,
   syncModelMetadataToNas,
 } = require('./nasSync')
-
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   string: ['model', 'cleanup-mp4', 'cleanup-gif-mp4'],
@@ -52,12 +51,8 @@ if (argv.help) {
   process.exit(0)
 }
 
-const baseLocal = process.env.LOCAL_DATASET_DIR
-  ? path.resolve(process.env.LOCAL_DATASET_DIR)
-  : path.join(process.env.APPDATA, '.slopvault', 'dataset')
-const baseNAS = process.env.NAS_DATASET_DIR
-  ? path.resolve(process.env.NAS_DATASET_DIR)
-  : 'Z:\\dataset'
+const baseLocal = config.datasetDir
+const baseNAS = config.nasDatasetDir
 
 const isPush = isTruthy(getOption('push'))
 const isPull = isTruthy(getOption('pull'))

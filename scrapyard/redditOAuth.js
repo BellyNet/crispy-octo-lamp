@@ -1,18 +1,14 @@
 const fs = require('fs')
 const http = require('http')
 const https = require('https')
-const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
+const config = require('./config')
 
 const DEFAULT_SCOPES = ['identity', 'read']
 const DEFAULT_REDIRECT_URI = 'http://127.0.0.1:8765/reddit/callback'
 const DEFAULT_USER_AGENT = 'windows:lora-training:v1.0 (by /u/local)'
-const CONFIG_PATH = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault',
-  'reddit-oauth.json'
-)
+const CONFIG_PATH = path.join(config.slopvaultRoot, 'reddit-oauth.json')
 
 let cachedToken = null
 

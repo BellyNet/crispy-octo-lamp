@@ -27,9 +27,10 @@ const { createDatasetPaths } = require('./datasetPaths')
 const { syncModelToNas } = require('./nasSync')
 const { loadRetryState } = require('./redditFullResolutionRetry')
 const runLifecycle = require('./runLifecycle')
+const config = require('./config')
 
 const rootDir = path.join(__dirname, '..')
-const registryPath = path.join(rootDir, 'model_aliases.json')
+const registryPath = config.registryPath
 const ALL_SOURCE_ORDER = REGISTRY_KEY_RUN_ORDER
 const temporarilyDisabledSources = new Map()
 const activeChildProcesses = new Set()
@@ -666,8 +667,7 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
 
 function getModelRunSummaryPath(modelName, source = 'milkmaid') {
   return path.join(
-    process.env.APPDATA || '',
-    '.slopvault',
+    config.slopvaultRoot,
     'dataset',
     modelName,
     `${source}-last-run.json`

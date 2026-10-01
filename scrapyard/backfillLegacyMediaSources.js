@@ -1,7 +1,6 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
 
@@ -14,6 +13,7 @@ const {
   hasSourceUrl,
   sourceMetaFromSeenRecord,
 } = require('./legacySourceBackfill')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -33,18 +33,10 @@ if (argv.help) {
   process.exit(0)
 }
 
-const rootDir = path.join(__dirname, '..')
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
-const registryPath = path.join(rootDir, 'model_aliases.json')
+const registryPath = config.registryPath
 const overridePath = path.resolve(
   String(argv.overrides || path.join(__dirname, 'legacy-source-overrides.json'))
 )

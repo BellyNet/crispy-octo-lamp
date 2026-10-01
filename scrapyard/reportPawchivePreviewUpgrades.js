@@ -1,18 +1,12 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
+const config = require('./config')
 
 function collectPawchivePreviewUpgrades(options = {}) {
-  const datasetDir =
-    options.datasetDir ||
-    path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      '.slopvault',
-      'dataset'
-    )
+  const datasetDir = options.datasetDir || config.datasetDir
   const modelFilter = new Set(
     String(options.models || '')
       .split(',')

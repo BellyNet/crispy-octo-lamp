@@ -21,17 +21,14 @@ const minimist = require('minimist')
 const pLimit = require('p-limit')
 
 const mediaDates = require('../scrapyard/mediaDates')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
 const TARGET_USER = argv.user || null
 const CONCURRENCY = parseInt(argv.concurrency, 10) || 8
 
-const APPDATA =
-  process.env.APPDATA ||
-  path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
-const datasetDir =
-  process.env.DATASET_DIR || path.join(APPDATA, '.slopvault', 'dataset')
+const datasetDir = config.datasetDir
 
 const MEDIA_FOLDERS = ['images', 'gif', 'webm']
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.tiff', '.webp'])

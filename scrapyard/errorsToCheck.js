@@ -2,14 +2,10 @@
 
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
+const config = require('./config')
 
 const slopvaultRoot = path.resolve(
-  process.env.SLOPVAULT_ROOT ||
-    path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      '.slopvault'
-    )
+  process.env.SLOPVAULT_ROOT || config.slopvaultRoot
 )
 
 const statePath = path.join(slopvaultRoot, 'errors-to-check-state.json')

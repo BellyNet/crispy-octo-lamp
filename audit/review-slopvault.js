@@ -5,6 +5,7 @@ const crypto = require('crypto')
 const { URL } = require('url')
 const { spawn } = require('child_process')
 const minimist = require('minimist')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -54,14 +55,7 @@ const dashboardPath = path.join(dashboardDir, 'slopvault-dashboard.html')
 const port = Number.parseInt(argv.port, 10) || 4777
 const reviewToken = crypto.randomBytes(16).toString('hex')
 const slopvaultRoot = path.resolve(
-  String(
-    argv['slopvault-root'] ||
-      path.join(
-        process.env.APPDATA ||
-          path.join(process.env.HOME, 'AppData', 'Roaming'),
-        '.slopvault'
-      )
-  )
+  String(argv['slopvault-root'] || config.slopvaultRoot)
 )
 const permanentSkipFile = path.join(
   slopvaultRoot,

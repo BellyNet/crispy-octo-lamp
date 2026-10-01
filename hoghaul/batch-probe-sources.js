@@ -37,13 +37,14 @@ const {
   getPawchiveProfileUrl,
   getPawchiveUserUrl,
 } = require('../scrapyard/pawchive')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
 const DRY_RUN = !!argv['dry-run']
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const registryPath = config.registryPath
 const reportPath = path.join(__dirname, '..', 'batch-probe-report.txt')
 
 // ─── PLATFORM CONFIG ──────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 'use strict'
 
 const fs = require('fs')
-const path = require('path')
 const { writeRepoJsonFileSync } = require('./repoFileWriter')
+const config = require('./config')
 
 function sortStringValues(values) {
   return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) =>
@@ -54,7 +54,7 @@ function sortModelRegistry(registry) {
 }
 
 function main() {
-  const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+  const registryPath = config.registryPath
   const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'))
   const sortedRegistry = sortModelRegistry(registry)
   writeRepoJsonFileSync(registryPath, sortedRegistry)

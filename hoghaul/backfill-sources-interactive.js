@@ -43,6 +43,7 @@ const {
   getPawchiveUserUrl,
 } = require('../scrapyard/pawchive')
 const { parseTumblrJsonpBody } = require('../scrapyard/sourceAdapters/tumblr')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
@@ -57,7 +58,7 @@ const MODEL_FILTER = new Set(
     .filter(Boolean)
 )
 
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const registryPath = config.registryPath
 const permanentSkipPath = path.join(
   __dirname,
   'source-backfill-permanent-skips.json'

@@ -1,13 +1,10 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const readline = require('readline')
 const minimist = require('minimist')
+const config = require('./config')
 
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
+const slopvaultRoot = config.slopvaultRoot
 
 main().catch((err) => {
   console.error(`Fatal remap error: ${err.stack || err.message}`)

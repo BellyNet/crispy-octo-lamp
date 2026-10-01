@@ -1,9 +1,9 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   boolean: ['skip-logs'],
@@ -15,19 +15,10 @@ const argv = minimist(process.argv.slice(2), {
 })
 
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const slopvaultRoot = path.dirname(datasetRoot)
-const nasRoot = path.resolve(
-  String(argv['nas-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
-)
+const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine', 'dataset')
 const reportDir = path.resolve(
   String(argv['report-dir'] || path.join(process.cwd(), 'reports'))

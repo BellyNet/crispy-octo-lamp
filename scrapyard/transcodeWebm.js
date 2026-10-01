@@ -20,6 +20,7 @@ const { execFile } = require('child_process')
 const { promisify } = require('util')
 
 const { findFfprobe } = require('./mediaDates')
+const config = require('./config')
 
 const execFileAsync = promisify(execFile)
 
@@ -222,21 +223,9 @@ module.exports = {
 // ─── CLI ──────────────────────────────────────────────────────────────────────
 if (require.main === module) {
   ;(async () => {
-    require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
-    const APPDATA =
-      process.env.APPDATA ||
-      path.join(
-        process.env.HOME || process.env.USERPROFILE,
-        'AppData',
-        'Roaming'
-      )
-    // DATASET_DIR wins over the .env-supplied LOCAL_DATASET_DIR so callers
-    // can target the NAS mount (e.g. `DATASET_DIR=Z:\\dataset node …`) for
-    // a one-shot pass over files that only exist on the NAS side.
-    const datasetDir =
-      process.env.DATASET_DIR ||
-      process.env.LOCAL_DATASET_DIR ||
-      path.join(APPDATA, '.slopvault', 'dataset')
+    // config honours DATASET_DIR over the .env-supplied LOCAL_DATASET_DIR, so
+    // the same script can sweep the NAS mount via `DATASET_DIR=Z:\\dataset node …`.
+    const datasetDir = config.datasetDir
 
     if (!fs.existsSync(datasetDir)) {
       console.error(`Dataset dir not found: ${datasetDir}`)

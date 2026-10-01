@@ -24,6 +24,7 @@ const minimist = require('minimist')
 
 const { createHttpClient } = require('../scrapyard/httpClient')
 const { loadModelRegistry, sanitize } = require('../scrapyard/modelRegistry')
+const config = require('../scrapyard/config')
 
 const ONLYHAVEN_ORIGIN = 'https://cum.st'
 const DEFAULT_DELAY_MS = 300
@@ -34,9 +35,7 @@ const argv = minimist(process.argv.slice(2), {
 })
 
 const rootDir = path.join(__dirname, '..')
-const registryPath = path.resolve(
-  String(argv.registry || path.join(rootDir, 'model_aliases.json'))
-)
+const registryPath = path.resolve(String(argv.registry || config.registryPath))
 const delayMs = Math.max(
   0,
   Number.parseInt(String(argv['delay-ms'] || DEFAULT_DELAY_MS), 10) ||

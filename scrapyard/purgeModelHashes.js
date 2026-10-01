@@ -1,11 +1,8 @@
 const fs = require('fs')
 const path = require('path')
+const config = require('./config')
 
-const datasetDir = path.join(
-  process.env.APPDATA || path.join(process.env.HOME, 'AppData', 'Roaming'),
-  '.slopvault',
-  'dataset'
-)
+const datasetDir = config.datasetDir
 
 const filesToClear = [
   'visualHashes.json',

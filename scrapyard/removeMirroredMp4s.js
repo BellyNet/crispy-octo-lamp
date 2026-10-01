@@ -1,8 +1,8 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
 const { findNasBackedMediaMatch, isEvictableMediaPath } = require('./nasSync')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -20,14 +20,7 @@ if (argv.help) {
 }
 
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const mirrorRoot = argv['mirror-root']
   ? path.resolve(String(argv['mirror-root']))

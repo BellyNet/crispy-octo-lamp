@@ -1,11 +1,11 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
 const {
   loadBitwiseHashCache,
   getBitwiseHashRecord,
 } = require('./bitwiseHasher')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -20,10 +20,7 @@ if (argv.help) {
   process.exit(0)
 }
 
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
+const slopvaultRoot = config.slopvaultRoot
 const datasetRoot = path.join(slopvaultRoot, 'dataset')
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')

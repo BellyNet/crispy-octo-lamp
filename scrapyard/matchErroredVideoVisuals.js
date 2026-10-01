@@ -1,10 +1,10 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const { spawn } = require('child_process')
 const minimist = require('minimist')
 
 const { getVideoFrameHashesFromPath } = require('./visualHasher')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -24,11 +24,8 @@ if (argv.help) {
   process.exit(0)
 }
 
-const appData =
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
-const slopvaultRoot = path.join(appData, '.slopvault')
-const datasetRoot = path.join(slopvaultRoot, 'dataset')
-const quarantineRoot = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const datasetRoot = config.datasetDir
+const quarantineRoot = config.quarantineDatasetDir
 const cachePath = path.resolve(
   __dirname,
   '..',

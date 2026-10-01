@@ -4,9 +4,10 @@ const fs = require('fs')
 const path = require('path')
 
 const { PAWCHIVE_ORIGIN } = require('../scrapyard/pawchive')
+const config = require('../scrapyard/config')
 
 const repoRoot = path.join(__dirname, '..')
-const registryPath = path.join(repoRoot, 'model_aliases.json')
+const registryPath = config.registryPath
 const permanentSkipPath = path.join(
   __dirname,
   'source-backfill-permanent-skips.json'

@@ -8,6 +8,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { execFileSync } = require('child_process')
 const rootsFromKeeper = require('./exact-media-keeper')
+const config = require('../scrapyard/config')
 
 const args = process.argv.slice(2)
 const apply = args.includes('--apply')
@@ -34,7 +35,10 @@ const auditPath = path.resolve(
   )
 )
 const decisionsPath = path.resolve(
-  option('decisions', 'Z:\\dashboard-cache\\exact-duplicate-decisions.json')
+  option(
+    'decisions',
+    path.join(config.nasDashboardCacheDir, 'exact-duplicate-decisions.json')
+  )
 )
 const reviewPath = option('review', null)
 const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'))

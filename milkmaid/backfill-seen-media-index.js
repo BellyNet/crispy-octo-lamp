@@ -2,10 +2,10 @@
 
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
 const { isLikelyMediaUrl } = require('../scrapyard/mediaEntries')
 const { createDatasetPaths } = require('../scrapyard/datasetPaths')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -25,14 +25,7 @@ if (argv.help) {
 }
 
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const singleModel = argv.model ? String(argv.model).trim() : null
 const explicitModels = String(argv.models || '')

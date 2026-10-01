@@ -1,6 +1,5 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const { createHash } = require('crypto')
 const minimist = require('minimist')
 
@@ -16,6 +15,7 @@ const {
   getVisualHashFromVideoPath,
   addVisualHash,
 } = require('./visualHasher')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -35,14 +35,7 @@ if (argv.help || !argv.model) {
 }
 
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const modelName = String(argv.model)
 const modelRoot = path.join(datasetRoot, modelName)

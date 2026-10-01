@@ -18,7 +18,6 @@
 
 const fs = require('fs')
 const https = require('https')
-const path = require('path')
 const readline = require('readline')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
@@ -28,12 +27,13 @@ const {
   loadModelRegistry,
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2))
 const FORCE = !!argv.force
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const registryPath = config.registryPath
 const COOMER_HOST = 'coomerfans.com'
 const SERVICES = [
   'onlyfans',

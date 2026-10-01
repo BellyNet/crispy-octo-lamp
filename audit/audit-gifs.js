@@ -22,16 +22,14 @@ const path = require('path')
 const minimist = require('minimist')
 const sharp = require('sharp')
 const { createHttpClient } = require('../scrapyard/httpClient')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   boolean: ['json', 'redownload', 'apply'],
   string: ['dataset', 'model', 'thumb-dir'],
 })
 
-const datasetDir =
-  argv.dataset ||
-  process.env.DATASET_DIR ||
-  path.join(process.env.APPDATA || process.cwd(), '.slopvault', 'dataset')
+const datasetDir = argv.dataset || process.env.DATASET_DIR || config.datasetDir
 const thumbDir = argv['thumb-dir'] || process.env.THUMB_DIR || null
 const MODEL_FILTER = new Set(
   String(argv.model || '')

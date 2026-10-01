@@ -1,8 +1,8 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const crypto = require('crypto')
 const minimist = require('minimist')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -20,13 +20,7 @@ if (argv.help) {
 }
 
 const slopvaultRoot = path.resolve(
-  String(
-    argv['slopvault-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault'
-      )
-  )
+  String(argv['slopvault-root'] || config.slopvaultRoot)
 )
 const datasetRoot = path.resolve(
   String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))

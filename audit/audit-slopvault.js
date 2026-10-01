@@ -1,6 +1,5 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const crypto = require('crypto')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
@@ -14,6 +13,7 @@ const {
   getVisualHashFromBuffer,
   getVisualHashRecord,
 } = require('../scrapyard/visualHasher')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -49,13 +49,7 @@ if (argv.help) {
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.resolve(
-  String(
-    argv['slopvault-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault'
-      )
-  )
+  String(argv['slopvault-root'] || config.slopvaultRoot)
 )
 const datasetRoot = path.resolve(
   String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))

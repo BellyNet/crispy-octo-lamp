@@ -77,6 +77,7 @@ const {
 const { createMediaSaver } = require('../scrapyard/mediaSaver')
 const { createMediaSavePipeline } = require('../scrapyard/mediaSavePipeline')
 const { createDuplicateChecker } = require('../scrapyard/duplicateChecker')
+const config = require('../scrapyard/config')
 const {
   getSourceCheckpoint,
   recordSourceCheckpoint,
@@ -2086,7 +2087,7 @@ async function runMilkmaidScrape(argvInput = process.argv.slice(2)) {
 
     const breadcrumbInfo = await getBreadcrumbInfo(tempPage)
     const inferredRawName = extractModelNameFromBreadcrumb(breadcrumbInfo.texts)
-    const aliasMapPath = path.join(__dirname, '..', 'model_aliases.json')
+    const aliasMapPath = config.registryPath
     const modelSelection = modelOverride
       ? {
           aliasName: modelOverride,

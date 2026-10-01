@@ -41,6 +41,7 @@ const {
 
 const mediaDates = require('../scrapyard/mediaDates')
 const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
+const config = require('../scrapyard/config')
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const argv = minimist(process.argv.slice(2))
@@ -49,15 +50,11 @@ const SRC_ARG = argv.src || argv.s
 const DRY_RUN = !!argv['dry-run']
 const SKIP_VISUAL = !!argv['no-dedup']
 
-const APPDATA =
-  process.env.APPDATA ||
-  path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
-
-const datasetDir = path.join(APPDATA, '.slopvault', 'dataset')
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const datasetDir = config.datasetDir
+const registryPath = config.registryPath
 
 // KemonoDownloader's default save location
-const KEMONO_DL_DEFAULT = path.join(APPDATA, 'Kemono Downloader')
+const KEMONO_DL_DEFAULT = path.join(config.appDataDir, 'Kemono Downloader')
 
 // ─── EXTENSION → BUCKET ───────────────────────────────────────────────────────
 const BUCKET = {

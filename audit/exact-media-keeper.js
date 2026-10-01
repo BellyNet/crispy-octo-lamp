@@ -1,11 +1,11 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const config = require('../scrapyard/config')
 
-const localRoot = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), '.slopvault', 'dataset')
-const nasRoot = process.env.NAS_DATASET_DIR || 'Z:\\dataset'
+const localRoot = config.datasetDir
+const nasRoot = config.nasDatasetDir
 const modelCache = new Map()
 
 function readJson(filePath) {

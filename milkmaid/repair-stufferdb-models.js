@@ -1,10 +1,10 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
 const { spawn } = require('child_process')
 const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
 const { syncModelMetadataToNas } = require('../scrapyard/nasSync')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -35,15 +35,9 @@ if (argv.help) {
 }
 
 const rootDir = path.join(__dirname, '..')
-const appDataRoot =
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
-const registryPath = path.resolve(
-  String(argv.registry || path.join(rootDir, 'model_aliases.json'))
-)
+const registryPath = path.resolve(String(argv.registry || config.registryPath))
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] || path.join(appDataRoot, '.slopvault', 'dataset')
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const logDir = path.resolve(
   String(argv['log-dir'] || path.join(rootDir, 'tmp', 'repair-stufferdb'))
@@ -52,9 +46,7 @@ const latestReportPath = path.join(logDir, 'repair-stufferdb-latest.json')
 const latestTextPath = path.join(logDir, 'repair-stufferdb-latest.txt')
 const statePath = path.join(logDir, 'repair-stufferdb-state.json')
 const nasDatasetRoot = path.resolve(
-  String(
-    argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset'
-  )
+  String(argv['nas-dataset-root'] || config.nasDatasetDir)
 )
 const limit = Math.max(parseInt(argv.limit, 10) || 0, 0)
 const singleModel = argv.model ? String(argv.model).trim() : null

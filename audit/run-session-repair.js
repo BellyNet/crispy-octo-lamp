@@ -1,9 +1,9 @@
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const { spawn } = require('child_process')
 const minimist = require('minimist')
 const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -25,13 +25,7 @@ if (argv.help) {
 
 const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.resolve(
-  String(
-    argv['slopvault-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault'
-      )
-  )
+  String(argv['slopvault-root'] || config.slopvaultRoot)
 )
 const datasetRoot = path.join(slopvaultRoot, 'dataset')
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
@@ -53,9 +47,7 @@ const latestSummaryPath = path.join(reportDir, 'session-repair-latest.json')
 const checkpointPath = path.join(reportDir, 'session-repair-checkpoint.json')
 const statePath = path.join(reportDir, 'session-repair-state.json')
 const nasDatasetRoot = path.resolve(
-  String(
-    argv['nas-dataset-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset'
-  )
+  String(argv['nas-dataset-root'] || config.nasDatasetDir)
 )
 
 main().catch((err) => {

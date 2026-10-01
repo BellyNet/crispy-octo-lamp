@@ -1,27 +1,20 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 
 const { hasNasMp4RelativePath, isIndexedVideoPath } = require('./nasMp4Index')
+const config = require('./config')
 
 function createDatasetPaths(options = {}) {
   const rootDir = options.rootDir || path.join(__dirname, '..')
-  const slopvaultRoot =
-    options.slopvaultRoot ||
-    path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      '.slopvault'
-    )
+  const slopvaultRoot = options.slopvaultRoot || config.slopvaultRoot
   const datasetDir = options.datasetDir || path.join(slopvaultRoot, 'dataset')
   const quarantineDatasetDir =
     options.quarantineDatasetDir ||
     path.join(slopvaultRoot, 'quarantine', 'dataset')
   const nasDatasetDir = path.resolve(
-    String(
-      options.nasDatasetDir || process.env.NAS_DATASET_DIR || 'Z:\\dataset'
-    )
+    String(options.nasDatasetDir || config.nasDatasetDir)
   )
   const repairCanUseNasMirror = Boolean(options.repairCanUseNasMirror)
   const nasMirrorExistsCache = new Map()

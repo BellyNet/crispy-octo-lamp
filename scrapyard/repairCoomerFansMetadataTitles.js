@@ -8,6 +8,7 @@ const minimist = require('minimist')
 const { SIDECAR_FILENAME } = require('./mediaDates')
 const { createHttpClient } = require('./httpClient')
 const { parseCoomerFansTitle } = require('./sourceAdapters/coomerFans')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   boolean: ['apply'],
@@ -24,7 +25,7 @@ const argv = minimist(process.argv.slice(2), {
 const datasetDir =
   argv.dataset ||
   process.env.DATASET_DIR ||
-  path.join(process.env.APPDATA || process.cwd(), '.slopvault', 'dataset')
+  config.datasetDir
 const APPLY = Boolean(argv.apply)
 const FETCH_DELAY_MS = Math.max(
   Number.parseInt(String(argv['delay-ms'] || ''), 10) || 250,

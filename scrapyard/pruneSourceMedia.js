@@ -1,7 +1,6 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
 
@@ -17,6 +16,7 @@ const {
 } = require('./visualHasher')
 const { removeNasMp4Entries, normalizePath } = require('./nasMp4Index')
 const { writeRepoJsonFileSync } = require('./repoFileWriter')
+const config = require('./config')
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.m4v', '.mov'])
@@ -68,20 +68,11 @@ if (argv.help || !argv.model || !argv['cutoff-date']) {
 
 const rootDir = path.join(__dirname, '..')
 const datasetRoot = path.resolve(
-  String(
-    argv['dataset-root'] ||
-      path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        '.slopvault',
-        'dataset'
-      )
-  )
+  String(argv['dataset-root'] || config.datasetDir)
 )
-const nasRoot = path.resolve(
-  String(argv['nas-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
-)
+const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
 const modelAliasesPath = path.resolve(
-  String(argv['model-aliases'] || path.join(rootDir, 'model_aliases.json'))
+  String(argv['model-aliases'] || config.registryPath)
 )
 const reportDir = path.resolve(
   String(argv['report-dir'] || path.join(rootDir, 'tmp', 'prune-source-media'))

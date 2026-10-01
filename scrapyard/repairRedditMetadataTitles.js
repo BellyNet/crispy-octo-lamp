@@ -11,16 +11,14 @@ const {
   resolveBestDateRecord,
 } = require('./mediaDates')
 const { parseRssEntries } = require('./sourceAdapters/reddit')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   boolean: ['apply', 'fetch-missing', 'broken-only'],
   string: ['dataset', 'delay-ms', 'fetch-timeout-ms', 'model', 'rss-max-pages'],
 })
 
-const datasetDir =
-  argv.dataset ||
-  process.env.DATASET_DIR ||
-  path.join(process.env.APPDATA || process.cwd(), '.slopvault', 'dataset')
+const datasetDir = argv.dataset || process.env.DATASET_DIR || config.datasetDir
 const APPLY = Boolean(argv.apply)
 const FETCH_MISSING = Boolean(argv['fetch-missing'])
 // --broken-only: fix just the records whose caption is missing or is a

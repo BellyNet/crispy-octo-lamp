@@ -18,18 +18,15 @@
 
 const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const minimist = require('minimist')
+const config = require('./config')
 
 const args = minimist(process.argv.slice(2), {
   boolean: ['apply', 'hard'],
   string: ['user', 'dataset'],
 })
 
-const slopvaultRoot = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault'
-)
+const slopvaultRoot = config.slopvaultRoot
 const datasetDir = path.resolve(
   args.dataset || process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
 )

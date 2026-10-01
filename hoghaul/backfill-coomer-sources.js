@@ -17,7 +17,6 @@
  */
 
 const https = require('https')
-const path = require('path')
 const minimist = require('minimist')
 
 const {
@@ -25,13 +24,14 @@ const {
   loadModelRegistry,
   resolveAndTrackModel,
 } = require('../scrapyard/modelRegistry.js')
+const config = require('../scrapyard/config')
 
 const argv = minimist(process.argv.slice(2))
 const DRY_RUN = !!argv['dry-run']
 const FORCE = !!argv.force
 const DELAY = parseInt(argv.delay ?? 300, 10)
 
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+const registryPath = config.registryPath
 const COOMER_HOST = 'coomerfans.com'
 
 // All services Coomer aggregates from

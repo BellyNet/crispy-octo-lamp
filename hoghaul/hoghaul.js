@@ -78,6 +78,7 @@ const {
 } = require('../scrapyard/sourceAdapters/coomerKemono')
 const { isOnlyHavenSource } = require('../scrapyard/sourceAdapters/coomerFans')
 const { parseTumblrJsonpBody } = require('../scrapyard/sourceAdapters/tumblr')
+const config = require('../scrapyard/config')
 const {
   isPawchiveHost,
   shouldUsePawchiveDeadMediaMatch,
@@ -112,12 +113,10 @@ const datasetPaths = createDatasetPaths({
   rootDir: path.join(__dirname, '..'),
   repairCanUseNasMirror: true,
 })
-const rootDir = datasetPaths.rootDir
 const slopvaultRoot = datasetPaths.slopvaultRoot
 const datasetDir = datasetPaths.datasetDir
 const nasDatasetDir = datasetPaths.nasDatasetDir
-const registryPath =
-  process.env.HOGHAUL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
+const registryPath = config.registryPath
 const API_ACCEPT_HEADER = 'text/css'
 const PAWCHIVE_RATE_LIMIT_RETRIES =
   Number.parseInt(process.env.HOGHAUL_PAWCHIVE_429_RETRIES || '', 10) || 3

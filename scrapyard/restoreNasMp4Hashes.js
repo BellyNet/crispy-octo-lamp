@@ -22,6 +22,7 @@ const {
   getVisualHashEntries,
   getVisualHashFromVideoPath,
 } = require('./visualHasher')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -41,9 +42,7 @@ if (argv.help) {
 const datasetRoot = path.resolve(
   String(argv['dataset-root'] || getDefaultDatasetRoot())
 )
-const nasRoot = path.resolve(
-  String(argv['nas-root'] || process.env.NAS_DATASET_DIR || 'Z:\\dataset')
-)
+const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
 const reportDir = path.resolve(
   String(
     argv['report-dir'] ||

@@ -12,8 +12,9 @@ const {
   normalizePath,
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
+const config = require('./config')
 
-const LOCAL_REGISTRY_PATH = path.join(__dirname, '..', 'model_aliases.json')
+const LOCAL_REGISTRY_PATH = config.registryPath
 const MUTABLE_MODEL_METADATA_FILES = ['.media-dates.json']
 const MAX_VERIFIED_SIZE_DELTA_BYTES = 32
 
@@ -109,7 +110,7 @@ function isEvictableMediaPath(filePath) {
 function findNasBackedMediaMatch({
   localPath,
   relativePath,
-  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+  nasDatasetDir = config.nasDatasetDir,
 } = {}) {
   if (!localPath || !relativePath || !isEvictableMediaPath(localPath)) {
     return null
@@ -168,7 +169,7 @@ function findNasBackedMediaMatch({
 // /app/model_aliases.json inside the dashboard container). Skips silently if
 // either the source or the NAS share is missing so this never blocks a scrape.
 function pushRegistryToNas({
-  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+  nasDatasetDir = config.nasDatasetDir,
   log = console,
 } = {}) {
   try {
@@ -186,7 +187,7 @@ function pushRegistryToNas({
 function syncModelMetadataToNas({
   modelName,
   datasetDir,
-  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+  nasDatasetDir = config.nasDatasetDir,
 } = {}) {
   if (!modelName || !datasetDir) {
     return {
@@ -238,7 +239,7 @@ function syncModelMetadataToNas({
 
 function syncAllModelMetadataToNas({
   datasetDir,
-  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+  nasDatasetDir = config.nasDatasetDir,
 } = {}) {
   if (!datasetDir || !fs.existsSync(datasetDir)) {
     return {
@@ -280,7 +281,7 @@ function syncAllModelMetadataToNas({
 function evictVerifiedLocalMp4s({
   modelName,
   datasetDir,
-  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+  nasDatasetDir = config.nasDatasetDir,
 } = {}) {
   const localModelDir = path.join(datasetDir, modelName)
   const relativeVideoPaths = collectMp4RelativePaths(localModelDir, datasetDir)
@@ -351,7 +352,7 @@ function evictVerifiedLocalMp4s({
 async function syncModelToNas({
   modelName,
   datasetDir,
-  nasDatasetDir = process.env.NAS_DATASET_DIR || 'Z:\\dataset',
+  nasDatasetDir = config.nasDatasetDir,
   log = console,
   successMessage = 'NAS sync complete.',
   failurePrefix = 'NAS sync failed with code',

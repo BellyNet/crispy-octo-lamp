@@ -6,9 +6,10 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { chooseKeeper, rank } = require('./exact-media-keeper')
+const config = require('../scrapyard/config')
 
 const reportPath = path.resolve(process.argv[2] || path.join(__dirname, '..', 'tmp', 'exact-media-review-latest.json'))
-const decisionsPath = path.resolve(process.argv[3] || 'Z:\\dashboard-cache\\exact-duplicate-decisions.json')
+const decisionsPath = path.resolve(process.argv[3] || path.join(config.nasDashboardCacheDir, 'exact-duplicate-decisions.json'))
 const outputPath = path.resolve(process.argv[4] || path.join(__dirname, '..', 'tmp', 'exact-media-cleanup-plan-latest.json'))
 const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'))
 if (report.version !== 2 || !report.readOnly || report.summary.scanErrors !== 0 || report.summary.hashErrors !== 0) {

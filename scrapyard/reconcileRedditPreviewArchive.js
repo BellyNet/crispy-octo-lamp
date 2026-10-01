@@ -1,13 +1,13 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
 const sharp = require('sharp')
 
 const { createHashStore } = require('./hashStore')
 const { syncModelMetadataToNas } = require('./nasSync')
+const config = require('./config')
 
 const argv = minimist(process.argv.slice(2), {
   alias: { h: 'help' },
@@ -68,15 +68,12 @@ Options:
 
 async function main() {
   const rootDir = path.join(__dirname, '..')
-  const slopvaultRoot = path.join(
-    process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-    '.slopvault'
-  )
+  const slopvaultRoot = config.slopvaultRoot
   const archiveRoot = path.resolve(String(argv.archive))
   const datasetRoot = path.resolve(
     String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
   )
-  const nasRoot = path.resolve(String(argv['nas-root'] || 'Z:\\dataset'))
+  const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
   const reportDir = path.resolve(
     String(
       argv['report-dir'] ||

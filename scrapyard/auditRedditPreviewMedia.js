@@ -1,13 +1,13 @@
 'use strict'
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const minimist = require('minimist')
 const sharp = require('sharp')
 
 const { createHashStore } = require('./hashStore')
 const { getRedditOriginalMediaUrl } = require('./redditFullResolutionRetry')
+const config = require('./config')
 
 const SIDECAR_FILENAME = '.media-dates.json'
 const SEEN_INDEX_FILENAME = 'milkmaid-seen-media-index.json'
@@ -86,10 +86,7 @@ Options:
 
 async function main() {
   const rootDir = path.join(__dirname, '..')
-  const slopvaultRoot = path.join(
-    process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-    '.slopvault'
-  )
+  const slopvaultRoot = config.slopvaultRoot
   const datasetRoot = path.resolve(
     String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
   )

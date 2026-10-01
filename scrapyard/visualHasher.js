@@ -7,16 +7,13 @@ const sharp = require('sharp')
 const { createHash } = require('crypto')
 const { createHashStore } = require('./hashStore')
 const { createHammingIndex } = require('./hammingIndex')
+const config = require('./config')
 
 const tmpDir = path.join(os.tmpdir(), 'thicc_visual_hash')
 
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
-const datasetDir = path.join(
-  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  '.slopvault',
-  'dataset'
-)
+const datasetDir = config.datasetDir
 const visualHashPath = path.join(datasetDir, 'visualHashes.v2.json')
 const visualHashStore = createHashStore({
   storePath: visualHashPath,
