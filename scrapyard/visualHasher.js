@@ -3,6 +3,7 @@ const fs = require('fs')
 const os = require('os')
 const { fork, spawn } = require('child_process')
 const imghash = require('imghash')
+const sharp = require('sharp')
 const { createHash } = require('crypto')
 const { createHashStore } = require('./hashStore')
 const { createHammingIndex } = require('./hammingIndex')
@@ -391,38 +392,6 @@ function extractVideoFrameRawYuv420p(inputPath, outputPath, timestampSeconds) {
       ) {
         return resolve()
       }
-      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
-    })
-  })
-}
-
-function normalizeImageWithFfmpeg(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      'ffmpeg',
-      [
-        '-y',
-        '-loglevel',
-        'error',
-        '-i',
-        inputPath,
-        '-frames:v',
-        '1',
-        outputPath,
-      ],
-      {
-        stdio: ['ignore', 'ignore', 'pipe'],
-      }
-    )
-
-    let stderr = ''
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString()
-    })
-
-    child.on('error', reject)
-    child.on('exit', (code) => {
-      if (code === 0 && fs.existsSync(outputPath)) return resolve()
       reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`))
     })
   })

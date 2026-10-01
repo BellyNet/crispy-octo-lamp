@@ -179,7 +179,8 @@ function findCanonicalModelName(registry, rawName) {
 }
 
 function getSourceRegistryKey(site) {
-  return site === 'coomerfans' ? 'coomer' : site
+  // Lazy: sources.js uses sanitize() from this module.
+  return require('./sources').getRegistryKeyForSite(site)
 }
 
 function findCanonicalModelNameBySource(registry, sourceInfo) {

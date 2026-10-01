@@ -13,7 +13,9 @@ const {
   parseSourceUrl,
   getScraperScript,
   describeSource,
+  findSourceForParsed,
 } = require('./sourceRouter')
+const { REGISTRY_KEY_RUN_ORDER } = require('./sources')
 const {
   getOption,
   isTruthy,
@@ -28,7 +30,7 @@ const runLifecycle = require('./runLifecycle')
 
 const rootDir = path.join(__dirname, '..')
 const registryPath = path.join(rootDir, 'model_aliases.json')
-const ALL_SOURCE_ORDER = ['reddit', 'kemono', 'coomer', 'stufferdb', 'tumblr']
+const ALL_SOURCE_ORDER = REGISTRY_KEY_RUN_ORDER
 const temporarilyDisabledSources = new Map()
 const activeChildProcesses = new Set()
 let hardInterruptHandlersInstalled = false
@@ -319,15 +321,6 @@ function runNodeScript(scriptPath, args, { log = console.log } = {}) {
   return result.status ?? 1
 }
 
-function runNodeScriptQuiet(scriptPath, args) {
-  const { spawnSync } = require('child_process')
-  const result = spawnSync(process.execPath, [scriptPath, ...args], {
-    cwd: rootDir,
-    stdio: 'inherit',
-  })
-  return result.status ?? 1
-}
-
 function runNodeScriptInteractive(
   scriptPath,
   args,
@@ -523,7 +516,11 @@ function appendHoghaulOptions(args, argv) {
     '--reddit-fallback-delay-ms',
     getOption(argv, 'reddit-fallback-delay-ms')
   )
-  appendOption(args, '--reddit-gallery-ids', getOption(argv, 'reddit-gallery-ids'))
+  appendOption(
+    args,
+    '--reddit-gallery-ids',
+    getOption(argv, 'reddit-gallery-ids')
+  )
   appendOption(args, '--cookie', getOption(argv, 'cookie'))
   appendOption(args, '--cookie-file', getOption(argv, 'cookie-file'))
   appendOption(
@@ -903,9 +900,7 @@ function collectSourceTargets(
 function getSourceLabel(sourceKey, url) {
   const parsed = parseSourceUrl(url)
   if (!parsed) return sourceKey
-  if (parsed.sourceType === 'coomerfans') return 'coomerfans'
-  if (parsed.sourceType === 'kemono') return 'pawchive'
-  return parsed.sourceType || sourceKey
+  return findSourceForParsed(parsed)?.runLabel || parsed.sourceType || sourceKey
 }
 
 function normalizeRegistrySourceUrls(sourceList) {
@@ -1228,9 +1223,7 @@ function isCompleteAllSourceResult(result) {
     Array.isArray(result?.runs) &&
     result.runs.length === result.sources.length &&
     result.runs.every(
-      (run) =>
-        run?.ok &&
-        Number(run.summary?.errors || 0) === 0
+      (run) => run?.ok && Number(run.summary?.errors || 0) === 0
     ) &&
     result.nasSync?.ok !== false
   )

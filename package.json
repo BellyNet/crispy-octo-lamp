@@ -18,7 +18,7 @@
     "format": "prettier . --write",
     "start": "node scrapyard/run-scrape.js",
     "scrape": "node scrapyard/run-scrape.js",
-    "test": "node scrapyard/smokeUnifiedScraper.js && node dashboard/testExactDuplicateNightly.js && node audit/testChosenCrossModelExactCleanup.js && node scrapyard/testHammingIndex.js",
+    "test": "node scrapyard/smokeUnifiedScraper.js && node dashboard/testExactDuplicateNightly.js && node audit/testChosenCrossModelExactCleanup.js && node scrapyard/testHammingIndex.js && node scrapyard/testSources.js",
     "test:unified-scraper": "node scrapyard/smokeUnifiedScraper.js",
     "hoghaul:all-coomerfans": "node scrapyard/run-source-batch.js --source=coomer --host-contains=coomerfans.com",
     "hoghaul:all-coomer": "node scrapyard/run-source-batch.js --source=coomer",

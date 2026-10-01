@@ -16,6 +16,7 @@ const { createStatusLineLogger } = require('../scrapyard/statusLineLogger')
 const {
   parseHoghaulSourceUrl: parseSourceUrl,
 } = require('../scrapyard/sourceRouter')
+const { findSourceForSite } = require('../scrapyard/sources')
 const {
   sanitize,
   findCanonicalModelName,
@@ -73,28 +74,11 @@ const {
   getDefaultBrowserProfileDir,
 } = require('../scrapyard/browserMediaDownloader')
 const {
-  fetchCoomerKemonoPosts,
-  getMediaEntriesFromPost: getCoomerKemonoMediaEntriesFromPost,
-  preflightCoomerKemonoSource,
   resolveKemonoCreatorIdForJson: resolveSharedKemonoCreatorIdForJson,
 } = require('../scrapyard/sourceAdapters/coomerKemono')
+const { isOnlyHavenSource } = require('../scrapyard/sourceAdapters/coomerFans')
+const { parseTumblrJsonpBody } = require('../scrapyard/sourceAdapters/tumblr')
 const {
-  fetchKnownRedditGalleryPosts,
-  fetchRedditPosts: fetchRedditAdapterPosts,
-  preflightRedditSource: preflightRedditAdapterSource,
-} = require('../scrapyard/sourceAdapters/reddit')
-const {
-  fetchCoomerFansPosts: fetchCoomerFansAdapterPosts,
-  isOnlyHavenSource,
-  preflightCoomerFansSource,
-} = require('../scrapyard/sourceAdapters/coomerFans')
-const {
-  fetchTumblrPosts: fetchTumblrAdapterPosts,
-  parseTumblrJsonpBody,
-  preflightTumblrSource: preflightTumblrAdapterSource,
-} = require('../scrapyard/sourceAdapters/tumblr')
-const {
-  PAWCHIVE_ORIGIN,
   isPawchiveHost,
   shouldUsePawchiveDeadMediaMatch,
 } = require('../scrapyard/pawchive')
@@ -134,9 +118,6 @@ const datasetDir = datasetPaths.datasetDir
 const nasDatasetDir = datasetPaths.nasDatasetDir
 const registryPath =
   process.env.HOGHAUL_REGISTRY_PATH || path.join(rootDir, 'model_aliases.json')
-const API_PAGE_SIZE = 50
-const REDDIT_PAGE_SIZE = 100
-const TUMBLR_PAGE_SIZE = 50
 const API_ACCEPT_HEADER = 'text/css'
 const PAWCHIVE_RATE_LIMIT_RETRIES =
   Number.parseInt(process.env.HOGHAUL_PAWCHIVE_429_RETRIES || '', 10) || 3
@@ -294,30 +275,6 @@ function resolveModelNameForRun(source, inputUrl, canonicalOverride) {
 
 function createModelFolders(modelName) {
   return datasetPaths.createModelFolders(modelName)
-}
-
-function getDatasetRelativePath(filePath) {
-  return datasetPaths.getDatasetRelativePath(filePath)
-}
-
-function getQuarantineMirrorPath(filePath) {
-  return datasetPaths.getQuarantineMirrorPath(filePath)
-}
-
-function getNasMirrorPath(filePath) {
-  return datasetPaths.getNasMirrorPath(filePath)
-}
-
-function isQuarantinedPath(filePath) {
-  return datasetPaths.isQuarantinedPath(filePath)
-}
-
-function existsForRepair(filePath) {
-  return datasetPaths.existsForRepair(filePath)
-}
-
-function existsAtExactPath(filePath) {
-  return datasetPaths.existsAtExactPath(filePath)
 }
 
 function existsLocallyOrOnNas(filePath) {
@@ -870,22 +827,6 @@ function getEntryHashMetadata(entry = {}) {
   return getMediaEntryHashMetadata(entry)
 }
 
-function getMediaSeenIndexPath(modelLogDir) {
-  return sharedMediaSeenIndex.getMediaSeenIndexPath(modelLogDir)
-}
-
-function loadMediaSeenIndex(modelLogDir) {
-  return sharedMediaSeenIndex.loadMediaSeenIndex(modelLogDir)
-}
-
-function saveMediaSeenIndex(modelLogDir, data) {
-  return sharedMediaSeenIndex.saveMediaSeenIndex(modelLogDir, data)
-}
-
-function getActiveMediaSeenRecord(modelLogDir, entry) {
-  return sharedMediaSeenIndex.getActiveMediaSeenRecord(entry)
-}
-
 function getSuccessfulSeenMediaMatch(modelLogDir, mediaPageUrl, mediaUrl) {
   return sharedMediaSeenIndex.getSuccessfulSeenMediaMatch(
     modelLogDir,
@@ -1082,18 +1023,34 @@ function filenameFromMediaUrl(mediaUrl) {
   }
 }
 
-function getMediaEntriesFromPost(source, post) {
-  if (Array.isArray(post.mediaEntries)) return post.mediaEntries
-  if (source.site === 'coomer' || source.site === 'kemono') {
-    return getCoomerKemonoMediaEntriesFromPost(source, post, {
-      normalizeUrl: normalizeSeenUrl,
-    })
+// The scrapyard/sources.js entry for a parsed source.
+function getSourceDefinition(source = {}) {
+  return findSourceForSite(source.site, [source.origin, source.inputUrl])
+}
+
+// Shared helpers handed to source definitions' preflight/fetchPosts.
+function getAdapterContext(overrides = {}) {
+  return {
+    fetchHtml,
+    fetchJson,
+    appendRunEvent,
+    logger: console,
+    normalizeUrl: normalizeSeenUrl,
+    redgifsClient,
+    ...overrides,
   }
-  return []
 }
 
 function isPawchiveSource(source = {}) {
   return source.site === 'kemono' && isPawchiveUrl(source.origin)
+}
+
+function getMediaEntriesFromPost(source, post) {
+  if (Array.isArray(post.mediaEntries)) return post.mediaEntries
+  const definition = getSourceDefinition(source)
+  return definition?.mediaEntriesFromPost
+    ? definition.mediaEntriesFromPost(source, post, getAdapterContext())
+    : []
 }
 
 function shouldUseBrowserMediaForSource(
@@ -1102,17 +1059,14 @@ function shouldUseBrowserMediaForSource(
   runOptions = {},
   env = process.env
 ) {
-  if (source.site === 'coomerfans') {
-    return !isOnlyHavenSource(source) && Boolean(requestedBrowserMedia)
-  }
-  if (source.site === 'tumblr') return false
-  if (isPawchiveSource(source)) return false
-  if (
-    source.site === 'reddit' &&
-    !runOptions.redditBrowserMedia &&
-    !env.HOGHAUL_REDDIT_BROWSER_MEDIA
-  ) {
-    return false
+  const definition = getSourceDefinition(source)
+  if (definition?.useBrowserMedia) {
+    return definition.useBrowserMedia(
+      source,
+      requestedBrowserMedia,
+      runOptions,
+      env
+    )
   }
   return Boolean(requestedBrowserMedia)
 }
@@ -1289,30 +1243,11 @@ function htmlDecode(value) {
 }
 
 async function preflightSourceJson(source, page = 0) {
-  if (source.site === 'reddit') {
-    return preflightRedditAdapterSource(source, {
-      fetchHtml,
-      fetchJson,
-      pageSize: REDDIT_PAGE_SIZE,
-    })
+  const definition = getSourceDefinition(source)
+  if (!definition?.preflight) {
+    throw new Error(`No preflight is defined for ${source.site} sources`)
   }
-  if (source.site === 'coomerfans') {
-    return preflightCoomerFansSource(source, page, {
-      fetchHtml,
-      fetchJson,
-      logger: console,
-    })
-  }
-  if (source.site === 'tumblr') {
-    return preflightTumblrAdapterSource(source, page, {
-      fetchJson,
-      pageSize: TUMBLR_PAGE_SIZE,
-    })
-  }
-  return preflightCoomerKemonoSource(source, page, {
-    fetchJson,
-    pageSize: API_PAGE_SIZE,
-  })
+  return definition.preflight(source, page, getAdapterContext())
 }
 
 async function resolveKemonoCreatorIdForJson(source) {
@@ -1376,68 +1311,16 @@ function getBrowserOptionsForSource(source, browserOptions = {}) {
 }
 
 async function fetchPosts(source, options, deps = {}) {
-  const pageLogger = createStatusLineLogger(console)
-  if (source.site === 'coomerfans') {
-    return fetchCoomerFansAdapterPosts(source, options, {
-      fetchHtml: deps.fetchHtml || fetchHtml,
-      fetchJson,
-      fullSourceRefresh: deps.fullSourceRefresh,
-      logger: pageLogger,
-      sourceFrontier: deps.sourceFrontier,
-      sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
-    })
+  const definition = getSourceDefinition(source)
+  if (!definition?.fetchPosts) {
+    throw new Error(`No post fetcher is defined for ${source.site} sources`)
   }
-  if (source.site === 'reddit') {
-    const redditDeps = {
-      fetchHtml,
-      fetchJson,
-      fetchPostHtml: deps.fetchPostHtml,
-      fetchPostText: deps.fetchPostText,
-      fallbackDelayMs: deps.fallbackDelayMs,
-      redditFullRefresh: deps.redditFullRefresh,
-      redditIncrementalOverlapPosts: deps.redditIncrementalOverlapPosts,
-      redditSourceState: deps.redditSourceState,
-      galleryCache: deps.galleryCache,
-      onGalleryHydrated: deps.onGalleryHydrated,
-      onDiscoveryProgress: deps.onDiscoveryProgress,
-      onListingPage: deps.onListingPage,
-      appendRunEvent,
-      logger: pageLogger,
-      normalizeUrl: normalizeSeenUrl,
-      pageSize: REDDIT_PAGE_SIZE,
-      redgifsClient,
-      suppressIncrementalLog: true,
-    }
-    return Array.isArray(deps.knownGalleryPosts)
-      ? fetchKnownRedditGalleryPosts(
-          source,
-          deps.knownGalleryPosts,
-          options,
-          redditDeps
-        )
-      : fetchRedditAdapterPosts(source, options, redditDeps)
-  }
-  if (source.site === 'tumblr') {
-    return fetchTumblrAdapterPosts(source, options, {
-      fetchJson,
-      fullSourceRefresh: deps.fullSourceRefresh,
-      logger: pageLogger,
-      sourceFrontier: deps.sourceFrontier,
-      sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
-      pageSize: TUMBLR_PAGE_SIZE,
-    })
-  }
-
-  return fetchCoomerKemonoPosts(source, options, {
-    fetchJson,
-    fullSourceRefresh: deps.fullSourceRefresh,
-    logger: pageLogger,
-    normalizeUrl: normalizeSeenUrl,
-    pageSize: API_PAGE_SIZE,
-    postConcurrency: isPawchiveUrl(source.origin) ? 1 : options.postConcurrency,
-    sourceFrontier: deps.sourceFrontier,
-    sourceIncrementalOverlapPages: deps.sourceIncrementalOverlapPages,
-  })
+  return definition.fetchPosts(
+    source,
+    options,
+    deps,
+    getAdapterContext({ logger: createStatusLineLogger(console) })
+  )
 }
 
 function createKnownRedditGalleryContext(modelLogDir, source) {
@@ -2269,13 +2152,14 @@ async function run(argvInput = process.argv.slice(2)) {
     useBrowserMedia,
     runOptions
   )
+  const sourceDefaults = getSourceDefinition(source)?.defaults || {}
   const imageConcurrency = parsePositiveInteger(
     runOptions.imageConcurrency || process.env.HOGHAUL_IMAGE_CONCURRENCY,
-    source.site === 'coomerfans' ? 3 : 6
+    sourceDefaults.imageConcurrency || 6
   )
   const postConcurrency = parsePositiveInteger(
     runOptions.postConcurrency || process.env.HOGHAUL_POST_CONCURRENCY,
-    source.site === 'coomerfans' ? 8 : source.origin === PAWCHIVE_ORIGIN ? 4 : 1
+    sourceDefaults.postConcurrency || 1
   )
   const videoConcurrency = parsePositiveInteger(
     runOptions.videoConcurrency || process.env.HOGHAUL_VIDEO_CONCURRENCY,
