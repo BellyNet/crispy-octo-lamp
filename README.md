@@ -11,6 +11,17 @@ All paths come from [scrapyard/config.js](scrapyard/config.js); override them in
 - Default NAS dataset root: `Z:\dataset` (`NAS_DATASET_DIR`)
 - Model registry: [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`)
 
+## Deploying the NAS dashboard
+
+```powershell
+.\deploy-dashboard.ps1            # deploy the commit checked out here
+.\deploy-dashboard.ps1 -Rollback  # switch back to the previous deploy
+```
+
+The script packages the current commit (`git archive`, so uncommitted changes are not included), builds it on the NAS, keeps the previous deploy at `/share/Vault69/slopvault-dashboard.prev`, and restarts the container. The container runs as the share user (uid 1000), and each deploy hands any root-owned files in the dataset and dashboard cache back to that user, so the PC can always read and modify them over SMB.
+
+The login password lives in `/share/Vault69/slopvault-dashboard/.env` as `DASHBOARD_PASSWORD`; the script asks for it the first time. One-time setup for passwordless SSH: `.\setup-deploy-ssh.ps1`.
+
 ## Adding a scrape source
 
 Every source is one entry in [scrapyard/sources.js](scrapyard/sources.js). The router, the all-source runner, the registry, the scraper and both dashboards read from that list.

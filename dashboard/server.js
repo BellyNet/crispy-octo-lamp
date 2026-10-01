@@ -32,7 +32,11 @@ const registryPath = path.join(__dirname, '..', 'model_aliases.json')
 
 const app = express()
 const PORT = process.env.DASHBOARD_PORT || 3420
-const PASSWORD = process.env.DASHBOARD_PASSWORD || 'gitgut'
+const PASSWORD = process.env.DASHBOARD_PASSWORD || ''
+if (!PASSWORD) {
+  console.error('DASHBOARD_PASSWORD is not set; refusing to start without one.')
+  process.exit(1)
+}
 const AUTH_COOKIE = 'dashboard_auth'
 const AUTH_TOKEN = crypto.createHash('sha256').update(PASSWORD).digest('hex')
 

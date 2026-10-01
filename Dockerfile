@@ -39,4 +39,6 @@ ENV DASHBOARD_PORT=3420
 ENV NODE_ENV=production
 
 EXPOSE 3420
-CMD ["node", "dashboard/server.js"]
+# Group-writable files (umask 0002) so the PC, which writes to the same share
+# as the same group, can modify what the dashboard creates.
+CMD ["sh", "-c", "umask 0002 && exec node dashboard/server.js"]

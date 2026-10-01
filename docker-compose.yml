@@ -2,6 +2,11 @@ services:
   dashboard:
     build: .
     restart: unless-stopped
+    # Run as the NAS share user (tjegan:everyone) rather than root, so files
+    # the dashboard creates (transcodes, remuxes, cache) stay readable and
+    # writable from the PC over SMB. deploy-dashboard.ps1 hands any existing
+    # root-owned files back to this user before starting the container.
+    user: '1000:100'
     ports:
       - '3420:3420'
     volumes:
@@ -24,7 +29,9 @@ services:
       DATASET_DIR: /data/dataset
       THUMB_DIR: /data/thumbs
       DASHBOARD_PORT: 3420
-      DASHBOARD_PASSWORD: gitgut
+      # Kept out of the repo: set DASHBOARD_PASSWORD in the .env file next to
+      # this compose file on the NAS (deploy-dashboard.ps1 prompts for it).
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Set DASHBOARD_PASSWORD in .env next to docker-compose.yml}
       # Bump the mobile-variant encoder from the default 2 parallel to
       # 6. On a QNAP with the dataset on its own disk, 2 workers were
       # taking 27-48 hours per full nightly pass — nowhere near
