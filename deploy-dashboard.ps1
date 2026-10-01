@@ -42,15 +42,18 @@ mkdir -p "$DOCKER_CONFIG"
 '@
 
 # Runs a shell script on the NAS, streaming its output. Returns the exit code.
-# The script travels base64-encoded: Windows PowerShell 5.1 mangles double
-# quotes in native-command arguments, and piping via stdin adds CRLFs.
+# The script travels base64-encoded (Windows PowerShell 5.1 mangles double
+# quotes in native-command arguments, and piping via stdin adds CRLFs) and
+# runs from a temp file with no stdin: fed to `sh` on stdin, anything that
+# reads stdin (docker compose run) swallowed the rest of the script.
 # ssh's stderr (BuildKit progress, warnings) must not trip $ErrorActionPreference.
 function Invoke-Remote([string]$Script) {
   $bytes = [Text.Encoding]::UTF8.GetBytes(($Script -replace "`r", ''))
   $encoded = [Convert]::ToBase64String($bytes)
+  $remote = "f=`$(mktemp) && printf %s $encoded | base64 -d > `$f && sh `$f </dev/null; rc=`$?; rm -f `$f; exit `$rc"
   $saved = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
-  & ssh @SshOptions $Target "printf %s $encoded | base64 -d | sh" | Out-Host
+  & ssh @SshOptions $Target $remote | Out-Host
   $code = $LASTEXITCODE
   $ErrorActionPreference = $saved
   return $code
@@ -163,17 +166,19 @@ mv "`$NEXT" "`$DEST"
 cd "`$DEST"
 
 echo "[remote] Handing root-owned files to the share user (1000:100)..."
-`$DOCKER compose -p $Project run --rm --no-deps --user 0:0 --entrypoint sh dashboard -c '
+`$DOCKER compose -p $Project run --rm -T --no-deps --user 0:0 --entrypoint sh dashboard -c '
   chown -R 1000:100 /data/thumbs &&
   chmod -R u+rwX,g+rwX,o+rX /data/thumbs &&
   find /data/dataset -xdev -user 0 -exec chown 1000:100 {} + &&
-  echo "[remote] ownership ok"'
+  echo "[remote] ownership ok"' </dev/null
 
 echo "[remote] [4/4] Starting the dashboard..."
 `$DOCKER compose -p $Project up -d --force-recreate
 `$DOCKER compose -p $Project ps
 sleep 3
 `$DOCKER compose -p $Project logs --tail=20
+# Only reached if every step above succeeded (set -e).
+echo DEPLOY_COMPLETE
 "@
 
 $code = Invoke-Remote $remoteScript
