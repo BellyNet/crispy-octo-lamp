@@ -4,10 +4,21 @@ This repo is the local control center for collecting, repairing, reviewing, hash
 
 ## Paths
 
-- Local dataset root: `%APPDATA%\.slopvault\dataset`
-- Local quarantine root: `%APPDATA%\.slopvault\quarantine`
-- Default NAS dataset root: `Z:\dataset`
-- Model registry: [model_aliases.json](/C:/Users/jagsr/.codex/worktrees/5ed8/LoRA-Training/model_aliases.json)
+All paths come from [scrapyard/config.js](scrapyard/config.js); override them in the environment or `.env`.
+
+- Local dataset root: `%APPDATA%\.slopvault\dataset` (`DATASET_DIR` / `LOCAL_DATASET_DIR`)
+- Local quarantine root: `%APPDATA%\.slopvault\quarantine` (under `SLOPVAULT_ROOT`)
+- Default NAS dataset root: `Z:\dataset` (`NAS_DATASET_DIR`)
+- Model registry: [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`)
+
+## Adding a scrape source
+
+Every source is one entry in [scrapyard/sources.js](scrapyard/sources.js). The router, the all-source runner, the registry, the scraper and both dashboards read from that list.
+
+1. Write the adapter in `scrapyard/sourceAdapters/<name>.js`. It needs a `preflight` (fetch one page, report post count) and a `fetchPosts` that returns posts with `mediaEntries`. `tumblr.js` is the smallest example.
+2. Add an entry to `SOURCES` in `scrapyard/sources.js`: `id`, `label`, `site` (written into sidecars, so never rename it later), `registryKey`, `runLabel`, `letter`, `engine: 'hoghaul'`, `runOrder`, `matchesHost`, `parseUrl`, and `preflight` / `fetchPosts` wrappers that pass the adapter what it needs from `ctx` (shared helpers like `fetchJson`) and `deps` (per-run state). Optional: `defaults`, `useBrowserMedia`, `searchUrl`, `mediaEntriesFromPost`.
+3. Add a sample URL for it to `SAMPLE_URLS` in `scrapyard/testSources.js` and run `npm test`.
+4. Try it: `npm run scrape -- "<url>" --preflight --skip-nas-sync`.
 
 ## Common Workflows
 
