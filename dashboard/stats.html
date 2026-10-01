@@ -94,6 +94,9 @@
         gap: 14px;
         margin-bottom: 14px;
       }
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
       .card {
         background: var(--card-bg);
         border: 1px solid var(--border);
@@ -302,7 +305,8 @@
         body {
           padding: 16px 16px 48px;
         }
-        .grid {
+        .grid,
+        .grid.two {
           grid-template-columns: minmax(0, 1fr);
         }
         .tiles {
@@ -344,8 +348,18 @@
       </section>
       <section class="card">
         <h2>Most active</h2>
-        <div class="sub">Files added in the last 30 days (last 7 in grey)</div>
+        <div class="sub">
+          Files added in the last 30 days (last 7 in grey), not counting a
+          model's first scrape
+        </div>
         <div id="rank-mostActive"></div>
+      </section>
+      <section class="card">
+        <h2>New models</h2>
+        <div class="sub">
+          First scraped in the last 30 days, with file count
+        </div>
+        <div id="rank-newModels"></div>
       </section>
       <section class="card">
         <h2>New since your last visit</h2>
@@ -374,11 +388,6 @@
         <div class="sub">Total size per model</div>
         <div id="rank-largestSize"></div>
       </section>
-      <section class="card">
-        <h2>Files by source</h2>
-        <div class="sub">Where each file was scraped from</div>
-        <div id="sources"></div>
-      </section>
     </div>
 
     <section class="card wide">
@@ -389,7 +398,12 @@
       <div class="chart" id="year-chart"></div>
     </section>
 
-    <div class="grid">
+    <div class="grid two">
+      <section class="card">
+        <h2>Files by source</h2>
+        <div class="sub">Where each file was scraped from</div>
+        <div id="sources"></div>
+      </section>
       <section class="card">
         <h2>Files by type</h2>
         <div class="sub">Count, with size on disk in grey</div>
@@ -719,8 +733,15 @@
           (r) =>
             `${formatCount(r.value)}<small>${formatCount(r.added7d)}</small>`,
           {
-            emptyText: 'Nothing added in the last 30 days.',
+            emptyText: 'No new files for existing models in the last 30 days.',
           }
+        )
+        renderRanking(
+          'rank-newModels',
+          rankings.newModels,
+          (r) =>
+            `${formatCount(r.value)}<small>${formatAgo(r.firstAddedMs)}</small>`,
+          { emptyText: 'No new models in the last 30 days.' }
         )
         renderRanking(
           'rank-newSinceLastVisit',

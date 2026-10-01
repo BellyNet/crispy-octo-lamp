@@ -37,7 +37,11 @@ function computeStatsFromResponse(allMedia) {
   const typeCounts = { image: 0, gif: 0, video: 0 }
   const siteCounts = {}
   const addedByDay = {}
+  // Same, minus the model's first scrape, so "Most active" isn't topped by
+  // whichever models were just added.
+  const activityByDay = {}
   const addedCutoffMs = Date.now() - STATS_ADDED_HISTORY_DAYS * DAY_MS
+  const { firstAddedMs, firstRunEndMs } = getFirstRun(allMedia)
   let videoSeconds = 0
   let flaggedCount = 0
   let captionCount = 0
@@ -50,6 +54,9 @@ function computeStatsFromResponse(allMedia) {
     if (m.addedMs >= addedCutoffMs) {
       const day = new Date(m.addedMs).toISOString().slice(0, 10)
       addedByDay[day] = (addedByDay[day] || 0) + 1
+      if (m.addedMs > firstRunEndMs) {
+        activityByDay[day] = (activityByDay[day] || 0) + 1
+      }
     }
     if (m.type === 'video' && m.duration > 0) {
       videoSeconds += m.duration
@@ -87,12 +94,33 @@ function computeStatsFromResponse(allMedia) {
     typeCounts,
     siteCounts,
     addedByDay,
+    activityByDay,
+    firstAddedMs,
     videoSeconds,
     flaggedCount,
     captionCount,
     largestFiles,
     longestVideos,
   }
+}
+
+// A model's first scrape is the opening burst of files: from its first file
+// until a gap longer than FIRST_RUN_GAP_MS. Nightly runs are ~24 h apart, so
+// 6 h separates runs while tolerating slow downloads within one.
+const FIRST_RUN_GAP_MS = 6 * 60 * 60 * 1000
+
+function getFirstRun(allMedia) {
+  const addedTimes = allMedia
+    .map((m) => m.addedMs || 0)
+    .filter((ms) => ms > 0)
+    .sort((a, b) => a - b)
+  if (!addedTimes.length) return { firstAddedMs: 0, firstRunEndMs: 0 }
+  let firstRunEndMs = addedTimes[0]
+  for (const ms of addedTimes) {
+    if (ms - firstRunEndMs > FIRST_RUN_GAP_MS) break
+    firstRunEndMs = ms
+  }
+  return { firstAddedMs: addedTimes[0], firstRunEndMs }
 }
 
 // Enough per-day history for the stats page's 26-week chart.
@@ -230,6 +258,8 @@ function buildStatsPayload({
 
     m.added7d = sumDaysSince(s.addedByDay, sevenKey)
     m.added30d = sumDaysSince(s.addedByDay, thirtyKey)
+    m.active7d = sumDaysSince(s.activityByDay, sevenKey)
+    m.active30d = sumDaysSince(s.activityByDay, thirtyKey)
     totals.addedLast7d += m.added7d
     totals.addedLast30d += m.added30d
 
@@ -270,9 +300,15 @@ function buildStatsPayload({
     trending: topBy(models, (m) => m.recentViews || 0).map((m) =>
       row(m, m.recentViews)
     ),
-    mostActive: topBy(scanned, (m) => m.added30d || 0).map((m) =>
-      row(m, m.added30d, { added7d: m.added7d })
+    mostActive: topBy(scanned, (m) => m.active30d || 0).map((m) =>
+      row(m, m.active30d, { added7d: m.active7d })
     ),
+    newModels: withFiles
+      .filter((m) => (m.stats.firstAddedMs || 0) >= now - 30 * DAY_MS)
+      .sort((a, b) => b.stats.firstAddedMs - a.stats.firstAddedMs)
+      .map((m) =>
+        row(m, m.stats.fileCount, { firstAddedMs: m.stats.firstAddedMs })
+      ),
     newSinceLastVisit: topBy(scanned, (m) => m.newSinceVisit || 0).map((m) =>
       row(m, m.newSinceVisit, { lastVisitedAt: m.visits.lastVisitedAt })
     ),
