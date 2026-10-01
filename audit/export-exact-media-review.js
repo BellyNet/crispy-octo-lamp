@@ -42,7 +42,14 @@ for (const group of audit.duplicateGroups) {
     const validModelPath = !record.modelName.startsWith('.') &&
       ['images', 'gif', 'webm'].includes(record.bucket)
     if (!validModelPath) { excludedTrashRecords++; return false }
-    const live = !liveOnly || record.locations.some((location) => fs.existsSync(location.absolutePath))
+    const live = !liveOnly || record.locations.some((location) => {
+      try {
+        const stat = fs.statSync(location.absolutePath)
+        return stat.isFile() && stat.size === group.sizeBytes
+      } catch {
+        return false
+      }
+    })
     if (!live) removedSinceAuditRecords++
     return live
   })

@@ -120,7 +120,7 @@
           ['Audited', new Date(report.auditedAt).toLocaleString()],
           ['Physical files checked in audit', s.physicalFilesIndexed.toLocaleString()],
           ['Archive records excluded', s.excludedTrashRecords.toLocaleString()],
-          ['Paths removed since audit', s.removedSinceAuditRecords.toLocaleString()],
+          ['Paths missing or changed since audit', s.removedSinceAuditRecords.toLocaleString()],
           ['Same-model groups', s.sameModelDuplicateGroups.toLocaleString()],
           ['Redundant same-model paths', s.sameModelRedundantCopies.toLocaleString()],
           ['Potential space', formatBytes(s.conservativeReclaimableBytes)],
