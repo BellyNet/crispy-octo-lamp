@@ -18,6 +18,7 @@ const {
   upsertSourceInfo,
 } = require('../scrapyard/modelRegistry')
 const { parseSourceUrl } = require('../scrapyard/sourceRouter')
+const { REGISTRY_KEY_RUN_ORDER } = require('../scrapyard/sources')
 const {
   readFreshModelRunSummary,
   summarizeSourceRunSummary,
@@ -70,13 +71,7 @@ const historyDir = path.join(__dirname, 'data')
 const runHistoryPath = path.join(historyDir, 'run-history.json')
 const ONLYHAVEN_ORIGIN = 'https://cum.st'
 
-const SOURCE_KEYS = [
-  'reddit',
-  'kemono',
-  'coomer',
-  'stufferdb',
-  'tumblr',
-]
+const SOURCE_KEYS = REGISTRY_KEY_RUN_ORDER
 const HISTORY_VERSION = 2
 const JOB_LOG_LIMIT = 2500
 const jobs = new Map()

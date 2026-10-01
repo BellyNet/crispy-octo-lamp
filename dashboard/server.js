@@ -13,6 +13,12 @@ const sharp = require('sharp')
 const execFileAsync = promisify(execFile)
 const mediaDates = require('../scrapyard/mediaDates.js')
 const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
+const {
+  REGISTRY_KEY_RUN_ORDER,
+  describeSourceLink,
+  findSourceForSite,
+  listSourcesForClient,
+} = require('../scrapyard/sources.js')
 const { transcodeWebmInUserDir } = require('../scrapyard/transcodeWebm.js')
 const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
 const MetaCache = require('./meta-cache.js')
@@ -242,17 +248,25 @@ async function generatePreviewGif(videoPath, gifPath) {
 }
 
 // ─── REGISTRY SOURCES ────────────────────────────────────────────────────────
-// Build a map of username → { coomer, kemono, stufferdb, tumblr, reddit }
-// from model_aliases.json so the /api/users route can include source links.
-// Called on every /api/users request — loadModelRegistry does a fresh fs.readFileSync
-// each time, so changes to the bind-mounted file are picked up immediately.
-const SOURCE_PLATFORMS = [
-  'coomer',
-  'kemono',
-  'stufferdb',
-  'tumblr',
-  'reddit',
-]
+// Build a map of username → { <registry key>: [urls] } from
+// model_aliases.json so the /api/users route can include source links. The
+// keys come from scrapyard/sources.js, so a new source shows up here too.
+const SOURCE_PLATFORMS = REGISTRY_KEY_RUN_ORDER
+
+// "Reddit · u/name"-style labels for a model's source links, memoized per URL.
+const sourceLinkCache = new Map()
+function getSourceLinks(sources = {}) {
+  const links = []
+  for (const key of SOURCE_PLATFORMS) {
+    for (const url of sources[key] || []) {
+      if (!sourceLinkCache.has(url)) {
+        sourceLinkCache.set(url, describeSourceLink(url))
+      }
+      links.push(sourceLinkCache.get(url))
+    }
+  }
+  return links
+}
 
 // Cached source map — rebuilt only when model_aliases.json mtime changes.
 // loadModelRegistry was previously called on every /api/users request, doing a
@@ -769,28 +783,14 @@ async function processFileForResponse(username, userDir, item) {
   }
 }
 
-// The scrapers record OnlyHaven (cum.st) media as site 'coomerfans' —
-// it's routed through the coomerfans adapter, and the scrape-side
-// frontier/legacy bookkeeping keys off that. For display, tell them apart
-// by the post/media URL host so the badge and source filter show which
-// site each file actually came from (works for already-scraped files too).
-function isOnlyHavenUrl(value) {
-  try {
-    const host = new URL(value).hostname.toLowerCase()
-    return host === 'cum.st' || host.endsWith('.cum.st')
-  } catch {
-    return false
-  }
-}
+// Sidecars record the scraper's internal `site`. Some sites are shared by
+// several sources (OnlyHaven and legacy CoomerFans are both 'coomerfans'),
+// so resolve the display source id by the post/media URL host. Works for
+// already-scraped files too.
 function displaySiteForSource(src) {
   const site = typeof src.site === 'string' ? src.site : null
-  if (
-    site === 'coomerfans' &&
-    [src.mediaPageUrl, src.mediaUrl].some(isOnlyHavenUrl)
-  ) {
-    return 'onlyhaven'
-  }
-  return site
+  if (!site) return null
+  return findSourceForSite(site, [src.mediaPageUrl, src.mediaUrl])?.id || site
 }
 
 // Returns { stats, response, source: 'memory' | 'disk' | 'scan' }.
@@ -1050,6 +1050,12 @@ function getFeaturedModel(allModelNames) {
 
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 
+// Source labels/badges for the pages, loaded before their main script.
+app.get('/sources.js', (_req, res) => {
+  res.type('application/javascript')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.send(`window.SOURCE_LIST = ${JSON.stringify(listSourcesForClient())}\n`)
+})
 app.use(express.static(__dirname))
 app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 app.get('/admin', (_req, res) =>
@@ -1129,10 +1135,10 @@ app.get('/api/users', async (_req, res) => {
     const empty = Object.fromEntries(SOURCE_PLATFORMS.map((p) => [p, []]))
     const users = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => ({
-        name: e.name,
-        sources: sourceMap[e.name] || { ...empty },
-      }))
+      .map((e) => {
+        const sources = sourceMap[e.name] || { ...empty }
+        return { name: e.name, sources, sourceLinks: getSourceLinks(sources) }
+      })
       .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
       )

@@ -10,6 +10,7 @@ const {
   REGISTRY_KEY_RUN_ORDER,
   findSourceForSite,
   getRegistryKeyForSite,
+  describeSourceLink,
   listSourcesForClient,
 } = require('./sources')
 const { PAWCHIVE_ORIGIN } = require('./pawchive')
@@ -64,7 +65,28 @@ assert.strictEqual(
   findSourceForSite('coomerfans', ['https://coomerfans.com/x']).id,
   'coomerfans'
 )
-assert.ok(listSourcesForClient().every((source) => source.id && source.label))
+const clientList = listSourcesForClient()
+assert.ok(clientList.sources.every((source) => source.id && source.label))
+assert.deepStrictEqual(
+  clientList.registryKeys.map(({ key, letter }) => `${key}:${letter}`),
+  ['reddit:R', 'kemono:K', 'coomer:OF', 'stufferdb:S', 'tumblr:T']
+)
+assert.deepStrictEqual(
+  [
+    'https://www.reddit.com/user/abc/submitted/',
+    'https://pawchive.pw/patreon/user/1',
+    'https://cum.st/creators/onlyfans/12',
+    'https://bubsxl.tumblr.com/',
+    'https://example.com/x',
+  ].map((url) => describeSourceLink(url).label),
+  [
+    'Reddit · u/abc',
+    'Pawchive · Patreon',
+    'OnlyHaven · OnlyFans',
+    'Tumblr · bubsxl',
+    'example.com',
+  ]
+)
 
 // Stub every adapter function and record what each definition passes.
 const calls = []

@@ -13,7 +13,8 @@
 //                 legacy CoomerFans share 'coomerfans' for that reason.
 //   registryKey   model_aliases.json `sources.<key>` list this source lives in
 //   runLabel      short name used in runner logs ("-- SOURCE 1/3: x -> label")
-//   letter        one-letter badge used by the dashboard source dots
+//   letter        short badge for the dashboard's per-registry-key source
+//                 dots (sources sharing a registry key share a letter)
 //   engine        'hoghaul' (unified post scraper) or 'milkmaid' (StufferDB)
 //   matchesHost   (hostname) => boolean, checked in list order
 //   parseUrl      (URL, hostname) => source fields; throws a descriptive
@@ -194,7 +195,7 @@ const SOURCES = [
     site: 'coomerfans',
     registryKey: 'coomer',
     runLabel: 'coomerfans',
-    letter: 'C',
+    letter: 'OF',
     engine: 'hoghaul',
     runOrder: 3,
     matchesHost: (host) => host.includes('coomerfans'),
@@ -237,7 +238,7 @@ const SOURCES = [
     site: 'coomerfans',
     registryKey: 'coomer',
     runLabel: 'coomerfans',
-    letter: 'O',
+    letter: 'OF',
     engine: 'hoghaul',
     runOrder: 3,
     matchesHost: isOnlyHavenHost,
@@ -281,7 +282,7 @@ const SOURCES = [
     site: 'coomer',
     registryKey: 'coomer',
     runLabel: 'coomer',
-    letter: 'C',
+    letter: 'OF',
     engine: 'hoghaul',
     runOrder: 3,
     matchesHost: (host) => host.includes('coomer'),
@@ -523,15 +524,63 @@ const REGISTRY_KEY_RUN_ORDER = [
   ),
 ]
 
-// What the dashboards need to render labels, badges and search links.
+// Display names for the creator platforms in Coomer/Pawchive/OnlyHaven URLs.
+const SERVICE_LABELS = {
+  onlyfans: 'OnlyFans',
+  fansly: 'Fansly',
+  patreon: 'Patreon',
+  fanbox: 'Fanbox',
+  candfans: 'C&F',
+  subscribestar: 'SubStar',
+  gumroad: 'Gumroad',
+  afdian: 'Afdian',
+  boosty: 'Boosty',
+  discord: 'Discord',
+  fantia: 'Fantia',
+  dlsite: 'DLsite',
+}
+
+// { url, label, sourceId } for a registry source URL, e.g. "Reddit · u/name"
+// or "Pawchive · Patreon". Unknown hosts fall back to the hostname.
+function describeSourceLink(url) {
+  const { parseSourceUrl } = require('./sourceRouter')
+  const parsed = parseSourceUrl(url)
+  const source = parsed ? findSourceForParsed(parsed) : findSourceForUrl(url)
+  if (!source) return { url, label: hostOf(url) || url, sourceId: null }
+
+  let detail = ''
+  if (source.id === 'reddit' && parsed?.username) {
+    detail = `u/${parsed.username}`
+  } else if (source.id === 'tumblr' && parsed?.username) {
+    detail = parsed.username
+  } else if (parsed?.service && source.registryKey !== 'reddit') {
+    detail = SERVICE_LABELS[parsed.service] || parsed.service
+  }
+  return {
+    url,
+    label: detail ? `${source.label} · ${detail}` : source.label,
+    sourceId: source.id,
+  }
+}
+
+// What the dashboards need to render badges, filters and source dots.
 function listSourcesForClient() {
-  return SOURCES.map((source) => ({
-    id: source.id,
-    label: source.label,
-    site: source.site || source.id,
-    registryKey: source.registryKey,
-    letter: source.letter,
-  }))
+  return {
+    sources: SOURCES.map((source) => ({
+      id: source.id,
+      label: source.label,
+      site: source.site || source.id,
+      registryKey: source.registryKey,
+    })),
+    registryKeys: REGISTRY_KEY_RUN_ORDER.map((key) => {
+      const members = SOURCES.filter((source) => source.registryKey === key)
+      return {
+        key,
+        letter: members[0].letter,
+        label: members.map((source) => source.label).join(' / '),
+      }
+    }),
+  }
 }
 
 module.exports = {
@@ -544,5 +593,6 @@ module.exports = {
   findSourceForParsed,
   getSourceById,
   getRegistryKeyForSite,
+  describeSourceLink,
   listSourcesForClient,
 }

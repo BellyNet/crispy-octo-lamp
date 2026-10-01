@@ -4,22 +4,18 @@
 // aggregates computeStatsFromResponse() keeps in modelStatsCache plus
 // visits.json — O(models) per request, never touches the dataset.
 
+const { SOURCES } = require('../scrapyard/sources.js')
+
 const DAY_MS = 24 * 60 * 60 * 1000
 const WEEKS_SHOWN = 26
 const TRENDING_WINDOW_DAYS = 14
 const RANKING_SIZE = 10
 const TOP_FILE_COUNT = 10
 
-// Display names for the `post.site` values the scrapers record. Files with
-// no sidecar metadata land under 'unknown'.
+// Display names for the source ids the server puts on item.post.site. Files
+// with no sidecar metadata land under 'unknown'.
 const SITE_LABELS = {
-  reddit: 'Reddit',
-  stufferdb: 'StufferDB',
-  coomerfans: 'CoomerFans',
-  onlyhaven: 'OnlyHaven',
-  kemono: 'Pawchive',
-  coomer: 'Coomer',
-  tumblr: 'Tumblr',
+  ...Object.fromEntries(SOURCES.map((source) => [source.id, source.label])),
   unknown: 'No source info',
 }
 

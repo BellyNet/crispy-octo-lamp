@@ -2727,6 +2727,8 @@
       </div>
     </div>
 
+    <!-- window.SOURCE_LIST: source labels/badges from scrapyard/sources.js -->
+    <script src="/sources.js"></script>
     <script>
       'use strict'
 
@@ -2955,7 +2957,9 @@
       }
 
       // ─── USERS ────────────────────────────────────────────────────────────
-      let usersData = [] // [{ name, sources }]
+      let usersData = [] // [{ name, sources, sourceLinks }]
+      // From /sources.js (scrapyard/sources.js); empty if it failed to load.
+      const SOURCE_LIST = window.SOURCE_LIST || { sources: [], registryKeys: [] }
 
       async function loadUsers() {
         const res = await fetch('/api/users')
@@ -3306,17 +3310,12 @@
 
           const srcs = document.createElement('div')
           srcs.className = 'home-card-sources'
-          for (const [key, label] of [
-            ['coomer', 'OF'],
-            ['kemono', 'K'],
-            ['stufferdb', 'S'],
-            ['tumblr', 'T'],
-            ['reddit', 'R'],
-          ]) {
+          for (const { key, letter, label } of SOURCE_LIST.registryKeys) {
             const dot = document.createElement('span')
             dot.className =
               'home-src-dot' + (u.sources?.[key]?.length ? ' has-source' : '')
-            dot.textContent = label
+            dot.textContent = letter
+            dot.title = label
             srcs.appendChild(dot)
           }
 
@@ -3545,117 +3544,26 @@
 
       const LINK_ICON = `<svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3H3a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V7"/><polyline points="8 1 11 1 11 4"/><line x1="5" y1="7" x2="11" y2="1"/></svg>`
 
-      const SERVICE_LABELS = {
-        onlyfans: 'OnlyFans',
-        fansly: 'Fansly',
-        patreon: 'Patreon',
-        fanbox: 'Fanbox',
-        candfans: 'C&F',
-        subscribestar: 'SubStar',
-        gumroad: 'Gumroad',
-        afdian: 'Afdian',
-        boosty: 'Boosty',
-        discord: 'Discord',
-        fantia: 'Fantia',
-        dlsite: 'DLsite',
-      }
-
-      // platform → short display prefix shown before the service name
-      const PLATFORM_PREFIX = {
-        coomer: '', // coomer URLs already carry the service name
-        kemono: 'K·',
-        stufferdb: '',
-        tumblr: '',
-        reddit: '',
-      }
-
-      // The registry's `coomer` list mixes three sites with different URL
-      // shapes — coomer.su (/onlyfans/user/x), coomerfans.com
-      // (/u/onlyfans/id/x) and OnlyHaven cum.st (/creators/onlyfans/id).
-      // Name the site so it's clear which link is which. Returns null for
-      // plain coomer URLs, which keep the bare service label.
-      function coomerSourceLabel(url) {
-        let host = ''
-        let parts = []
-        try {
-          const u = new URL(url)
-          host = u.hostname.toLowerCase()
-          parts = u.pathname.split('/').filter(Boolean)
-        } catch {
-          return null
-        }
-        const svc = (s) => SERVICE_LABELS[s] || s || ''
-        if (host === 'cum.st' || host.endsWith('.cum.st')) {
-          const service = parts[0] === 'creators' ? parts[1] : null
-          return `OnlyHaven${service ? '·' + svc(service) : ''}`
-        }
-        if (host.includes('coomerfans')) {
-          const service = parts[0] === 'u' ? parts[1] : null
-          return `CoomerFans${service ? '·' + svc(service) : ''}`
-        }
-        return null
-      }
-
-      function renderSourceLinks(sources) {
+      // links: [{ url, label }] from /api/users, labelled server-side by
+      // scrapyard/sources.js (e.g. "Reddit · u/name", "Pawchive · Patreon").
+      function renderSourceLinks(links) {
         sourceLinksEl.innerHTML = ''
-        if (!sources) return
-
-        for (const url of sources.stufferdb || []) {
+        for (const { url, label } of links || []) {
           const a = document.createElement('a')
           a.className = 'src-link'
           a.href = url
           a.target = '_blank'
           a.rel = 'noopener noreferrer'
-          a.innerHTML = `${LINK_ICON} StufferDB`
+          a.innerHTML = LINK_ICON
+          a.append(` ${label}`)
           sourceLinksEl.appendChild(a)
-        }
-
-
-        for (const url of sources.reddit || []) {
-          // www.reddit.com/user/<name>/submitted/ → "u/<name>"
-          const name = (url.match(/\/(?:user|u)\/([^/?#]+)/i) || [])[1]
-          const a = document.createElement('a')
-          a.className = 'src-link'
-          a.href = url
-          a.target = '_blank'
-          a.rel = 'noopener noreferrer'
-          a.innerHTML = `${LINK_ICON} Reddit`
-          if (name) a.append(` u/${decodeURIComponent(name)}`)
-          sourceLinksEl.appendChild(a)
-        }
-
-        for (const url of sources.tumblr || []) {
-          const a = document.createElement('a')
-          a.className = 'src-link'
-          a.href = url
-          a.target = '_blank'
-          a.rel = 'noopener noreferrer'
-          a.innerHTML = `${LINK_ICON} Tumblr`
-          sourceLinksEl.appendChild(a)
-        }
-
-        for (const [platform, prefix] of [
-          ['coomer', ''],
-          ['kemono', 'K·'],
-        ]) {
-          for (const url of sources[platform] || []) {
-            const label = platform === 'coomer' ? coomerSourceLabel(url) : null
-            const service = url.split('/')[3] || platform
-            const fallback = SERVICE_LABELS[service] || service
-            const a = document.createElement('a')
-            a.className = 'src-link'
-            a.href = url
-            a.target = '_blank'
-            a.rel = 'noopener noreferrer'
-            a.innerHTML = `${LINK_ICON} ${prefix}${label || fallback}`
-            sourceLinksEl.appendChild(a)
-          }
         }
       }
 
       async function selectUser(userObj, liEl, opts = {}) {
         const username = typeof userObj === 'string' ? userObj : userObj.name
-        const sources = typeof userObj === 'object' ? userObj.sources : null
+        const sourceLinks =
+          typeof userObj === 'object' ? userObj.sourceLinks : null
         closeSidebar()
         hideHomeView()
         if (!opts.skipHashUpdate) setHashRoute({ view: 'user', username })
@@ -3672,7 +3580,7 @@
         currentUsername = username
         markSeen(username)
         currentNameEl.textContent = username
-        renderSourceLinks(sources)
+        renderSourceLinks(sourceLinks)
 
         // Restore the user's last sort for this model. First-ever visit
         // defaults to 'added-desc' so freshly scraped media shows up at
@@ -4058,26 +3966,21 @@
       const DATE_FMT = { year: '2-digit', month: 'numeric', day: 'numeric' }
 
       // Origin-site labels for the small badge that replaced the
-      // date-source chip on cards. Keys match the `site` field set by
-      // the scrapers (see scrapyard/sourceAdapters/*). Anything not in
-      // this map falls back to the raw string with the `unknown` chip
-      // style so a new adapter still shows up somewhere.
-      const ORIGIN_LABELS = {
-        reddit: 'reddit',
-        stufferdb: 'stufferdb',
-        coomerfans: 'coomer',
-        onlyhaven: 'onlyhaven',
-        kemono: 'kemono',
-        tumblr: 'tumblr',
-      }
-      const ORIGIN_TIPS = {
-        reddit: 'Scraped from reddit',
-        stufferdb: 'Scraped from stufferdb',
-        coomerfans: 'Scraped from coomerfans',
-        onlyhaven: 'Scraped from onlyhaven (cum.st)',
-        kemono: 'Scraped from kemono',
-        tumblr: 'Scraped from tumblr',
-      }
+      // date-source chip on cards, keyed by the source id the server puts
+      // on item.post.site. Anything unknown falls back to the raw string
+      // with the `unknown` chip style so it still shows up somewhere.
+      const ORIGIN_LABELS = Object.fromEntries(
+        SOURCE_LIST.sources.map((source) => [
+          source.id,
+          source.label.toLowerCase(),
+        ])
+      )
+      const ORIGIN_TIPS = Object.fromEntries(
+        SOURCE_LIST.sources.map((source) => [
+          source.id,
+          `Scraped from ${source.label}`,
+        ])
+      )
       // Pull the origin site off an item — the scrapers write it into
       // .media-dates.json under `source.site`, and the server puts it
       // on item.post.site. Returns null when unknown.
