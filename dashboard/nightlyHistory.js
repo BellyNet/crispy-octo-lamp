@@ -1,7 +1,7 @@
 'use strict'
 
 // Persistent nightly-pass run history — THUMB_DIR/nightly-history.json.
-// Same lightweight pattern as visits.js: plain fs.writeFileSync, no deps.
+// Plain fs.writeFileSync, no deps.
 // Capped at MAX_ENTRIES so the file never grows unbounded.
 
 const fs = require('fs')

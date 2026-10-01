@@ -16,8 +16,6 @@ const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
 const { transcodeWebmInUserDir } = require('../scrapyard/transcodeWebm.js')
 const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
 const MetaCache = require('./meta-cache.js')
-const VisitTracker = require('./visits.js')
-const { buildDiscoverPayload } = require('./discover.js')
 const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
@@ -59,7 +57,6 @@ const MEDIA_EXTS = new Set([
 
 fs.mkdirSync(THUMB_DIR, { recursive: true })
 const metaCache = new MetaCache(THUMB_DIR)
-const visits = new VisitTracker(THUMB_DIR)
 const nightlyHistory = new NightlyHistory(THUMB_DIR)
 const runIndexStore = new RunIndex(THUMB_DIR)
 
@@ -1215,10 +1212,9 @@ app.get('/api/users', async (_req, res) => {
   }
 })
 
-// Discover panel — generated stats + a mixed discovery carousel. Pure
-// computation over visits.json/modelStatsCache; see dashboard/discover.js
-// for the actual logic.
-app.get('/api/discover', async (_req, res) => {
+// Home-page stat tiles — totals over modelStatsCache for the live model
+// directories (a fresh datasetDir listing, so removed models never count).
+app.get('/api/home-stats', async (_req, res) => {
   try {
     const entries = await fs.promises.readdir(datasetDir, {
       withFileTypes: true,
@@ -1226,14 +1222,23 @@ app.get('/api/discover', async (_req, res) => {
     const modelNames = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
       .map((e) => e.name)
+    const addedCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    let totalFiles = 0
+    let totalBytes = 0
+    let recentlyAddedCount = 0
+    for (const name of modelNames) {
+      const stats = modelStatsCache[name]
+      totalFiles += stats?.fileCount || 0
+      totalBytes += stats?.totalBytes || 0
+      if ((stats?.latestAddedMs || 0) >= addedCutoff) recentlyAddedCount += 1
+    }
     res.setHeader('Cache-Control', 'no-cache')
-    res.json(
-      buildDiscoverPayload({
-        modelNames,
-        statsByName: modelStatsCache,
-        visitsData: visits.getVisits(),
-      })
-    )
+    res.json({
+      totalModels: modelNames.length,
+      totalFiles,
+      totalBytes,
+      recentlyAddedCount,
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -1364,10 +1369,6 @@ app.get('/api/users/:username/media', async (req, res) => {
     // ~200 cards, the rest are likely already cached on disk.
     setImmediate(() => {
       warmGridThumbs(username, response)
-      // This route only fires from a real client-side model open
-      // (selectUser() in index.html) — internal jobs call scanModel()
-      // directly — so it's a safe place to record a Discover-panel visit.
-      visits.recordVisit(username)
     })
   } catch (err) {
     res.status(500).json({ error: err.message })

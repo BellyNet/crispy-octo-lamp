@@ -2203,102 +2203,30 @@
         border-color: var(--accent);
       }
 
-      /* ─── DISCOVER PANEL ─────────────────────────────────────── */
-      #discover-panel {
-        margin-bottom: 18px;
-      }
-      #discover-stats {
+      /* ─── HOME STAT TILES ────────────────────────────────────── */
+      #home-stats {
         display: flex;
         gap: 10px;
         flex-wrap: wrap;
-        margin-bottom: 14px;
+        margin-bottom: 18px;
       }
-      .discover-stat-tile {
+      .home-stat-tile {
         background: var(--card-bg);
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 8px 14px;
         min-width: 100px;
       }
-      .discover-stat-value {
+      .home-stat-value {
         font-size: 18px;
         font-weight: 700;
         color: var(--text);
       }
-      .discover-stat-label {
+      .home-stat-label {
         font-size: 10px;
         color: var(--muted);
         text-transform: uppercase;
         letter-spacing: 0.03em;
-      }
-      #discover-recs-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 8px;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-      }
-      #discover-updated {
-        font-size: 10px;
-        font-weight: 400;
-        color: var(--muted);
-      }
-      #discover-recs-row {
-        display: flex;
-        gap: 10px;
-        overflow-x: auto;
-        padding-bottom: 6px;
-      }
-      #discover-recs-row::-webkit-scrollbar {
-        height: 6px;
-      }
-      #discover-recs-row::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      #discover-recs-row::-webkit-scrollbar-thumb {
-        background: var(--border);
-        border-radius: 3px;
-      }
-      .discover-card {
-        flex: 0 0 140px;
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        overflow: hidden;
-        cursor: pointer;
-        transition:
-          transform 0.15s,
-          border-color 0.15s;
-      }
-      .discover-card:hover {
-        transform: translateY(-2px);
-        border-color: var(--accent);
-      }
-      .discover-card img {
-        width: 100%;
-        aspect-ratio: 1;
-        object-fit: cover;
-        display: block;
-        background: #0a0a10;
-      }
-      .discover-card-name {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--text);
-        padding: 6px 8px 2px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .discover-card-reason {
-        font-size: 10px;
-        color: var(--muted);
-        padding: 0 8px 6px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
       }
 
       /* HD toggle — mobile-only. Off = compressed 720p mp4s (default).
@@ -2734,13 +2662,7 @@
       <div id="grid-container">
         <!-- HOME VIEW: model card grid -->
         <div id="home-view">
-          <div id="discover-panel">
-            <div id="discover-stats"></div>
-            <div id="discover-recs-header">
-              <span>Discover</span>
-            </div>
-            <div id="discover-recs-row"></div>
-          </div>
+          <div id="home-stats"></div>
           <div id="home-sort-bar">
             <select id="home-sort-select" aria-label="Sort models">
               <option value="random" selected>Random ↻</option>
@@ -2940,8 +2862,7 @@
       const homeSizeBtns = document.querySelectorAll('.home-size-btn')
       const homeSortSelect = document.getElementById('home-sort-select')
       let homeSort = 'random'
-      const discoverStatsEl = document.getElementById('discover-stats')
-      const discoverRecsRowEl = document.getElementById('discover-recs-row')
+      const homeStatsEl = document.getElementById('home-stats')
 
       // ─── HELPERS ──────────────────────────────────────────────────────────
       function formatDate(iso) {
@@ -3203,7 +3124,7 @@
             renderUserList(usersData)
             if (homeVisible) renderHomeGrid()
           }
-          if (homeVisible) loadDiscover()
+          if (homeVisible) loadHomeStats()
         } catch {}
       }
 
@@ -3235,7 +3156,7 @@
         sourceLinksEl.innerHTML = ''
         if (!opts.skipHashUpdate) setHashRoute({ view: 'home' })
         renderHomeGrid()
-        loadDiscover()
+        loadHomeStats()
       }
 
       function hideHomeView() {
@@ -3463,17 +3384,14 @@
         }
       }
 
-      // ─── DISCOVER PANEL ───────────────────────────────────────────────────
-      // Generated stats + a mixed discovery carousel — not a chat, just plain
-      // arithmetic over /api/discover (visit counts and model stats, see
-      // dashboard/discover.js).
+      // ─── HOME STAT TILES ──────────────────────────────────────────────────
       function formatCount(n) {
         return (n || 0).toLocaleString()
       }
 
-      function renderDiscoverStats(stats) {
+      function renderHomeStats(stats) {
         if (!stats) {
-          discoverStatsEl.innerHTML = ''
+          homeStatsEl.innerHTML = ''
           return
         }
         const tiles = [
@@ -3482,71 +3400,23 @@
           ['Total size', formatFileSize(stats.totalBytes || 0) || '0 B'],
           ['Added this week', formatCount(stats.recentlyAddedCount)],
         ]
-        discoverStatsEl.innerHTML = tiles
+        homeStatsEl.innerHTML = tiles
           .map(
             ([label, value]) => `
-          <div class="discover-stat-tile">
-            <div class="discover-stat-value">${value}</div>
-            <div class="discover-stat-label">${label}</div>
+          <div class="home-stat-tile">
+            <div class="home-stat-value">${value}</div>
+            <div class="home-stat-label">${label}</div>
           </div>
         `
           )
           .join('')
       }
 
-      // Minimal card — deliberately NOT reusing renderHomeGrid()'s per-card
-      // logic (activity graph, source dots, etc.) since that function isn't
-      // factored into a reusable helper and these cards need far less detail.
-      function renderDiscoverRecs(list) {
-        discoverRecsRowEl.innerHTML = ''
-        if (!list || !list.length) return
-        for (const rec of list) {
-          const card = document.createElement('div')
-          card.className = 'discover-card'
-          card.addEventListener('click', () => selectUser(rec.name))
-
-          const img = document.createElement('img')
-          img.loading = 'lazy'
-          img.alt = rec.name
-          const known = usersData.find((u) => u.name === rec.name)
-          if (known?.cover) {
-            img.src =
-              known.cover.thumbUrl || known.cover.previewUrl || known.cover.url
-          } else {
-            fetch(`/api/users/${encodeURIComponent(rec.name)}/cover`)
-              .then((r) => (r.ok ? r.json() : null))
-              .then((cover) => {
-                if (cover)
-                  img.src = cover.thumbUrl || cover.previewUrl || cover.url
-              })
-              .catch(() => {})
-          }
-          img.onerror = () => {
-            img.style.opacity = '0.3'
-          }
-
-          const name = document.createElement('div')
-          name.className = 'discover-card-name'
-          name.textContent = rec.name
-
-          const reason = document.createElement('div')
-          reason.className = 'discover-card-reason'
-          reason.textContent = rec.reason
-
-          card.appendChild(img)
-          card.appendChild(name)
-          card.appendChild(reason)
-          discoverRecsRowEl.appendChild(card)
-        }
-      }
-
-      async function loadDiscover() {
+      async function loadHomeStats() {
         try {
-          const r = await fetch('/api/discover')
+          const r = await fetch('/api/home-stats')
           if (!r.ok) return
-          const d = await r.json()
-          renderDiscoverStats(d.stats)
-          renderDiscoverRecs(d.recommended)
+          renderHomeStats(await r.json())
         } catch {}
       }
 
