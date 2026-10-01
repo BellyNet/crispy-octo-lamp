@@ -2182,7 +2182,8 @@
         color: #ff6868;
         border-color: #c64646;
       }
-      #admin-link {
+      #admin-link,
+      #stats-link {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2197,7 +2198,8 @@
           color 0.15s,
           border-color 0.15s;
       }
-      #admin-link:hover {
+      #admin-link:hover,
+      #stats-link:hover {
         background: var(--card-bg);
         color: var(--text);
         border-color: var(--accent);
@@ -2586,6 +2588,23 @@
             <path d="M11.7 8.5v5" />
           </svg>
         </button>
+        <a id="stats-link" href="/stats" title="Stats" aria-label="Stats">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M4 20V10" />
+            <path d="M10 20V4" />
+            <path d="M16 20v-7" />
+            <path d="M22 20H2" />
+          </svg>
+        </a>
         <a
           id="admin-link"
           href="/admin"

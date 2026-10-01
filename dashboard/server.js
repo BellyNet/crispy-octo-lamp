@@ -16,6 +16,8 @@ const { loadModelRegistry } = require('../scrapyard/modelRegistry.js')
 const { transcodeWebmInUserDir } = require('../scrapyard/transcodeWebm.js')
 const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
 const MetaCache = require('./meta-cache.js')
+const VisitTracker = require('./visits.js')
+const { buildStatsPayload, computeStatsFromResponse } = require('./stats.js')
 const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
@@ -57,6 +59,7 @@ const MEDIA_EXTS = new Set([
 
 fs.mkdirSync(THUMB_DIR, { recursive: true })
 const metaCache = new MetaCache(THUMB_DIR)
+const visits = new VisitTracker(THUMB_DIR)
 const nightlyHistory = new NightlyHistory(THUMB_DIR)
 const runIndexStore = new RunIndex(THUMB_DIR)
 
@@ -482,45 +485,6 @@ const fingerprintCache = new Map()
 const imgLimit = pLimit(parseInt(process.env.SCAN_IMG_CONCURRENCY, 10) || 16)
 const vidLimit = pLimit(parseInt(process.env.SCAN_VID_CONCURRENCY, 10) || 4)
 const modelLimit = pLimit(parseInt(process.env.SCAN_MODEL_CONCURRENCY, 10) || 8)
-
-function computeStatsFromResponse(allMedia) {
-  let earliestMs = Infinity,
-    latestMs = 0,
-    latestAddedMs = 0,
-    totalBytes = 0,
-    bytesImages = 0,
-    bytesGifs = 0,
-    bytesVideos = 0
-  const yearCounts = {}
-  for (const m of allMedia) {
-    if (m.addedMs > latestAddedMs) latestAddedMs = m.addedMs
-    if (m.mediaDateMs) {
-      if (m.mediaDateMs < earliestMs) earliestMs = m.mediaDateMs
-      if (m.mediaDateMs > latestMs) latestMs = m.mediaDateMs
-    }
-    const dateMs = m.mediaDateMs || m.addedMs
-    if (dateMs > 0) {
-      const yr = new Date(dateMs).getFullYear()
-      if (yr >= 1990 && yr <= 2035) yearCounts[yr] = (yearCounts[yr] || 0) + 1
-    }
-    const sz = m.size || 0
-    totalBytes += sz
-    if (m.type === 'image') bytesImages += sz
-    else if (m.type === 'gif') bytesGifs += sz
-    else if (m.type === 'video') bytesVideos += sz
-  }
-  return {
-    earliestMs: earliestMs === Infinity ? 0 : earliestMs,
-    latestMs,
-    latestAddedMs,
-    fileCount: allMedia.length,
-    yearCounts,
-    totalBytes,
-    bytesImages,
-    bytesGifs,
-    bytesVideos,
-  }
-}
 
 // Sample up to N candidate items from a response — used to pick the daily cover
 // without holding the full response in memory after scan.
@@ -1092,6 +1056,9 @@ app.get('/', (_req, res) => res.sendFile('index.html', { root: __dirname }))
 app.get('/admin', (_req, res) =>
   res.sendFile('admin.html', { root: __dirname })
 )
+app.get('/stats', (_req, res) =>
+  res.sendFile('stats.html', { root: __dirname })
+)
 app.get('/admin/duplicates', (_req, res) =>
   res.sendFile('exact-duplicates.html', { root: __dirname })
 )
@@ -1244,6 +1211,34 @@ app.get('/api/home-stats', async (_req, res) => {
   }
 })
 
+// Stats page — aggregates over modelStatsCache and visits.json only, so it
+// costs O(models) per request and never touches the dataset.
+app.get('/api/stats', async (_req, res) => {
+  try {
+    const entries = await fs.promises.readdir(datasetDir, {
+      withFileTypes: true,
+    })
+    const modelNames = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+    res.setHeader('Cache-Control', 'no-cache')
+    res.json(
+      buildStatsPayload({
+        modelNames,
+        statsByName: modelStatsCache,
+        visitsData: visits.getVisits(),
+        scan: {
+          inProgress: scanState.inProgress,
+          modelsDone: scanState.modelsDone,
+          modelsTotal: scanState.modelsTotal,
+        },
+      })
+    )
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // Admin page — media added across every model, grouped into scrape "runs".
 // Backed by runIndexStore (dashboard/runIndex.js), a persisted THUMB_DIR
 // index — this route is a pure read, no per-request scanning. The index
@@ -1369,6 +1364,10 @@ app.get('/api/users/:username/media', async (req, res) => {
     // ~200 cards, the rest are likely already cached on disk.
     setImmediate(() => {
       warmGridThumbs(username, response)
+      // This route only fires from a real client-side model open
+      // (selectUser() in index.html) — internal jobs call scanModel()
+      // directly — so it's a safe place to count a view for /stats.
+      visits.recordVisit(username)
     })
   } catch (err) {
     res.status(500).json({ error: err.message })

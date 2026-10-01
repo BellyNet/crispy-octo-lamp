@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dataset Stats</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0d0d12;
+        --card-bg: #1a1a24;
+        --border: #2a2a3a;
+        --grid: #23232f;
+        --accent: #7c6cfc;
+        --accent-soft: rgba(124, 108, 252, 0.18);
+        --text: #e0e0f0;
+        --muted: #8a8ab4;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        padding: 24px 32px 60px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      a {
+        color: inherit;
+      }
+      a.back {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      a.back:hover {
+        color: var(--accent);
+      }
+      #scan-note {
+        color: var(--muted);
+        font-size: 12px;
+        margin: -10px 0 18px;
+        min-height: 1em;
+      }
+
+      .tiles {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 24px;
+      }
+      .tile {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 14px;
+      }
+      .tile-value {
+        font-size: 20px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .tile-label {
+        font-size: 10px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-top: 2px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px 16px;
+        min-width: 0;
+      }
+      .card.wide {
+        margin-bottom: 14px;
+      }
+      .card h2 {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+      .card .sub {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .empty {
+        color: var(--muted);
+        font-size: 12px;
+        padding: 6px 0;
+      }
+
+      /* Ranked lists: name, a thin single-hue bar, then the value. */
+      .rank {
+        list-style: none;
+      }
+      .rank li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 72px auto;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 0;
+        border-top: 1px solid var(--grid);
+        font-size: 13px;
+      }
+      .rank li:first-child {
+        border-top: none;
+      }
+      .rank .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-decoration: none;
+      }
+      .rank .name:hover {
+        color: var(--accent);
+      }
+      .rank .track {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--grid);
+        overflow: hidden;
+      }
+      .rank .fill {
+        height: 100%;
+        border-radius: 3px;
+        background: var(--accent);
+      }
+      .rank .value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        white-space: nowrap;
+      }
+      .rank .value small {
+        color: var(--muted);
+        margin-left: 4px;
+      }
+      .more {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .more summary {
+        cursor: pointer;
+      }
+      .more summary:hover {
+        color: var(--accent);
+      }
+      .more .rank {
+        margin-top: 6px;
+      }
+
+      /* Column charts */
+      .chart {
+        position: relative;
+      }
+      .chart svg {
+        display: block;
+        width: 100%;
+        height: 200px;
+        overflow: visible;
+      }
+      .chart .axis-label {
+        fill: var(--muted);
+        font-size: 10px;
+      }
+      .chart .gridline {
+        stroke: var(--grid);
+        stroke-width: 1;
+      }
+      .chart .bar {
+        fill: var(--accent);
+        pointer-events: none;
+      }
+      .chart .hit {
+        fill: transparent;
+        cursor: default;
+      }
+      .chart .hit:hover + .bar,
+      .chart .bar.active {
+        fill: #a397ff;
+      }
+      .tooltip {
+        position: fixed;
+        pointer-events: none;
+        background: #0a0a10;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: var(--text);
+        white-space: nowrap;
+        z-index: 10;
+        display: none;
+      }
+      .tooltip b {
+        font-variant-numeric: tabular-nums;
+      }
+      details.table-view {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      details.table-view summary {
+        cursor: pointer;
+      }
+      details.table-view table {
+        border-collapse: collapse;
+        margin-top: 6px;
+        width: 100%;
+        color: var(--text);
+      }
+      details.table-view td {
+        padding: 2px 8px 2px 0;
+        border-top: 1px solid var(--grid);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* File lists with thumbnails */
+      .files {
+        list-style: none;
+      }
+      .files li {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 0;
+        border-top: 1px solid var(--grid);
+        font-size: 12px;
+      }
+      .files li:first-child {
+        border-top: none;
+      }
+      .files img {
+        width: 44px;
+        height: 44px;
+        object-fit: cover;
+        border-radius: 6px;
+        background: #0a0a10;
+        display: block;
+      }
+      .files a {
+        text-decoration: none;
+        min-width: 0;
+      }
+      .files a:hover .model {
+        color: var(--accent);
+      }
+      .files .model {
+        font-weight: 600;
+        font-size: 13px;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .files .file {
+        color: var(--muted);
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .files .value {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 600px) {
+        body {
+          padding: 16px 16px 48px;
+        }
+        .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .tiles {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .rank li {
+          grid-template-columns: minmax(0, 1fr) 48px auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Stats</h1>
+      <a class="back" href="/">&larr; Back to dashboard</a>
+    </header>
+    <div id="scan-note"></div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <section class="card wide">
+      <h2>Files added per week</h2>
+      <div class="sub">
+        Last 26 weeks, by the date each file landed in the dataset
+      </div>
+      <div class="chart" id="weekly-chart"></div>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Most viewed</h2>
+        <div class="sub">Times each model was opened, all time</div>
+        <div id="rank-mostViewed"></div>
+      </section>
+      <section class="card">
+        <h2>Trending</h2>
+        <div class="sub">Opens in the last 14 days</div>
+        <div id="rank-trending"></div>
+      </section>
+      <section class="card">
+        <h2>Most active</h2>
+        <div class="sub">Files added in the last 30 days (last 7 in grey)</div>
+        <div id="rank-mostActive"></div>
+      </section>
+      <section class="card">
+        <h2>New since your last visit</h2>
+        <div class="sub">
+          Files added after the day you last opened the model
+        </div>
+        <div id="rank-newSinceLastVisit"></div>
+      </section>
+      <section class="card">
+        <h2>Never opened</h2>
+        <div class="sub">Models you haven't opened yet, by file count</div>
+        <div id="rank-neverOpened"></div>
+      </section>
+      <section class="card">
+        <h2>Quietest</h2>
+        <div class="sub">Longest time since anything new was added</div>
+        <div id="rank-quietest"></div>
+      </section>
+      <section class="card">
+        <h2>Most files</h2>
+        <div class="sub">Images, GIFs and videos combined</div>
+        <div id="rank-mostFiles"></div>
+      </section>
+      <section class="card">
+        <h2>Largest on disk</h2>
+        <div class="sub">Total size per model</div>
+        <div id="rank-largestSize"></div>
+      </section>
+      <section class="card">
+        <h2>Files by source</h2>
+        <div class="sub">Where each file was scraped from</div>
+        <div id="sources"></div>
+      </section>
+    </div>
+
+    <section class="card wide">
+      <h2>Posts per year</h2>
+      <div class="sub">
+        By original post date where known, otherwise the date the file was added
+      </div>
+      <div class="chart" id="year-chart"></div>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Files by type</h2>
+        <div class="sub">Count, with size on disk in grey</div>
+        <div id="types"></div>
+      </section>
+      <section class="card">
+        <h2>Largest files</h2>
+        <div class="sub">Top 10 across every model</div>
+        <ul class="files" id="largest-files"></ul>
+      </section>
+      <section class="card">
+        <h2>Longest videos</h2>
+        <div class="sub">Top 10 across every model</div>
+        <ul class="files" id="longest-videos"></ul>
+      </section>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+      const tooltipEl = document.getElementById('tooltip')
+      const RANK_PREVIEW = 10
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+            })[c]
+        )
+      }
+      function formatCount(n) {
+        return (n || 0).toLocaleString()
+      }
+      function formatBytes(bytes) {
+        if (!bytes) return '0 B'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let v = bytes
+        let u = 0
+        while (v >= 1024 && u < units.length - 1) {
+          v /= 1024
+          u++
+        }
+        return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`
+      }
+      function formatDuration(seconds) {
+        const s = Math.round(seconds || 0)
+        const h = Math.floor(s / 3600)
+        const m = Math.floor((s % 3600) / 60)
+        const sec = s % 60
+        return h
+          ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+          : `${m}:${String(sec).padStart(2, '0')}`
+      }
+      function formatAgo(value) {
+        const ms = typeof value === 'number' ? value : Date.parse(value)
+        if (!ms) return ''
+        const days = Math.floor((Date.now() - ms) / 86400000)
+        if (days <= 0) return 'today'
+        if (days === 1) return '1 day ago'
+        if (days < 60) return `${days} days ago`
+        const months = Math.round(days / 30)
+        if (months < 24) return `${months} months ago`
+        return `${(days / 365).toFixed(1)} years ago`
+      }
+      function modelHref(name, file) {
+        const base = `/#/u/${encodeURIComponent(name)}`
+        if (!file) return base
+        return `${base}?open=${encodeURIComponent(file.folder)}/${encodeURIComponent(file.filename)}`
+      }
+
+      function renderTiles(totals) {
+        const tiles = [
+          ['Models', formatCount(totals.models)],
+          ['Files', formatCount(totals.files)],
+          ['Total size', formatBytes(totals.bytes)],
+          ['Video hours', formatCount(Math.round(totals.videoSeconds / 3600))],
+          ['Added this week', formatCount(totals.addedLast7d)],
+          ['Added in 30 days', formatCount(totals.addedLast30d)],
+          ['Flagged', formatCount(totals.flagged)],
+          ['Model opens', formatCount(totals.totalViews)],
+        ]
+        document.getElementById('tiles').innerHTML = tiles
+          .map(
+            ([label, value]) =>
+              `<div class="tile"><div class="tile-value">${value}</div><div class="tile-label">${label}</div></div>`
+          )
+          .join('')
+      }
+
+      function rankItems(rows, format, max) {
+        return rows
+          .map((row) => {
+            const pct = max > 0 ? Math.max(2, (row.barValue / max) * 100) : 0
+            return `<li>
+              <a class="name" href="${modelHref(row.name)}" title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</a>
+              <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+              <span class="value">${format(row)}</span>
+            </li>`
+          })
+          .join('')
+      }
+
+      // rows: [{ name, value, ... }]. barValue drives the bar; for "quietest"
+      // that's age, so older reads as the longer bar.
+      function renderRanking(
+        id,
+        rows,
+        format,
+        { emptyText, barValue = (r) => r.value } = {}
+      ) {
+        const el = document.getElementById(id)
+        if (!rows.length) {
+          el.innerHTML = `<div class="empty">${emptyText || 'Nothing yet.'}</div>`
+          return
+        }
+        const withBars = rows.map((r) => ({ ...r, barValue: barValue(r) }))
+        const max = Math.max(...withBars.map((r) => r.barValue))
+        const head = withBars.slice(0, RANK_PREVIEW)
+        const rest = withBars.slice(RANK_PREVIEW)
+        el.innerHTML =
+          `<ul class="rank">${rankItems(head, format, max)}</ul>` +
+          (rest.length
+            ? `<details class="more"><summary>Show ${rest.length} more</summary><ul class="rank">${rankItems(rest, format, max)}</ul></details>`
+            : '')
+      }
+
+      function renderBars(id, rows) {
+        const el = document.getElementById(id)
+        if (!rows.length) {
+          el.innerHTML = '<div class="empty">Nothing yet.</div>'
+          return
+        }
+        const max = Math.max(...rows.map((r) => r.value))
+        el.innerHTML = `<ul class="rank">${rows
+          .map((r) => {
+            const pct = max > 0 ? Math.max(2, (r.value / max) * 100) : 0
+            return `<li>
+              <span class="name">${escapeHtml(r.label)}</span>
+              <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+              <span class="value">${formatCount(r.value)}${r.extra ? `<small>${r.extra}</small>` : ''}</span>
+            </li>`
+          })
+          .join('')}</ul>`
+      }
+
+      function niceMax(value) {
+        if (value <= 0) return 1
+        const pow = 10 ** Math.floor(Math.log10(value))
+        const steps = [1, 2, 2.5, 5, 10]
+        for (const step of steps) {
+          if (value <= step * pow) return step * pow
+        }
+        return 10 * pow
+      }
+
+      // Single-series column chart: thin bars rounded at the top and anchored
+      // to the baseline, recessive gridlines, per-bar hover tooltip, and a
+      // table view underneath.
+      function renderColumnChart(
+        id,
+        points,
+        { labelEvery = 1, tooltip, tableHeader }
+      ) {
+        const el = document.getElementById(id)
+        if (!points.length) {
+          el.innerHTML = '<div class="empty">Nothing yet.</div>'
+          return
+        }
+        const width = Math.max(280, Math.round(el.clientWidth || 1000))
+        const height = 200
+        const pad = { top: 8, right: 4, bottom: 22, left: 48 }
+        const plotW = width - pad.left - pad.right
+        const plotH = height - pad.top - pad.bottom
+        const max = niceMax(Math.max(...points.map((p) => p.value)))
+        const slot = plotW / points.length
+        const barW = Math.max(2, Math.min(28, slot - 2))
+        const radius = Math.min(4, barW / 2)
+
+        let svg = ''
+        for (let i = 0; i <= 4; i++) {
+          const v = (max / 4) * i
+          const y = pad.top + plotH - (v / max) * plotH
+          svg += `<line class="gridline" x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}"/>`
+          svg += `<text class="axis-label" x="${pad.left - 6}" y="${y + 3}" text-anchor="end">${formatCount(Math.round(v))}</text>`
+        }
+        points.forEach((p, i) => {
+          const x = pad.left + i * slot + (slot - barW) / 2
+          const h = (p.value / max) * plotH
+          const y = pad.top + plotH - h
+          const bottom = pad.top + plotH
+          svg += `<rect class="hit" data-i="${i}" x="${pad.left + i * slot}" y="${pad.top}" width="${slot}" height="${plotH}"/>`
+          if (h > 0) {
+            const r = Math.min(radius, h)
+            svg += `<path class="bar" d="M${x},${bottom} V${y + r} Q${x},${y} ${x + r},${y} H${x + barW - r} Q${x + barW},${y} ${x + barW},${y + r} V${bottom} Z"/>`
+          } else {
+            svg += '<path class="bar" d=""/>'
+          }
+          if (i % labelEvery === 0) {
+            svg += `<text class="axis-label" x="${x + barW / 2}" y="${height - 6}" text-anchor="middle">${escapeHtml(p.label)}</text>`
+          }
+        })
+        el.innerHTML =
+          `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${escapeHtml(tableHeader[1])}">${svg}</svg>` +
+          `<details class="table-view"><summary>Show as table</summary><table>` +
+          points
+            .map(
+              (p) =>
+                `<tr><td>${escapeHtml(p.fullLabel || p.label)}</td><td>${formatCount(p.value)}</td></tr>`
+            )
+            .join('') +
+          `</table></details>`
+
+        el.querySelectorAll('.hit').forEach((hit) => {
+          const p = points[Number(hit.dataset.i)]
+          hit.addEventListener('mousemove', (event) => {
+            tooltipEl.innerHTML = tooltip(p)
+            tooltipEl.style.display = 'block'
+            const x = Math.min(
+              event.clientX + 12,
+              window.innerWidth - tooltipEl.offsetWidth - 8
+            )
+            tooltipEl.style.left = `${x}px`
+            tooltipEl.style.top = `${event.clientY - 36}px`
+          })
+          hit.addEventListener('mouseleave', () => {
+            tooltipEl.style.display = 'none'
+          })
+        })
+      }
+
+      function renderFiles(id, files, format) {
+        const el = document.getElementById(id)
+        if (!files.length) {
+          el.innerHTML = '<li class="empty">Nothing yet.</li>'
+          return
+        }
+        el.innerHTML = files
+          .map(
+            (f) => `<li>
+              <img loading="lazy" alt="" src="${escapeHtml(f.thumbUrl || '')}" onerror="this.style.visibility='hidden'" />
+              <a href="${modelHref(f.model, f)}">
+                <span class="model">${escapeHtml(f.model)}</span>
+                <span class="file" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</span>
+              </a>
+              <span class="value">${format(f)}</span>
+            </li>`
+          )
+          .join('')
+      }
+
+      function render(data) {
+        const { totals, rankings } = data
+        const note = document.getElementById('scan-note')
+        if (data.scan?.inProgress) {
+          note.textContent = `Dataset scan in progress (${data.scan.modelsDone}/${data.scan.modelsTotal} models) — numbers will fill in as it finishes.`
+        } else if (data.scan && data.scan.modelsWithStats < totals.models) {
+          note.textContent = `${totals.models - data.scan.modelsWithStats} models haven't been scanned yet.`
+        } else {
+          note.textContent = ''
+        }
+
+        renderTiles(totals)
+
+        const monthFmt = new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: 'numeric',
+          timeZone: 'UTC',
+        })
+        renderColumnChart(
+          'weekly-chart',
+          data.weeklyAdded.map((w) => ({
+            label: monthFmt.format(new Date(w.weekStart)),
+            fullLabel: `Week of ${monthFmt.format(new Date(w.weekStart))}`,
+            value: w.count,
+          })),
+          {
+            labelEvery: window.innerWidth < 600 ? 5 : 3,
+            tooltip: (p) =>
+              `${escapeHtml(p.fullLabel)}<br><b>${formatCount(p.value)}</b> files added`,
+            tableHeader: ['Week', 'Files added per week'],
+          }
+        )
+
+        const years = data.postsPerYear
+        renderColumnChart(
+          'year-chart',
+          years.map((y) => ({ label: String(y.year), value: y.count })),
+          {
+            labelEvery:
+              years.length > 16 && window.innerWidth < 600
+                ? 4
+                : years.length > 16
+                  ? 2
+                  : 1,
+            tooltip: (p) =>
+              `${escapeHtml(p.label)}<br><b>${formatCount(p.value)}</b> files`,
+            tableHeader: ['Year', 'Posts per year'],
+          }
+        )
+
+        renderRanking(
+          'rank-mostViewed',
+          rankings.mostViewed,
+          (r) =>
+            `${formatCount(r.value)}<small>${formatAgo(r.lastVisitedAt)}</small>`,
+          {
+            emptyText: 'No model opens recorded yet.',
+          }
+        )
+        renderRanking(
+          'rank-trending',
+          rankings.trending,
+          (r) => formatCount(r.value),
+          {
+            emptyText: 'No opens in the last 14 days.',
+          }
+        )
+        renderRanking(
+          'rank-mostActive',
+          rankings.mostActive,
+          (r) =>
+            `${formatCount(r.value)}<small>${formatCount(r.added7d)}</small>`,
+          {
+            emptyText: 'Nothing added in the last 30 days.',
+          }
+        )
+        renderRanking(
+          'rank-newSinceLastVisit',
+          rankings.newSinceLastVisit,
+          (r) =>
+            `${formatCount(r.value)}<small>${formatAgo(r.lastVisitedAt)}</small>`,
+          {
+            emptyText: "You're caught up.",
+          }
+        )
+        renderRanking(
+          'rank-neverOpened',
+          rankings.neverOpened,
+          (r) => formatCount(r.value),
+          {
+            emptyText: "You've opened every model.",
+          }
+        )
+        renderRanking(
+          'rank-quietest',
+          rankings.quietest,
+          (r) => formatAgo(r.value),
+          {
+            barValue: (r) => Date.now() - r.value,
+          }
+        )
+        renderRanking('rank-mostFiles', rankings.mostFiles, (r) =>
+          formatCount(r.value)
+        )
+        renderRanking('rank-largestSize', rankings.largestSize, (r) =>
+          formatBytes(r.value)
+        )
+
+        renderBars(
+          'sources',
+          data.sources.map((s) => ({ label: s.label, value: s.count }))
+        )
+        renderBars(
+          'types',
+          [
+            ['Images', 'image'],
+            ['GIFs', 'gif'],
+            ['Videos', 'video'],
+          ].map(([label, key]) => ({
+            label,
+            value: totals.typeCounts[key],
+            extra: formatBytes(totals.typeBytes[key]),
+          }))
+        )
+
+        renderFiles('largest-files', data.largestFiles, (f) =>
+          formatBytes(f.size)
+        )
+        renderFiles('longest-videos', data.longestVideos, (f) =>
+          formatDuration(f.duration)
+        )
+      }
+
+      let lastData = null
+      let resizeTimer = null
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer)
+        resizeTimer = setTimeout(() => lastData && render(lastData), 150)
+      })
+
+      async function load() {
+        try {
+          const res = await fetch('/api/stats')
+          if (res.status === 401) {
+            location.href = '/login.html'
+            return
+          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const data = await res.json()
+          lastData = data
+          render(data)
+          if (data.scan?.inProgress) setTimeout(load, 5000)
+        } catch (err) {
+          document.getElementById('scan-note').textContent =
+            `Couldn't load stats: ${err.message}`
+        }
+      }
+      load()
+    </script>
+  </body>
+</html>
