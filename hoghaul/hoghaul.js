@@ -108,6 +108,7 @@ const {
   addVisualHash,
   getVisualHashRecord,
   getVisualHashEntries,
+  findVisualHashesWithin,
 } = require('../scrapyard/visualHasher')
 const {
   loadBitwiseHashCache,
@@ -220,6 +221,7 @@ const duplicateChecker = createDuplicateChecker({
   isVisualDupe,
   getVisualHashEntries,
   getVisualHashDistance,
+  findVisualHashesWithin,
 })
 const {
   getBitwiseDuplicationRecord,

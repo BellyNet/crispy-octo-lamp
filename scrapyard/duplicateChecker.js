@@ -12,6 +12,7 @@ function createDuplicateChecker(options = {}) {
     isVisualDupe,
     getVisualHashEntries,
     getVisualHashDistance,
+    findVisualHashesWithin,
   } = options
 
   if (!datasetDir) {
@@ -67,14 +68,34 @@ function createDuplicateChecker(options = {}) {
   }
 
   function requireFuzzyVisualHelpers(name) {
+    if (typeof findVisualHashesWithin === 'function') return
     if (
       typeof getVisualHashEntries !== 'function' ||
       typeof getVisualHashDistance !== 'function'
     ) {
       throw new Error(
-        `${name} requires getVisualHashEntries and getVisualHashDistance to be provided`
+        `${name} requires findVisualHashesWithin, or getVisualHashEntries and getVisualHashDistance, to be provided`
       )
     }
+  }
+
+  // [{ entry, distance }] for stored visual hashes within maxDistance. Uses
+  // the packed index when the caller provides one; the full scan remains for
+  // callers (and fixtures) that only supply entries + a distance function.
+  function findVisualCandidates(visualHash, maxDistance) {
+    if (typeof findVisualHashesWithin === 'function') {
+      return findVisualHashesWithin(visualHash, maxDistance)
+    }
+    const candidates = []
+    for (const entry of getVisualHashEntries()) {
+      const distance = getVisualHashDistance(
+        visualHash,
+        String(entry?.hash || '')
+      )
+      if (distance === null || distance > maxDistance) continue
+      candidates.push({ entry, distance })
+    }
+    return candidates
   }
 
   function getBitwiseDuplicationRecord(hash) {
@@ -110,11 +131,11 @@ function createDuplicateChecker(options = {}) {
     requireFuzzyVisualHelpers('getFuzzyVisualDuplicationRecord')
 
     let bestMatch = null
-    for (const entry of getVisualHashEntries()) {
+    for (const { entry, distance } of findVisualCandidates(
+      visualHash,
+      maxDistance
+    )) {
       const candidateHash = String(entry?.hash || '')
-      const distance = getVisualHashDistance(visualHash, candidateHash)
-      if (distance === null || distance > maxDistance) continue
-
       const activeRefs = getActiveRecordRefs(entry).filter((relativePath) =>
         isSameModelRef(modelName, relativePath)
       )

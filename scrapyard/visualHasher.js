@@ -1,10 +1,11 @@
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
-const { spawn, spawnSync } = require('child_process')
+const { fork, spawn } = require('child_process')
 const imghash = require('imghash')
 const { createHash } = require('crypto')
 const { createHashStore } = require('./hashStore')
+const { createHammingIndex } = require('./hammingIndex')
 
 const tmpDir = path.join(os.tmpdir(), 'thicc_visual_hash')
 
@@ -22,13 +23,118 @@ const visualHashStore = createHashStore({
   algorithm: 'imghash-16-hex|video-3frame-imghash-16-hex',
 })
 
+// Packed copy of the store's hashes for near-match lookups. Built on first
+// use, extended as hashes are added, and dropped whenever hashes are removed
+// or the store is reloaded.
+let fuzzyIndex = null
+
+function getFuzzyIndex() {
+  if (!fuzzyIndex) {
+    fuzzyIndex = createHammingIndex()
+    for (const entry of visualHashStore.getAllEntries()) {
+      fuzzyIndex.add(entry.hash)
+    }
+  }
+  return fuzzyIndex
+}
+
 function loadVisualHashCache() {
   visualHashStore.load()
+  fuzzyIndex = null
 }
 
 function saveVisualHashCache() {
   fs.mkdirSync(path.dirname(visualHashPath), { recursive: true })
   visualHashStore.save()
+}
+
+// Image hashing runs in a separate long-lived worker process
+// (visualHashWorker.js serve), so a decoder crash or hang can't take the
+// scraper down, without paying Node startup per image or blocking the event
+// loop the way the old per-image spawnSync did.
+const HASH_WORKER_TIMEOUT_MS = 60_000
+// Recycle the worker periodically so native-memory growth can't accumulate
+// over a long scrape.
+const HASH_WORKER_MAX_REQUESTS = 500
+
+let hashWorker = null
+let hashWorkerRequests = 0
+let nextHashRequestId = 1
+// id -> { inputPath, resolve, timer, worker, attempt }
+const pendingHashRequests = new Map()
+
+function setHashWorkerActive(worker, active) {
+  // An idle worker must not keep the scraper process alive at exit.
+  if (active) {
+    worker.ref()
+    worker.channel?.ref()
+  } else {
+    worker.unref()
+    worker.channel?.unref()
+  }
+}
+
+function finishHashRequest(id, hash) {
+  const request = pendingHashRequests.get(id)
+  if (!request) return
+  pendingHashRequests.delete(id)
+  clearTimeout(request.timer)
+  request.resolve(String(hash || '').trim() || null)
+
+  const worker = request.worker
+  const stillBusy = [...pendingHashRequests.values()].some(
+    (pending) => pending.worker === worker
+  )
+  if (stillBusy) return
+  if (hashWorkerRequests >= HASH_WORKER_MAX_REQUESTS && worker === hashWorker) {
+    hashWorker = null
+    worker.disconnect()
+  } else {
+    setHashWorkerActive(worker, false)
+  }
+}
+
+function startHashWorker() {
+  const worker = fork(path.join(__dirname, 'visualHashWorker.js'), ['serve'], {
+    cwd: path.join(__dirname, '..'),
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  })
+  hashWorkerRequests = 0
+  worker.on('message', (message) =>
+    finishHashRequest(message?.id, message?.hash)
+  )
+  worker.on('error', () => {})
+  worker.on('exit', () => {
+    if (hashWorker === worker) hashWorker = null
+    // Anything this worker still owed goes to a fresh worker once, except
+    // the request that timed out (already resolved and removed). A second
+    // crash gives up on that image instead of respawning forever.
+    const orphaned = [...pendingHashRequests.entries()].filter(
+      ([, request]) => request.worker === worker
+    )
+    for (const [id, request] of orphaned) {
+      clearTimeout(request.timer)
+      pendingHashRequests.delete(id)
+      if (request.attempt >= 2) request.resolve(null)
+      else
+        sendHashRequest(request.inputPath, request.resolve, request.attempt + 1)
+    }
+  })
+  return worker
+}
+
+function sendHashRequest(inputPath, resolve, attempt = 1) {
+  if (!hashWorker || !hashWorker.connected) hashWorker = startHashWorker()
+  const worker = hashWorker
+  const id = nextHashRequestId++
+  const timer = setTimeout(() => {
+    finishHashRequest(id, null)
+    worker.kill()
+  }, HASH_WORKER_TIMEOUT_MS)
+  pendingHashRequests.set(id, { inputPath, resolve, timer, worker, attempt })
+  hashWorkerRequests += 1
+  setHashWorkerActive(worker, true)
+  worker.send({ id, inputPath })
 }
 
 async function getVisualHashFromBuffer(buffer) {
@@ -37,32 +143,14 @@ async function getVisualHashFromBuffer(buffer) {
     .toString(16)
     .slice(2)}`
   const inputPath = path.join(tmpDir, `vh_${hash}_${nonce}_src`)
-  const outputPath = path.join(tmpDir, `vh_${hash}_${nonce}.json`)
 
   try {
-    fs.writeFileSync(inputPath, buffer)
-    const result = spawnSync(
-      process.execPath,
-      [
-        path.join(__dirname, 'visualHashWorker.js'),
-        'image',
-        inputPath,
-        outputPath,
-      ],
-      {
-        cwd: path.join(__dirname, '..'),
-        stdio: 'ignore',
-        timeout: 60000,
-      }
-    )
-    if (result.status !== 0 || !fs.existsSync(outputPath)) return null
-    const payload = JSON.parse(fs.readFileSync(outputPath, 'utf8'))
-    return String(payload.hash || '').trim() || null
+    await fs.promises.writeFile(inputPath, buffer)
+    return await new Promise((resolve) => sendHashRequest(inputPath, resolve))
   } catch {
     return null
   } finally {
     unlinkIfExists(inputPath)
-    unlinkIfExists(outputPath)
   }
 }
 
@@ -461,7 +549,23 @@ function isVisualDupe(visualHash) {
 }
 
 function addVisualHash(visualHash, metadata = null) {
-  return visualHashStore.add(visualHash, metadata)
+  const isNewHash = Boolean(visualHash) && !visualHashStore.has(visualHash)
+  const entry = visualHashStore.add(visualHash, metadata)
+  if (isNewHash && fuzzyIndex) fuzzyIndex.add(visualHash)
+  return entry
+}
+
+// Every stored entry whose hash is within maxDistance bits of visualHash, as
+// [{ entry, distance }]. Same matches as looping getVisualHashEntries()
+// through getVisualHashDistance(), without the per-lookup full scan.
+function findVisualHashesWithin(visualHash, maxDistance) {
+  return getFuzzyIndex()
+    .findWithin(visualHash, maxDistance)
+    .map(({ hash, distance }) => ({
+      entry: visualHashStore.get(hash),
+      distance,
+    }))
+    .filter(({ entry }) => entry)
 }
 
 function getVisualHashRecord(visualHash) {
@@ -473,7 +577,10 @@ function getVisualHashEntries() {
 }
 
 function removeVisualRefs(matchRef) {
-  return visualHashStore.removeRefs(matchRef)
+  const sizeBefore = visualHashStore.size()
+  const removed = visualHashStore.removeRefs(matchRef)
+  if (visualHashStore.size() !== sizeBefore) fuzzyIndex = null
+  return removed
 }
 
 module.exports = {
@@ -487,5 +594,6 @@ module.exports = {
   addVisualHash,
   getVisualHashRecord,
   getVisualHashEntries,
+  findVisualHashesWithin,
   removeVisualRefs,
 }

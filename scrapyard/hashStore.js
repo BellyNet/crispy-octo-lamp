@@ -125,6 +125,10 @@ function createHashStore({ storePath, kind, algorithm }) {
     return [...entries.values()]
   }
 
+  function size() {
+    return entries.size
+  }
+
   function removeRefs(matchRef) {
     if (typeof matchRef !== 'function') return 0
 
@@ -156,6 +160,7 @@ function createHashStore({ storePath, kind, algorithm }) {
     get,
     add,
     getAllEntries,
+    size,
     removeRefs,
   }
 }

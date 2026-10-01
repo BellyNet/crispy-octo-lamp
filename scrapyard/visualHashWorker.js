@@ -44,24 +44,21 @@ function normalizeImageWithFfmpeg(inputPath, outputPath) {
   })
 }
 
-async function hashImage(inputPath, outputPath) {
-  const tmpPath = `${outputPath}.jpg`
-  const ffmpegOutputPath = `${outputPath}.png`
+// Returns the image's 16x16 imghash as hex, or null when neither sharp nor
+// ffmpeg can decode it. `scratchPrefix` names the temporary files.
+async function computeImageHash(inputPath, scratchPrefix) {
+  const tmpPath = `${scratchPrefix}.jpg`
+  const ffmpegOutputPath = `${scratchPrefix}.png`
 
   try {
     await sharp(inputPath).resize(512).jpeg({ quality: 95 }).toFile(tmpPath)
-    const hash = await imghash.hash(tmpPath, 16, 'hex')
-    fs.writeFileSync(outputPath, JSON.stringify({ hash }) + '\n')
-    return 0
+    return await imghash.hash(tmpPath, 16, 'hex')
   } catch {
     try {
       await normalizeImageWithFfmpeg(inputPath, ffmpegOutputPath)
-      const hash = await imghash.hash(ffmpegOutputPath, 16, 'hex')
-      fs.writeFileSync(outputPath, JSON.stringify({ hash }) + '\n')
-      return 0
+      return await imghash.hash(ffmpegOutputPath, 16, 'hex')
     } catch {
-      fs.writeFileSync(outputPath, JSON.stringify({ hash: null }) + '\n')
-      return 0
+      return null
     }
   } finally {
     unlinkIfExists(tmpPath)
@@ -69,8 +66,33 @@ async function hashImage(inputPath, outputPath) {
   }
 }
 
+async function hashImage(inputPath, outputPath) {
+  const hash = await computeImageHash(inputPath, outputPath)
+  fs.writeFileSync(outputPath, JSON.stringify({ hash }) + '\n')
+  return 0
+}
+
+// Long-lived mode used by visualHasher: one process answers many
+// { id, inputPath } requests over IPC, so each image no longer pays Node
+// startup. Exits when the parent disconnects.
+function serve() {
+  process.on('message', async (request) => {
+    const { id, inputPath } = request || {}
+    let hash = null
+    try {
+      hash = await computeImageHash(inputPath, `${inputPath}.${id}`)
+    } catch {}
+    if (process.connected) process.send({ id, hash })
+  })
+  process.on('disconnect', () => process.exit(0))
+}
+
 async function main(argv = process.argv.slice(2)) {
   const [mode, inputPath, outputPath] = argv
+  if (mode === 'serve') {
+    serve()
+    return null
+  }
   if (mode !== 'image' || !inputPath || !outputPath) return 2
   fs.mkdirSync(path.dirname(outputPath), { recursive: true })
   return hashImage(inputPath, outputPath)
@@ -79,7 +101,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) {
   main()
     .then((code) => {
-      process.exitCode = code
+      if (code !== null) process.exitCode = code
     })
     .catch(() => {
       process.exitCode = 1
