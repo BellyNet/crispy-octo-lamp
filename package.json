@@ -27,8 +27,6 @@
     "upgrade:pawchive-previews": "node scrapyard/run-source-batch.js --source=pawchive --full-source-refresh",
     "report:pawchive-previews": "node scrapyard/reportPawchivePreviewUpgrades.js",
     "scrape:interactive": "node scrapyard/run-scrape-interactive.js",
-    "evict:nas-media": "node scrapyard/evictLocalNasBackedMedia.js",
-    "evict:nas-media:apply": "node scrapyard/evictLocalNasBackedMedia.js --apply",
     "backfill:seen-media": "node milkmaid/backfill-seen-media-index.js",
     "backfill:legacy-sources": "node scrapyard/backfillLegacyMediaSources.js",
     "repair:stufferdb": "node milkmaid/repair-stufferdb-models.js --scrape",

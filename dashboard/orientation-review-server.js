@@ -9,12 +9,8 @@ const sharp = require('sharp')
 const app = express()
 const PORT = Number.parseInt(process.env.ORIENTATION_REVIEW_PORT || '4780', 10)
 
-const APPDATA =
-  process.env.APPDATA ||
-  path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
-const slopvaultRoot = path.join(APPDATA, '.slopvault')
-const datasetDir =
-  process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+// DATASET_DIR in the NAS image, the NAS share (Z:/dataset) on the PC.
+const datasetDir = require('../scrapyard/config').datasetDir
 const statePath = path.join(
   __dirname,
   '..',

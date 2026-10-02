@@ -52,8 +52,8 @@ const APPDATA =
   process.env.APPDATA ||
   path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Roaming')
 const slopvaultRoot = path.join(APPDATA, '.slopvault')
-const datasetDir =
-  process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+// DATASET_DIR in the NAS image, the NAS share (Z:/dataset) on the PC.
+const datasetDir = require('../scrapyard/config').datasetDir
 const THUMB_DIR =
   process.env.THUMB_DIR || path.join(slopvaultRoot, '.dashboard-thumbs')
 const EXACT_DUPLICATE_REPORT_PATH =

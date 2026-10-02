@@ -173,7 +173,7 @@ npm run repair
 Use this when you want to check the local dataset model-by-model without doing a fresh scrape update first.
 
 What it does:
-- walks local model folders under `%APPDATA%\.slopvault\dataset`
+- walks the model folders under `Z:\dataset`
 - runs prune/backfill/validate for each selected model
 - clears resolved `milkmaid-run-errors-*` artifacts when a model is now clean
 - writes a top-level `%APPDATA%\.slopvault\errors-to-check-latest.md`
@@ -325,7 +325,7 @@ Use these for:
 
 The dataset lives only on the NAS (`Z:\dataset`). Scrapes on the PC write straight to it, and there is no local copy to sync. Sync and "evict the local copy" steps switch themselves off when the dataset and the NAS are the same folder (`scrapyard/datasetLocation.js`).
 
-The old local copy under `%APPDATA%\.slopvault\dataset` is no longer used. `npm run evict:nas-media` (dry run) and `npm run evict:nas-media:apply` remove its files, but only those confirmed on the NAS at the same size.
+The old local copy under `%APPDATA%\.slopvault\dataset` was deleted on 2026-10-02 after every file was confirmed on the NAS.
 
 ## Script Reference
 
