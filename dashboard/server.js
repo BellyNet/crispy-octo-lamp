@@ -31,6 +31,12 @@ const {
   startNightlySchedule,
 } = require('./scrapes.js')
 const { mountSourceRoutes } = require('./sources.js')
+const {
+  runFfmpeg,
+  failedBefore,
+  recordFailure,
+  clearFailure,
+} = require('./mobileEncode.js')
 const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
@@ -1576,6 +1582,7 @@ async function quarantineCorruptFile(srcPath) {
   fs.promises
     .unlink(mobileVariantPath(username, folder, filename))
     .catch(() => {})
+  clearFailure(mobileVariantPath(username, folder, filename))
   return true
 }
 
@@ -1634,6 +1641,7 @@ app.post('/api/users/:username/trash', async (req, res) => {
       fs.promises
         .unlink(mobileVariantPath(username, folder, filename))
         .catch(() => {})
+      clearFailure(mobileVariantPath(username, folder, filename))
     }
 
     // Clear any flag entries for the trashed files — they're gone, not just
@@ -1948,13 +1956,17 @@ async function generateMobileVariant(srcPath, dstPath, isGif) {
     // durations seen in this dataset (~31 min) even under full 6-way
     // contention, while still eventually killing a genuinely hung process
     // instead of leaving it to run forever.
-    await execFileAsync(ffmpegPath, args, { timeout: 90 * 60 * 1000 })
+    await runFfmpeg(ffmpegPath, args, { timeoutMs: 90 * 60 * 1000 })
     const stat = fs.statSync(tmp)
     if (stat.size < 1000) throw new Error('output too small')
     await fs.promises.rename(tmp, dstPath)
+    clearFailure(dstPath)
     return true
   } catch (err) {
     console.warn(`  Mobile variant failed: ${srcPath}: ${err.message}`)
+    // A timeout can be contention, so only real failures are remembered
+    // (see mobileEncode.js); the file is skipped until the source changes.
+    if (!err.timedOut) recordFailure(srcPath, dstPath, err.message)
     try {
       await fs.promises.unlink(tmp)
     } catch {}
@@ -1996,8 +2008,10 @@ app.get('/media-mobile/:username/:folder/:filename', async (req, res) => {
   if (!fs.existsSync(srcPath)) return res.status(404).send('Not found')
 
   // Kick off background encode (deduped) so the next hit is instant.
+  // A source that failed to encode before gets the same 404, so the client
+  // keeps falling back to the original.
   const key = `${username}/${folder}/${filename}`
-  if (!_mobileInflight.has(key)) {
+  if (!_mobileInflight.has(key) && !failedBefore(srcPath, dstPath)) {
     _mobileInflight.set(
       key,
       mobileEncodeLimit(() =>
@@ -2076,6 +2090,7 @@ async function prewarmMobileVariants() {
     )
     const tasks = []
     let totalEligible = 0
+    let failedEarlier = 0
     for (const d of modelDirs) {
       const username = d.name
       for (const folder of MEDIA_FOLDERS) {
@@ -2096,6 +2111,10 @@ async function prewarmMobileVariants() {
           const src = path.join(datasetDir, username, folder, file)
           const dst = mobileVariantPath(username, folder, file)
           if (fs.existsSync(dst)) continue
+          if (failedBefore(src, dst)) {
+            failedEarlier++
+            continue
+          }
           // Stat the source to get mtime. Cheap (~one syscall per file)
           // and lets us encode newest-first below — recently scraped
           // videos are the ones users are most likely to browse and were
@@ -2109,7 +2128,12 @@ async function prewarmMobileVariants() {
         }
       }
     }
-    const cached = totalEligible - tasks.length
+    const cached = totalEligible - tasks.length - failedEarlier
+    if (failedEarlier) {
+      console.log(
+        `  Mobile:    skipping ${failedEarlier} file(s) that failed to encode before (until they change)`
+      )
+    }
     if (!tasks.length) {
       console.log('  Mobile:    all mobile variants cached ✓')
       prewarmStart('mobileVariants', 0, cached)
