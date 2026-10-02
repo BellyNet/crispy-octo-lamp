@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrapes</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #0d0d12;
+        --card-bg: #1a1a24;
+        --border: #2a2a3a;
+        --grid: #23232f;
+        --accent: #7c6cfc;
+        --text: #e0e0f0;
+        --muted: #8a8ab4;
+        --ok: #4caf82;
+        --err: #e05d5d;
+        --warn: #d9a441;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        padding: 24px 32px 60px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      a.back {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      a.back:hover {
+        color: var(--accent);
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 14px;
+        min-width: 0;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .workers {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+      .worker {
+        margin-bottom: 0;
+      }
+      .worker-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .status-icon {
+        font-size: 12px;
+        line-height: 1;
+      }
+      .online {
+        color: var(--ok);
+      }
+      .offline {
+        color: var(--muted);
+      }
+      .busy {
+        color: var(--accent);
+      }
+      button,
+      select,
+      input {
+        font: inherit;
+        color: var(--text);
+        background: #12121a;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 12px;
+        min-height: 36px;
+      }
+      button {
+        cursor: pointer;
+        background: var(--card-bg);
+      }
+      button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      button.danger:hover:not(:disabled) {
+        border-color: var(--err);
+        color: var(--err);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      input[type='url'],
+      input[type='text'] {
+        flex: 1 1 260px;
+        min-width: 0;
+      }
+      select {
+        max-width: 100%;
+      }
+      .start-grid {
+        display: grid;
+        gap: 12px;
+      }
+      .start-grid .row > span {
+        min-width: 90px;
+      }
+      #start-message {
+        margin-top: 10px;
+        font-size: 13px;
+        min-height: 1em;
+      }
+      #start-message.error {
+        color: var(--err);
+      }
+      #start-message.ok {
+        color: var(--ok);
+      }
+
+      /* Live log */
+      #live-meta {
+        margin-bottom: 8px;
+      }
+      .log {
+        background: #0a0a10;
+        border: 1px solid var(--grid);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        height: 340px;
+        overflow-y: auto;
+        color: #c8c8e0;
+      }
+
+      /* Runs */
+      .run {
+        border-top: 1px solid var(--grid);
+        padding: 10px 0;
+      }
+      .run:first-of-type {
+        border-top: none;
+      }
+      .run-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        cursor: pointer;
+      }
+      .run-title {
+        font-weight: 600;
+        flex: 1 1 200px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pill {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .pill.running,
+      .pill.queued,
+      .pill.canceling {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .pill.done {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .pill.finished-with-errors,
+      .pill.failed {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
+      .pill.canceled {
+        color: var(--muted);
+      }
+      .progress {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--grid);
+        overflow: hidden;
+        margin: 8px 0 6px;
+        display: flex;
+      }
+      .progress span {
+        height: 100%;
+      }
+      .progress .done {
+        background: var(--accent);
+      }
+      .progress .failed {
+        background: var(--warn);
+      }
+      .tasks {
+        margin-top: 8px;
+        max-height: 420px;
+        overflow-y: auto;
+      }
+      .task {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 10px;
+        align-items: center;
+        padding: 5px 0;
+        border-top: 1px solid var(--grid);
+        font-size: 12px;
+      }
+      .task button {
+        min-height: 28px;
+        padding: 3px 10px;
+        font-size: 12px;
+      }
+      .task-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tag {
+        font-size: 10px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0 4px;
+        margin-left: 6px;
+      }
+      @media (max-width: 700px) {
+        body {
+          padding: 16px 16px 48px;
+        }
+        .workers {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .log {
+          height: 260px;
+        }
+        .task {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+        .task .task-stat {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Scrapes</h1>
+      <a class="back" href="/">&larr; Back to dashboard</a>
+    </header>
+
+    <div class="workers">
+      <section class="card worker" id="worker-nas"></section>
+      <section class="card worker" id="worker-pc"></section>
+    </div>
+
+    <section class="card">
+      <h2>Start a scrape</h2>
+      <div class="start-grid">
+        <div class="row">
+          <button class="primary" id="run-all">Run all sources</button>
+          <span class="muted" id="run-all-note"></span>
+        </div>
+        <div class="row">
+          <select id="model-select" aria-label="Model">
+            <option>Loading models…</option>
+          </select>
+          <button id="run-model">Run this model</button>
+        </div>
+        <div class="row">
+          <input
+            type="url"
+            id="url-input"
+            placeholder="Source URL (Pawchive, OnlyHaven, Reddit, StufferDB…)"
+          />
+          <button id="run-url">Run URL</button>
+        </div>
+      </div>
+      <div id="start-message"></div>
+    </section>
+
+    <section class="card">
+      <h2>Live output</h2>
+      <div class="muted" id="live-meta">Nothing running.</div>
+      <div class="log" id="live-log"></div>
+    </section>
+
+    <section class="card">
+      <div
+        class="row"
+        style="justify-content: space-between; margin-bottom: 6px"
+      >
+        <h2 style="margin: 0">Runs</h2>
+        <label class="row muted" style="gap: 6px">
+          <input type="checkbox" id="nightly-enabled" />
+          Run all sources every night at
+          <select id="nightly-hour" aria-label="Nightly hour"></select>
+        </label>
+      </div>
+      <div id="runs"><div class="muted">Loading…</div></div>
+    </section>
+
+    <script>
+      const state = {
+        runs: [],
+        workers: [],
+        expanded: new Set(),
+        runDetails: new Map(),
+        // Which task's log the live panel shows: the running one unless the
+        // user picked a specific task.
+        pinned: null,
+        logKey: null,
+        logSize: -1,
+        lastOutputAt: null,
+      }
+      const $ = (id) => document.getElementById(id)
+
+      function el(tag, attrs = {}, children = []) {
+        const node = document.createElement(tag)
+        for (const [key, value] of Object.entries(attrs)) {
+          if (key === 'class') node.className = value
+          else if (key === 'text') node.textContent = value
+          else if (key.startsWith('on'))
+            node.addEventListener(key.slice(2), value)
+          else node.setAttribute(key, value)
+        }
+        for (const child of [].concat(children)) {
+          if (child != null) node.append(child)
+        }
+        return node
+      }
+      function ago(value) {
+        const ms = typeof value === 'number' ? value : Date.parse(value)
+        if (!ms) return 'never'
+        const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+        if (s < 60) return `${s}s ago`
+        if (s < 3600) return `${Math.round(s / 60)} min ago`
+        if (s < 86400) return `${Math.round(s / 3600)} h ago`
+        return `${Math.round(s / 86400)} d ago`
+      }
+      function duration(start, end) {
+        const ms = (end ? Date.parse(end) : Date.now()) - Date.parse(start)
+        if (!(ms > 0)) return ''
+        const s = Math.round(ms / 1000)
+        if (s < 60) return `${s}s`
+        if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+        return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+      }
+      function bytes(n) {
+        if (!n) return '0 B'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let v = n
+        let u = 0
+        while (v >= 1024 && u < units.length - 1) {
+          v /= 1024
+          u++
+        }
+        return `${v.toFixed(v < 10 && u ? 1 : 0)} ${units[u]}`
+      }
+      async function api(path, options) {
+        const res = await fetch(path, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        })
+        if (res.status === 401 || res.redirected) {
+          location.href = '/login.html'
+          throw new Error('login required')
+        }
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        return data
+      }
+
+      // ── Workers ───────────────────────────────────────────────────────
+      function renderWorker(id, title, worker, offlineHint) {
+        const box = $(`worker-${id}`)
+        box.replaceChildren()
+        const online = worker?.online
+        const current = online ? worker.current : null
+        const icon = el('span', {
+          class: `status-icon ${current ? 'busy' : online ? 'online' : 'offline'}`,
+          text: '●',
+        })
+        box.append(
+          el('div', { class: 'worker-title' }, [
+            icon,
+            title,
+            el('span', {
+              class: 'muted',
+              text: current ? 'running' : online ? 'idle' : 'offline',
+            }),
+          ])
+        )
+        if (current) {
+          box.append(
+            el('div', {
+              text: `${current.model} · ${current.sourceLabel}`,
+            }),
+            el('div', {
+              class: 'muted',
+              text: `for ${duration(current.startedAt)}`,
+            })
+          )
+        } else if (online) {
+          box.append(el('div', { class: 'muted', text: 'Waiting for work.' }))
+        } else {
+          box.append(
+            el('div', {
+              class: 'muted',
+              text: worker
+                ? `Last seen ${ago(worker.lastSeen)}. ${offlineHint}`
+                : offlineHint,
+            })
+          )
+        }
+      }
+      function renderWorkers() {
+        const nas = state.workers.find((w) => w.id === 'nas')
+        const pc = state.workers.find((w) => w.browser)
+        renderWorker(
+          'nas',
+          'NAS',
+          nas,
+          'The dashboard container runs this worker; it should come back on its own.'
+        )
+        renderWorker(
+          'pc',
+          pc?.label || 'PC',
+          pc,
+          'StufferDB, Tumblr and Reddit scrapes wait until the PC worker is running.'
+        )
+      }
+
+      // ── Runs ──────────────────────────────────────────────────────────
+      function progressBar(run) {
+        const bar = el('div', { class: 'progress' })
+        const pct = (n) => `${(n / Math.max(run.total, 1)) * 100}%`
+        bar.append(
+          el('span', { class: 'done', style: `width:${pct(run.counts.done)}` }),
+          el('span', {
+            class: 'failed',
+            style: `width:${pct(run.counts.failed)}`,
+          })
+        )
+        return bar
+      }
+      function runLine(run) {
+        const finished =
+          run.counts.done + run.counts.failed + run.counts.canceled
+        const parts = [
+          `${finished}/${run.total} sources`,
+          `saved ${run.totals.saved.toLocaleString()}`,
+          `${bytes(run.totals.downloadBytes)}`,
+        ]
+        if (run.totals.errors) parts.push(`${run.totals.errors} media errors`)
+        if (run.counts.failed) parts.push(`${run.counts.failed} failed`)
+        const pcOnline = state.workers.some((w) => w.browser && w.online)
+        if (run.waitingForBrowser && !pcOnline && run.status !== 'canceling') {
+          parts.push(`${run.waitingForBrowser} waiting for the PC`)
+        }
+        return parts.join(' · ')
+      }
+      function taskRow(run, task) {
+        const label = el('div', { class: 'task-name' }, [
+          `${task.model} · ${task.sourceLabel}`,
+          task.requiresBrowser
+            ? el('span', { class: 'tag', text: 'PC' })
+            : null,
+        ])
+        const stat = el('span', {
+          class: 'task-stat muted',
+          text:
+            task.status === 'running'
+              ? `running ${duration(task.startedAt)}`
+              : task.summary
+                ? `saved ${task.summary.saved} · ${duration(task.startedAt, task.finishedAt)}`
+                : task.status,
+        })
+        const right = el('div', { class: 'row', style: 'gap:6px' }, [
+          el('span', { class: `pill ${task.status}`, text: task.status }),
+        ])
+        if (task.status !== 'queued') {
+          right.append(
+            el('button', {
+              text: 'Log',
+              onclick: (event) => {
+                event.stopPropagation()
+                state.pinned = { runId: run.id, taskId: task.id, task }
+                state.logKey = null
+                refreshLog()
+                $('live-log').scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'center',
+                })
+              },
+            })
+          )
+        }
+        return el('div', { class: 'task' }, [label, stat, right])
+      }
+      function renderRuns() {
+        const box = $('runs')
+        box.replaceChildren()
+        if (!state.runs.length) {
+          box.append(el('div', { class: 'muted', text: 'No scrapes yet.' }))
+          return
+        }
+        for (const run of state.runs) {
+          const active = ['queued', 'running', 'canceling'].includes(run.status)
+          const head = el('div', { class: 'run-head' }, [
+            el('span', { class: 'run-title', text: run.label }),
+            el('span', {
+              class: `pill ${run.status}`,
+              text: run.status.replace(/-/g, ' '),
+            }),
+            el('span', {
+              class: 'muted',
+              text: `${ago(run.createdAt)}${run.createdBy === 'nightly schedule' ? ' · nightly' : ''}`,
+            }),
+          ])
+          if (active && run.status !== 'canceling') {
+            head.append(
+              el('button', {
+                class: 'danger',
+                text: 'Cancel',
+                onclick: async (event) => {
+                  event.stopPropagation()
+                  if (
+                    !confirm(
+                      'Cancel this run? The running source stops and the rest are skipped.'
+                    )
+                  )
+                    return
+                  await api(`/api/scrapes/${run.id}/cancel`, { method: 'POST' })
+                  refresh()
+                },
+              })
+            )
+          }
+          head.addEventListener('click', () => {
+            if (state.expanded.has(run.id)) state.expanded.delete(run.id)
+            else state.expanded.add(run.id)
+            renderRuns()
+            if (state.expanded.has(run.id)) loadRunDetails(run.id)
+          })
+          const item = el('div', { class: 'run' }, [
+            head,
+            progressBar(run),
+            el('div', { class: 'muted', text: runLine(run) }),
+          ])
+          if (state.expanded.has(run.id)) {
+            const details = state.runDetails.get(run.id)
+            const tasks = el('div', { class: 'tasks' })
+            if (!details) {
+              tasks.append(el('div', { class: 'muted', text: 'Loading…' }))
+            } else {
+              const order = {
+                running: 0,
+                failed: 1,
+                done: 2,
+                canceled: 3,
+                queued: 4,
+              }
+              const sorted = [...details.tasks].sort(
+                (a, b) =>
+                  order[a.status] - order[b.status] ||
+                  String(b.finishedAt || '').localeCompare(
+                    String(a.finishedAt || '')
+                  )
+              )
+              for (const task of sorted) tasks.append(taskRow(run, task))
+            }
+            item.append(tasks)
+          }
+          box.append(item)
+        }
+      }
+      async function loadRunDetails(runId) {
+        try {
+          const { run } = await api(`/api/scrapes/${runId}`)
+          state.runDetails.set(runId, run)
+          renderRuns()
+        } catch {}
+      }
+
+      // ── Live log ──────────────────────────────────────────────────────
+      function liveTarget() {
+        if (state.pinned) return state.pinned
+        for (const run of state.runs) {
+          if (run.current) {
+            return { runId: run.id, taskId: run.current.id, task: run.current }
+          }
+        }
+        return null
+      }
+      async function refreshLog() {
+        const target = liveTarget()
+        const meta = $('live-meta')
+        const logEl = $('live-log')
+        if (!target) {
+          meta.textContent = 'Nothing running.'
+          return
+        }
+        const key = `${target.runId}/${target.taskId}`
+        try {
+          const log = await api(
+            `/api/scrapes/${target.runId}/tasks/${target.taskId}/log?bytes=65536`
+          )
+          if (key !== state.logKey) {
+            state.logKey = key
+            state.logSize = -1
+            state.lastOutputAt = null
+          }
+          if (log.size !== state.logSize) {
+            if (state.logSize >= 0) state.lastOutputAt = Date.now()
+            state.logSize = log.size
+            const atBottom =
+              logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30
+            logEl.textContent = (log.truncated ? '…\n' : '') + log.text
+            if (atBottom || state.lastOutputAt === null) {
+              logEl.scrollTop = logEl.scrollHeight
+            }
+          }
+          const task = target.task
+          const running = !state.pinned || task.status === 'running'
+          meta.replaceChildren(
+            ...[
+              el('span', { text: `${task.model} · ${task.sourceLabel} — ` }),
+              el('span', {
+                class: running ? 'busy' : '',
+                text: running
+                  ? `running for ${duration(task.startedAt)}, last output ${
+                      state.lastOutputAt ? ago(state.lastOutputAt) : 'just now'
+                    }`
+                  : `${task.status} (log from ${ago(task.finishedAt || task.startedAt)})`,
+              }),
+              state.pinned
+                ? el('button', {
+                    text: 'Follow live run',
+                    style:
+                      'margin-left:10px;min-height:26px;padding:2px 10px;font-size:12px',
+                    onclick: () => {
+                      state.pinned = null
+                      state.logKey = null
+                      refreshLog()
+                    },
+                  })
+                : null,
+            ].filter(Boolean)
+          )
+        } catch {}
+      }
+
+      // ── Start + settings ──────────────────────────────────────────────
+      function message(text, kind = '') {
+        const box = $('start-message')
+        box.textContent = text
+        box.className = kind
+      }
+      async function start(body, button) {
+        button.disabled = true
+        message('Queuing…')
+        try {
+          const { run } = await api('/api/scrapes', {
+            method: 'POST',
+            body: JSON.stringify(body),
+          })
+          message(
+            `Queued "${run.label}" (${run.total} source${run.total === 1 ? '' : 's'}).`,
+            'ok'
+          )
+          state.pinned = null
+          refresh()
+        } catch (err) {
+          message(err.message, 'error')
+        } finally {
+          button.disabled = false
+        }
+      }
+      $('run-all').addEventListener('click', (event) => {
+        if (!confirm('Queue every saved source? This can take many hours.'))
+          return
+        start({ scope: 'all' }, event.currentTarget)
+      })
+      $('run-model').addEventListener('click', (event) => {
+        const model = $('model-select').value
+        if (model) start({ scope: 'model', model }, event.currentTarget)
+      })
+      $('run-url').addEventListener('click', (event) => {
+        const url = $('url-input').value.trim()
+        if (!url) return message('Paste a source URL first.', 'error')
+        start({ scope: 'url', url }, event.currentTarget)
+      })
+      async function loadModels() {
+        try {
+          const models = await api('/api/scrapes/models')
+          const select = $('model-select')
+          select.replaceChildren(
+            ...models.map((model) =>
+              el('option', {
+                value: model.name,
+                text: `${model.name} (${model.sources} source${model.sources === 1 ? '' : 's'})`,
+              })
+            )
+          )
+        } catch {}
+      }
+
+      // Nightly hour is stored in UTC; show and pick it in local time.
+      const hourSelect = $('nightly-hour')
+      for (let local = 0; local < 24; local++) {
+        const d = new Date()
+        d.setHours(local, 0, 0, 0)
+        hourSelect.append(
+          el('option', {
+            value: String(d.getUTCHours()),
+            text: d.toLocaleTimeString([], {
+              hour: 'numeric',
+              minute: '2-digit',
+            }),
+          })
+        )
+      }
+      function renderSettings(settings) {
+        const nightly = settings?.nightly || {}
+        if (document.activeElement !== hourSelect) {
+          hourSelect.value = String(nightly.utcHour ?? 6)
+        }
+        $('nightly-enabled').checked = Boolean(nightly.enabled)
+      }
+      async function saveSettings() {
+        try {
+          await api('/api/scrapes-settings', {
+            method: 'POST',
+            body: JSON.stringify({
+              enabled: $('nightly-enabled').checked,
+              utcHour: Number(hourSelect.value),
+            }),
+          })
+        } catch (err) {
+          message(`Couldn't save the schedule: ${err.message}`, 'error')
+        }
+      }
+      $('nightly-enabled').addEventListener('change', saveSettings)
+      hourSelect.addEventListener('change', saveSettings)
+
+      // ── Polling ───────────────────────────────────────────────────────
+      async function refresh() {
+        try {
+          const data = await api('/api/scrapes')
+          state.runs = data.runs
+          state.workers = data.workers
+          renderWorkers()
+          renderSettings(data.settings)
+          const allActive = data.runs.some(
+            (run) =>
+              run.scope === 'all' && ['queued', 'running'].includes(run.status)
+          )
+          $('run-all').disabled = allActive
+          $('run-all-note').textContent = allActive
+            ? 'An all-sources run is already in progress.'
+            : ''
+          for (const runId of state.expanded) loadRunDetails(runId)
+          renderRuns()
+        } catch {}
+        refreshLog()
+      }
+      loadModels()
+      refresh()
+      setInterval(refresh, 3000)
+    </script>
+  </body>
+</html>

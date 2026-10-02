@@ -1,8 +1,10 @@
 'use strict'
 
-const { runStufferDbBatch } = require('./scraperRunner')
+const { runStufferDbBatch, withCliScrapeLock } = require('./scraperRunner')
 
-runStufferDbBatch(process.argv.slice(2))
+withCliScrapeLock('npm run update:stufferdb', () =>
+  runStufferDbBatch(process.argv.slice(2))
+)
   .then((code) => {
     process.exitCode = code
   })

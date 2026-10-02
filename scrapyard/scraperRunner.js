@@ -2303,6 +2303,34 @@ async function runAllSourceUpdates(argvInput = {}) {
     : 0
 }
 
+// Scrapes started from the CLI take the shared scrape lock (see
+// scrapeQueue.js) so they never run alongside a dashboard-queued scrape.
+// Tasks started by a queue worker already hold it (SCRAPE_LOCK_HELD).
+async function withCliScrapeLock(label, run) {
+  if (process.env.SCRAPE_LOCK_HELD) return run()
+  let release
+  try {
+    release = require('./scrapeQueue').holdScrapeLock(label)
+  } catch (err) {
+    if (err.code === 'SCRAPE_LOCK_BUSY') {
+      console.error(err.message)
+      return 1
+    }
+    console.warn(`Scrape lock unavailable (${err.message}); continuing without it.`)
+    return run()
+  }
+  process.once('exit', release)
+  try {
+    return await run()
+  } finally {
+    release()
+  }
+}
+
+function isPreflightRun(rawArgs) {
+  return rawArgs.some((arg) => /^--preflight(=true)?$/i.test(String(arg)))
+}
+
 async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
   installHardInterruptHandlers()
 
@@ -2319,38 +2347,20 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
       printHelp()
       return 1
     }
-    return runScrape(inputUrl, argv, deps)
+    if (isPreflightRun(scrapeArgs)) return runScrape(inputUrl, argv, deps)
+    return withCliScrapeLock(`npm run scrape ${inputUrl}`, () =>
+      runScrape(inputUrl, argv, deps)
+    )
   }
 
   if (command === 'repair') return runRepair(rawArgs.slice(1))
   if (command === 'sync') return runSync(rawArgs.slice(1))
 
   if (command === 'update') {
-    const updateArgs = rawArgs.slice(2)
-    const target = String(rawArgs[1] || 'all')
-      .trim()
-      .toLowerCase()
-    if (target === 'all') return runAllSourceUpdates(updateArgs)
-    if (target === 'stufferdb' || target === 'stuffer') {
-      return runStufferDbBatch(updateArgs)
-    }
-    if (target === 'coomerfans') {
-      return runSourceBatch('coomer', {
-        ...parseRunnerArgs(updateArgs),
-        'host-contains': 'coomerfans.com',
-      })
-    }
-    if (
-      target === 'coomer' ||
-      target === 'kemono' ||
-      target === 'pawchive' ||
-      target === 'reddit' ||
-      target === 'tumblr'
-    ) {
-      return runSourceBatch(target, updateArgs)
-    }
-    printHelp()
-    return 1
+    return withCliScrapeLock(
+      `npm run scrape -- update ${rawArgs[1] || 'all'}`,
+      () => runUpdateCommand(rawArgs)
+    )
   }
 
   const argv = parseRunnerArgs(argvInput)
@@ -2365,7 +2375,38 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
     return runInteractiveLauncher()
   }
 
-  return runScrape(inputUrl, argv, deps)
+  if (isPreflightRun(rawArgs)) return runScrape(inputUrl, argv, deps)
+  return withCliScrapeLock(`npm run scrape ${inputUrl}`, () =>
+    runScrape(inputUrl, argv, deps)
+  )
+}
+
+function runUpdateCommand(rawArgs) {
+  const updateArgs = rawArgs.slice(2)
+  const target = String(rawArgs[1] || 'all')
+    .trim()
+    .toLowerCase()
+  if (target === 'all') return runAllSourceUpdates(updateArgs)
+  if (target === 'stufferdb' || target === 'stuffer') {
+    return runStufferDbBatch(updateArgs)
+  }
+  if (target === 'coomerfans') {
+    return runSourceBatch('coomer', {
+      ...parseRunnerArgs(updateArgs),
+      'host-contains': 'coomerfans.com',
+    })
+  }
+  if (
+    target === 'coomer' ||
+    target === 'kemono' ||
+    target === 'pawchive' ||
+    target === 'reddit' ||
+    target === 'tumblr'
+  ) {
+    return runSourceBatch(target, updateArgs)
+  }
+  printHelp()
+  return 1
 }
 
 module.exports = {
@@ -2401,6 +2442,7 @@ module.exports = {
   formatAllSourceSummary,
   runAllSourceUpdates,
   runScraperCli,
+  withCliScrapeLock,
 }
 
 if (require.main === module) {

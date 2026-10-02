@@ -1,8 +1,10 @@
 'use strict'
 
-const { runAllSourceUpdates } = require('./scraperRunner')
+const { runAllSourceUpdates, withCliScrapeLock } = require('./scraperRunner')
 
-runAllSourceUpdates(process.argv.slice(2))
+withCliScrapeLock('npm run update:all-models', () =>
+  runAllSourceUpdates(process.argv.slice(2))
+)
   .then((code) => {
     process.exitCode = code
   })

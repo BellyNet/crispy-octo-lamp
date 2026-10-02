@@ -2175,7 +2175,8 @@
         border-color: #c64646;
       }
       #admin-link,
-      #stats-link {
+      #stats-link,
+      #scrapes-link {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2191,7 +2192,8 @@
           border-color 0.15s;
       }
       #admin-link:hover,
-      #stats-link:hover {
+      #stats-link:hover,
+      #scrapes-link:hover {
         background: var(--card-bg);
         color: var(--text);
         border-color: var(--accent);
@@ -2580,6 +2582,22 @@
             <path d="M11.7 8.5v5" />
           </svg>
         </button>
+        <a id="scrapes-link" href="/scrapes" title="Scrapes" aria-label="Scrapes">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 3v12" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M4 21h16" />
+          </svg>
+        </a>
         <a id="stats-link" href="/stats" title="Stats" aria-label="Stats">
           <svg
             width="16"

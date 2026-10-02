@@ -1,8 +1,8 @@
 'use strict'
 
-const { runSourceBatch } = require('./scraperRunner')
+const { runSourceBatch, withCliScrapeLock } = require('./scraperRunner')
 
-runSourceBatch(process.argv.slice(2))
+withCliScrapeLock('source batch', () => runSourceBatch(process.argv.slice(2)))
   .then((code) => {
     process.exitCode = code
   })

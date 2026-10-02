@@ -11,6 +11,17 @@ All paths come from [scrapyard/config.js](scrapyard/config.js); override them in
 - Default NAS dataset root: `Z:\dataset` (`NAS_DATASET_DIR`)
 - Model registry: [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`)
 
+## Running scrapes from the dashboard
+
+Open the dashboard's **Scrapes** page (the download icon in the header) to start a run (all sources, one model, or one URL), watch its live output, see run history, and turn on the nightly all-sources run.
+
+- Runs are queued on the NAS (`Z:\slopvault-state\scrapes`). One source runs at a time across both machines, because every scrape updates the shared dedup records.
+- The NAS runs Pawchive, OnlyHaven and Coomer sources itself.
+- StufferDB, Tumblr and Reddit need a browser, so the PC runs them. They wait in the queue until the PC worker is online.
+- Manual `npm run scrape ...` runs take the same lock, so they never collide with queued ones.
+
+PC worker (once): `.\install-scrape-worker.ps1` registers a logon task that runs it in the background with no window (`-Uninstall` removes it). Its log is `%APPDATA%\.slopvault\scrape-worker.log`.
+
 ## Deploying the NAS dashboard
 
 ```powershell

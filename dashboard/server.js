@@ -24,6 +24,11 @@ const { faststartInUserDir } = require('../scrapyard/faststartMp4.js')
 const MetaCache = require('./meta-cache.js')
 const VisitTracker = require('./visits.js')
 const { buildStatsPayload, computeStatsFromResponse } = require('./stats.js')
+const {
+  mountScrapeRoutes,
+  startNasWorker,
+  startNightlySchedule,
+} = require('./scrapes.js')
 const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
@@ -1068,6 +1073,7 @@ app.get('/admin', (_req, res) =>
 app.get('/stats', (_req, res) =>
   res.sendFile('stats.html', { root: __dirname })
 )
+mountScrapeRoutes(app, { registryPath, pageDir: __dirname })
 app.get('/admin/duplicates', (_req, res) =>
   res.sendFile('exact-duplicates.html', { root: __dirname })
 )
@@ -3024,6 +3030,15 @@ async function start() {
     }, msUntilNextHour(NIGHTLY_HOUR))
   }
   scheduleNightly()
+
+  // Scrape queue: the NAS image sets SCRAPE_WORKER=nas, so only the deployed
+  // dashboard runs NAS scrape tasks and the nightly schedule (never a copy
+  // started locally for development).
+  if (process.env.SCRAPE_WORKER === 'nas') {
+    startNasWorker({ registryPath })
+    startNightlySchedule({ registryPath })
+    console.log(`  Scrapes:   NAS worker running; queue ${require('../scrapyard/config').scrapeQueueDir}`)
+  }
 }
 
 start()

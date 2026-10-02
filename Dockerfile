@@ -50,6 +50,9 @@ ENV SLOPVAULT_ROOT=/data/state
 # No Chrome in this image: browser-only sources (StufferDB, Tumblr, Reddit)
 # refuse to start here and run on the PC instead.
 ENV SCRAPER_NO_BROWSER=1
+# Scrape queue shared with the PC worker, and this container's role in it.
+ENV SCRAPE_QUEUE_DIR=/data/state/scrapes
+ENV SCRAPE_WORKER=nas
 ENV THUMB_DIR=/data/thumbs
 ENV DASHBOARD_PORT=3420
 ENV NODE_ENV=production

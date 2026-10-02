@@ -57,4 +57,11 @@ module.exports = {
       path.join(rootDir, 'model_aliases.json')
   ),
   tmpDir: path.join(rootDir, 'tmp'),
+  // Scrape queue shared by the NAS dashboard and the PC worker; must be on
+  // the NAS (default Z:\slopvault-state\scrapes, /data/state/scrapes in the
+  // NAS image).
+  scrapeQueueDir: path.resolve(
+    process.env.SCRAPE_QUEUE_DIR ||
+      path.join(path.dirname(nasDatasetDir), 'slopvault-state', 'scrapes')
+  ),
 }

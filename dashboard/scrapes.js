@@ -1,0 +1,222 @@
+'use strict'
+
+// Scrapes page support for the dashboard: API routes over the shared scrape
+// queue (scrapyard/scrapeQueue.js), the NAS worker, and the optional nightly
+// schedule. The PC worker (scrapyard/scrapeWorker.js) shares the same queue
+// through the NAS share.
+
+const fs = require('fs')
+const path = require('path')
+
+const config = require('../scrapyard/config')
+const queue = require('../scrapyard/scrapeQueue')
+const { planScrapeRun } = require('../scrapyard/scrapePlans')
+const { loadModelRegistry } = require('../scrapyard/modelRegistry')
+
+const RUN_ID = /^[0-9TZ]+-[0-9a-f]{6}$/
+const TASK_ID = /^t\d{4}$/
+const SCHEDULE_CHECK_MS = 60 * 1000
+
+function settingsPath() {
+  return path.join(config.scrapeQueueDir, 'settings.json')
+}
+
+function readSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath(), 'utf8'))
+  } catch {
+    return { nightly: { enabled: false, utcHour: 6 } }
+  }
+}
+
+function writeSettings(settings) {
+  fs.mkdirSync(config.scrapeQueueDir, { recursive: true })
+  fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 1))
+}
+
+function createRunFromRequest({ scope, model, url, createdBy }, registryPath) {
+  const plan = planScrapeRun({ scope, model, url }, { registryPath })
+  return queue.createRun({ ...plan, scope, createdBy })
+}
+
+function mountScrapeRoutes(app, { registryPath, pageDir }) {
+  app.get('/scrapes', (_req, res) =>
+    res.sendFile('scrapes.html', { root: pageDir })
+  )
+
+  app.get('/api/scrapes', (_req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-cache')
+      res.json({
+        workers: queue.listWorkers(),
+        lock: queue.readLock(),
+        runs: queue.listRunSummaries({ limit: 25 }),
+        settings: readSettings(),
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.get('/api/scrapes/models', (_req, res) => {
+    try {
+      const registry = loadModelRegistry(registryPath)
+      res.json(
+        Object.entries(registry)
+          .map(([name, entry]) => ({
+            name,
+            sources: Object.values(entry?.sources || {}).reduce(
+              (sum, list) => sum + (Array.isArray(list) ? list.length : 0),
+              0
+            ),
+          }))
+          .filter((model) => model.sources > 0)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      )
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.get('/api/scrapes/:runId', (req, res) => {
+    if (!RUN_ID.test(req.params.runId)) return res.status(400).end()
+    const run = queue.readRun(req.params.runId)
+    if (!run) return res.status(404).json({ error: 'Run not found' })
+    res.setHeader('Cache-Control', 'no-cache')
+    res.json({
+      run,
+      summary: queue.summarizeRun(run, {
+        canceled: queue.isCancelRequested(run.id),
+      }),
+    })
+  })
+
+  app.get('/api/scrapes/:runId/tasks/:taskId/log', (req, res) => {
+    const { runId, taskId } = req.params
+    if (!RUN_ID.test(runId) || !TASK_ID.test(taskId)) {
+      return res.status(400).end()
+    }
+    const bytes = Math.min(
+      Math.max(Number.parseInt(req.query.bytes, 10) || 32768, 1024),
+      512 * 1024
+    )
+    res.setHeader('Cache-Control', 'no-cache')
+    res.json(queue.readTaskLogTail(runId, taskId, bytes))
+  })
+
+  app.post('/api/scrapes', (req, res) => {
+    const scope = req.body?.scope
+    if (!['all', 'model', 'url'].includes(scope)) {
+      return res.status(400).json({ error: 'scope must be all, model or url' })
+    }
+    try {
+      if (
+        scope === 'all' &&
+        queue
+          .listRunSummaries({ limit: 50 })
+          .some(
+            (run) =>
+              run.scope === 'all' && ['queued', 'running'].includes(run.status)
+          )
+      ) {
+        return res
+          .status(409)
+          .json({ error: 'An all-sources run is already in progress.' })
+      }
+      const run = createRunFromRequest(
+        {
+          scope,
+          model: req.body?.model,
+          url: req.body?.url,
+          createdBy: 'dashboard',
+        },
+        registryPath
+      )
+      res.json({ ok: true, run: queue.summarizeRun(run) })
+    } catch (err) {
+      res.status(400).json({ error: err.message })
+    }
+  })
+
+  app.post('/api/scrapes/:runId/cancel', (req, res) => {
+    if (!RUN_ID.test(req.params.runId)) return res.status(400).end()
+    if (!queue.readRun(req.params.runId)) {
+      return res.status(404).json({ error: 'Run not found' })
+    }
+    queue.requestCancel(req.params.runId)
+    res.json({ ok: true })
+  })
+
+  app.post('/api/scrapes-settings', (req, res) => {
+    const utcHour = Number(req.body?.utcHour)
+    if (!Number.isInteger(utcHour) || utcHour < 0 || utcHour > 23) {
+      return res.status(400).json({ error: 'utcHour must be 0-23' })
+    }
+    const settings = readSettings()
+    settings.nightly = {
+      ...settings.nightly,
+      enabled: Boolean(req.body?.enabled),
+      utcHour,
+    }
+    writeSettings(settings)
+    res.json({ ok: true, settings })
+  })
+}
+
+// Queues an all-sources run once a day at the configured hour (UTC, so it
+// doesn't depend on the container's timezone), unless one is already active.
+function startNightlySchedule({ registryPath, log = console }) {
+  const check = () => {
+    try {
+      const settings = readSettings()
+      const nightly = settings.nightly || {}
+      const now = new Date()
+      const today = now.toISOString().slice(0, 10)
+      if (!nightly.enabled || now.getUTCHours() !== nightly.utcHour) return
+      if (nightly.lastQueuedDate === today) return
+      if (queue.activeRunExists()) return
+      createRunFromRequest(
+        { scope: 'all', createdBy: 'nightly schedule' },
+        registryPath
+      )
+      settings.nightly = { ...nightly, lastQueuedDate: today }
+      writeSettings(settings)
+      log.log('  Scrapes:   nightly all-sources run queued')
+    } catch (err) {
+      log.warn('  Scrapes:   nightly schedule check failed:', err.message)
+    }
+  }
+  const timer = setInterval(check, SCHEDULE_CHECK_MS)
+  timer.unref?.()
+  check()
+}
+
+// The NAS worker: runs the tasks that don't need a browser. Each task gets a
+// fresh working copy of the registry, and its registry edits are not pushed
+// back, so it can't overwrite the PC's copy (the registry still lives on
+// the PC until it moves to the NAS).
+function startNasWorker({ registryPath, log = console }) {
+  const { startWorker } = require('../scrapyard/scrapeWorker')
+  const registryCopy = path.join(config.slopvaultRoot, 'model_aliases.json')
+  return startWorker({
+    id: 'nas',
+    label: 'NAS',
+    browser: false,
+    pollMs: 5000,
+    cooldownMs: 8000,
+    childEnv: {
+      MODEL_REGISTRY_PATH: registryCopy,
+      SKIP_REGISTRY_PUSH: '1',
+    },
+    prepareTask: () => {
+      fs.mkdirSync(path.dirname(registryCopy), { recursive: true })
+      fs.copyFileSync(registryPath, registryCopy)
+    },
+    log: {
+      warn: (message) => log.warn(`  Scrapes:   ${message}`),
+      error: (message) => log.warn(`  Scrapes:   ${message}`),
+    },
+  })
+}
+
+module.exports = { mountScrapeRoutes, startNightlySchedule, startNasWorker }
