@@ -144,6 +144,10 @@ set -e
 $DockerPreamble
 SHA='$sha'; DEST='$RemotePath'; NEXT="`$DEST.next"; PREV="`$DEST.prev"; TAR='$remoteTar'
 
+# Bind-mounted state folder: create it as the share user before docker
+# would create it as root.
+mkdir -p /share/Vault69/slopvault-state/tmp /share/Vault69/slopvault-state/incomplete
+
 rm -rf "`$NEXT"
 mkdir -p "`$NEXT"
 tar -xf "`$TAR" -C "`$NEXT"

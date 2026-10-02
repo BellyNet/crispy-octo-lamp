@@ -25,6 +25,9 @@ services:
       # keeping it on the vault share means 7 TB of permanent room and a
       # single backup target alongside the raw dataset.
       - /share/Vault69/dashboard-cache:/data/thumbs
+      # Scraper state for scrapes run on the NAS (nas-scrape.ps1): scratch
+      # downloads, run reports, quarantine, registry working copy.
+      - /share/Vault69/slopvault-state:/data/state
     environment:
       DATASET_DIR: /data/dataset
       THUMB_DIR: /data/thumbs

@@ -28,12 +28,25 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY dashboard/ ./dashboard/
-# The dashboard reuses scrapyard/ helpers (mediaDates, registry, transcoders).
+# The scrapers ship in the same image so scrapes can run on the NAS
+# (nas-scrape.ps1) against the same dataset the dashboard serves.
 COPY scrapyard/ ./scrapyard/
-COPY audit/audit-exact-media-duplicates.js audit/export-exact-media-review.js ./audit/
-COPY model_aliases.json ./
+COPY hoghaul/ ./hoghaul/
+COPY milkmaid/ ./milkmaid/
+COPY stuffinglogger/ ./stuffinglogger/
+COPY audit/ ./audit/
+COPY banners.js model_aliases.json ./
+
+# Scraper scratch space (partial downloads, run reports) lives in the NAS
+# state folder mounted at /data/state, so it is writable by the share user
+# and survives container restarts.
+RUN ln -s /data/state/tmp /app/tmp && ln -s /data/state/incomplete /app/incomplete
 
 ENV DATASET_DIR=/data/dataset
+# The dataset is the NAS dataset: tells scrapyard/datasetLocation.js there is
+# no separate local copy to sync or evict.
+ENV NAS_DATASET_DIR=/data/dataset
+ENV SLOPVAULT_ROOT=/data/state
 ENV THUMB_DIR=/data/thumbs
 ENV DASHBOARD_PORT=3420
 ENV NODE_ENV=production

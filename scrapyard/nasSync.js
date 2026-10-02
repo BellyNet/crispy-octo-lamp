@@ -173,6 +173,9 @@ function pushRegistryToNas({
   nasDatasetDir = config.nasDatasetDir,
   log = console,
 } = {}) {
+  // Scrapes run on the NAS use a registry working copy that must not
+  // overwrite the dashboard's registry (see nas-scrape.ps1).
+  if (process.env.SKIP_REGISTRY_PUSH) return { ok: false, reason: 'disabled' }
   try {
     if (!fs.existsSync(LOCAL_REGISTRY_PATH))
       return { ok: false, reason: 'no-source' }
