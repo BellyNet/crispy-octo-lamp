@@ -82,6 +82,14 @@ function createLocalBackend(queueDir = config.scrapeQueueDir) {
       const release = queue.holdScrapeLock(note, queueDir)
       return async () => release()
     },
+    async registryPull() {
+      const { loadModelRegistry } = require('./modelRegistry')
+      return { registry: loadModelRegistry(config.registryPath) }
+    },
+    async registryApply(ops) {
+      const { applyOpsToRegistry } = require('./registryStore')
+      return { registry: await applyOpsToRegistry(ops) }
+    },
   }
 }
 
@@ -157,6 +165,12 @@ function createRemoteBackend({
         clearInterval(timer)
         await post('lock', { action: 'release', holder }).catch(() => {})
       }
+    },
+    async registryPull() {
+      return post('registry/pull', {})
+    },
+    async registryApply(ops) {
+      return post('registry/apply', { ops })
     },
   }
 }

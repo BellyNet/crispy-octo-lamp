@@ -7,9 +7,6 @@ require('dotenv').config({
 })
 
 const rootDir = path.join(__dirname, '..')
-const MODEL_ALIASES_FILENAME = 'model_aliases.json'
-const NAS_MODEL_ALIASES_FILENAME = 'model-aliases.json'
-const DEFAULT_NAS_MODEL_ALIASES_PATH = `Z:\\${NAS_MODEL_ALIASES_FILENAME}`
 const PRETTIER_PARSERS = new Map([
   ['.cjs', 'babel'],
   ['.css', 'css'],
@@ -24,8 +21,22 @@ const PRETTIER_PARSERS = new Map([
   ['.yml', 'yaml'],
 ])
 
+// Prettier is a dev dependency: present on the PC, absent from the NAS image.
+let prettierAvailable = null
+function hasPrettier() {
+  if (prettierAvailable === null) {
+    try {
+      require.resolve('prettier', { paths: [rootDir] })
+      prettierAvailable = true
+    } catch {
+      prettierAvailable = false
+    }
+  }
+  return prettierAvailable
+}
+
 function shouldFormat(filePath, formatWithPrettier) {
-  if (!formatWithPrettier) return false
+  if (!formatWithPrettier || !hasPrettier()) return false
   return PRETTIER_PARSERS.has(path.extname(filePath).toLowerCase())
 }
 
@@ -76,48 +87,19 @@ const prettier = require('prettier')
   }
 }
 
-function isRootModelAliasesFile(filePath) {
-  const resolvedPath = path.resolve(filePath)
-  return (
-    path.basename(resolvedPath).toLowerCase() === MODEL_ALIASES_FILENAME &&
-    path.dirname(resolvedPath) === rootDir
-  )
-}
-
-function getNasModelAliasesPath() {
-  const configuredNasDatasetRoot = String(
-    process.env.NAS_DATASET_DIR || ''
-  ).trim()
-
-  if (!configuredNasDatasetRoot) {
-    return DEFAULT_NAS_MODEL_ALIASES_PATH
-  }
-
-  const nasDatasetRoot = path.resolve(configuredNasDatasetRoot)
-  return path.join(path.dirname(nasDatasetRoot), NAS_MODEL_ALIASES_FILENAME)
-}
-
-function syncModelAliasesToNas(filePath) {
-  if (!isRootModelAliasesFile(filePath)) return
-
-  const resolvedPath = path.resolve(filePath)
-  const nasModelAliasesPath = getNasModelAliasesPath()
-  fs.mkdirSync(path.dirname(nasModelAliasesPath), { recursive: true })
-  fs.copyFileSync(resolvedPath, nasModelAliasesPath)
-}
-
 function writeRepoFileSync(filePath, contents, options = {}) {
   const resolvedPath = path.resolve(filePath)
   const encoding = options.encoding || 'utf8'
   const formatWithPrettier = options.formatWithPrettier !== false
 
-  fs.writeFileSync(resolvedPath, contents, encoding)
+  // Write-then-rename so readers (and a crash) never see half a file.
+  const tmpPath = `${resolvedPath}.${process.pid}.tmp`
+  fs.writeFileSync(tmpPath, contents, encoding)
+  fs.renameSync(tmpPath, resolvedPath)
 
   if (shouldFormat(resolvedPath, formatWithPrettier)) {
     formatRepoFile(resolvedPath)
   }
-
-  syncModelAliasesToNas(resolvedPath)
 }
 
 function writeRepoJsonFileSync(filePath, value, options = {}) {

@@ -15,7 +15,6 @@ const {
 const config = require('./config')
 const { isSameDirectory } = require('./datasetLocation')
 
-const LOCAL_REGISTRY_PATH = config.registryPath
 const MUTABLE_MODEL_METADATA_FILES = ['.media-dates.json']
 const MAX_VERIFIED_SIZE_DELTA_BYTES = 32
 
@@ -163,29 +162,6 @@ function findNasBackedMediaMatch({
   }
 
   return null
-}
-
-// Copies the local model_aliases.json to its bind-mount location on the NAS
-// (one level above the dataset dir — that's the path docker-compose mounts as
-// /app/model_aliases.json inside the dashboard container). Skips silently if
-// either the source or the NAS share is missing so this never blocks a scrape.
-function pushRegistryToNas({
-  nasDatasetDir = config.nasDatasetDir,
-  log = console,
-} = {}) {
-  // Scrapes run on the NAS use a registry working copy that must not
-  // overwrite the dashboard's registry (see dashboard/scrapes.js).
-  if (process.env.SKIP_REGISTRY_PUSH) return { ok: false, reason: 'disabled' }
-  try {
-    if (!fs.existsSync(LOCAL_REGISTRY_PATH))
-      return { ok: false, reason: 'no-source' }
-    const dest = path.join(path.dirname(nasDatasetDir), 'model_aliases.json')
-    fs.copyFileSync(LOCAL_REGISTRY_PATH, dest)
-    return { ok: true, dest }
-  } catch (err) {
-    log.warn?.(`Registry push to NAS failed: ${err.message}`)
-    return { ok: false, reason: err.message }
-  }
 }
 
 function syncModelMetadataToNas({
@@ -391,9 +367,8 @@ async function syncModelToNas({
   failurePrefix = 'NAS sync failed with code',
 }) {
   // NAS-only dataset: the scrape already wrote to the NAS. Nothing to copy
-  // or evict; just keep the dashboard's registry copy current.
+  // or evict. (The registry syncs through the dashboard; see registrySync.js.)
   if (isSameDirectory(datasetDir, nasDatasetDir)) {
-    pushRegistryToNas({ nasDatasetDir, log })
     return { ok: true, code: 0, stdout: '', stderr: '', datasetIsNas: true }
   }
 
@@ -435,7 +410,6 @@ async function syncModelToNas({
     datasetDir,
     nasDatasetDir,
   })
-  pushRegistryToNas({ nasDatasetDir, log })
   if (cleanup.deletedFiles > 0) {
     log.log(
       `Removed ${cleanup.deletedFiles} NAS-backed local media file(s) after NAS sync.`
@@ -465,5 +439,4 @@ module.exports = {
   syncModelMetadataToNas,
   evictVerifiedLocalMp4s,
   syncModelToNas,
-  pushRegistryToNas,
 }

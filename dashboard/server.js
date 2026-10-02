@@ -30,11 +30,13 @@ const {
   startNasWorker,
   startNightlySchedule,
 } = require('./scrapes.js')
+const { mountSourceRoutes } = require('./sources.js')
 const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
 
-const registryPath = path.join(__dirname, '..', 'model_aliases.json')
+// /app/model_aliases.json in the NAS image (the NAS registry, bind-mounted).
+const registryPath = require('../scrapyard/config').registryPath
 
 const app = express()
 const PORT = process.env.DASHBOARD_PORT || 3420
@@ -438,7 +440,9 @@ app.use(
 // PC scrape worker API: token auth and a larger body limit, so it goes
 // before the cookie login and the 32 KB JSON parser. Only the NAS deploy
 // (SCRAPE_WORKER=nas) owns the queue.
-if (process.env.SCRAPE_WORKER === 'nas') mountWorkerApi(app, { express })
+if (process.env.SCRAPE_WORKER === 'nas') {
+  mountWorkerApi(app, { express, registryPath })
+}
 
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json({ limit: '32kb' }))
@@ -1080,6 +1084,7 @@ app.get('/stats', (_req, res) =>
   res.sendFile('stats.html', { root: __dirname })
 )
 mountScrapeRoutes(app, { registryPath, pageDir: __dirname })
+mountSourceRoutes(app, { registryPath, pageDir: __dirname })
 app.get('/admin/duplicates', (_req, res) =>
   res.sendFile('exact-duplicates.html', { root: __dirname })
 )
@@ -3041,7 +3046,7 @@ async function start() {
   // dashboard runs NAS scrape tasks and the nightly schedule (never a copy
   // started locally for development).
   if (process.env.SCRAPE_WORKER === 'nas') {
-    startNasWorker({ registryPath })
+    startNasWorker({})
     startNightlySchedule({ registryPath })
     console.log(`  Scrapes:   NAS worker running; queue ${require('../scrapyard/config').scrapeQueueDir}`)
   }

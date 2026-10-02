@@ -2304,9 +2304,24 @@ async function withCliScrapeLock(label, run) {
     )
     return run()
   }
+  // On the PC, bring model_aliases.json in step with the NAS first and send
+  // this run's changes back after.
+  const remote = process.env.SCRAPE_QUEUE_MODE !== 'local'
+  const syncRegistry = async () => {
+    if (!remote) return
+    try {
+      await require('./registrySync').syncRegistry()
+    } catch (err) {
+      console.warn(
+        `Registry sync with the NAS failed (${err.message}); changes will sync next time.`
+      )
+    }
+  }
+  await syncRegistry()
   try {
     return await run()
   } finally {
+    await syncRegistry()
     await release()
   }
 }

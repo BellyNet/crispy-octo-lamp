@@ -53,7 +53,8 @@ function killTree(child) {
 //   pollMs               how often to look for work when idle
 //   cooldownMs           pause after a task so the other worker gets a turn
 //   childEnv             extra environment for task processes
-//   prepareTask(task)    called before each task (e.g. refresh registry copy)
+//   prepareTask(task)    called before each task (e.g. registry sync)
+//   afterTask(task)      called after each task, before it is reported
 //   log                  { warn, error } for the worker itself
 function startWorker(options) {
   const worker = {
@@ -196,6 +197,11 @@ function startWorker(options) {
       result = JSON.parse(fs.readFileSync(resultPath, 'utf8'))
       fs.unlinkSync(resultPath)
     } catch {}
+    try {
+      await options.afterTask?.(task)
+    } catch (err) {
+      write(`[queue] After-task step failed: ${err.message}\n`)
+    }
     const source = result?.runs?.[0]
     const status = canceled ? 'canceled' : exitCode === 0 ? 'done' : 'failed'
     write(`\n[queue] ${worker.label} finished: ${status} (exit ${exitCode})\n`)
@@ -278,11 +284,22 @@ if (require.main === module) {
     'info',
     `worker ${id} starting; dashboard ${config.dashboardUrl}, token from ${config.scrapeQueueDir}`
   )
+  // The PC's registry copy follows the NAS one around every task.
+  const syncRegistry = async () => {
+    try {
+      const { sent } = await require('./registrySync').syncRegistry()
+      if (sent) logLine('info', `registry: sent ${sent} change(s) to the NAS`)
+    } catch (err) {
+      logLine('warn', `registry sync failed: ${err.message}`)
+    }
+  }
   startWorker({
     id,
     label: argv.label || `${os.hostname()} (PC)`,
     browser: argv.browser,
     pollMs: 6000,
+    prepareTask: syncRegistry,
+    afterTask: syncRegistry,
     log: {
       warn: (message) => logLine('warn', message),
       error: (message) => logLine('error', message),

@@ -6,10 +6,9 @@ This repo is the local control center for collecting, repairing, reviewing, hash
 
 All paths come from [scrapyard/config.js](scrapyard/config.js); override them in the environment or `.env`.
 
-- Local dataset root: `%APPDATA%\.slopvault\dataset` (`DATASET_DIR` / `LOCAL_DATASET_DIR`)
+- Dataset: `Z:\dataset` on the NAS (`NAS_DATASET_DIR`; `DATASET_DIR` overrides it for tests)
 - Local quarantine root: `%APPDATA%\.slopvault\quarantine` (under `SLOPVAULT_ROOT`)
-- Default NAS dataset root: `Z:\dataset` (`NAS_DATASET_DIR`)
-- Model registry: [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`)
+- Model registry: the NAS copy (`/share/Vault69/model_aliases.json`) is the master; the PC keeps a working copy in [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`) and syncs it (see [Registry sync](#registry-sync))
 
 ## Running scrapes from the dashboard
 
@@ -21,6 +20,18 @@ Open the dashboard's **Scrapes** page (the download icon in the header) to start
 - Manual `npm run scrape ...` runs take the same lock, so they never collide with queued ones.
 
 PC worker (once): `.\install-scrape-worker.ps1` registers a logon task that runs it in the background with no window (`-Uninstall` removes it). Its log is `%APPDATA%\.slopvault\scrape-worker.log`.
+
+## Adding and finding sources
+
+The dashboard's **Sources** page (linked from the Scrapes page, and "Edit sources" on each model) edits the registry on the NAS:
+
+- Search a creator name to probe Pawchive, Coomer/CoomerFans, Tumblr and StufferDB for matching creators (plus unverified Reddit guesses and manual search links), or paste a source URL. Results show which model already owns each source.
+- Add a source to an existing model, or tick "new model" to create one. "Add & scrape" queues a run for just that URL.
+- Turn sources off and on, or remove them, per model.
+
+### Registry sync
+
+The NAS registry is the master copy. PC scrapes edit the local working copy, so the PC syncs both ways through the dashboard before and after every queued task and every manual `npm run scrape`. A sync sends only the PC's changes since the last sync (tracked in `%APPDATA%\.slopvault\model_aliases.synced.json`), so dashboard edits made in the meantime are kept. Run `npm run registry:sync` to sync by hand, e.g. before and after editing `model_aliases.json` directly.
 
 ## Deploying the NAS dashboard
 
@@ -367,6 +378,8 @@ The old local copy under `%APPDATA%\.slopvault\dataset` is no longer used. `npm 
 
 - `npm run sort:model-aliases`
   - sort and normalize the model registry file
+- `npm run registry:sync`
+  - merge the PC's registry changes into the NAS copy and pull the NAS copy back
 - `npm run purge-hashes`
   - clear model hash caches
 - `npm run prune:model-hashes`

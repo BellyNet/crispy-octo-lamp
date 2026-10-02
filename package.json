@@ -84,7 +84,8 @@
     "cleanup:flagged": "node scrapyard/cleanupFlaggedFiles.js",
     "cleanup:flagged:apply": "node scrapyard/cleanupFlaggedFiles.js --apply",
     "rebuild:nas-mp4-index": "node scrapyard/rebuildNasMp4Index.js",
-    "prune:missing-media": "node scrapyard/pruneMissingMediaRefs.js"
+    "prune:missing-media": "node scrapyard/pruneMissingMediaRefs.js",
+    "registry:sync": "node scrapyard/registrySync.js"
   },
   "dependencies": {
     "ansi-escapes": "^7.0.0",

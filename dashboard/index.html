@@ -3610,6 +3610,13 @@
           a.append(` ${label}`)
           sourceLinksEl.appendChild(a)
         }
+        if (currentUsername) {
+          const edit = document.createElement('a')
+          edit.className = 'src-link'
+          edit.href = `/sources#model=${encodeURIComponent(currentUsername)}`
+          edit.textContent = links?.length ? 'Edit sources' : '+ Add sources'
+          sourceLinksEl.appendChild(edit)
+        }
       }
 
       async function selectUser(userObj, liEl, opts = {}) {

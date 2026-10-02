@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sources</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #0d0d12;
+        --card-bg: #1a1a24;
+        --border: #2a2a3a;
+        --grid: #23232f;
+        --accent: #7c6cfc;
+        --text: #e0e0f0;
+        --muted: #8a8ab4;
+        --ok: #4caf82;
+        --err: #e05d5d;
+        --warn: #d9a441;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        padding: 24px 32px 60px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      header nav {
+        display: flex;
+        gap: 14px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      h3 {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 14px 0 6px;
+      }
+      a {
+        color: inherit;
+      }
+      header a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      header a:hover {
+        color: var(--accent);
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 14px;
+        min-width: 0;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      button,
+      input {
+        font: inherit;
+        color: var(--text);
+        background: #12121a;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 12px;
+        min-height: 36px;
+      }
+      button {
+        cursor: pointer;
+        background: var(--card-bg);
+        white-space: nowrap;
+      }
+      button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      button.danger:hover:not(:disabled) {
+        border-color: var(--err);
+        color: var(--err);
+      }
+      button.small {
+        min-height: 28px;
+        padding: 3px 10px;
+        font-size: 12px;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      input[type='text'],
+      input[type='search'],
+      input[type='url'] {
+        flex: 1 1 240px;
+        min-width: 0;
+      }
+      input.model-input {
+        flex: 0 1 200px;
+      }
+      label.check {
+        display: inline-flex;
+        gap: 5px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .message {
+        margin-top: 8px;
+        font-size: 13px;
+        min-height: 1em;
+      }
+      .message.error {
+        color: var(--err);
+      }
+      .message.ok {
+        color: var(--ok);
+      }
+      .item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 0;
+        border-top: 1px solid var(--grid);
+      }
+      .item:first-child {
+        border-top: none;
+      }
+      .item-main {
+        min-width: 0;
+      }
+      .item-title {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .item-url {
+        font-size: 12px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: block;
+        text-decoration: none;
+      }
+      .item-url:hover {
+        color: var(--accent);
+      }
+      .chip {
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .chip.new {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .chip.owned {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .chip.guess {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        font-size: 12px;
+      }
+      .links a {
+        color: var(--muted);
+      }
+      .links a:hover {
+        color: var(--accent);
+      }
+      @media (max-width: 700px) {
+        body {
+          padding: 16px 16px 48px;
+        }
+        .item {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .actions {
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Sources</h1>
+      <nav>
+        <a href="/scrapes">Scrapes</a>
+        <a href="/">&larr; Dashboard</a>
+      </nav>
+    </header>
+
+    <section class="card">
+      <h2>Find sources</h2>
+      <form class="row" id="search-form">
+        <input type="search" id="search-input" placeholder="Creator name or a source URL" autocomplete="off" />
+        <button class="primary" type="submit" id="search-button">Search</button>
+      </form>
+      <div class="message" id="search-message"></div>
+      <div id="results"></div>
+      <div id="search-links"></div>
+    </section>
+
+    <section class="card">
+      <h2>Model</h2>
+      <form class="row" id="model-form">
+        <input type="text" id="model-input" list="model-names" placeholder="Model name" autocomplete="off" />
+        <button type="submit">Show</button>
+      </form>
+      <datalist id="model-names"></datalist>
+      <div class="message" id="model-message"></div>
+      <div id="model"></div>
+    </section>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+      let models = []
+      let currentModel = null
+
+      function el(tag, attrs = {}, children = []) {
+        const node = document.createElement(tag)
+        for (const [key, value] of Object.entries(attrs)) {
+          if (value == null || value === false) continue
+          if (key === 'class') node.className = value
+          else if (key === 'text') node.textContent = value
+          else if (key.startsWith('on')) node.addEventListener(key.slice(2), value)
+          else node.setAttribute(key, value === true ? '' : value)
+        }
+        for (const child of [].concat(children)) {
+          if (child != null && child !== false) node.append(child)
+        }
+        return node
+      }
+      function ago(value) {
+        const ms = Date.parse(value)
+        if (!ms) return 'never'
+        const days = Math.floor((Date.now() - ms) / 86400000)
+        if (days < 1) return 'today'
+        if (days === 1) return 'yesterday'
+        if (days < 60) return `${days} days ago`
+        return `${Math.round(days / 30)} months ago`
+      }
+      function message(id, text, kind = '') {
+        $(id).textContent = text
+        $(id).className = `message ${kind}`
+      }
+      async function api(path, body) {
+        const res = await fetch(path, body
+          ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+          : {})
+        if (res.redirected || res.status === 401) {
+          location.href = '/login.html'
+          throw new Error('login required')
+        }
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        return data
+      }
+      const modelExists = (name) =>
+        models.some((m) => m.name === name || m.aliases.includes(name))
+      const sanitizeName = (value) =>
+        String(value || '').trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_.-]+/g, '_')
+
+      async function loadModels() {
+        try {
+          models = await api('/api/sources/models')
+          $('model-names').replaceChildren(
+            ...models.map((m) => el('option', { value: m.name, label: `${m.sources} sources` }))
+          )
+        } catch {}
+      }
+
+      // ── Add ─────────────────────────────────────────────────────────────
+      async function addSource({ url, model, createModel, scrapeNow }, messageId) {
+        message(messageId, 'Saving…')
+        try {
+          const result = await api('/api/sources/add', { url, model, createModel, scrapeNow })
+          await loadModels()
+          renderModel(result.entry)
+          message(
+            messageId,
+            `Added to ${result.model}.${result.run ? ' Scrape queued — watch it on the Scrapes page.' : ''}`,
+            'ok'
+          )
+          return true
+        } catch (err) {
+          message(messageId, err.message, 'error')
+          return false
+        }
+      }
+
+      function addControls(url, suggestedModel, messageId) {
+        const input = el('input', {
+          type: 'text',
+          class: 'model-input',
+          list: 'model-names',
+          value: suggestedModel || '',
+          placeholder: 'Add to model',
+          'aria-label': 'Model to add to',
+        })
+        const isNew = el('label', { class: 'check' }, [el('input', { type: 'checkbox' }), 'new model'])
+        const sync = () => {
+          const exists = modelExists(sanitizeName(input.value))
+          isNew.style.display = exists || !input.value ? 'none' : ''
+        }
+        input.addEventListener('input', sync)
+        sync()
+        const go = (scrapeNow) => () =>
+          addSource(
+            {
+              url,
+              model: input.value,
+              createModel: isNew.querySelector('input').checked,
+              scrapeNow,
+            },
+            messageId
+          )
+        return el('div', { class: 'actions' }, [
+          input,
+          isNew,
+          el('button', { class: 'small', text: 'Add', onclick: go(false) }),
+          el('button', { class: 'small', text: 'Add & scrape', onclick: go(true) }),
+        ])
+      }
+
+      // ── Search ──────────────────────────────────────────────────────────
+      $('search-form').addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const q = $('search-input').value.trim()
+        if (!q) return
+        $('search-button').disabled = true
+        $('results').replaceChildren()
+        $('search-links').replaceChildren()
+        message('search-message', /^https?:/i.test(q) ? 'Checking the URL…' : 'Searching Pawchive, Coomer, Tumblr and StufferDB… (about 10–20 seconds)')
+        try {
+          const result = await api(`/api/sources/search?q=${encodeURIComponent(q)}`)
+          renderResults(q, result)
+        } catch (err) {
+          message('search-message', err.message, 'error')
+        } finally {
+          $('search-button').disabled = false
+        }
+      })
+
+      function renderResults(query, { terms, candidates, searchLinks }) {
+        const suggested = currentModel || (terms[0] && modelExists(terms[0]) ? terms[0] : terms[0] || '')
+        message(
+          'search-message',
+          candidates.length
+            ? `${candidates.length} result${candidates.length === 1 ? '' : 's'}${terms.length ? ` for ${terms.join(', ')}` : ''}.`
+            : 'Nothing found automatically. Try the site searches below, then paste the URL here.'
+        )
+        $('results').replaceChildren(
+          ...candidates.map((candidate) => {
+            const chip = candidate.owner
+              ? el('span', { class: 'chip owned', text: `already on ${candidate.owner}` })
+              : candidate.verified
+                ? el('span', { class: 'chip new', text: 'new' })
+                : el('span', { class: 'chip guess', text: 'unverified guess' })
+            return el('div', { class: 'item' }, [
+              el('div', { class: 'item-main' }, [
+                el('div', { class: 'item-title' }, [
+                  el('strong', { text: candidate.label }),
+                  candidate.name ? el('span', { text: candidate.name }) : null,
+                  chip,
+                  candidate.mediaCount ? el('span', { class: 'muted', text: `${candidate.mediaCount} files` }) : null,
+                ]),
+                el('a', { class: 'item-url', href: candidate.url, target: '_blank', rel: 'noopener noreferrer', text: candidate.url }),
+              ]),
+              candidate.owner
+                ? el('div', { class: 'actions' }, [
+                    el('button', { class: 'small', text: `Open ${candidate.owner}`, onclick: () => showModel(candidate.owner) }),
+                  ])
+                : addControls(candidate.url, suggested, 'search-message'),
+            ])
+          })
+        )
+        if (searchLinks?.length) {
+          $('search-links').replaceChildren(
+            el('h3', { text: 'Search the sites yourself' }),
+            el(
+              'div',
+              { class: 'links' },
+              searchLinks.map((link) =>
+                el('a', { href: link.url, target: '_blank', rel: 'noopener noreferrer', text: link.label })
+              )
+            )
+          )
+        }
+      }
+
+      // ── Model ───────────────────────────────────────────────────────────
+      $('model-form').addEventListener('submit', (event) => {
+        event.preventDefault()
+        const name = $('model-input').value.trim()
+        if (name) showModel(name)
+      })
+
+      async function change(route, source) {
+        try {
+          const result = await api(`/api/sources/${route}`, {
+            model: currentModel,
+            key: source.key,
+            url: source.url,
+          })
+          message('model-message', '')
+          renderModel(result.entry)
+          loadModels()
+        } catch (err) {
+          message('model-message', err.message, 'error')
+        }
+      }
+
+      function sourceRow(source, active) {
+        const meta = active
+          ? `checked ${ago(source.lastCheckedAt)}${source.requiresBrowser ? ' · runs on the PC' : ' · runs on the NAS'}`
+          : `off since ${ago(source.inactiveAt)}${source.inactiveReason ? ` · ${source.inactiveReason.replace(/_/g, ' ')}` : ''}`
+        return el('div', { class: 'item' }, [
+          el('div', { class: 'item-main' }, [
+            el('div', { class: 'item-title' }, [el('strong', { text: source.label })]),
+            el('a', { class: 'item-url', href: source.url, target: '_blank', rel: 'noopener noreferrer', text: source.url }),
+            el('div', { class: 'muted', text: meta }),
+          ]),
+          el('div', { class: 'actions' }, [
+            active
+              ? el('button', { class: 'small', text: 'Turn off', title: 'Stop scraping it but keep it listed', onclick: () => change('deactivate', source) })
+              : el('button', { class: 'small', text: 'Turn on', onclick: () => change('reactivate', source) }),
+            el('button', {
+              class: 'small danger',
+              text: 'Remove',
+              onclick: () => {
+                if (confirm(`Remove ${source.label} from ${currentModel}? Already scraped files stay.`)) change('remove', source)
+              },
+            }),
+          ]),
+        ])
+      }
+
+      function renderModel(entry) {
+        currentModel = entry.name
+        $('model-input').value = entry.name
+        if (location.hash !== `#model=${encodeURIComponent(entry.name)}`) {
+          history.replaceState(null, '', `#model=${encodeURIComponent(entry.name)}`)
+        }
+        const urlInput = el('input', { type: 'url', placeholder: 'Paste a source URL to add', 'aria-label': 'Source URL' })
+        const add = (scrapeNow) => async () => {
+          const url = urlInput.value.trim()
+          if (!url) return message('model-message', 'Paste a URL first.', 'error')
+          if (await addSource({ url, model: entry.name, scrapeNow }, 'model-message')) urlInput.value = ''
+        }
+        $('model').replaceChildren(
+          el('div', { class: 'row', style: 'justify-content:space-between;margin-top:8px' }, [
+            el('div', {}, [
+              el('strong', { text: entry.name }),
+              el('div', { class: 'muted', text: `Also known as: ${entry.aliases.filter((a) => a !== entry.name).join(', ') || '—'}` }),
+            ]),
+            el('div', { class: 'actions' }, [
+              el('a', { href: `/#/u/${encodeURIComponent(entry.name)}`, class: 'muted', text: 'Open in dashboard' }),
+              entry.sources.length
+                ? el('button', {
+                    class: 'small',
+                    text: 'Scrape this model',
+                    onclick: async () => {
+                      try {
+                        await api('/api/scrapes', { scope: 'model', model: entry.name })
+                        message('model-message', 'Scrape queued — watch it on the Scrapes page.', 'ok')
+                      } catch (err) {
+                        message('model-message', err.message, 'error')
+                      }
+                    },
+                  })
+                : null,
+            ]),
+          ]),
+          el('h3', { text: `Active (${entry.sources.length})` }),
+          entry.sources.length
+            ? el('div', {}, entry.sources.map((source) => sourceRow(source, true)))
+            : el('div', { class: 'muted', text: 'No active sources.' }),
+          el('div', { class: 'row', style: 'margin-top:10px' }, [
+            urlInput,
+            el('button', { class: 'small', text: 'Add', onclick: add(false) }),
+            el('button', { class: 'small', text: 'Add & scrape', onclick: add(true) }),
+          ]),
+          entry.inactive.length ? el('h3', { text: `Turned off (${entry.inactive.length})` }) : null,
+          entry.inactive.length ? el('div', {}, entry.inactive.map((source) => sourceRow(source, false))) : null
+        )
+      }
+
+      async function showModel(name, entry) {
+        message('model-message', '')
+        try {
+          renderModel(entry || (await api(`/api/sources/model/${encodeURIComponent(name)}`)))
+          $('model').scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        } catch (err) {
+          $('model').replaceChildren()
+          currentModel = null
+          message('model-message', `${err.message} Search for it above to add its first source.`, 'error')
+        }
+      }
+
+      loadModels().then(() => {
+        const match = location.hash.match(/^#model=(.+)$/)
+        if (match) showModel(decodeURIComponent(match[1]))
+      })
+    </script>
+  </body>
+</html>

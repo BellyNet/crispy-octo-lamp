@@ -167,7 +167,7 @@ function mountScrapeRoutes(app, { registryPath, pageDir }) {
 // remote backend). Mounted before the dashboard's cookie login: callers
 // authenticate with the token kept in the queue folder on the NAS share,
 // so anyone who can reach the share can run a worker, and nothing else.
-function mountWorkerApi(app, { express }) {
+function mountWorkerApi(app, { express, registryPath }) {
   const crypto = require('crypto')
   const {
     createLocalBackend,
@@ -256,6 +256,19 @@ function mountWorkerApi(app, { express }) {
       })
     })
   )
+  // The NAS registry for the PC's registry sync (scrapyard/registrySync.js).
+  router.post(
+    '/registry/pull',
+    handle(async () => ({ registry: loadModelRegistry(registryPath) }))
+  )
+  router.post(
+    '/registry/apply',
+    handle(async (body) => {
+      const ops = Array.isArray(body?.ops) ? body.ops : []
+      const { applyOpsToRegistry } = require('../scrapyard/registryStore')
+      return { registry: await applyOpsToRegistry(ops, registryPath) }
+    })
+  )
   // Lock for scrapes started by hand on the PC (npm run scrape ...).
   router.post(
     '/lock',
@@ -305,14 +318,11 @@ function startNightlySchedule({ registryPath, log = console }) {
   check()
 }
 
-// The NAS worker: runs the tasks that don't need a browser. Each task gets a
-// fresh working copy of the registry, and its registry edits are not pushed
-// back, so it can't overwrite the PC's copy (the registry still lives on
-// the PC until it moves to the NAS).
-function startNasWorker({ registryPath, log = console }) {
+// The NAS worker: runs the tasks that don't need a browser, against the
+// NAS registry directly.
+function startNasWorker({ log = console }) {
   const { startWorker } = require('../scrapyard/scrapeWorker')
   const { createLocalBackend } = require('../scrapyard/scrapeBackends')
-  const registryCopy = path.join(config.slopvaultRoot, 'model_aliases.json')
   return startWorker({
     backend: createLocalBackend(),
     id: 'nas',
@@ -320,14 +330,6 @@ function startNasWorker({ registryPath, log = console }) {
     browser: false,
     pollMs: 5000,
     cooldownMs: 8000,
-    childEnv: {
-      MODEL_REGISTRY_PATH: registryCopy,
-      SKIP_REGISTRY_PUSH: '1',
-    },
-    prepareTask: () => {
-      fs.mkdirSync(path.dirname(registryCopy), { recursive: true })
-      fs.copyFileSync(registryPath, registryCopy)
-    },
     log: {
       warn: (message) => log.warn(`  Scrapes:   ${message}`),
       error: (message) => log.warn(`  Scrapes:   ${message}`),
