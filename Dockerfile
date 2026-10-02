@@ -28,8 +28,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY dashboard/ ./dashboard/
-# The scrapers ship in the same image so scrapes can run on the NAS
-# (nas-scrape.ps1) against the same dataset the dashboard serves.
+# The scrapers ship in the same image so the dashboard's NAS worker can run
+# scrapes against the same dataset it serves.
 COPY scrapyard/ ./scrapyard/
 COPY hoghaul/ ./hoghaul/
 COPY milkmaid/ ./milkmaid/

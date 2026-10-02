@@ -174,7 +174,7 @@ function pushRegistryToNas({
   log = console,
 } = {}) {
   // Scrapes run on the NAS use a registry working copy that must not
-  // overwrite the dashboard's registry (see nas-scrape.ps1).
+  // overwrite the dashboard's registry (see dashboard/scrapes.js).
   if (process.env.SKIP_REGISTRY_PUSH) return { ok: false, reason: 'disabled' }
   try {
     if (!fs.existsSync(LOCAL_REGISTRY_PATH))

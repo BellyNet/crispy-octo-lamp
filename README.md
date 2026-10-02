@@ -165,7 +165,6 @@ What it does:
 - walks local model folders under `%APPDATA%\.slopvault\dataset`
 - runs prune/backfill/validate for each selected model
 - clears resolved `milkmaid-run-errors-*` artifacts when a model is now clean
-- syncs touched models to the NAS
 - writes a top-level `%APPDATA%\.slopvault\errors-to-check-latest.md`
 
 Useful variants:
@@ -216,12 +215,7 @@ What it does:
 - salvages quarantined tail-decode videos
 - promotes successful salvages back into the dataset
 - runs prune/backfill/validate for affected models
-- syncs affected models to the NAS
 - writes reports under `tmp/session-repair`
-
-Important behavior:
-- `npm run repair:tail-decode` keeps a persistent pending NAS sync queue in `tmp/session-repair/session-repair-state.json`
-- if a repair run fails after touching models but before sync finishes, the next repair run will retry NAS sync for those pending models
 
 Useful variants:
 
@@ -316,47 +310,11 @@ Use these for:
 - extracting EXIF/uploaded dates into sidecars
 - normalizing the quarantine manifest
 
-## NAS Sync
+## Where the dataset lives
 
-There are two ways to sync.
+The dataset lives only on the NAS (`Z:\dataset`). Scrapes on the PC write straight to it, and there is no local copy to sync. Sync and "evict the local copy" steps switch themselves off when the dataset and the NAS are the same folder (`scrapyard/datasetLocation.js`).
 
-### Automatic
-
-`npm run repair` now attempts to sync all touched local models to the NAS after maintenance. It also clears resolved model error logs so the next run only surfaces active local issues.
-
-### Manual push local -> NAS
-
-Push the full local dataset:
-
-```powershell
-.\update-nas.ps1
-```
-
-Push a single model:
-
-```powershell
-npm run sync --model=model_name
-```
-
-Notes:
-- this uses `robocopy`
-- it copies local dataset changes to the NAS model folder
-
-### Manual pull NAS -> local
-
-```powershell
-.\update-local.ps1
-```
-
-This pulls the full NAS dataset down to local.
-
-### Compare local vs NAS without copying
-
-```powershell
-.\compare-nas.ps1
-```
-
-This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/worktrees/5ed8/LoRA-Training/slopvault-diff.txt).
+The old local copy under `%APPDATA%\.slopvault\dataset` is no longer used. `npm run evict:nas-media` (dry run) and `npm run evict:nas-media:apply` remove its files, but only those confirmed on the NAS at the same size.
 
 ## Script Reference
 
@@ -377,14 +335,14 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
 - `npm run scrape:interactive`
   - interactive launcher for all-model, per-source, or pasted-URL scrapes
 - `npm run repair`
-  - local dataset repair pass across model folders, with prune/backfill/validate and NAS sync
+  - local dataset repair pass across model folders, with prune/backfill/validate
 - `npm run repair:stufferdb`
   - same repair pass, but with StufferDB scraping enabled first
 
 ### Repair and audit
 
 - `npm run repair:tail-decode`
-  - session repair for quarantined tail-decode videos plus NAS sync
+  - session repair for quarantined tail-decode videos
 - `npm run report:repair-failures`
   - bucket and summarize repair failures
 - `npm run audit:slopvault`
@@ -424,8 +382,6 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
 
 ### Other support tools
 
-- `npm run sync`
-  - model-level NAS sync helper
 - `npm run backfill:sources`
   - backfill missing StufferDB source/category metadata
 - `npm run match:errored-video-visuals`
@@ -439,18 +395,11 @@ This writes a dry-run diff log to [slopvault-diff.txt](/C:/Users/jagsr/.codex/wo
 
 If you are unsure what to run:
 
-1. Pull from NAS if you think local is behind:
-   - `.\update-local.ps1`
-2. Run the scrape or repair you need:
-   - `npm run scrape -- "<url>"`
-   - `npm run scrape -- "<url>" --model=model_name`
-   - or `npm run repair`
-3. Review anything suspicious:
+1. Start scrapes from the dashboard's Scrapes page (or `npm run scrape -- "<url>"` on the PC).
+2. Review anything suspicious:
    - `npm run review:slopvault`
    - `npm run review:slopvault-duplicates-express`
    - `npm run review:orientation`
-4. Push back to NAS:
-   - `.\update-nas.ps1`
 
 ## Known Gotcha
 

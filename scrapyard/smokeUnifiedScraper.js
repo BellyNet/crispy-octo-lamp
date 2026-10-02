@@ -19,7 +19,6 @@ const {
   buildRepairArgs,
   buildScraperArgs,
   buildScraperOptions,
-  buildSyncArgs,
   getTemporarilyDisabledSourceReason,
   isSuccessfulRunStatus,
   runScrape,
@@ -3391,11 +3390,6 @@ async function main() {
     }),
     ['--model', 'abc', '--scrape', '--skip-nas-sync']
   )
-  assert.deepStrictEqual(buildSyncArgs({ push: true, 'cleanup-mp4': 'true' }), [
-    '--push',
-    '--cleanup-mp4',
-    'true',
-  ])
 
   const badUpdateStatus = await withConsoleSilenced(() =>
     runScraperCli(['update', 'bogus'], {

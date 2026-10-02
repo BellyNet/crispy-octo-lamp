@@ -20,7 +20,6 @@ const {
   runScrape,
   runSourceBatch,
   runStufferDbBatch,
-  runSync,
   readFreshModelRunSummary,
   summarizeSourceRunSummary,
   formatModelSummaryLine,
@@ -918,31 +917,6 @@ async function runRepairFlow(rl) {
   })
 }
 
-async function runSyncFlow(rl) {
-  const mode = (await ask(rl, 'Sync mode: push, pull, or model? [push]: '))
-    .trim()
-    .toLowerCase()
-  const options = {}
-  if (!mode || mode === 'push') {
-    options.push = true
-    const cleanupAnswer = (
-      await ask(rl, 'Remove mirrored local MP4s after push? [y/N]: ')
-    )
-      .trim()
-      .toLowerCase()
-    if (cleanupAnswer === 'y' || cleanupAnswer === 'yes') {
-      options['cleanup-mp4'] = 'true'
-    }
-  } else if (mode === 'pull') {
-    options.pull = true
-  } else {
-    options.model =
-      mode === 'model' ? (await ask(rl, 'Model to sync: ')).trim() : mode
-  }
-
-  await runSync(options)
-}
-
 async function runOversizedVideoFlow(rl) {
   const models = (
     await ask(
@@ -1041,16 +1015,15 @@ async function main() {
       console.log('6. Run a model/alias from registry')
       console.log('7. Add/run one source URL or search by Reddit username')
       console.log('8. Repair models')
-      console.log('9. Sync dataset/NAS')
-      console.log('10. Download oversized Hoghaul videos')
-      console.log('11. Quit')
+      console.log('9. Download oversized Hoghaul videos')
+      console.log('10. Quit')
       console.log(
         `Hoghaul session: ${formatHoghaulSessionOptions(sessionOptions)}`
       )
 
       const choice = (await ask(rl, '\nPick an option: ')).trim()
 
-      if (choice === '11' || /^q(?:uit)?$/i.test(choice)) {
+      if (choice === '10' || /^q(?:uit)?$/i.test(choice)) {
         console.log('Done.')
         break
       }
@@ -1118,16 +1091,11 @@ async function main() {
       }
 
       if (choice === '9') {
-        await runSyncFlow(rl)
-        continue
-      }
-
-      if (choice === '10') {
         await runOversizedVideoFlow(rl)
         continue
       }
 
-      console.log('Please choose 1-11.')
+      console.log('Please choose 1-10.')
     }
   } finally {
     rl.close()

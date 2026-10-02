@@ -416,29 +416,10 @@ function buildRepairArgs(argvInput = {}) {
   return args
 }
 
-function buildSyncArgs(argvInput = {}) {
-  const argv = parseRunnerArgs(argvInput)
-  const args = []
-  appendBoolean(args, '--push', isTruthy(getOption(argv, 'push')))
-  appendBoolean(args, '--pull', isTruthy(getOption(argv, 'pull')))
-  appendOption(args, '--model', getOption(argv, 'model'))
-  appendOption(args, '--cleanup-mp4', getOption(argv, 'cleanup-mp4'))
-  appendOption(args, '--cleanup-gif-mp4', getOption(argv, 'cleanup-gif-mp4'))
-  appendBoolean(args, '--help', isTruthy(getOption(argv, 'help')))
-  return args
-}
-
 function runRepair(argvInput = {}) {
   return runNodeScript(
     path.join('milkmaid', 'repair-stufferdb-models.js'),
     buildRepairArgs(argvInput)
-  )
-}
-
-function runSync(argvInput = {}) {
-  return runNodeScript(
-    path.join('scrapyard', 'sync.js'),
-    buildSyncArgs(argvInput)
   )
 }
 
@@ -2357,7 +2338,6 @@ async function runScraperCli(argvInput = process.argv.slice(2), deps = {}) {
   }
 
   if (command === 'repair') return runRepair(rawArgs.slice(1))
-  if (command === 'sync') return runSync(rawArgs.slice(1))
 
   if (command === 'update') {
     return withCliScrapeLock(
@@ -2431,13 +2411,11 @@ module.exports = {
   buildScraperOptions,
   applyScrapePositionalFallback,
   buildRepairArgs,
-  buildSyncArgs,
   readFreshModelRunSummary,
   summarizeSourceRunSummary,
   formatModelSummaryLine,
   runScrape,
   runRepair,
-  runSync,
   runSourceBatch,
   runStufferDbBatch,
   runAllSourceModelUpdate,
