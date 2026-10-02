@@ -3203,25 +3203,59 @@
         return { start: minYear === Infinity ? maxYear : minYear, end: maxYear }
       }
 
-      // Held in memory across renders so Random stays stable while navigating
-      // (clicking into a model and back doesn't reshuffle). The shuffle button
-      // and re-selecting Random both regenerate it.
+      // Random order changes once a day, not on every visit or reload: each
+      // model's position is a hash of (today's seed, model name), so a model
+      // added mid-day slots in without reshuffling the others. The shuffle
+      // button picks a new seed that holds for the rest of the day.
+      const HOME_SHUFFLE_KEY = 'homeShuffleSeed'
       let _homeRandomOrder = null
-      function reshuffleHome() {
-        const names = usersData.map((u) => u.name)
-        // Fisher-Yates
-        for (let i = names.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1))
-          ;[names[i], names[j]] = [names[j], names[i]]
+      function todayKey() {
+        const d = new Date()
+        return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+      }
+      function homeShuffleSeed() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(HOME_SHUFFLE_KEY))
+          if (saved?.day === todayKey() && saved.seed) return saved.seed
+        } catch {}
+        return todayKey()
+      }
+      function hash32(text) {
+        // FNV-1a
+        let h = 0x811c9dc5
+        for (let i = 0; i < text.length; i++) {
+          h ^= text.charCodeAt(i)
+          h = Math.imul(h, 0x01000193)
         }
-        _homeRandomOrder = new Map(names.map((n, i) => [n, i]))
+        return h >>> 0
+      }
+      function reshuffleHome({ newSeed = false } = {}) {
+        let seed = homeShuffleSeed()
+        if (newSeed) {
+          seed = `${todayKey()}:${Math.random().toString(36).slice(2)}`
+          try {
+            localStorage.setItem(
+              HOME_SHUFFLE_KEY,
+              JSON.stringify({ day: todayKey(), seed })
+            )
+          } catch {}
+        }
+        _homeRandomOrder = {
+          day: todayKey(),
+          seed,
+          get: (name) => hash32(`${seed}|${name}`),
+        }
       }
 
       function renderHomeGrid() {
         homeGridEl.innerHTML = ''
         const { start: globalStart, end: globalEnd } = getYearRange()
         const seen = readLastSeen()
-        if (homeSort === 'random' && !_homeRandomOrder) reshuffleHome()
+        if (
+          homeSort === 'random' &&
+          (!_homeRandomOrder || _homeRandomOrder.day !== todayKey())
+        )
+          reshuffleHome()
 
         // Sort order: featured pinned first, everything else purely by the
         // selected sort. NEW models are called out with a badge (below) but
@@ -5722,8 +5756,7 @@
       homeSortSelect.addEventListener('change', () => {
         homeSort = homeSortSelect.value
         if (homeSort === 'random') {
-          // Re-picking Random always re-shuffles, so a second click gives a
-          // fresh order even if you were already on Random.
+          // Back to today's order; the shuffle button gives a new one.
           reshuffleHome()
           homeShuffleBtn.style.display = ''
         } else {
@@ -5732,7 +5765,7 @@
         renderHomeGrid()
       })
       homeShuffleBtn.addEventListener('click', () => {
-        reshuffleHome()
+        reshuffleHome({ newSeed: true })
         renderHomeGrid()
       })
 
