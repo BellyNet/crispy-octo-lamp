@@ -1,13 +1,14 @@
 'use strict'
 
-// Scrape worker: takes tasks from the shared queue (scrapeQueue.js) and runs
-// them one at a time, streaming output into the task log the dashboard shows.
+// Scrape worker: takes tasks from the scrape queue and runs them one at a
+// time, streaming output into the task log the dashboard shows.
 //
-// The NAS dashboard starts one inside its own process (no browser, so it only
-// takes Pawchive/OnlyHaven/Coomer tasks). The PC runs one in the background
-// with a browser, so it takes the browser-only tasks:
+// The NAS dashboard starts one inside its own process (local backend, no
+// browser, so it only takes Pawchive/OnlyHaven/Coomer tasks). The PC runs
+// one in the background (remote backend, over the dashboard's worker API)
+// with a browser, so it takes StufferDB, Tumblr and Reddit tasks:
 //
-//   node scrapyard/scrapeWorker.js --id=pc       (add --no-browser to skip browser tasks)
+//   node scrapyard/scrapeWorker.js --id=pc     (--no-browser to skip those)
 
 const fs = require('fs')
 const os = require('os')
@@ -15,14 +16,14 @@ const path = require('path')
 const { spawn, spawnSync } = require('child_process')
 
 const config = require('./config')
-const queue = require('./scrapeQueue')
+const { defaultBackend } = require('./scrapeBackends')
 
 // SCRAPE_TASK_SCRIPT lets tests substitute a fake task.
 const TASK_SCRIPT =
   process.env.SCRAPE_TASK_SCRIPT || path.join(__dirname, 'runQueuedTask.js')
-const LOCK_HEARTBEAT_MS = 20 * 1000
-const CANCEL_CHECK_MS = 5 * 1000
-const LOG_FLUSH_MS = 1000
+// How often output is sent, which is also the lock heartbeat and the cancel
+// check while a task runs.
+const PROGRESS_MS = 2000
 const MAX_LOG_BYTES = 20 * 1024 * 1024
 
 function stripAnsi(text) {
@@ -47,20 +48,20 @@ function killTree(child) {
 }
 
 // options:
-//   id, label, browser       identity and whether it can run browser tasks
-//   queueDir                 defaults to config.scrapeQueueDir
-//   pollMs                   how often to look for work
-//   cooldownMs               pause after a task so the other worker gets a turn
-//   childEnv                 extra environment for task processes
-//   prepareTask()            called before each task (e.g. refresh registry copy)
-//   log                      logger for the worker itself
+//   id, label, browser   identity and whether it can run browser tasks
+//   backend              scrapeBackends local/remote (default: by environment)
+//   pollMs               how often to look for work when idle
+//   cooldownMs           pause after a task so the other worker gets a turn
+//   childEnv             extra environment for task processes
+//   prepareTask(task)    called before each task (e.g. refresh registry copy)
+//   log                  { warn, error } for the worker itself
 function startWorker(options) {
   const worker = {
     id: options.id,
     label: options.label || options.id,
     browser: Boolean(options.browser),
   }
-  const queueDir = options.queueDir || config.scrapeQueueDir
+  const backend = options.backend || defaultBackend()
   const pollMs = options.pollMs || 6000
   const cooldownMs = options.cooldownMs || 0
   const log = options.log || console
@@ -69,73 +70,88 @@ function startWorker(options) {
   let current = null
   let lastFinishedAt = 0
   let timer = null
+  let lastError = null
 
-  function heartbeat() {
+  function currentInfo() {
+    return current
+      ? {
+          runId: current.run.id,
+          taskId: current.task.id,
+          model: current.task.model,
+          sourceLabel: current.task.sourceLabel,
+          startedAt: current.task.startedAt,
+        }
+      : null
+  }
+
+  async function heartbeat() {
     try {
-      queue.heartbeatWorker(
-        worker,
-        {
-          current: current
-            ? {
-                runId: current.run.id,
-                taskId: current.task.id,
-                model: current.task.model,
-                sourceLabel: current.task.sourceLabel,
-                startedAt: current.task.startedAt,
-              }
-            : null,
-        },
-        queueDir
-      )
+      await backend.heartbeat(worker, { current: currentInfo() })
+      lastError = null
     } catch (err) {
-      log.warn?.(`[worker ${worker.id}] heartbeat failed: ${err.message}`)
+      // Log once per distinct failure (NAS offline, dashboard restarting).
+      if (err.message !== lastError) {
+        lastError = err.message
+        log.warn?.(`[worker ${worker.id}] queue unavailable: ${err.message}`)
+      }
+      throw err
     }
   }
 
   async function runTask({ run, task }) {
-    const holder = { id: worker.id }
-    queue.updateLock(holder, { runId: run.id, taskId: task.id }, queueDir)
+    let pending = ''
+    let logBytes = 0
+    let logCapped = false
+    let canceled = false
+    let child = null
+    const write = (text) => {
+      pending += stripAnsi(text).replace(/\r(?!\n)/g, '\n')
+    }
+    // Sends buffered output; doubles as lock heartbeat and cancel check.
+    // Chained so updates go out one at a time, in order.
+    let progressChain = Promise.resolve()
+    const sendProgress = () => {
+      progressChain = progressChain.then(doSendProgress)
+      return progressChain
+    }
+    const doSendProgress = async () => {
+      let text = pending
+      pending = ''
+      if (logCapped) text = ''
+      logBytes += Buffer.byteLength(text)
+      if (!logCapped && logBytes > MAX_LOG_BYTES) {
+        logCapped = true
+        text +=
+          '\n[queue] Log size limit reached; further output is not recorded.\n'
+      }
+      try {
+        const { cancel } = await backend.progress(worker, run.id, task.id, text)
+        if (cancel && !canceled && child) {
+          canceled = true
+          write(
+            '\n[queue] Cancel requested (or the task was reassigned); stopping it.\n'
+          )
+          killTree(child)
+        }
+      } catch (err) {
+        pending = text + pending // keep it for the next attempt
+        log.warn?.(
+          `[worker ${worker.id}] progress update failed: ${err.message}`
+        )
+      }
+    }
+
     const resultPath = path.join(
       os.tmpdir(),
       `scrape-task-${run.id}-${task.id}-${process.pid}.json`
     )
-    let pending = ''
-    let logBytes = 0
-    let logCapped = false
-    const flush = () => {
-      if (!pending) return
-      const text = pending
-      pending = ''
-      if (logCapped) return
-      logBytes += Buffer.byteLength(text)
-      if (logBytes > MAX_LOG_BYTES) {
-        logCapped = true
-        queue.appendTaskLog(
-          run.id,
-          task.id,
-          '\n[queue] Log size limit reached; further output is not recorded.\n',
-          queueDir
-        )
-        return
-      }
-      try {
-        queue.appendTaskLog(run.id, task.id, text, queueDir)
-      } catch (err) {
-        log.warn?.(`[worker ${worker.id}] log write failed: ${err.message}`)
-      }
-    }
-    const write = (text) => {
-      pending += stripAnsi(text).replace(/\r(?!\n)/g, '\n')
-    }
-
     write(
       `[queue] ${worker.label} started ${task.model} | ${task.sourceLabel} | ${task.url}` +
         `${task.attempts > 1 ? ` (attempt ${task.attempts})` : ''}\n`
     )
-    flush()
+    await sendProgress()
 
-    let canceled = false
-    let child
+    let exitCode
     try {
       await options.prepareTask?.(task)
       child = spawn(
@@ -159,43 +175,21 @@ function startWorker(options) {
           detached: process.platform !== 'win32',
         }
       )
+      child.stdout.on('data', write)
+      child.stderr.on('data', write)
+      const progressTimer = setInterval(sendProgress, PROGRESS_MS)
+      exitCode = await new Promise((resolve) => {
+        child.on('error', (err) => {
+          write(`[queue] Task process error: ${err.message}\n`)
+          resolve(1)
+        })
+        child.on('exit', (code, signal) => resolve(code ?? (signal ? 130 : 1)))
+      })
+      clearInterval(progressTimer)
     } catch (err) {
       write(`[queue] Could not start the task: ${err.message}\n`)
-      flush()
-      queue.finishTask(
-        run.id,
-        task.id,
-        { status: 'failed', exitCode: null, error: err.message },
-        queueDir
-      )
-      return
+      exitCode = null
     }
-
-    child.stdout.on('data', write)
-    child.stderr.on('data', write)
-    const flushTimer = setInterval(flush, LOG_FLUSH_MS)
-    const lockTimer = setInterval(() => {
-      queue.updateLock(holder, { runId: run.id, taskId: task.id }, queueDir)
-      heartbeat()
-    }, LOCK_HEARTBEAT_MS)
-    const cancelTimer = setInterval(() => {
-      if (!canceled && queue.isCancelRequested(run.id, queueDir)) {
-        canceled = true
-        write('\n[queue] Cancel requested; stopping this task.\n')
-        killTree(child)
-      }
-    }, CANCEL_CHECK_MS)
-
-    const exitCode = await new Promise((resolve) => {
-      child.on('error', (err) => {
-        write(`[queue] Task process error: ${err.message}\n`)
-        resolve(1)
-      })
-      child.on('exit', (code, signal) => resolve(code ?? (signal ? 130 : 1)))
-    })
-    clearInterval(flushTimer)
-    clearInterval(lockTimer)
-    clearInterval(cancelTimer)
 
     let result = null
     try {
@@ -205,39 +199,29 @@ function startWorker(options) {
     const source = result?.runs?.[0]
     const status = canceled ? 'canceled' : exitCode === 0 ? 'done' : 'failed'
     write(`\n[queue] ${worker.label} finished: ${status} (exit ${exitCode})\n`)
-    flush()
-    queue.finishTask(
-      run.id,
-      task.id,
-      {
-        status,
-        exitCode,
-        summary: source?.summary || null,
-        error: source?.error || null,
-      },
-      queueDir
-    )
+    await sendProgress()
+    await backend.finish(worker, run.id, task.id, {
+      status,
+      exitCode,
+      summary: source?.summary || null,
+      error: source?.error || null,
+    })
   }
 
   async function tick() {
     if (stopped || busy) return
-    heartbeat()
-    if (cooldownMs && Date.now() - lastFinishedAt < cooldownMs) return
-    const holder = { id: worker.id }
-    let acquired = false
     try {
-      acquired = queue.tryAcquireLock(holder, queueDir)
-    } catch (err) {
-      log.warn?.(`[worker ${worker.id}] queue unavailable: ${err.message}`)
+      await heartbeat()
+    } catch {
       return
     }
-    if (!acquired) return
+    if (cooldownMs && Date.now() - lastFinishedAt < cooldownMs) return
     busy = true
     try {
-      const claimed = queue.claimNextTask(worker, queueDir)
+      const claimed = await backend.claim(worker)
       if (!claimed) return
       current = claimed
-      heartbeat()
+      await heartbeat().catch(() => {})
       await runTask(claimed)
       lastFinishedAt = Date.now()
     } catch (err) {
@@ -246,9 +230,8 @@ function startWorker(options) {
       )
     } finally {
       current = null
-      queue.releaseLock(holder, queueDir)
       busy = false
-      heartbeat()
+      heartbeat().catch(() => {})
     }
   }
 
@@ -260,7 +243,7 @@ function startWorker(options) {
     }, pollMs)
   }
 
-  heartbeat()
+  heartbeat().catch(() => {})
   schedule()
   return {
     worker,
@@ -291,7 +274,10 @@ if (require.main === module) {
     } catch {}
     if (process.stdout.isTTY) process.stdout.write(line)
   }
-  logLine('info', `worker ${id} starting; queue ${config.scrapeQueueDir}`)
+  logLine(
+    'info',
+    `worker ${id} starting; dashboard ${config.dashboardUrl}, token from ${config.scrapeQueueDir}`
+  )
   startWorker({
     id,
     label: argv.label || `${os.hostname()} (PC)`,

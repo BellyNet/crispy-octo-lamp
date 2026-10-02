@@ -1,9 +1,10 @@
 'use strict'
 
-// Fixture test for the scrape queue: two workers (NAS without a browser, PC
-// with one) drain a run through a fake task script. Checks routing, that
-// tasks never overlap, logs/results, failures, cancel, stale-lock recovery
-// and the CLI lock.
+// Fixture test for the scrape queue: two workers drain a run through a fake
+// task script, like production: the NAS worker uses the queue folder
+// directly, the PC worker goes through the dashboard's worker API over HTTP.
+// Checks routing, that tasks never overlap, logs/results, failures, cancel,
+// stale-lock recovery and the CLI lock (local and over HTTP).
 const assert = require('assert')
 const fs = require('fs')
 const os = require('os')
@@ -34,9 +35,13 @@ setTimeout(() => {
 `
 )
 process.env.SCRAPE_TASK_SCRIPT = fakeTask
+process.env.SCRAPE_QUEUE_DIR = queueDir
 
+const express = require('express')
 const queue = require('./scrapeQueue')
 const { startWorker } = require('./scrapeWorker')
+const { createLocalBackend, createRemoteBackend } = require('./scrapeBackends')
+const { mountWorkerApi } = require('../dashboard/scrapes')
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -60,10 +65,19 @@ function task(name, requiresBrowser, query = '') {
 const quietLog = { warn() {}, error() {} }
 
 ;(async () => {
+  // The dashboard's worker API on a random local port.
+  const app = express()
+  mountWorkerApi(app, { express })
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s))
+  })
+  const baseUrl = `http://127.0.0.1:${server.address().port}`
+  const remote = createRemoteBackend({ baseUrl, queueDir })
+
   const nas = startWorker({
     id: 'nas',
     browser: false,
-    queueDir,
+    backend: createLocalBackend(queueDir),
     pollMs: 80,
     cooldownMs: 120,
     log: quietLog,
@@ -71,7 +85,7 @@ const quietLog = { warn() {}, error() {} }
   const pc = startWorker({
     id: 'pc',
     browser: true,
-    queueDir,
+    backend: remote,
     pollMs: 80,
     log: quietLog,
   })
@@ -215,6 +229,25 @@ const quietLog = { warn() {}, error() {} }
   assert.ok(queue.readLock(queueDir).holder.startsWith('cli-'))
   release()
   assert.strictEqual(queue.readLock(queueDir), null)
+
+  // 5. The same over HTTP (manual scrapes on the PC), and a bad token is
+  // refused.
+  const releaseRemote = await remote.holdCliLock('pc cli')
+  assert.ok(queue.readLock(queueDir).holder.startsWith('cli-'))
+  await assert.rejects(
+    () => remote.holdCliLock('second cli'),
+    (err) => err.code === 'SCRAPE_LOCK_BUSY'
+  )
+  await releaseRemote()
+  assert.strictEqual(queue.readLock(queueDir), null)
+  const res = await fetch(`${baseUrl}/api/worker/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Worker-Token': 'nope' },
+    body: JSON.stringify({ worker: { id: 'x' } }),
+  })
+  assert.strictEqual(res.status, 401)
+
+  server.close()
 
   fs.rmSync(root, { recursive: true, force: true })
   console.log('Scrape queue fixture passed.')

@@ -26,6 +26,7 @@ const VisitTracker = require('./visits.js')
 const { buildStatsPayload, computeStatsFromResponse } = require('./stats.js')
 const {
   mountScrapeRoutes,
+  mountWorkerApi,
   startNasWorker,
   startNightlySchedule,
 } = require('./scrapes.js')
@@ -433,6 +434,11 @@ app.use(
     },
   })
 )
+
+// PC scrape worker API: token auth and a larger body limit, so it goes
+// before the cookie login and the 32 KB JSON parser. Only the NAS deploy
+// (SCRAPE_WORKER=nas) owns the queue.
+if (process.env.SCRAPE_WORKER === 'nas') mountWorkerApi(app, { express })
 
 app.use(express.urlencoded({ extended: false }))
 app.use(express.json({ limit: '32kb' }))

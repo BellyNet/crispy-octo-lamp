@@ -57,9 +57,14 @@ module.exports = {
       path.join(rootDir, 'model_aliases.json')
   ),
   tmpDir: path.join(rootDir, 'tmp'),
-  // Scrape queue shared by the NAS dashboard and the PC worker; must be on
-  // the NAS (default Z:\slopvault-state\scrapes, /data/state/scrapes in the
-  // NAS image).
+  // The NAS dashboard; the PC worker and CLI scrapes coordinate through
+  // its worker API.
+  dashboardUrl:
+    process.env.DASHBOARD_URL ||
+    `http://${process.env.NAS_HOST || '192.168.50.13'}:3420`,
+  // Scrape queue folder on the NAS (default Z:\slopvault-state\scrapes,
+  // /data/state/scrapes in the NAS image). Only processes on the NAS touch
+  // it directly; the PC reads just the worker token from it.
   scrapeQueueDir: path.resolve(
     process.env.SCRAPE_QUEUE_DIR ||
       path.join(path.dirname(nasDatasetDir), 'slopvault-state', 'scrapes')

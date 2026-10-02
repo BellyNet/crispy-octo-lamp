@@ -53,6 +53,8 @@ ENV SCRAPER_NO_BROWSER=1
 # Scrape queue shared with the PC worker, and this container's role in it.
 ENV SCRAPE_QUEUE_DIR=/data/state/scrapes
 ENV SCRAPE_WORKER=nas
+# The queue folder is local disk here; the PC goes through the dashboard API.
+ENV SCRAPE_QUEUE_MODE=local
 ENV THUMB_DIR=/data/thumbs
 ENV DASHBOARD_PORT=3420
 ENV NODE_ENV=production

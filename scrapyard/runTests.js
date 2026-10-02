@@ -27,6 +27,7 @@ const env = {
   SLOPVAULT_ROOT: path.join(sandbox, 'slopvault'),
   MODEL_REGISTRY_PATH: path.join(sandbox, 'model_aliases.json'),
   SCRAPE_QUEUE_DIR: path.join(sandbox, 'scrape-queue'),
+  SCRAPE_QUEUE_MODE: 'local',
 }
 for (const dir of ['dataset', 'nas-dataset', 'dashboard-cache', 'slopvault']) {
   fs.mkdirSync(path.join(sandbox, dir), { recursive: true })

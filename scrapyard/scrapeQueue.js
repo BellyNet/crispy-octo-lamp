@@ -312,21 +312,22 @@ function releaseLock(holder, queueDir) {
 // the global lock for the whole run so queued tasks wait instead of racing
 // on the hash stores. Returns a release function; throws with
 // code SCRAPE_LOCK_BUSY when another scrape holds the lock.
+function lockBusyError(lock) {
+  const where = lock?.runId
+    ? ` (run ${lock.runId}, task ${lock.taskId})`
+    : lock?.note
+      ? ` (${lock.note})`
+      : ''
+  const err = new Error(
+    `Another scrape is running on ${lock?.holder || 'another worker'}${where}. Wait for it to finish, or cancel it from the dashboard's Scrapes page.`
+  )
+  err.code = 'SCRAPE_LOCK_BUSY'
+  return err
+}
+
 function holdScrapeLock(note, queueDir) {
   const holder = { id: `cli-${os.hostname()}-${process.pid}`, note }
-  if (!tryAcquireLock(holder, queueDir)) {
-    const lock = readLock(queueDir)
-    const where = lock?.runId
-      ? ` (run ${lock.runId}, task ${lock.taskId})`
-      : lock?.note
-        ? ` (${lock.note})`
-        : ''
-    const err = new Error(
-      `Another scrape is running on ${lock?.holder || 'another worker'}${where}. Wait for it to finish, or cancel it from the dashboard's Scrapes page.`
-    )
-    err.code = 'SCRAPE_LOCK_BUSY'
-    throw err
-  }
+  if (!tryAcquireLock(holder, queueDir)) throw lockBusyError(readLock(queueDir))
   const timer = setInterval(() => updateLock(holder, {}, queueDir), 20 * 1000)
   timer.unref?.()
   let released = false
@@ -456,6 +457,7 @@ module.exports = {
   updateLock,
   releaseLock,
   holdScrapeLock,
+  lockBusyError,
   claimNextTask,
   finishTask,
   taskLogPath,

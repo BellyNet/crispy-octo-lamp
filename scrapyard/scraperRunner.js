@@ -2310,20 +2310,23 @@ async function withCliScrapeLock(label, run) {
   if (process.env.SCRAPE_LOCK_HELD) return run()
   let release
   try {
-    release = require('./scrapeQueue').holdScrapeLock(label)
+    release = await require('./scrapeBackends')
+      .defaultBackend()
+      .holdCliLock(label)
   } catch (err) {
     if (err.code === 'SCRAPE_LOCK_BUSY') {
       console.error(err.message)
       return 1
     }
-    console.warn(`Scrape lock unavailable (${err.message}); continuing without it.`)
+    console.warn(
+      `Scrape lock unavailable (${err.message}); continuing without it.`
+    )
     return run()
   }
-  process.once('exit', release)
   try {
     return await run()
   } finally {
-    release()
+    await release()
   }
 }
 

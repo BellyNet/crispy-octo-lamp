@@ -163,6 +163,120 @@ function mountScrapeRoutes(app, { registryPath, pageDir }) {
   })
 }
 
+// Worker API for the PC worker and PC CLI scrapes (scrapyard/scrapeBackends
+// remote backend). Mounted before the dashboard's cookie login: callers
+// authenticate with the token kept in the queue folder on the NAS share,
+// so anyone who can reach the share can run a worker, and nothing else.
+function mountWorkerApi(app, { express }) {
+  const crypto = require('crypto')
+  const {
+    createLocalBackend,
+    ensureWorkerToken,
+  } = require('../scrapyard/scrapeBackends')
+  const token = Buffer.from(ensureWorkerToken())
+  const local = createLocalBackend()
+  const WORKER_ID = /^[\w.-]{1,64}$/
+
+  const requireWorkerToken = (req, res, next) => {
+    const given = Buffer.from(String(req.get('X-Worker-Token') || ''))
+    if (
+      given.length !== token.length ||
+      !crypto.timingSafeEqual(given, token)
+    ) {
+      return res.status(401).json({ error: 'Bad worker token' })
+    }
+    next()
+  }
+  const worker = (body) => {
+    const id = String(body?.worker?.id || '')
+    if (!WORKER_ID.test(id)) throw new Error('Bad worker id')
+    return {
+      id,
+      label: String(body.worker.label || id).slice(0, 100),
+      browser: Boolean(body.worker.browser),
+    }
+  }
+  const ids = (body) => {
+    const runId = String(body?.runId || '')
+    const taskId = String(body?.taskId || '')
+    if (!RUN_ID.test(runId) || !TASK_ID.test(taskId)) {
+      throw new Error('Bad run or task id')
+    }
+    return { runId, taskId }
+  }
+  const handle = (fn) => async (req, res) => {
+    try {
+      res.json((await fn(req.body)) || { ok: true })
+    } catch (err) {
+      res
+        .status(err.code === 'SCRAPE_LOCK_BUSY' ? 409 : 400)
+        .json({ error: err.message, code: err.code })
+    }
+  }
+
+  const router = express.Router()
+  router.use(express.json({ limit: '4mb' }), requireWorkerToken)
+  router.post(
+    '/heartbeat',
+    handle(async (body) => {
+      await local.heartbeat(worker(body), body?.extra || {})
+    })
+  )
+  router.post(
+    '/claim',
+    handle(async (body) => {
+      const claimed = await local.claim(worker(body))
+      return claimed || { task: null }
+    })
+  )
+  router.post(
+    '/progress',
+    handle(async (body) => {
+      const { runId, taskId } = ids(body)
+      return local.progress(
+        worker(body),
+        runId,
+        taskId,
+        String(body.text || '')
+      )
+    })
+  )
+  router.post(
+    '/finish',
+    handle(async (body) => {
+      const { runId, taskId } = ids(body)
+      const fields = body?.fields || {}
+      await local.finish(worker(body), runId, taskId, {
+        status: ['done', 'failed', 'canceled'].includes(fields.status)
+          ? fields.status
+          : 'failed',
+        exitCode: fields.exitCode ?? null,
+        summary: fields.summary || null,
+        error: fields.error || null,
+      })
+    })
+  )
+  // Lock for scrapes started by hand on the PC (npm run scrape ...).
+  router.post(
+    '/lock',
+    handle(async (body) => {
+      const holder = { id: String(body?.holder || ''), note: body?.note }
+      if (!/^cli-[\w.-]{1,80}$/.test(holder.id)) throw new Error('Bad holder')
+      if (body.action === 'acquire') {
+        if (!queue.tryAcquireLock(holder))
+          throw queue.lockBusyError(queue.readLock())
+      } else if (body.action === 'heartbeat') {
+        queue.updateLock(holder)
+      } else if (body.action === 'release') {
+        queue.releaseLock(holder)
+      } else {
+        throw new Error('Bad action')
+      }
+    })
+  )
+  app.use('/api/worker', router)
+}
+
 // Queues an all-sources run once a day at the configured hour (UTC, so it
 // doesn't depend on the container's timezone), unless one is already active.
 function startNightlySchedule({ registryPath, log = console }) {
@@ -197,8 +311,10 @@ function startNightlySchedule({ registryPath, log = console }) {
 // the PC until it moves to the NAS).
 function startNasWorker({ registryPath, log = console }) {
   const { startWorker } = require('../scrapyard/scrapeWorker')
+  const { createLocalBackend } = require('../scrapyard/scrapeBackends')
   const registryCopy = path.join(config.slopvaultRoot, 'model_aliases.json')
   return startWorker({
+    backend: createLocalBackend(),
     id: 'nas',
     label: 'NAS',
     browser: false,
@@ -219,4 +335,9 @@ function startNasWorker({ registryPath, log = console }) {
   })
 }
 
-module.exports = { mountScrapeRoutes, startNightlySchedule, startNasWorker }
+module.exports = {
+  mountScrapeRoutes,
+  mountWorkerApi,
+  startNightlySchedule,
+  startNasWorker,
+}
