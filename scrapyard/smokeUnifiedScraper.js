@@ -1713,6 +1713,52 @@ async function main() {
     pawchivePreviewEntries[0].fullResolutionUrl,
     `${PAWCHIVE_MEDIA_ORIGIN}/data/a/b/one.jpg?f=one.jpg`
   )
+  // A Patreon link post's `file` is the link's preview card: skip it, keep
+  // real attachments and the linked video.
+  const linkPostEntries = getMediaEntriesFromPost(
+    {
+      origin: PAWCHIVE_ORIGIN,
+      site: 'kemono',
+      service: 'patreon',
+      userId: '24586027',
+    },
+    {
+      id: '165862602',
+      title: 'Getting Stuck in My Car',
+      has_full: true,
+      file: {
+        name: 'yh4j03xx1xsplo7qvb8ut.jpg',
+        path: '/27/29/27295795254c80db787f358207815b6545ff2fd866229a17b4d364f95aa0e1f9.jpg',
+      },
+      attachments: [
+        { name: 'IMG_1.jpeg', path: '/aa/bb/real-photo.jpeg' },
+        // The same card, listed again as an attachment.
+        {
+          name: 'yh4j03xx1xsplo7qvb8ut.jpg',
+          path: '/27/29/27295795254c80db787f358207815b6545ff2fd866229a17b4d364f95aa0e1f9.jpg',
+        },
+        // A card named by its Patreon media id.
+        { name: '709216354.jpg', path: '/20/87/card.jpg' },
+        // A card named by its thumbnail URL, with no extension.
+        {
+          name: 'https://www.dropbox.com/temp_thumb_from_token/s/rf1qti5529fyduv?size=1200x1200',
+          path: '/c1/6a/thumb',
+        },
+      ],
+      embed: {
+        url: 'https://www.dropbox.com/scl/fi/yh4j03xx1xsplo7qvb8ut/StuckInCar.mp4?rlkey=x&dl=0',
+        subject: 'StuckInCar.mp4',
+      },
+    }
+  )
+  assert.deepStrictEqual(
+    linkPostEntries
+      .filter((entry) => !entry.externalMedia)
+      .map((entry) => entry.originalName),
+    ['IMG_1.jpeg'],
+    'only the real photo is downloaded, not the link preview cards'
+  )
+  assert.ok(linkPostEntries.some((entry) => entry.externalMedia))
   const pawchiveMediaEntries = getMediaEntriesFromPost(
     {
       origin: PAWCHIVE_ORIGIN,

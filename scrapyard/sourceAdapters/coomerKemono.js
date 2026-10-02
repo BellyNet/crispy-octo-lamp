@@ -278,6 +278,30 @@ function getExternalMediaEntriesFromPost(source, post, options = {}) {
     .filter(Boolean)
 }
 
+// A Patreon link post (a Dropbox/YouTube/... video shared as a link) carries
+// the link's preview card as its `file` and often as an attachment too: a
+// thumbnail, not media of its own. The linked video itself comes from
+// getExternalMediaEntriesFromPost. On a link post, an image is the preview
+// card when it is the post's `file`, or is named like one: a Patreon media
+// id (709216354.jpg), a thumbnail URL, or the link's own id
+// (yh4j03xx1xsplo7qvb8ut.jpg for dropbox.com/.../yh4j03xx1xsplo7qvb8ut/...).
+// Real photos keep their upload names (IMG_3734.jpeg) and are kept.
+const IMAGE_NAME_RE = /\.(jpe?g|png|webp|gif|avif)(?:$|[?#])/i
+
+function isLinkPreviewMedia(post, media) {
+  const embedUrl = String(post?.embed?.url || '').trim()
+  if (!embedUrl || !media?.path) return false
+  const name = String(media.name || '').trim()
+  // Named by the thumbnail's URL (sometimes with the slashes stripped), and
+  // often without an image extension.
+  if (/^https?(?::\/\/|[a-z0-9])/i.test(name)) return true
+  if (!IMAGE_NAME_RE.test(name) && !IMAGE_NAME_RE.test(media.path)) return false
+  if (media.path === post.file?.path) return true
+  const stem = name.replace(/\.[^.]+$/, '')
+  if (/^\d{6,}$/.test(stem)) return true
+  return stem.length >= 8 && embedUrl.includes(stem)
+}
+
 function getMediaEntriesFromPost(source, post, options = {}) {
   const postPublishedAt = parseResolvedDate(post.published)
   const mediaPageUrl = getPostPageUrl(source, post)
@@ -290,13 +314,16 @@ function getMediaEntriesFromPost(source, post, options = {}) {
   const rawEntries = []
   if (post.file?.path) rawEntries.push(post.file)
   if (Array.isArray(post.attachments)) rawEntries.push(...post.attachments)
+  const postMedia = rawEntries.filter(
+    (media) => !isLinkPreviewMedia(post, media)
+  )
 
   const normalizeUrl =
     typeof options.normalizeUrl === 'function'
       ? options.normalizeUrl
       : (value) => String(value || '').trim()
   const seen = new Set()
-  const entries = rawEntries
+  const entries = postMedia
     .map((media) => {
       const mediaUrl = getMediaUrl(source, media, post)
       const sourceFilename = mediaUrl ? filenameFromMediaUrl(mediaUrl) : null
