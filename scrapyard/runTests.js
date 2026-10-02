@@ -17,6 +17,7 @@ const SUITES = [
   'scrapyard/testDatasetLocation.js',
   'scrapyard/testScrapeQueue.js',
   'scrapyard/testRegistrySync.js',
+  'dashboard/testTrashBin.js',
 ]
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'lora-tests-'))

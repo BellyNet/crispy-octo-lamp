@@ -37,6 +37,11 @@ const {
   recordFailure,
   clearFailure,
 } = require('./mobileEncode.js')
+const {
+  TRASH_DIRNAME,
+  purgeOldTrash,
+  removeModelFromRegistry,
+} = require('./trashBin.js')
 const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
@@ -1545,7 +1550,6 @@ app.post('/api/users/:username/rotate', async (req, res) => {
 // (without --hard): datasetDir/.dashboard-trash/<runTimestamp>/<username>/<folder>/<filename>.
 // A file trashed from the dashboard is recoverable the same way a file
 // trashed by that CLI script is — move it back, there's no other bookkeeping.
-const TRASH_DIRNAME = '.dashboard-trash'
 function trashDestFor(username, folder, filename, runTimestamp) {
   return path.join(
     datasetDir,
@@ -1711,6 +1715,17 @@ app.post('/api/users/:username/delete-model', async (req, res) => {
     await fs.promises.mkdir(path.dirname(dst), { recursive: true })
     await fs.promises.rename(userDir, dst)
 
+    // Take it out of the model registry too, or the next all-sources scrape
+    // downloads it again (see trashBin.js; the entry is kept in the trash).
+    let removedFromRegistry = false
+    try {
+      removedFromRegistry = Boolean(
+        await removeModelFromRegistry(username, dst, registryPath)
+      )
+    } catch (err) {
+      console.warn(`  Delete model: registry update failed for ${username}:`, err.message)
+    }
+
     // Thumbnail/mobile-variant cache is derived data, not original content —
     // delete outright rather than trashing it too.
     await fs.promises
@@ -1723,7 +1738,11 @@ app.post('/api/users/:username/delete-model', async (req, res) => {
       fs.unlinkSync(path.join(RESPONSE_CACHE_DIR, `${username}.json`))
     } catch {}
 
-    res.json({ ok: true, trashedTo: path.relative(datasetDir, dst) })
+    res.json({
+      ok: true,
+      trashedTo: path.relative(datasetDir, dst),
+      removedFromRegistry,
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -2504,6 +2523,13 @@ async function runNightlyPass({ trigger = 'manual' } = {}) {
   } catch (err) {
     console.warn('  Nightly maintenance error:', err.message)
     stepErrors.push({ step: 'maint', error: err.message })
+  }
+  nightlyState.step = 'trash'
+  try {
+    await purgeOldTrash({ datasetDir })
+  } catch (err) {
+    console.warn('  Trash purge error:', err.message)
+    stepErrors.push({ step: 'trash', error: err.message })
   }
   nightlyState.step = 'scan'
   try {

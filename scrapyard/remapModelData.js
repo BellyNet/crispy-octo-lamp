@@ -145,6 +145,13 @@ async function main() {
 function handleExistingDestination({ filePath, destinationPath, refMap }) {
   const basename = path.basename(filePath).toLowerCase()
 
+  // The same file already in the target (e.g. a run log written to both
+  // models by one run): nothing to move, so drop the source copy.
+  if (filesIdentical(filePath, destinationPath)) {
+    fs.unlinkSync(filePath)
+    return true
+  }
+
   if (basename === '.media-dates.json') {
     const source = readJsonFile(filePath, {})
     const target = readJsonFile(destinationPath, {})
@@ -181,6 +188,13 @@ function handleExistingDestination({ filePath, destinationPath, refMap }) {
   }
 
   return false
+}
+
+function filesIdentical(left, right) {
+  const leftStat = fs.statSync(left)
+  const rightStat = fs.statSync(right)
+  if (leftStat.size !== rightStat.size) return false
+  return fs.readFileSync(left).equals(fs.readFileSync(right))
 }
 
 function normalizePath(value) {

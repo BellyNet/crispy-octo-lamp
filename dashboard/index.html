@@ -5676,7 +5676,7 @@
           String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
         modal.innerHTML = `
           <h3>Delete "${esc(username)}"?</h3>
-          <p>Moves the model's entire folder to trash — recoverable, but gone from the dashboard immediately. Type the model name to confirm.</p>
+          <p>Moves the model's entire folder to trash and removes it from the scrape list — recoverable for 30 days, but gone from the dashboard immediately. Type the model name to confirm.</p>
           <input type="text" class="delete-model-input" autocomplete="off" spellcheck="false" placeholder="${esc(username)}" />
           <div class="delete-model-modal-actions">
             <button type="button" class="delete-model-cancel">Cancel</button>
