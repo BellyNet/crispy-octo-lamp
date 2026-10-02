@@ -17,9 +17,8 @@ const argv = minimist(process.argv.slice(2), {
 const datasetRoot = path.resolve(
   String(argv['dataset-root'] || config.datasetDir)
 )
-const slopvaultRoot = path.dirname(datasetRoot)
 const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
-const quarantineRoot = path.join(slopvaultRoot, 'quarantine', 'dataset')
+const quarantineRoot = config.quarantineDatasetDir
 const reportDir = path.resolve(
   String(argv['report-dir'] || path.join(process.cwd(), 'reports'))
 )

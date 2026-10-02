@@ -86,14 +86,13 @@ Options:
 
 async function main() {
   const rootDir = path.join(__dirname, '..')
-  const slopvaultRoot = config.slopvaultRoot
   const datasetRoot = path.resolve(
     String(argv['dataset-root'] || config.datasetDir)
   )
   const quarantineRoot = path.resolve(
     String(
       argv['quarantine-root'] ||
-        path.join(slopvaultRoot, 'quarantine', 'reddit-preview-quality')
+        path.join(config.quarantineDir, 'reddit-preview-quality')
     )
   )
   const reportDir = path.resolve(

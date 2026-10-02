@@ -3,6 +3,7 @@ const path = require('path')
 const { execFile } = require('child_process')
 const minimist = require('minimist')
 const config = require('../scrapyard/config')
+const { salvageOutputPath } = require('./salvageOutputPath')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -23,12 +24,9 @@ if (argv.help || !argv.input) {
   process.exit(argv.help ? 0 : 1)
 }
 
-const slopvaultRoot = path.resolve(
-  String(argv['slopvault-root'] || config.slopvaultRoot)
-)
 const outputRoot = path.resolve(
   String(
-    argv['output-root'] || path.join(slopvaultRoot, 'quarantine', 'salvaged')
+    argv['output-root'] || path.join(config.quarantineDir, 'salvaged')
   )
 )
 const inputPath = path.resolve(String(argv.input))
@@ -142,7 +140,6 @@ function printHelp() {
 
 Options:
   -i, --input <path>           Broken video to salvage.
-  --slopvault-root <path>      Override Slopvault root.
   --output-root <path>         Override salvage root.
   --probe-window <seconds>     Probe window size near candidate cut point.
   --min-trim-gap <seconds>     Minimum trimmed tail before output is written.
@@ -151,7 +148,7 @@ Options:
   -h, --help                   Show help.
 
 Notes:
-  Outputs are written under %APPDATA%\\.slopvault\\quarantine\\salvaged by default.
+  Outputs are written under the quarantine's salvaged folder (Z:\\quarantine\\salvaged) by default.
   The original broken file is left untouched.
 `)
 }
@@ -165,22 +162,8 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true })
 }
 
-function normalizePath(value) {
-  return String(value || '').replace(/\\/g, '/')
-}
-
 function buildOutputPath(filePath) {
-  const normalized = normalizePath(filePath)
-  const datasetMarker = '/.slopvault/'
-  const markerIndex = normalized.toLowerCase().indexOf(datasetMarker)
-  let relative = path.basename(filePath)
-
-  if (markerIndex >= 0) {
-    relative = normalized.slice(markerIndex + datasetMarker.length)
-  }
-
-  const parsed = path.parse(relative)
-  return path.join(outputRoot, parsed.dir, `${parsed.name}.salvaged.mp4`)
+  return salvageOutputPath(outputRoot, filePath)
 }
 
 function buildSummary(inputProbe, salvageDuration, output, alreadyHealthy) {

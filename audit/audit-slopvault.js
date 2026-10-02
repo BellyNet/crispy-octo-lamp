@@ -58,7 +58,7 @@ const incompleteRoot = path.resolve(
   String(argv['incomplete-root'] || path.join(rootDir, 'incomplete'))
 )
 const quarantineBase = path.resolve(
-  String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
+  String(argv['quarantine-root'] || config.quarantineDir)
 )
 const quarantineManifestPath = path.join(
   quarantineBase,

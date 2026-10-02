@@ -20,9 +20,8 @@ if (argv.help) {
   process.exit(0)
 }
 
-const slopvaultRoot = config.slopvaultRoot
 const datasetRoot = config.datasetDir
-const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
+const quarantineRoot = config.quarantineDir
 const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
 const targetModel = argv.model ? String(argv.model) : null
 

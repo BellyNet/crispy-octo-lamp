@@ -4,6 +4,7 @@ const { spawn } = require('child_process')
 const minimist = require('minimist')
 const { upsertErrorsSource } = require('../scrapyard/errorsToCheck')
 const config = require('../scrapyard/config')
+const { salvageOutputPath } = require('./salvageOutputPath')
 
 const argv = minimist(process.argv.slice(2), {
   alias: {
@@ -28,7 +29,7 @@ const slopvaultRoot = path.resolve(
   String(argv['slopvault-root'] || config.slopvaultRoot)
 )
 const datasetRoot = config.datasetDir
-const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
+const quarantineRoot = config.quarantineDir
 const quarantineDatasetRoot = path.join(quarantineRoot, 'dataset')
 const quarantineManifestPath = path.join(
   quarantineRoot,
@@ -286,17 +287,7 @@ function normalizePath(value) {
 }
 
 function buildSalvageOutputPath(quarantinePath) {
-  const normalized = normalizePath(quarantinePath)
-  const datasetMarker = '/.slopvault/'
-  const markerIndex = normalized.toLowerCase().indexOf(datasetMarker)
-  let relative = path.basename(quarantinePath)
-
-  if (markerIndex >= 0) {
-    relative = normalized.slice(markerIndex + datasetMarker.length)
-  }
-
-  const parsed = path.parse(relative)
-  return path.join(salvageOutputRoot, parsed.dir, `${parsed.name}.salvaged.mp4`)
+  return salvageOutputPath(salvageOutputRoot, quarantinePath)
 }
 
 function parseTimestamp(value) {

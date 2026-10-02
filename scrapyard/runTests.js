@@ -26,6 +26,7 @@ const env = {
   NAS_DATASET_DIR: path.join(sandbox, 'nas-dataset'),
   NAS_DASHBOARD_CACHE_DIR: path.join(sandbox, 'dashboard-cache'),
   SLOPVAULT_ROOT: path.join(sandbox, 'slopvault'),
+  QUARANTINE_DIR: path.join(sandbox, 'quarantine'),
   MODEL_REGISTRY_PATH: path.join(sandbox, 'model_aliases.json'),
   SCRAPE_QUEUE_DIR: path.join(sandbox, 'scrape-queue'),
   SCRAPE_QUEUE_MODE: 'local',

@@ -8,8 +8,10 @@
 //   DATASET_DIR              point one run at a different dataset folder
 //   NAS_DASHBOARD_CACHE_DIR  dashboard cache share (default: next to the NAS
 //                            dataset, Z:\dashboard-cache)
-//   SLOPVAULT_ROOT           local state root: quarantine, browser profiles,
-//                            OAuth tokens (default %APPDATA%\.slopvault)
+//   SLOPVAULT_ROOT           local state root: browser profiles, OAuth
+//                            tokens (default %APPDATA%\.slopvault)
+//   QUARANTINE_DIR           quarantined media and its manifest, on the NAS
+//                            (default: next to the NAS dataset, Z:\quarantine)
 //   MODEL_REGISTRY_PATH      model_aliases.json
 //
 // With the dataset on the NAS, scrapyard/datasetLocation.js makes every
@@ -39,7 +41,10 @@ const nasDashboardCacheDir = path.resolve(
   process.env.NAS_DASHBOARD_CACHE_DIR ||
     path.join(path.dirname(nasDatasetDir), 'dashboard-cache')
 )
-const quarantineDir = path.join(slopvaultRoot, 'quarantine')
+const quarantineDir = path.resolve(
+  process.env.QUARANTINE_DIR ||
+    path.join(path.dirname(nasDatasetDir), 'quarantine')
+)
 
 module.exports = {
   rootDir,

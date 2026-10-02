@@ -359,11 +359,7 @@ const duplicateChecker = createDuplicateChecker({
 const { getBitwiseDuplicationRecord, getVisualDuplicationRecord } =
   duplicateChecker
 const quarantineDatasetDir = datasetPaths.quarantineDatasetDir
-const quarantineManifestPath = path.join(
-  slopvaultRoot,
-  'quarantine',
-  'quarantine-manifest.json'
-)
+const quarantineManifestPath = config.quarantineManifestPath
 const permanentSkipFile = path.join(
   slopvaultRoot,
   'milkmaid-permanent-skips.json'

@@ -26,7 +26,7 @@ const datasetRoot = path.resolve(
   String(argv['dataset-root'] || config.datasetDir)
 )
 const quarantineRoot = path.resolve(
-  String(argv['quarantine-root'] || path.join(slopvaultRoot, 'quarantine'))
+  String(argv['quarantine-root'] || config.quarantineDir)
 )
 const outputDir = path.resolve(
   String(argv['output-dir'] || path.join(__dirname, 'manifests'))

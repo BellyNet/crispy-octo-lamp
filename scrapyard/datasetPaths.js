@@ -16,7 +16,9 @@ function createDatasetPaths(options = {}) {
       : config.datasetDir)
   const quarantineDatasetDir =
     options.quarantineDatasetDir ||
-    path.join(slopvaultRoot, 'quarantine', 'dataset')
+    (options.slopvaultRoot
+      ? path.join(options.slopvaultRoot, 'quarantine', 'dataset')
+      : config.quarantineDatasetDir)
   const nasDatasetDir = path.resolve(
     String(options.nasDatasetDir || config.nasDatasetDir)
   )

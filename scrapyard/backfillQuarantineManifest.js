@@ -12,9 +12,8 @@ const {
 } = require('./visualHasher')
 const config = require('./config')
 
-const slopvaultRoot = config.slopvaultRoot
 const datasetRoot = config.datasetDir
-const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
+const quarantineRoot = config.quarantineDir
 const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
 const auditLogPath = path.join(
   __dirname,

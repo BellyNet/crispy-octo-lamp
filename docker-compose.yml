@@ -27,6 +27,9 @@ services:
       # downloads, run reports, and the model registry (see
       # MODEL_REGISTRY_PATH below).
       - /share/Vault69/slopvault-state:/data/state
+      # Quarantined media and its manifest (Z:\quarantine), so scrapes on the
+      # NAS see the same quarantine as the PC (QUARANTINE_DIR in Dockerfile).
+      - /share/Vault69/quarantine:/data/quarantine
     environment:
       DATASET_DIR: /data/dataset
       THUMB_DIR: /data/thumbs

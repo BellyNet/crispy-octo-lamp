@@ -25,7 +25,7 @@ const slopvaultRoot = path.resolve(
 const quarantineManifestPath = path.resolve(
   String(
     argv['quarantine-manifest'] ||
-      path.join(slopvaultRoot, 'quarantine', 'quarantine-manifest.json')
+      config.quarantineManifestPath
   )
 )
 const outputDir = path.resolve(
