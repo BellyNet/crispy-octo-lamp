@@ -41,17 +41,14 @@ async function syncRegistry({
   const local = fs.existsSync(registryPath)
     ? loadModelRegistry(registryPath)
     : {}
-  let base = readJson(snapshotPath)
-  let nas = null
-  if (!base) {
-    // First sync: the NAS copy was pushed from this PC, so whatever differs
-    // locally is newer.
-    nas = (await backend.registryPull()).registry
-    base = nas
-  }
-  const ops = diffRegistries(base, local)
-  if (ops.length) nas = (await backend.registryApply(ops)).registry
-  else if (!nas) nas = (await backend.registryPull()).registry
+  const base = readJson(snapshotPath)
+  // Without a snapshot there's no telling which local differences are this
+  // PC's own changes and which are just a stale copy (from git, or from
+  // before something was deleted on the dashboard), so the NAS copy wins.
+  const ops = base ? diffRegistries(base, local) : []
+  const nas = ops.length
+    ? (await backend.registryApply(ops)).registry
+    : (await backend.registryPull()).registry
 
   saveModelRegistry(registryPath, nas)
   // Snapshot what is on disk now (after this PC's formatting), so the next

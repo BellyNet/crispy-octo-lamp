@@ -104,6 +104,10 @@ function applyRegistryOps(registry, ops = []) {
   for (const change of ops) {
     const { op, model } = change || {}
     if (!model || typeof model !== 'string') continue
+    // Only createModel brings a model into being. Edits to a model that
+    // isn't here (deleted on the dashboard since the sender last synced)
+    // are dropped instead of quietly recreating it.
+    if (op !== 'createModel' && !registry[model]) continue
     if (op === 'createModel') {
       if (!registry[model]) {
         registry[model] = change.entry || { aliases: [model], sources: {} }

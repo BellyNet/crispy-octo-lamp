@@ -13,7 +13,7 @@ const {
 } = require('./modelRegistry')
 const { diffRegistries, applyRegistryOps } = require('./registryOps')
 const { syncRegistry } = require('./registrySync')
-const { applyOpsToRegistry } = require('./registryStore')
+const { applyOpsToRegistry, updateRegistry } = require('./registryStore')
 
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const normalized = (registry) =>
@@ -173,6 +173,37 @@ for (let round = 0; round < 25; round += 1) {
     (await syncRegistry({ backend, registryPath: pcPath, snapshotPath })).sent,
     0
   )
+
+  // A model deleted on the dashboard stays deleted: the PC's later edit to
+  // it (a scrape updating its sources) must not recreate it.
+  const victim = models[2]
+  await updateRegistry((registry) => {
+    delete registry[victim]
+  }, nasPath)
+  const pcEdit = loadModelRegistry(pcPath)
+  ;(pcEdit[victim].sources.tumblr ||= []).push({
+    url: 'https://late-edit.tumblr.com/',
+  })
+  saveModelRegistry(pcPath, pcEdit)
+  await syncRegistry({ backend, registryPath: pcPath, snapshotPath })
+  assert.ok(!loadModelRegistry(nasPath)[victim], 'deleted model not recreated')
+  assert.ok(!loadModelRegistry(pcPath)[victim], 'and gone from the PC copy')
+
+  // Without a snapshot, a stale PC copy (e.g. the git version) is replaced
+  // by the NAS copy instead of being pushed as changes.
+  const stale = clone(real)
+  stale.zombie_model = { aliases: ['zombie_model'], sources: {} }
+  saveModelRegistry(pcPath, stale)
+  fs.rmSync(snapshotPath)
+  const noSnapshot = await syncRegistry({
+    backend,
+    registryPath: pcPath,
+    snapshotPath,
+  })
+  assert.strictEqual(noSnapshot.sent, 0)
+  assert.ok(!loadModelRegistry(nasPath).zombie_model)
+  assert.ok(!loadModelRegistry(pcPath).zombie_model)
+  assert.ok(!loadModelRegistry(pcPath)[victim])
 
   fs.rmSync(root, { recursive: true, force: true })
   console.log('Registry sync fixture passed.')
