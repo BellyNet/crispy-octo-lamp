@@ -49,10 +49,11 @@ function loadModelRegistry(registryPath) {
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? parsed : {}
   } catch (err) {
-    console.warn(
-      `⚠️ Could not parse model registry at ${registryPath}: ${err.message}`
+    // Never hand back an empty registry for a damaged file: the caller's
+    // next save would wipe every model.
+    throw new Error(
+      `Could not parse model registry at ${registryPath}: ${err.message}`
     )
-    return {}
   }
 }
 

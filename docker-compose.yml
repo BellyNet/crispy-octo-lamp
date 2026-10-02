@@ -16,10 +16,6 @@ services:
       # — read-only behavior is preserved by the application code, not by
       # the bind mount.
       - /share/Vault69/dataset:/data/dataset
-      # The model registry. This NAS copy is the one everything syncs with:
-      # the Sources page edits it, NAS scrapes update it, and the PC sends its
-      # changes through the dashboard (scrapyard/registrySync.js).
-      - /share/Vault69/model_aliases.json:/app/model_aliases.json
       # Derived assets (grid thumbs, gif previews, mobile-friendly mp4 variants,
       # response/meta caches, featured & registry state) — bind-mounted onto the
       # NAS so they survive container/volume prunes and don't have to be
@@ -28,11 +24,17 @@ services:
       # single backup target alongside the raw dataset.
       - /share/Vault69/dashboard-cache:/data/thumbs
       # Scraper state for scrapes run on the NAS: the scrape queue, scratch
-      # downloads, run reports, registry working copy.
+      # downloads, run reports, and the model registry (see
+      # MODEL_REGISTRY_PATH below).
       - /share/Vault69/slopvault-state:/data/state
     environment:
       DATASET_DIR: /data/dataset
       THUMB_DIR: /data/thumbs
+      # The model registry everything syncs with: the Sources page edits it,
+      # NAS scrapes update it, and the PC sends its changes through the
+      # dashboard (scrapyard/registrySync.js). It sits in a mounted folder,
+      # not a single-file mount, so saves can write a temp file and rename it.
+      MODEL_REGISTRY_PATH: /data/state/model_aliases.json
       DASHBOARD_PORT: 3420
       # Kept out of the repo: set DASHBOARD_PASSWORD in the .env file next to
       # this compose file on the NAS (deploy-dashboard.ps1 prompts for it).

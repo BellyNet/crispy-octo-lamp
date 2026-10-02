@@ -8,7 +8,7 @@ All paths come from [scrapyard/config.js](scrapyard/config.js); override them in
 
 - Dataset: `Z:\dataset` on the NAS (`NAS_DATASET_DIR`; `DATASET_DIR` overrides it for tests)
 - Local quarantine root: `%APPDATA%\.slopvault\quarantine` (under `SLOPVAULT_ROOT`)
-- Model registry: the NAS copy (`/share/Vault69/model_aliases.json`) is the master; the PC keeps a working copy in [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`) and syncs it (see [Registry sync](#registry-sync))
+- Model registry: the NAS copy (`/share/Vault69/slopvault-state/model_aliases.json`) is the master; the PC keeps a working copy in [model_aliases.json](model_aliases.json) (`MODEL_REGISTRY_PATH`) and syncs it (see [Registry sync](#registry-sync))
 
 ## Running scrapes from the dashboard
 

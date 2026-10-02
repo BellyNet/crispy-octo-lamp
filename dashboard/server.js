@@ -35,7 +35,7 @@ const NightlyHistory = require('./nightlyHistory.js')
 const { refreshExactDuplicateReview } = require('./exactDuplicateNightly.js')
 const RunIndex = require('./runIndex.js')
 
-// /app/model_aliases.json in the NAS image (the NAS registry, bind-mounted).
+// /data/state/model_aliases.json on the NAS (MODEL_REGISTRY_PATH in docker-compose.yml).
 const registryPath = require('../scrapyard/config').registryPath
 
 const app = express()
