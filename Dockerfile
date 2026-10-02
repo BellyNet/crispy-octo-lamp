@@ -47,6 +47,9 @@ ENV DATASET_DIR=/data/dataset
 # no separate local copy to sync or evict.
 ENV NAS_DATASET_DIR=/data/dataset
 ENV SLOPVAULT_ROOT=/data/state
+# No Chrome in this image: browser-only sources (StufferDB, Tumblr, Reddit)
+# refuse to start here and run on the PC instead.
+ENV SCRAPER_NO_BROWSER=1
 ENV THUMB_DIR=/data/thumbs
 ENV DASHBOARD_PORT=3420
 ENV NODE_ENV=production

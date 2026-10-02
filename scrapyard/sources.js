@@ -16,6 +16,9 @@
 //   letter        short badge for the dashboard's per-registry-key source
 //                 dots (sources sharing a registry key share a letter)
 //   engine        'hoghaul' (unified post scraper) or 'milkmaid' (StufferDB)
+//   requiresBrowser  true when a scrape needs a real Chrome (StufferDB pages,
+//                 Tumblr's JSON, Reddit's gallery fallbacks). Hosts without a
+//                 browser (the NAS) refuse these; see SCRAPER_NO_BROWSER.
 //   matchesHost   (hostname) => boolean, checked in list order
 //   parseUrl      (URL, hostname) => source fields; throws a descriptive
 //                 Error when the URL is on this host but not a creator page
@@ -175,6 +178,7 @@ const SOURCES = [
     runLabel: 'stufferdb',
     letter: 'S',
     engine: 'milkmaid',
+    requiresBrowser: true,
     runOrder: 4,
     matchesHost: (host) =>
       host.includes('stufferdb') || host.includes('stufferai'),
@@ -309,6 +313,7 @@ const SOURCES = [
   },
   {
     id: 'reddit',
+    requiresBrowser: true,
     label: 'Reddit',
     site: 'reddit',
     registryKey: 'reddit',
@@ -392,6 +397,7 @@ const SOURCES = [
   },
   {
     id: 'tumblr',
+    requiresBrowser: true,
     label: 'Tumblr',
     site: 'tumblr',
     registryKey: 'tumblr',
@@ -571,6 +577,7 @@ function listSourcesForClient() {
       label: source.label,
       site: source.site || source.id,
       registryKey: source.registryKey,
+      requiresBrowser: Boolean(source.requiresBrowser),
     })),
     registryKeys: REGISTRY_KEY_RUN_ORDER.map((key) => {
       const members = SOURCES.filter((source) => source.registryKey === key)

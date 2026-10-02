@@ -820,6 +820,16 @@ async function runScrape(inputUrl, argvInput = {}, deps = {}) {
     return 0
   }
 
+  // Hosts without Chrome (the NAS image sets SCRAPER_NO_BROWSER) can't run
+  // browser-only sources; say so instead of failing inside puppeteer.
+  const sourceDefinition = findSourceForParsed(parsedSource)
+  if (process.env.SCRAPER_NO_BROWSER && sourceDefinition?.requiresBrowser) {
+    error(
+      `${sourceDefinition.label} scrapes need a browser, which this host doesn't have. Run this one on the PC (npm run scrape).`
+    )
+    return 3
+  }
+
   const scriptPath = getScraperScript(parsedSource)
   if (!scriptPath) {
     error(`No scraper is registered for ${describeSource(parsedSource)}.`)

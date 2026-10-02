@@ -3,11 +3,11 @@
 # dataset. Your PC only starts it and shows the output.
 #
 #   .\nas-scrape.ps1 "https://pawchive.pw/patreon/user/123"
-#   .\nas-scrape.ps1 "https://someblog.tumblr.com/" --max-posts=20
+#   .\nas-scrape.ps1 "https://cum.st/creators/onlyfans/12345" --max-posts=20
 #
 # Takes the same options as `npm run scrape`. Only sources that don't need a
-# browser work on the NAS for now (Pawchive, Tumblr, OnlyHaven, Coomer);
-# Reddit and StufferDB still run on the PC.
+# browser work on the NAS (Pawchive, OnlyHaven, Coomer); StufferDB, Tumblr
+# and Reddit need Chrome and refuse to start here, so run those on the PC.
 #
 # Until the NAS owns the model registry (scheduling work), each run uses a
 # fresh working copy of Z:\model_aliases.json and discards its registry
