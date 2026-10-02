@@ -29,6 +29,12 @@ The dashboard's **Sources** page (linked from the Scrapes page, and "Edit source
 - Add a source to an existing model, or tick "new model" to create one. "Add & scrape" queues a run for just that URL.
 - Turn sources off and on, or remove them, per model.
 
+### Deleting from the dashboard
+
+Deleted files and models go to the delete bin, `Z:\dataset\.dashboard-trash\<time>\`, and the nightly pass empties anything in it older than 30 days (`DASHBOARD_TRASH_RETENTION_DAYS` in the container; `0` keeps everything). Deleting a model also removes it from the registry, so scrapes don't bring it back; its registry entry is saved in the trashed folder as `registry-entry.json`.
+
+To merge a placeholder model into the right one, run `npm run remap:model -- --source <wrong> --target <right> --yes`. It moves the files and their hash-store references. Then run `npm run backfill:model-hashes -- --model <right>` to hash anything that wasn't hashed yet.
+
 ### Registry sync
 
 The NAS registry is the master copy. PC scrapes edit the local working copy, so the PC syncs both ways through the dashboard before and after every queued task and every manual `npm run scrape`. A sync sends only the PC's changes since the last sync (tracked in `%APPDATA%\.slopvault\model_aliases.synced.json`), so dashboard edits made in the meantime are kept. Run `npm run registry:sync` to sync by hand, e.g. before and after editing `model_aliases.json` directly.
