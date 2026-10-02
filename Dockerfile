@@ -61,6 +61,7 @@ ENV DASHBOARD_PORT=3420
 ENV NODE_ENV=production
 
 EXPOSE 3420
-# Group-writable files (umask 0002) so the PC, which writes to the same share
-# as the same group, can modify what the dashboard creates.
-CMD ["sh", "-c", "umask 0002 && exec node dashboard/server.js"]
+# Files only the share user can read (umask 0077). The PC reaches the share
+# as that same user, so it can still read and modify everything; other NAS
+# accounts can't.
+CMD ["sh", "-c", "umask 0077 && exec node dashboard/server.js"]

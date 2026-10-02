@@ -12,9 +12,10 @@
 #      dashboard untouched.
 #   3. Keep the current folder as <path>.prev (for -Rollback) and swap in the
 #      new one.
-#   4. Stop the dashboard, hand any root-owned files in the dataset and
-#      dashboard cache to the share user (1000:100), and start the new
-#      container, which runs as that user.
+#   4. Stop the dashboard, hand every file in the mounted folders (dataset,
+#      dashboard cache, state, quarantine) to the share user (1000:100) with
+#      no group/other access, and start the new container, which runs as
+#      that user.
 #
 # Auth: SSH key (run .\setup-deploy-ssh.ps1 once). Override the target with
 # NAS_HOST, NAS_USER, NAS_PATH.
@@ -169,11 +170,14 @@ fi
 mv "`$NEXT" "`$DEST"
 cd "`$DEST"
 
-echo "[remote] Handing root-owned files to the share user (1000:100)..."
+chmod -R go-rwx "`$DEST"
+
+echo "[remote] Handing files to the share user (1000:100), readable by it alone..."
 `$DOCKER compose -p $Project run --rm -T --no-deps --user 0:0 --entrypoint sh dashboard -c '
-  chown -R 1000:100 /data/thumbs &&
-  chmod -R u+rwX,g+rwX,o+rX /data/thumbs &&
-  find /data/dataset -xdev -user 0 -exec chown 1000:100 {} + &&
+  for dir in /data/thumbs /data/dataset /data/state /data/quarantine; do
+    find "`$dir" -xdev ! -user 1000 -exec chown 1000:100 {} + &&
+    find "`$dir" -xdev -perm /077 -exec chmod go-rwx {} + || exit 1
+  done &&
   echo "[remote] ownership ok"' </dev/null
 
 echo "[remote] [4/4] Starting the dashboard..."

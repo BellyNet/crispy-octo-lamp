@@ -40,7 +40,7 @@ The NAS registry is the master copy. PC scrapes edit the local working copy, so 
 .\deploy-dashboard.ps1 -Rollback  # switch back to the previous deploy
 ```
 
-The script packages the current commit (`git archive`, so uncommitted changes are not included), builds it on the NAS, keeps the previous deploy at `/share/Vault69/slopvault-dashboard.prev`, and restarts the container. The container runs as the share user (uid 1000), and each deploy hands any root-owned files in the dataset and dashboard cache back to that user, so the PC can always read and modify them over SMB.
+The script packages the current commit (`git archive`, so uncommitted changes are not included), builds it on the NAS, keeps the previous deploy at `/share/Vault69/slopvault-dashboard.prev`, and restarts the container. The container runs as the share user (uid 1000) with umask 0077, and each deploy hands every file in the dataset, dashboard cache, state and quarantine folders to that user with no group or other access. Only that user can read them; the PC connects to the share as the same user, so it can still read and modify everything, and new files it creates inherit their folder's private permissions.
 
 The login password lives in `/share/Vault69/slopvault-dashboard/.env` as `DASHBOARD_PASSWORD`; the script asks for it the first time. One-time setup for passwordless SSH: `.\setup-deploy-ssh.ps1`.
 
