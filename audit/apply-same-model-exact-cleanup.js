@@ -38,6 +38,7 @@ for (const operation of operations) {
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const backupDir = path.join(__dirname, '..', 'tmp', `exact-media-cleanup-backup-${stamp}`)
 const reportPath = path.join(backupDir, 'result.json')
+require('../scrapyard/datasetLocation').assertSeparateFromNas('apply-same-model-exact-cleanup', localRoot, nasRoot)
 const roots = [{ type: 'local', root: localRoot }, { type: 'nas', root: nasRoot }]
 const models = [...new Set(operations.map((operation) => operation.from.split('/')[0]))]
 const fromPaths = new Set(operations.map((operation) => operation.from))

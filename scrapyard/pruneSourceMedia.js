@@ -71,6 +71,11 @@ const datasetRoot = path.resolve(
   String(argv['dataset-root'] || config.datasetDir)
 )
 const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
+// NAS-only dataset: the dataset files are the NAS files; never delete twice.
+const datasetIsNas = require('./datasetLocation').isSameDirectory(
+  datasetRoot,
+  nasRoot
+)
 const modelAliasesPath = path.resolve(
   String(argv['model-aliases'] || config.registryPath)
 )
@@ -190,6 +195,7 @@ function main() {
       }
       if (
         deleteNas &&
+        !datasetIsNas &&
         target.nasExists &&
         deleteFileInsideRoot(nasRoot, target.nasPath)
       ) {

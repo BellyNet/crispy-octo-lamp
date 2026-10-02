@@ -666,12 +666,7 @@ function buildScraperOptions(parsedSource, argvInput = {}) {
 }
 
 function getModelRunSummaryPath(modelName, source = 'milkmaid') {
-  return path.join(
-    config.slopvaultRoot,
-    'dataset',
-    modelName,
-    `${source}-last-run.json`
-  )
+  return path.join(config.datasetDir, modelName, `${source}-last-run.json`)
 }
 
 function readModelRunSummary(modelName, source = 'milkmaid') {

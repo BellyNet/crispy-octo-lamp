@@ -26,9 +26,8 @@ const args = minimist(process.argv.slice(2), {
   string: ['user', 'dataset'],
 })
 
-const slopvaultRoot = config.slopvaultRoot
 const datasetDir = path.resolve(
-  args.dataset || process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+  args.dataset || config.datasetDir
 )
 
 const FLAGS_FILENAME = '.dashboard-flags.json'

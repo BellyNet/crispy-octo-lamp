@@ -68,10 +68,9 @@ Options:
 
 async function main() {
   const rootDir = path.join(__dirname, '..')
-  const slopvaultRoot = config.slopvaultRoot
   const archiveRoot = path.resolve(String(argv.archive))
   const datasetRoot = path.resolve(
-    String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
+    String(argv['dataset-root'] || config.datasetDir)
   )
   const nasRoot = path.resolve(String(argv['nas-root'] || config.nasDatasetDir))
   const reportDir = path.resolve(
@@ -101,7 +100,14 @@ async function main() {
 
   validateRoot(archiveRoot, 'archive')
   validateRoot(datasetRoot, 'dataset')
-  if (syncNas) validateRoot(nasRoot, 'NAS dataset')
+  if (syncNas) {
+    validateRoot(nasRoot, 'NAS dataset')
+    require('./datasetLocation').assertSeparateFromNas(
+      'reconcileRedditPreviewArchive --sync-nas',
+      datasetRoot,
+      nasRoot
+    )
+  }
   fs.mkdirSync(reportDir, { recursive: true })
 
   const archivedRecords = collectArchiveRecords(

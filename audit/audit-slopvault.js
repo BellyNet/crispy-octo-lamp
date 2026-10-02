@@ -52,7 +52,7 @@ const slopvaultRoot = path.resolve(
   String(argv['slopvault-root'] || config.slopvaultRoot)
 )
 const datasetRoot = path.resolve(
-  String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
+  String(argv['dataset-root'] || config.datasetDir)
 )
 const incompleteRoot = path.resolve(
   String(argv['incomplete-root'] || path.join(rootDir, 'incomplete'))

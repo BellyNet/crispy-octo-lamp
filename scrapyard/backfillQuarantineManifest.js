@@ -13,7 +13,7 @@ const {
 const config = require('./config')
 
 const slopvaultRoot = config.slopvaultRoot
-const datasetRoot = path.join(slopvaultRoot, 'dataset')
+const datasetRoot = config.datasetDir
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const manifestPath = path.join(quarantineRoot, 'quarantine-manifest.json')
 const auditLogPath = path.join(

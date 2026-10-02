@@ -11,6 +11,8 @@ const {
 const config = require('./config')
 
 const slopvaultRoot = config.slopvaultRoot
+// The old local copy of the dataset (pre NAS-only), not config.datasetDir:
+// this tool deletes local files only after confirming the NAS has them.
 const datasetDir = path.join(slopvaultRoot, 'dataset')
 const nasDatasetDir = path.resolve(config.nasDatasetDir)
 
@@ -79,6 +81,11 @@ function tryRemoveEmptyParents(startDir, stopDir) {
 }
 
 function main() {
+  require('./datasetLocation').assertSeparateFromNas(
+    'evictLocalNasBackedMedia',
+    datasetDir,
+    nasDatasetDir
+  )
   const argv = minimist(process.argv.slice(2), {
     string: ['model', 'models', 'bucket', 'mode'],
     boolean: ['apply', 'dry-run'],

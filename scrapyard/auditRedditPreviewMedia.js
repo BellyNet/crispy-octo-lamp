@@ -88,7 +88,7 @@ async function main() {
   const rootDir = path.join(__dirname, '..')
   const slopvaultRoot = config.slopvaultRoot
   const datasetRoot = path.resolve(
-    String(argv['dataset-root'] || path.join(slopvaultRoot, 'dataset'))
+    String(argv['dataset-root'] || config.datasetDir)
   )
   const quarantineRoot = path.resolve(
     String(

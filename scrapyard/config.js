@@ -1,17 +1,19 @@
 'use strict'
 
 // Where everything lives. Scrapers, repair tools and the scrape dashboard
-// resolve their paths from here, so moving the dataset (e.g. onto the NAS)
-// is a config change rather than an edit to every script.
+// resolve their paths from here.
 //
 // Overrides, from the environment or the repo's .env:
-//   DATASET_DIR / LOCAL_DATASET_DIR  dataset the scrapers read and write
-//   NAS_DATASET_DIR                  NAS dataset mirror (default Z:\dataset)
-//   NAS_DASHBOARD_CACHE_DIR          dashboard cache share (default: next to
-//                                    the NAS dataset, Z:\dashboard-cache)
-//   SLOPVAULT_ROOT                   state root: quarantine, hash stores,
-//                                    browser profiles, OAuth tokens
-//   MODEL_REGISTRY_PATH              model_aliases.json
+//   NAS_DATASET_DIR          the dataset, on the NAS (default Z:\dataset)
+//   DATASET_DIR              point one run at a different dataset folder
+//   NAS_DASHBOARD_CACHE_DIR  dashboard cache share (default: next to the NAS
+//                            dataset, Z:\dashboard-cache)
+//   SLOPVAULT_ROOT           local state root: quarantine, browser profiles,
+//                            OAuth tokens (default %APPDATA%\.slopvault)
+//   MODEL_REGISTRY_PATH      model_aliases.json
+//
+// With the dataset on the NAS, scrapyard/datasetLocation.js makes every
+// local-to-NAS sync and "evict the local copy" step a no-op.
 
 const os = require('os')
 const path = require('path')
@@ -27,12 +29,12 @@ const appDataDir =
 const slopvaultRoot = path.resolve(
   process.env.SLOPVAULT_ROOT || path.join(appDataDir, '.slopvault')
 )
-const datasetDir = path.resolve(
-  process.env.DATASET_DIR ||
-    process.env.LOCAL_DATASET_DIR ||
-    path.join(slopvaultRoot, 'dataset')
-)
 const nasDatasetDir = path.resolve(process.env.NAS_DATASET_DIR || 'Z:\\dataset')
+// The dataset lives on the NAS; scrapers write straight to it. (The old
+// local copy under %APPDATA%\.slopvault\dataset is no longer used, and
+// LOCAL_DATASET_DIR is deliberately ignored so a leftover .env entry can't
+// send scrapes back to it.) DATASET_DIR still points a run elsewhere.
+const datasetDir = path.resolve(process.env.DATASET_DIR || nasDatasetDir)
 const nasDashboardCacheDir = path.resolve(
   process.env.NAS_DASHBOARD_CACHE_DIR ||
     path.join(path.dirname(nasDatasetDir), 'dashboard-cache')

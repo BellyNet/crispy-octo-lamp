@@ -64,6 +64,12 @@ const cleanupMirroredMp4s =
   isTruthy(getOption('cleanup-mp4')) ||
   isTruthy(process.env.npm_config_cleanup_mp4)
 
+require('./datasetLocation').assertSeparateFromNas(
+  'npm run sync',
+  baseLocal,
+  baseNAS
+)
+
 let cmd = ''
 
 if (isPush) {

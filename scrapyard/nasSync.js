@@ -13,6 +13,7 @@ const {
   syncNasMp4IndexToMirror,
 } = require('./nasMp4Index')
 const config = require('./config')
+const { isSameDirectory } = require('./datasetLocation')
 
 const LOCAL_REGISTRY_PATH = config.registryPath
 const MUTABLE_MODEL_METADATA_FILES = ['.media-dates.json']
@@ -200,6 +201,19 @@ function syncModelMetadataToNas({
     }
   }
 
+  // NAS-only dataset: the metadata is already in place.
+  if (isSameDirectory(datasetDir, nasDatasetDir)) {
+    return {
+      copied: 0,
+      replaced: 0,
+      unchanged: MUTABLE_MODEL_METADATA_FILES.length,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+      datasetIsNas: true,
+    }
+  }
+
   const localModelDir = path.join(datasetDir, modelName)
   const nasModelDir = path.join(nasDatasetDir, modelName)
   let copied = 0
@@ -283,6 +297,22 @@ function evictVerifiedLocalMp4s({
   datasetDir,
   nasDatasetDir = config.nasDatasetDir,
 } = {}) {
+  // NAS-only dataset: every file would "match itself" on the NAS, and
+  // deleting it would delete the only copy. Never evict.
+  if (isSameDirectory(datasetDir, nasDatasetDir)) {
+    return {
+      scannedFiles: 0,
+      verifiedFiles: 0,
+      deletedFiles: 0,
+      deletedBytes: 0,
+      missingOnNas: 0,
+      sizeMismatches: 0,
+      sameStemMatches: 0,
+      deletedRelativePaths: [],
+      datasetIsNas: true,
+    }
+  }
+
   const localModelDir = path.join(datasetDir, modelName)
   const relativeVideoPaths = collectMp4RelativePaths(localModelDir, datasetDir)
   const verifiedRelativePaths = []
@@ -357,6 +387,13 @@ async function syncModelToNas({
   successMessage = 'NAS sync complete.',
   failurePrefix = 'NAS sync failed with code',
 }) {
+  // NAS-only dataset: the scrape already wrote to the NAS. Nothing to copy
+  // or evict; just keep the dashboard's registry copy current.
+  if (isSameDirectory(datasetDir, nasDatasetDir)) {
+    pushRegistryToNas({ nasDatasetDir, log })
+    return { ok: true, code: 0, stdout: '', stderr: '', datasetIsNas: true }
+  }
+
   const localModelDir = path.join(datasetDir, modelName)
   const nasModelDir = path.join(nasDatasetDir, modelName)
 

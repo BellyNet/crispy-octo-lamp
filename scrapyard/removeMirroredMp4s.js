@@ -40,6 +40,11 @@ function main() {
     console.error('Missing required --mirror-root for mirrored media cleanup.')
     process.exit(1)
   }
+  require('./datasetLocation').assertSeparateFromNas(
+    'removeMirroredMp4s',
+    datasetRoot,
+    mirrorRoot
+  )
 
   ensureDir(reportDir)
   const matches = collectMatches(datasetRoot)

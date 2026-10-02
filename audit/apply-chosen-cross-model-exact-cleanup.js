@@ -115,10 +115,17 @@ const backupDir = path.join(
   `exact-media-cross-model-cleanup-backup-${stamp}`
 )
 const reportPath = path.join(backupDir, 'result.json')
-const roots = [
-  { type: 'local', root: localRoot },
-  { type: 'nas', root: nasRoot },
-]
+// With the dataset on the NAS there is one copy of each file; listing both
+// roots would move every file twice.
+const roots = require('../scrapyard/datasetLocation').isSameDirectory(
+  localRoot,
+  nasRoot
+)
+  ? [{ type: 'nas', root: nasRoot }]
+  : [
+      { type: 'local', root: localRoot },
+      { type: 'nas', root: nasRoot },
+    ]
 const models = [
   ...new Set(
     operations.flatMap((operation) => [

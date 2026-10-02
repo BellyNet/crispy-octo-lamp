@@ -4,7 +4,6 @@ const readline = require('readline')
 const minimist = require('minimist')
 const config = require('./config')
 
-const slopvaultRoot = config.slopvaultRoot
 
 main().catch((err) => {
   console.error(`Fatal remap error: ${err.stack || err.message}`)
@@ -27,7 +26,7 @@ async function main() {
   // directly against a NAS-mounted dataset root instead of requiring a
   // pull-merge-push round trip through local when local is behind.
   const datasetRoot = path.resolve(
-    args.dataset || process.env.DATASET_DIR || path.join(slopvaultRoot, 'dataset')
+    args.dataset || config.datasetDir
   )
   const bitwiseV2Path = path.join(datasetRoot, 'bitwiseHashes.v2.json')
   const visualV2Path = path.join(datasetRoot, 'visualHashes.v2.json')

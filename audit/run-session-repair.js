@@ -27,7 +27,7 @@ const rootDir = path.join(__dirname, '..')
 const slopvaultRoot = path.resolve(
   String(argv['slopvault-root'] || config.slopvaultRoot)
 )
-const datasetRoot = path.join(slopvaultRoot, 'dataset')
+const datasetRoot = config.datasetDir
 const quarantineRoot = path.join(slopvaultRoot, 'quarantine')
 const quarantineDatasetRoot = path.join(quarantineRoot, 'dataset')
 const quarantineManifestPath = path.join(

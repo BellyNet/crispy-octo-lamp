@@ -9,7 +9,11 @@ const config = require('./config')
 function createDatasetPaths(options = {}) {
   const rootDir = options.rootDir || path.join(__dirname, '..')
   const slopvaultRoot = options.slopvaultRoot || config.slopvaultRoot
-  const datasetDir = options.datasetDir || path.join(slopvaultRoot, 'dataset')
+  const datasetDir =
+    options.datasetDir ||
+    (options.slopvaultRoot
+      ? path.join(options.slopvaultRoot, 'dataset')
+      : config.datasetDir)
   const quarantineDatasetDir =
     options.quarantineDatasetDir ||
     path.join(slopvaultRoot, 'quarantine', 'dataset')
